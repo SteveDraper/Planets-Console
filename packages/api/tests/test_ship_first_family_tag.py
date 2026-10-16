@@ -25,6 +25,7 @@ from api.analytics.military_score_inference.ship_first_family import (
     select_ship_first_hold,
     tag_ship_first_near_solution,
 )
+from api.analytics.military_score_inference.ship_first_overshoot import catalog_score_lookups
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_MINE_SCORE_RESIDUAL
 from api.serialization.inference_row_persistence import persisted_inference_row_from_wire_complete
 
@@ -140,33 +141,37 @@ def test_torps_inflating_leftover_still_mine_overshoot() -> None:
     observation = _observation(military_delta_2x=100, military_partition_slack_2x=1)
     catalog = _catalog(ship_score_2x=120, torp_score_2x=40)
     solution = _solution(objective=-10, ship_count=1, torp_count=1)
+    lookups = catalog_score_lookups(catalog)
 
-    assert classify_ship_first_family(solution, observation, catalog) == "mine_overshoot"
+    assert classify_ship_first_family(solution, observation, lookups) == "mine_overshoot"
 
 
 def test_torps_closing_the_window_are_ammo_top_up() -> None:
     observation = _observation(military_delta_2x=100, military_partition_slack_2x=1)
     catalog = _catalog(ship_score_2x=100, torp_score_2x=40)
     solution = _solution(objective=-10, ship_count=1, torp_count=1)
+    lookups = catalog_score_lookups(catalog)
 
-    assert classify_ship_first_family(solution, observation, catalog) == "ammo_top_up"
+    assert classify_ship_first_family(solution, observation, lookups) == "ammo_top_up"
 
 
 def test_ship_builds_count_as_non_torp_even_with_launchers() -> None:
     observation = _observation(military_delta_2x=100, military_partition_slack_2x=1)
     catalog = _catalog(include_combo=True, combo_score_2x=120, torp_score_2x=40)
     solution = _solution(objective=-10, ship_count=0, torp_count=1, combo_count=1)
+    lookups = catalog_score_lookups(catalog)
 
-    assert classify_ship_first_family(solution, observation, catalog) == "mine_overshoot"
+    assert classify_ship_first_family(solution, observation, lookups) == "mine_overshoot"
 
 
 def test_leftover_0_exact_is_not_tagged() -> None:
     observation = _observation(military_delta_2x=100, military_partition_slack_2x=1)
     catalog = _catalog(ship_score_2x=100)
     solution = _solution(objective=0, ship_count=1, torp_count=0)
+    lookups = catalog_score_lookups(catalog)
 
-    assert classify_ship_first_family(solution, observation, catalog) is None
-    tagged = tag_ship_first_near_solution(solution, observation, catalog)
+    assert classify_ship_first_family(solution, observation, lookups) is None
+    tagged = tag_ship_first_near_solution(solution, observation, lookups)
     assert tagged.ship_first_family is None
 
 
@@ -181,8 +186,9 @@ def test_ammo_top_up_may_span_most_of_leftover_no_torp_cap() -> None:
     observation = _observation(military_delta_2x=100, military_partition_slack_2x=1)
     catalog = _catalog(ship_score_2x=90, torp_score_2x=200)
     solution = _solution(objective=-10, ship_count=1, torp_count=1)
+    lookups = catalog_score_lookups(catalog)
 
-    assert classify_ship_first_family(solution, observation, catalog) == "ammo_top_up"
+    assert classify_ship_first_family(solution, observation, lookups) == "ammo_top_up"
 
 
 def _action_ids(solutions: list[InferenceSolution]) -> list[str]:
@@ -451,7 +457,7 @@ def test_wire_persists_ship_first_family_and_omits_it_on_exact(sample_turn) -> N
     tagged = tag_ship_first_near_solution(
         _solution(objective=-10, ship_count=1, torp_count=1),
         observation,
-        catalog,
+        catalog_score_lookups(catalog),
     )
     assert tagged.ship_first_family == "mine_overshoot"
     result = InferenceResult(
@@ -470,21 +476,23 @@ def test_wire_persists_ship_first_family_and_omits_it_on_exact(sample_turn) -> N
     )
     assert row.solutions[0]["shipFirstFamily"] == "mine_overshoot"
 
+    exact_catalog = _catalog(ship_score_2x=100)
     exact = tag_ship_first_near_solution(
         _solution(objective=0, ship_count=1, torp_count=0),
         _observation(military_delta_2x=100, warship_delta=1, military_partition_slack_2x=1),
-        _catalog(ship_score_2x=100),
+        catalog_score_lookups(exact_catalog),
+    )
+    exact_observation = _observation(
+        military_delta_2x=100, warship_delta=1, military_partition_slack_2x=1
     )
     exact_payload = inference_result_to_api_payload(
         InferenceResult(status=STATUS_EXACT, solutions=(exact,), diagnostics={}),
-        _catalog(ship_score_2x=100),
-        _observation(military_delta_2x=100, warship_delta=1, military_partition_slack_2x=1),
+        exact_catalog,
+        exact_observation,
         sample_turn,
         InferenceProblem(
-            observation=_observation(
-                military_delta_2x=100, warship_delta=1, military_partition_slack_2x=1
-            ),
-            aggregate_actions=_catalog(ship_score_2x=100).aggregate_actions,
+            observation=exact_observation,
+            aggregate_actions=exact_catalog.aggregate_actions,
         ),
     )
     assert "shipFirstFamily" not in exact_payload["solutions"][0]

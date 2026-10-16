@@ -1,10 +1,9 @@
 """OR-Tools CP-SAT adapter for military score build inference."""
 
+import heapq
 import time
-from collections import defaultdict
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
-from itertools import product
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ortools.sat.python import cp_model
@@ -12,11 +11,9 @@ from ortools.sat.python import cp_model
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 
-from api.analytics.military_score_inference.constraints import InferenceHardConstraints
-from api.analytics.military_score_inference.inference_objective import (
-    build_inference_objective_terms,
-    max_combo_probability_weight,
-)
+from api.analytics.military_score_inference import catalog_model
+from api.analytics.military_score_inference.catalog_model import BuiltModel, MergedComboCatalog
+from api.analytics.military_score_inference.inference_objective import max_combo_probability_weight
 from api.analytics.military_score_inference.models import (
     InferenceProblem,
     InferenceResult,
@@ -26,6 +23,7 @@ from api.analytics.military_score_inference.models import (
     ShipBuildCombo,
 )
 from api.analytics.military_score_inference.near_best_structural_search import (
+    StructuralSearchMode,
     collect_near_best_structural_hits,
     merged_assignment_from_solution,  # noqa: F401 -- re-export for stable solver import path
 )
@@ -34,15 +32,16 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
     solution_signature,  # noqa: F401 -- re-export for stable solver import path
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
+    InferenceRankingHeuristics,
     compute_bin_penalty_objective_contribution,
     compute_overflow_objective_contribution,
-    compute_partial_weapon_slot_penalty_contribution,
     ranking_heuristics_diagnostics_payload,
-    ranking_penalty_from_marginal_weight,
+    ship_build_objective_coefficient,
 )
 from api.analytics.military_score_inference.ship_build_combos import (
     is_generic_zero_military_score_combo_id,
 )
+from api.analytics.military_score_inference.tier_solve_cache import TierSolve
 from api.concepts.races import is_horwasp
 
 STATUS_EXACT = "exact"
@@ -53,30 +52,10 @@ STATUS_MINE_SCORE_RESIDUAL = "mine_score_residual"
 STATUS_STOPPED = "stopped"
 STATUS_TIME_LIMITED = "time_limited"
 
-# Ranking objective domain for the exposed IntVar used by near-best banding.
-_RANKING_OBJECTIVE_VAR_LB = -10_000_000
-_RANKING_OBJECTIVE_VAR_UB = 1_000_000
-
-
-@dataclass(frozen=True)
-class _MergedComboCatalog:
-    combos: tuple[ShipBuildCombo, ...]
-    members_by_merged_id: dict[str, tuple[ShipBuildCombo, ...]]
-
-
-@dataclass(frozen=True)
-class _BuiltModel:
-    model: cp_model.CpModel
-    action_count_vars: dict[str, cp_model.IntVar]
-    combo_count_vars: dict[str, cp_model.IntVar]
-    objective_var: cp_model.IntVar
-    merged_combo_catalog: _MergedComboCatalog
-    diversity_caps_applied: tuple[dict[str, object], ...]
-
 
 def _solver_build_diagnostics(
     problem: InferenceProblem,
-    built_model: _BuiltModel,
+    built_model: BuiltModel,
 ) -> dict[str, object]:
     """Diagnostics fixed at CP-SAT model build time; merged into InferenceResult.diagnostics."""
     return {
@@ -85,6 +64,8 @@ def _solver_build_diagnostics(
             admission_caps_by_action_id=problem.admission_caps_by_action_id,
         ),
         "diversityCapsApplied": list(built_model.diversity_caps_applied),
+        "catalogShipFitCount": built_model.catalog_ship_fits,
+        "reachableShipFitCount": built_model.reachable_ship_fits,
     }
 
 
@@ -140,53 +121,6 @@ def _validate_problem(problem: InferenceProblem) -> str | None:
     return None
 
 
-def merge_score_equivalent_combos(
-    combos: tuple[ShipBuildCombo, ...],
-) -> _MergedComboCatalog:
-    """Merge score-equivalent combos for CP-SAT feasibility; members kept for extraction."""
-    groups: dict[tuple[int, int, int], list[ShipBuildCombo]] = defaultdict(list)
-    merged: list[ShipBuildCombo] = []
-    members_by_merged_id: dict[str, tuple[ShipBuildCombo, ...]] = {}
-    for combo in combos:
-        if is_generic_zero_military_score_combo_id(combo.combo_id):
-            merged.append(combo)
-            members_by_merged_id[combo.combo_id] = (combo,)
-            continue
-        groups[(combo.score_delta_2x, combo.warship_delta, combo.freighter_delta)].append(combo)
-
-    for members in groups.values():
-        sorted_members = tuple(sorted(members, key=lambda combo: combo.combo_id))
-        if len(sorted_members) == 1:
-            combo = sorted_members[0]
-            merged.append(combo)
-            members_by_merged_id[combo.combo_id] = sorted_members
-            continue
-
-        representative = max(
-            sorted_members,
-            key=lambda combo: (combo.probability_weight, combo.combo_id),
-        )
-        merged_id = (
-            f"combo_equiv_{representative.score_delta_2x}_"
-            f"{representative.warship_delta}_{representative.freighter_delta}"
-        )
-        merged.append(
-            replace(
-                representative,
-                combo_id=merged_id,
-                labels=tuple(label for member in sorted_members for label in member.labels),
-                probability_weight=max(member.probability_weight for member in sorted_members),
-                upper_bound=max(member.upper_bound for member in sorted_members),
-            )
-        )
-        members_by_merged_id[merged_id] = sorted_members
-
-    return _MergedComboCatalog(
-        combos=tuple(merged),
-        members_by_merged_id=members_by_merged_id,
-    )
-
-
 def _freighter_only_zero_military_solution(
     problem: InferenceProblem,
 ) -> InferenceSolution | None:
@@ -238,54 +172,6 @@ def _problem_has_catalog_entries(problem: InferenceProblem) -> bool:
     return bool(problem.aggregate_actions or problem.ship_build_combos)
 
 
-def _build_model(
-    problem: InferenceProblem,
-    merged_combo_catalog: _MergedComboCatalog,
-) -> _BuiltModel:
-    model = cp_model.CpModel()
-    action_count_vars = {
-        action.id: model.new_int_var(action.lower_bound, action.upper_bound, action.id)
-        for action in problem.aggregate_actions
-    }
-    combo_count_vars = {
-        combo.combo_id: model.new_int_var(combo.lower_bound, combo.upper_bound, combo.combo_id)
-        for combo in merged_combo_catalog.combos
-    }
-    objective_terms = build_inference_objective_terms(
-        model,
-        problem,
-        action_count_vars,
-        combo_count_vars,
-        ship_build_combos=merged_combo_catalog.combos,
-    )
-
-    merged_problem = replace(problem, ship_build_combos=merged_combo_catalog.combos)
-    diversity_caps_applied = InferenceHardConstraints.from_problem(merged_problem).add_to_model(
-        model,
-        merged_problem,
-        action_count_vars,
-        combo_count_vars,
-    )
-    objective_var = model.new_int_var(
-        _RANKING_OBJECTIVE_VAR_LB,
-        _RANKING_OBJECTIVE_VAR_UB,
-        "ranking_objective",
-    )
-    if objective_terms:
-        model.add(objective_var == sum(objective_terms))
-    else:
-        model.add(objective_var == 0)
-    model.maximize(objective_var)
-    return _BuiltModel(
-        model=model,
-        action_count_vars=action_count_vars,
-        combo_count_vars=combo_count_vars,
-        objective_var=objective_var,
-        merged_combo_catalog=merged_combo_catalog,
-        diversity_caps_applied=tuple(diversity_caps_applied),
-    )
-
-
 def _objective_value(
     problem: InferenceProblem,
     action_counts: dict[str, int],
@@ -304,17 +190,12 @@ def _objective_value(
     )
     combo_by_id = {combo.combo_id: combo for combo in problem.ship_build_combos}
     for ship_build in ship_builds:
-        combo = combo_by_id[ship_build.combo_id]
-        combo_penalty = ranking_penalty_from_marginal_weight(
-            combo.probability_weight,
-            max_marginal_weight=max_combo_weight,
+        coefficient = ship_build_objective_coefficient(
+            combo_by_id[ship_build.combo_id],
+            max_combo_weight=max_combo_weight,
+            heuristics=problem.ranking_heuristics,
         )
-        objective_value -= combo_penalty * ship_build.count
-    objective_value += compute_partial_weapon_slot_penalty_contribution(
-        ship_builds,
-        combo_by_id,
-        problem.ranking_heuristics,
-    )
+        objective_value += coefficient * ship_build.count
     return objective_value
 
 
@@ -344,58 +225,130 @@ def _ship_build_from_member(
     )
 
 
-def _ranked_merged_members(members: tuple[ShipBuildCombo, ...]) -> tuple[ShipBuildCombo, ...]:
-    """Order equivalent combos for expansion: highest probability first, then combo id."""
-    return tuple(sorted(members, key=lambda member: (-member.probability_weight, member.combo_id)))
+@dataclass(frozen=True, slots=True)
+class _RankedFitting:
+    """One scored fitting of a merged class."""
+
+    contribution: int
+    ship_build: InferenceSolutionShipBuild
 
 
-def _ship_build_variants_for_merged_count(
+@dataclass(frozen=True, slots=True)
+class _RankedLabeling:
+    """One labeling and the sum of its per-ship contributions."""
+
+    contribution: int
+    ship_builds: tuple[InferenceSolutionShipBuild, ...]
+
+
+def _fittings_for_merged_count(
     merged_combo_id: str,
     count: int,
-    merged_combo_catalog: _MergedComboCatalog,
+    merged_combo_catalog: MergedComboCatalog,
     *,
-    max_expansions: int,
-) -> tuple[InferenceSolutionShipBuild, ...]:
+    max_labelings: int,
+    max_combo_weight: int,
+    heuristics: InferenceRankingHeuristics,
+) -> tuple[_RankedFitting, ...]:
+    """Fittings of one class, contribution descending then combo id ascending.
+
+    A repeated class (count other than 1) keeps its best fitting. A count of
+    1 keeps the first ``max_labelings`` fittings. That prefix is the only one
+    a top-K labeling can use: equal-sum labelings emit in ascending
+    index-tuple order over axes in ``combo_counts`` order.
+    """
     members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
     if is_generic_zero_military_score_combo_id(merged_combo_id):
-        return (_ship_build_from_member(members[0], count),)
-    if len(members) == 1:
-        return (_ship_build_from_member(members[0], count),)
+        member = members[0]
+        coefficient = ship_build_objective_coefficient(
+            member,
+            max_combo_weight=max_combo_weight,
+            heuristics=heuristics,
+        )
+        return (
+            _RankedFitting(
+                contribution=coefficient * count,
+                ship_build=_ship_build_from_member(member, count),
+            ),
+        )
 
-    if count != 1:
-        best_member = _ranked_merged_members(members)[0]
-        return (_ship_build_from_member(best_member, count),)
-
-    ranked_members = _ranked_merged_members(members)
-    expansion_limit = max(1, max_expansions)
+    fittings = [
+        _RankedFitting(
+            contribution=ship_build_objective_coefficient(
+                member,
+                max_combo_weight=max_combo_weight,
+                heuristics=heuristics,
+            )
+            * count,
+            ship_build=_ship_build_from_member(member, count),
+        )
+        for member in members
+    ]
+    keep_count = 1 if count != 1 else max_labelings
     return tuple(
-        _ship_build_from_member(member, count) for member in ranked_members[:expansion_limit]
+        heapq.nsmallest(
+            keep_count,
+            fittings,
+            key=lambda fitting: (-fitting.contribution, fitting.ship_build.combo_id),
+        )
     )
 
 
-def _full_expansion_limit_for_combo_counts(
-    combo_counts: dict[str, int],
-    merged_combo_catalog: _MergedComboCatalog,
-) -> int:
-    """Upper bound on label variants for one structural hit (product of group sizes)."""
-    limit = 1
-    for merged_combo_id, count in combo_counts.items():
-        if count <= 0:
-            continue
-        members = merged_combo_catalog.members_by_merged_id[merged_combo_id]
-        if is_generic_zero_military_score_combo_id(merged_combo_id) or count != 1:
-            continue
-        limit *= max(1, len(members))
-    return max(1, limit)
+def _best_label_combinations(
+    axes: Sequence[Sequence[_RankedFitting]],
+    *,
+    max_labelings: int,
+) -> list[_RankedLabeling]:
+    """Top ``max_labelings`` labelings by summed per-ship contribution.
+
+    Axes are in ``combo_counts`` order, each ordered by contribution
+    descending then combo id ascending. Equal-sum labelings are emitted in
+    ascending index-tuple order. The cartesian product is not materialized.
+    """
+    if max_labelings <= 0 or not axes:
+        return []
+    start = tuple(0 for _ in axes)
+    start_score = sum(axis[0].contribution for axis in axes)
+    # Min-heap of (-score, index tuple). Equal scores pop in ascending index order.
+    pending: list[tuple[int, tuple[int, ...]]] = [(-start_score, start)]
+    seen = {start}
+    labelings: list[_RankedLabeling] = []
+    while pending and len(labelings) < max_labelings:
+        negative_score, indexes = heapq.heappop(pending)
+        parent_score = -negative_score
+        labelings.append(
+            _RankedLabeling(
+                contribution=parent_score,
+                ship_builds=tuple(
+                    axes[axis_index][member_index].ship_build
+                    for axis_index, member_index in enumerate(indexes)
+                ),
+            )
+        )
+        for axis_index, axis in enumerate(axes):
+            next_member = indexes[axis_index] + 1
+            if next_member >= len(axis):
+                continue
+            neighbor = indexes[:axis_index] + (next_member,) + indexes[axis_index + 1 :]
+            if neighbor in seen:
+                continue
+            seen.add(neighbor)
+            neighbor_score = (
+                parent_score
+                - axis[indexes[axis_index]].contribution
+                + axis[next_member].contribution
+            )
+            heapq.heappush(pending, (-neighbor_score, neighbor))
+    return labelings
 
 
 def _expand_score_equivalent_solutions(
     problem: InferenceProblem,
     action_counts: dict[str, int],
     combo_counts: dict[str, int],
-    merged_combo_catalog: _MergedComboCatalog,
+    merged_combo_catalog: MergedComboCatalog,
     *,
-    max_expansions: int,
+    max_labelings: int,
 ) -> list[InferenceSolution]:
     action_by_id = {action.id: action for action in problem.aggregate_actions}
     solution_actions: list[InferenceSolutionAction] = []
@@ -411,59 +364,59 @@ def _expand_score_equivalent_solutions(
                 counterparty_player_id=action.counterparty_player_id,
             )
         )
-    ship_build_variant_lists = [
-        _ship_build_variants_for_merged_count(
+    max_labelings = max(1, max_labelings)
+    max_combo_weight = max_combo_probability_weight(problem)
+    heuristics = problem.ranking_heuristics
+    ship_build_axes = [
+        _fittings_for_merged_count(
             merged_combo_id,
             count,
             merged_combo_catalog,
-            max_expansions=max_expansions,
+            max_labelings=max_labelings,
+            max_combo_weight=max_combo_weight,
+            heuristics=heuristics,
         )
         for merged_combo_id, count in combo_counts.items()
         if count > 0
     ]
-    # Idle exact (all-zero counts) is a valid structural hit when observation deltas
-    # are zero; keep it instead of dropping the expansion.
-    if not ship_build_variant_lists and not solution_actions:
+    action_constant = _objective_value(problem, action_counts, ())
+    # Idle exact (all-zero counts) and action-only hits are valid structural hits.
+    # Both yield exactly one solution with no ship builds.
+    if not ship_build_axes:
         return [
             InferenceSolution(
-                objective_value=_objective_value(problem, action_counts, ()),
-                actions=(),
+                objective_value=action_constant,
+                actions=tuple(solution_actions),
                 ship_builds=(),
             )
         ]
-    # Action-only hits have no ship-build axes; synthesize one empty combination.
-    ship_build_combinations: list[tuple[InferenceSolutionShipBuild, ...]]
-    if not ship_build_variant_lists:
-        ship_build_combinations = [()]
-    else:
-        ship_build_combinations = [
-            tuple(ship_build_variant) for ship_build_variant in product(*ship_build_variant_lists)
-        ]
     solutions: list[InferenceSolution] = []
-    for ship_builds in ship_build_combinations:
+    for labeling in _best_label_combinations(
+        ship_build_axes,
+        max_labelings=max_labelings,
+    ):
         solutions.append(
             InferenceSolution(
-                objective_value=_objective_value(problem, action_counts, ship_builds),
+                objective_value=action_constant + labeling.contribution,
                 actions=tuple(solution_actions),
-                ship_builds=ship_builds,
+                ship_builds=labeling.ship_builds,
             )
         )
-    solutions.sort(key=lambda solution: solution.objective_value, reverse=True)
-    return solutions[: max(1, max_expansions)]
+    return solutions
 
 
 def expand_structural_hits_to_top_k(
     problem: InferenceProblem,
     structural_hits: Sequence[tuple[dict[str, int], dict[str, int]]],
-    merged_combo_catalog: _MergedComboCatalog,
+    merged_combo_catalog: MergedComboCatalog,
     *,
     max_solutions: int,
 ) -> list[InferenceSolution]:
     """Expand distinct CP-SAT hits into label variants; keep a streaming top-K.
 
-    Solve-loop budget is structural (merged signatures). Label variants of the same
-    military arithmetic are expanded here and culled so at most ``max_solutions``
-    rows are retained, ranked by objective.
+    Solve-loop budget is structural (merged signatures). A hit's objective is the
+    sum of one contribution per ship, so each class is ranked on its own and only
+    the top ``max_solutions`` labelings of that sum are admitted.
     """
     if max_solutions <= 0 or not structural_hits:
         return []
@@ -475,7 +428,7 @@ def expand_structural_hits_to_top_k(
             action_counts,
             combo_counts,
             merged_combo_catalog,
-            max_expansions=1,
+            max_labelings=1,
         )
         if not best_only:
             continue
@@ -497,10 +450,7 @@ def expand_structural_hits_to_top_k(
             action_counts,
             combo_counts,
             merged_combo_catalog,
-            max_expansions=_full_expansion_limit_for_combo_counts(
-                combo_counts,
-                merged_combo_catalog,
-            ),
+            max_labelings=max_solutions,
         )
         for expansion in expansions:
             if kth_objective is not None and expansion.objective_value <= kth_objective:
@@ -524,6 +474,8 @@ def solve_inference_problem(
     on_solution: Callable[[InferenceSolution], None] | None = None,
     cancel_token: InferenceCancelToken | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
+    tier_solve: TierSolve | None = None,
+    search_mode: StructuralSearchMode = StructuralSearchMode.BAND_ENUMERATION,
 ) -> InferenceResult:
     """Return up to max_solutions ranked feasible explanations for one player turn.
 
@@ -576,19 +528,31 @@ def solve_inference_problem(
             },
         )
 
-    merged_combo_catalog = merge_score_equivalent_combos(problem.ship_build_combos)
-    built_model = _build_model(problem, merged_combo_catalog)
+    prepared_seed_counts: tuple[int, int] | None = None
+    if tier_solve is not None:
+        built_model, seed_applied, seed_skipped = tier_solve.cache.fresh_model(
+            problem,
+            tier_solve.pins,
+            seed_no_good_solutions,
+        )
+        merged_combo_catalog = built_model.merged_combo_catalog
+        search_seeds: Sequence[InferenceSolution] = ()
+        prepared_seed_counts = (seed_applied, seed_skipped)
+    else:
+        merged_combo_catalog = catalog_model.build_catalog_merge_plan(
+            problem.ship_build_combos
+        ).unconstrained
+        built_model = catalog_model.build_model(problem, merged_combo_catalog)
+        merged_combo_catalog = built_model.merged_combo_catalog
+        search_seeds = seed_no_good_solutions
     build_diagnostics = _solver_build_diagnostics(problem, built_model)
     started_at = time.monotonic()
     search = collect_near_best_structural_hits(
         problem,
-        model=built_model.model,
-        action_count_vars=built_model.action_count_vars,
-        combo_count_vars=built_model.combo_count_vars,
-        objective_var=built_model.objective_var,
-        merged_combo_catalog=merged_combo_catalog,
-        seed_no_good_solutions=seed_no_good_solutions,
+        built=built_model,
+        seed_no_good_solutions=search_seeds,
         cancel_token=cancel_token,
+        search_mode=search_mode,
     )
 
     # Hang fuse: drop solutions before admission. Charge path raises after this.
@@ -624,8 +588,12 @@ def solve_inference_problem(
     if search.tier_max_objective is not None:
         diagnostics["tierMaxObjective"] = search.tier_max_objective
     if seed_no_good_solutions:
-        diagnostics["seedNoGoodCount"] = search.seed_no_goods_applied
-        diagnostics["seedNoGoodSkippedCount"] = search.seed_no_goods_skipped
+        if prepared_seed_counts is not None:
+            diagnostics["seedNoGoodCount"] = prepared_seed_counts[0]
+            diagnostics["seedNoGoodSkippedCount"] = prepared_seed_counts[1]
+        else:
+            diagnostics["seedNoGoodCount"] = search.seed_no_goods_applied
+            diagnostics["seedNoGoodSkippedCount"] = search.seed_no_goods_skipped
     if search.hang_fuse_hit:
         diagnostics["hangFuseHit"] = True
     elif search.time_limited:

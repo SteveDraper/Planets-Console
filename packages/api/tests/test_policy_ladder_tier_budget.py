@@ -6,10 +6,14 @@ import json
 import time
 from unittest.mock import MagicMock
 
+from api.analytics.military_score_inference.actions import ActionCatalog
+from api.analytics.military_score_inference.catalog_model import build_catalog_merge_plan
 from api.analytics.military_score_inference.models import (
+    InferenceObservation,
     InferenceResult,
     InferenceSolution,
     InferenceSolutionShipBuild,
+    ShipBuildCombo,
     WallSolveClip,
 )
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -30,6 +34,7 @@ from api.analytics.military_score_inference.tier_policy import (
     InferenceTierPolicyStep,
     resolve_tier_policies,
 )
+from api.analytics.military_score_inference.tier_solve_cache import TierSolveCache
 
 
 def _minimal_policy_step(
@@ -350,6 +355,39 @@ def _empty_catalog_result() -> InferenceResult:
     return InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={})
 
 
+def _explainable_seed_inputs() -> tuple[InferenceObservation, ActionCatalog, TierSolveCache]:
+    """A one-ship catalog whose seed count of 1 meets the exact military window."""
+    ship = ShipBuildCombo(
+        combo_id="c1",
+        hull_id=1,
+        engine_id=1,
+        beam_id=None,
+        torp_id=None,
+        beam_count=0,
+        launcher_count=0,
+        labels=("c1",),
+        score_delta_2x=100,
+        warship_delta=1,
+        upper_bound=4,
+    )
+    catalog = ActionCatalog(
+        aggregate_actions=(),
+        ship_build_combos=(ship,),
+        probability_buckets_by_action_id={},
+    )
+    observation = InferenceObservation(
+        player_id=1,
+        turn=3,
+        military_delta_2x=100,
+        warship_delta=1,
+        freighter_delta=0,
+        priority_point_delta=0,
+        starbases_owned=2,
+        is_after_ship_limit=False,
+    )
+    return observation, catalog, TierSolveCache(build_catalog_merge_plan((ship,)))
+
+
 def test_seed_progression_samples_remaining_per_sub_solve(monkeypatch) -> None:
     """Neighborhood 0/1 then unfixed each see a fresh remaining, not one snapshot."""
     recorded_limits: list[float] = []
@@ -369,13 +407,15 @@ def test_seed_progression_samples_remaining_per_sub_solve(monkeypatch) -> None:
         actions=(),
         ship_builds=(InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),),
     )
+    observation, catalog, cache = _explainable_seed_inputs()
     result, problem = _solve_seed_progression(
-        MagicMock(),
-        MagicMock(),
+        observation,
+        catalog,
         seed,
         max_solutions=5,
         next_solve_clip=budget.next_solve_clip,
         should_stop=budget.should_stop,
+        tier_solve_cache=cache,
     )
     assert result is None
     assert problem is None
@@ -402,13 +442,15 @@ def test_seed_progression_stops_when_remaining_exhausted(monkeypatch) -> None:
         actions=(),
         ship_builds=(InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),),
     )
+    observation, catalog, cache = _explainable_seed_inputs()
     result, problem = _solve_seed_progression(
-        MagicMock(),
-        MagicMock(),
+        observation,
+        catalog,
         seed,
         max_solutions=5,
         next_solve_clip=budget.next_solve_clip,
         should_stop=budget.should_stop,
+        tier_solve_cache=cache,
     )
     assert result is None
     assert problem is None
@@ -433,13 +475,15 @@ def test_seed_progression_skips_all_solves_when_should_stop(monkeypatch) -> None
         actions=(),
         ship_builds=(InferenceSolutionShipBuild(combo_id="c1", label="c1", count=1),),
     )
+    observation, catalog, cache = _explainable_seed_inputs()
     result, problem = _solve_seed_progression(
-        MagicMock(),
-        MagicMock(),
+        observation,
+        catalog,
         seed,
         max_solutions=5,
         next_solve_clip=lambda: WallSolveClip(max_time_in_seconds=5.0),
         should_stop=lambda: True,
+        tier_solve_cache=cache,
     )
     assert result is None
     assert problem is None

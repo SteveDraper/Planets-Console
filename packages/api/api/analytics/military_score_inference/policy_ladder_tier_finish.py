@@ -6,6 +6,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from enum import Enum
 
 from api.analytics.military_score_inference.actions import ActionCatalog
@@ -17,6 +18,7 @@ from api.analytics.military_score_inference.component_eligibility import (
 )
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
+    InferenceProblem,
     InferenceSolution,
 )
 from api.analytics.military_score_inference.policy_ladder_admission import (
@@ -140,8 +142,14 @@ def finish_tier_step(
     added_combo_ids: frozenset[str] = frozenset(),
     added_aggregate_action_ids: frozenset[str] = frozenset(),
     new_exact_before_step: int | None = None,
+    early_stop_reason: str | None = None,
 ) -> None:
-    """Append tier diagnostics, then advance / early-stop per ``finish_mode``."""
+    """Append tier diagnostics, then advance / early-stop per ``finish_mode``.
+
+    ``early_stop_reason`` completes the ladder when the mode advances the step
+    index. In-step checks still run first, so they can update ``last_status``;
+    the explicit reason then replaces any reason those checks stored.
+    """
     duration_ms = (time.monotonic() - step_started_at) * 1000.0
     state.step_diagnostics.append(
         _policy_step_diagnostics(
@@ -188,43 +196,68 @@ def finish_tier_step(
 
     state.next_step_index = policy_step_index + 1
 
+    in_step_stop = False
     if finish_mode in (TierStepFinishMode.SKIP, TierStepFinishMode.COMPLETE):
-        if maybe_early_stop_after_step(
+        in_step_stop = maybe_early_stop_after_step(
             state,
             policy_step=policy_step,
             observation=observation,
             catalog=catalog,
-        ):
-            _annotate_last_step_early_stop(state)
-            return
-    if finish_mode is TierStepFinishMode.COMPLETE:
+        )
+    if not in_step_stop and finish_mode is TierStepFinishMode.COMPLETE:
         if new_exact_before_step is None:
             raise RuntimeError("finish_tier_step COMPLETE requires new_exact_before_step")
-        if maybe_no_new_exact_signatures_early_stop(
+        in_step_stop = maybe_no_new_exact_signatures_early_stop(
             state,
             added_combo_ids=added_combo_ids,
             added_aggregate_action_ids=added_aggregate_action_ids,
             new_exact_before_step=new_exact_before_step,
-        ):
-            _annotate_last_step_early_stop(state)
-            return
-        if maybe_expensive_tier_abort_after_step(
-            state,
-            policy_step=policy_step,
-            observation=observation,
-            catalog=catalog,
-        ):
-            _annotate_last_step_early_stop(state)
-            return
-    if finish_mode is not TierStepFinishMode.DIAGNOSTICS_ONLY:
-        if maybe_ship_first_prefix_stop_after_step(
-            state,
-            policy_step=policy_step,
-        ):
-            _annotate_last_step_early_stop(state)
-            return
+        )
+        if not in_step_stop:
+            in_step_stop = maybe_expensive_tier_abort_after_step(
+                state,
+                policy_step=policy_step,
+                observation=observation,
+                catalog=catalog,
+            )
+    if not in_step_stop and maybe_ship_first_prefix_stop_after_step(
+        state,
+        policy_step=policy_step,
+    ):
+        in_step_stop = True
+
+    if early_stop_reason is not None:
+        state.ladder_complete = True
+        state.ladder_early_stop_reason = early_stop_reason
+        _annotate_last_step_early_stop(state)
+        return
+    if in_step_stop:
+        _annotate_last_step_early_stop(state)
+        return
     # BUDGET_STOP: advance only -- no ship-only / no-new-signature early-stop
     # and no expensive-tier abort. In-regime prefix still stops before posts.
 
     if state.next_step_index >= len(state.policy_steps):
         state.ladder_complete = True
+
+
+def close_tier_without_solve(
+    state: PolicyLadderState,
+    *,
+    problem: InferenceProblem,
+    status: str,
+    diagnostics: dict[str, object],
+    stop_reason: str,
+    finish: Callable[..., None],
+) -> None:
+    """Record ``problem`` and finish the tier on ``stop_reason`` without a solve.
+
+    ``finish`` is called with ``early_stop_reason=stop_reason`` so the tier
+    diagnostics entry records that reason as it is appended. ``time_limited``
+    is cleared because this path did not spend a solve.
+    """
+    state.last_status = status
+    state.time_limited = False
+    state.last_diagnostics = dict(diagnostics)
+    state.problem = problem
+    finish(early_stop_reason=stop_reason)

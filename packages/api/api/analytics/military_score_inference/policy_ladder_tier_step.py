@@ -11,6 +11,10 @@ from api.analytics.military_score_inference.actions import (
     build_action_catalog_from_turn,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.catalog_model import (
+    ComboPins,
+    build_catalog_merge_plan,
+)
 from api.analytics.military_score_inference.collision_hull_widen import (
     CollisionHullWidenPlan,
     load_twins_for_turn,
@@ -24,6 +28,13 @@ from api.analytics.military_score_inference.degrade_aggregate_probe import (
 )
 from api.analytics.military_score_inference.held_score_equivalent_relabel import (
     relabeled_solutions_for_widened_classes,
+)
+from api.analytics.military_score_inference.incoming_warship_floor import (
+    INCOMING_WARSHIP_FLOOR_STOP_REASON,
+)
+from api.analytics.military_score_inference.incoming_warship_floor_step import (
+    consider_incoming_warship_floor,
+    incoming_warship_floor_diagnostics,
 )
 from api.analytics.military_score_inference.inference_cancel import InferenceCancelToken
 from api.analytics.military_score_inference.military_sat_admission import (
@@ -41,6 +52,13 @@ from api.analytics.military_score_inference.models import (
     InferenceResult,
     InferenceSolution,
 )
+from api.analytics.military_score_inference.near_best_structural_search import (
+    StructuralSearchMode,
+)
+from api.analytics.military_score_inference.pinned_seed_screen import (
+    negative_band_upper_bound_is_unreachable,
+    pinned_counts_cannot_explain,
+)
 from api.analytics.military_score_inference.policy_ladder_admission import (
     held_leftover_0_solutions,
     make_incremental_admitter,
@@ -57,6 +75,7 @@ from api.analytics.military_score_inference.policy_ladder_tier_budget import (
 )
 from api.analytics.military_score_inference.policy_ladder_tier_finish import (
     TierStepFinishMode,
+    close_tier_without_solve,
     finish_tier_step,
 )
 from api.analytics.military_score_inference.prior_fleet_tech_raise import (
@@ -77,15 +96,19 @@ from api.analytics.military_score_inference.ship_first_family import (
     tag_ship_first_near_solution,
 )
 from api.analytics.military_score_inference.ship_first_overshoot import (
+    CatalogScoreLookups,
     ShipFirstOvershootPlan,
+    catalog_score_lookups,
     leftover_military_2x,
 )
 from api.analytics.military_score_inference.solver import (
     STATUS_INVALID_PROBLEM,
+    STATUS_MINE_SCORE_RESIDUAL,
     STATUS_STOPPED,
     STATUS_TIME_LIMITED,
     solve_inference_problem,
 )
+from api.analytics.military_score_inference.tier_solve_cache import TierSolve, TierSolveCache
 from api.models.game import TurnInfo
 
 
@@ -95,12 +118,12 @@ def _combo_counts_from_solution(solution: InferenceSolution) -> dict[str, int]:
 
 def _explained_military_score_2x(
     solution: InferenceSolution,
-    catalog: ActionCatalog,
+    lookups: CatalogScoreLookups,
 ) -> int:
     return catalog_explained_military_delta_2x(
         solution,
-        {action.id: action for action in catalog.aggregate_actions},
-        {combo.combo_id: combo for combo in catalog.ship_build_combos},
+        lookups.actions_by_id,
+        lookups.combos_by_id,
     )
 
 
@@ -112,12 +135,13 @@ def _solve_catalog(
     max_solutions: int,
     solve_clip: SolveClip,
     military_score_window: MilitaryScoreWindow | None = None,
-    fixed_combo_counts: dict[str, int] | None = None,
-    combo_count_neighborhood: int = 0,
+    pins: ComboPins | None = None,
     cancel_token: InferenceCancelToken | None = None,
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
+    tier_solve_cache: TierSolveCache,
+    search_mode: StructuralSearchMode = StructuralSearchMode.BAND_ENUMERATION,
 ) -> tuple[InferenceResult, InferenceProblem]:
     problem = build_inference_problem(
         observation,
@@ -127,14 +151,14 @@ def _solve_catalog(
         time_limit_seconds=solve_clip.problem_time_limit_seconds(),
         solve_clip=solve_clip,
         military_score_window=military_score_window,
-        fixed_combo_counts=fixed_combo_counts,
-        combo_count_neighborhood=combo_count_neighborhood,
     )
     result = solve_inference_problem(
         problem,
         cancel_token=cancel_token,
         on_solution=on_solution,
         seed_no_good_solutions=seed_no_good_solutions,
+        tier_solve=TierSolve(cache=tier_solve_cache, pins=pins),
+        search_mode=search_mode,
     )
     _charge_effort_budget(budget_run, result)
     return result, problem
@@ -177,11 +201,15 @@ def _solve_seed_progression(
     on_solution: Callable[[InferenceSolution], None] | None = None,
     seed_no_good_solutions: Sequence[InferenceSolution] = (),
     budget_run: TierStepRun | None = None,
+    tier_solve_cache: TierSolveCache,
+    search_mode: StructuralSearchMode = StructuralSearchMode.FIRST_HIT_ONLY,
 ) -> tuple[InferenceResult | None, InferenceProblem | None]:
     """Run neighborhood then unfixed catalog solves under one shared clip.
 
-    Each sub-solve samples ``next_solve_clip()`` at call time so successive
-    passes cannot each claim the full tier allowance independently.
+    Each sub-solve samples ``next_solve_clip()`` at call time so later passes
+    cannot each claim the full tier allowance independently. Seed passes
+    default to ``StructuralSearchMode.FIRST_HIT_ONLY``. ``SUCCESSIVE`` keeps
+    the per-hit re-solve walk used by comparison tests.
     """
     fixed_counts = _combo_counts_from_solution(seed)
     if not fixed_counts:
@@ -201,6 +229,14 @@ def _solve_seed_progression(
         return clip
 
     for neighborhood in (0, 1):
+        pins = ComboPins(counts=fixed_counts, neighborhood=neighborhood)
+        if pinned_counts_cannot_explain(
+            tier_solve_cache.plan,
+            observation,
+            catalog.aggregate_actions,
+            pins,
+        ):
+            continue
         clip = _solve_cap()
         if clip is None:
             return None, None
@@ -210,12 +246,13 @@ def _solve_seed_progression(
             race_id=race_id,
             max_solutions=max_solutions,
             solve_clip=clip,
-            fixed_combo_counts=fixed_counts,
-            combo_count_neighborhood=neighborhood,
+            pins=pins,
             cancel_token=cancel_token,
             on_solution=on_solution,
             seed_no_good_solutions=seed_no_good_solutions,
             budget_run=budget_run,
+            tier_solve_cache=tier_solve_cache,
+            search_mode=search_mode,
         )
         if result.status == STATUS_STOPPED:
             return result, problem
@@ -236,6 +273,8 @@ def _solve_seed_progression(
         on_solution=on_solution,
         budget_run=budget_run,
         seed_no_good_solutions=seed_no_good_solutions,
+        tier_solve_cache=tier_solve_cache,
+        search_mode=search_mode,
     )
     if result.solutions or result.status == STATUS_STOPPED:
         return result, problem
@@ -487,6 +526,8 @@ def run_policy_ladder_tier_step(
         catalog_reuse=state.catalog_reuse,
     )
     state.catalog = catalog
+    score_lookups = catalog_score_lookups(catalog)
+    tier_solve_cache = TierSolveCache(build_catalog_merge_plan(catalog.ship_build_combos))
     current_combo_ids = frozenset(combo.combo_id for combo in catalog.ship_build_combos)
     added_combo_ids = (
         current_combo_ids
@@ -546,6 +587,7 @@ def run_policy_ladder_tier_step(
         added_combo_ids: frozenset[str] = frozenset(),
         added_aggregate_action_ids: frozenset[str] = frozenset(),
         new_exact_before_step: int | None = None,
+        early_stop_reason: str | None = None,
     ) -> None:
         finish_tier_step(
             state,
@@ -565,6 +607,7 @@ def run_policy_ladder_tier_step(
             added_combo_ids=added_combo_ids,
             added_aggregate_action_ids=added_aggregate_action_ids,
             new_exact_before_step=new_exact_before_step,
+            early_stop_reason=early_stop_reason,
             **budget_kwargs,
         )
 
@@ -601,13 +644,13 @@ def run_policy_ladder_tier_step(
         return False
 
     def admit_overshoot(solution: InferenceSolution) -> None:
-        tagged = tag_ship_first_near_solution(solution, observation, catalog)
+        tagged = tag_ship_first_near_solution(solution, observation, score_lookups)
         admitted = admit_ship_first_ranked_solution(
             state.merged_solutions,
             state.seen_signatures,
             tagged,
             max_solutions=state.resolved_max_solutions,
-            leftover_2x=lambda held: leftover_military_2x(held, observation, catalog),
+            leftover_2x=lambda held: leftover_military_2x(held, observation, score_lookups),
             on_admitted=None,
         )
         if admitted:
@@ -629,6 +672,7 @@ def run_policy_ladder_tier_step(
             on_solution=admit_solution,
             seed_no_good_solutions=held_no_goods,
             budget_run=run,
+            tier_solve_cache=tier_solve_cache,
         )
         if seed_result is None or seed_problem is None:
             continue
@@ -661,29 +705,66 @@ def run_policy_ladder_tier_step(
             cancel_token=cancel_token,
             on_solution=admit_overshoot,
             seed_no_good_solutions=tuple(state.merged_solutions),
+            tier_solve_cache=tier_solve_cache,
         )
         return record_solve(overshoot_result, overshoot_problem)
+
+    def unsolved_overshoot_problem(window: MilitaryScoreWindow) -> InferenceProblem:
+        """Overshoot problem recorded when this tier does not run that solve."""
+        clip = run.solve_clip_or_exhausted()
+        return build_inference_problem(
+            observation,
+            catalog,
+            race_id=player_race_id,
+            max_solutions=catalog_solve_max,
+            time_limit_seconds=clip.problem_time_limit_seconds(),
+            solve_clip=clip,
+            military_score_window=window,
+        )
+
+    def finish_closed_tier(*, early_stop_reason: str) -> None:
+        finish_step(
+            finish_mode=TierStepFinishMode.COMPLETE,
+            new_exact_before_step=new_exact_before_step,
+            early_stop_reason=early_stop_reason,
+        )
 
     def _solve_military_window() -> bool:
         """Exact, overshoot, or band for this step. True aborts the tier."""
         nonlocal band_residual_2x
         if overlay_mode == "overshoot_only" and overlay is not None:
+            overshoot_window = overlay.overshoot_window()
+            floor = consider_incoming_warship_floor(
+                observation=observation,
+                catalog=catalog,
+                turn=turn,
+                overlay=overlay,
+                score_lookups=score_lookups,
+                records_for_player=state.load_counterparty_fleet,
+                merged_solutions=state.merged_solutions,
+                seen_signatures=state.seen_signatures,
+                overshoot_signatures=state.overshoot_signatures,
+                newly_admitted=newly_admitted,
+                max_solutions=state.resolved_max_solutions,
+                on_admitted=on_admitted,
+            )
+            if floor.closes_tier:
+                close_tier_without_solve(
+                    state,
+                    problem=unsolved_overshoot_problem(overshoot_window),
+                    status=STATUS_MINE_SCORE_RESIDUAL,
+                    diagnostics=incoming_warship_floor_diagnostics(len(state.merged_solutions)),
+                    stop_reason=INCOMING_WARSHIP_FLOOR_STOP_REASON,
+                    finish=finish_closed_tier,
+                )
+                return True
             if (
                 overlay.should_solve_overshoot
                 and not budget_exhausted()
                 and run.remaining_allowance() > 0
             ):
                 return _solve_overshoot_catalog(overlay)
-            clip = run.solve_clip_or_exhausted()
-            state.problem = build_inference_problem(
-                observation,
-                catalog,
-                race_id=player_race_id,
-                max_solutions=catalog_solve_max,
-                time_limit_seconds=clip.problem_time_limit_seconds(),
-                solve_clip=clip,
-                military_score_window=overlay.overshoot_window(),
-            )
+            state.problem = unsolved_overshoot_problem(overshoot_window)
             return False
 
         exact_result, problem = _solve_catalog(
@@ -696,6 +777,7 @@ def run_policy_ladder_tier_step(
             cancel_token=cancel_token,
             on_solution=admit_solution,
             seed_no_good_solutions=held_no_goods,
+            tier_solve_cache=tier_solve_cache,
         )
         if record_solve(exact_result, problem):
             return True
@@ -715,6 +797,12 @@ def run_policy_ladder_tier_step(
             return False
         if budget_exhausted() or run.remaining_allowance() <= 0:
             return False
+        if negative_band_upper_bound_is_unreachable(
+            observation,
+            catalog.aggregate_actions,
+            catalog.ship_build_combos,
+        ):
+            return False
         band_result, band_problem = _solve_catalog(
             observation,
             catalog,
@@ -724,6 +812,7 @@ def run_policy_ladder_tier_step(
             military_score_window=BandMilitaryScoreWindow(alpha=policy_step.alpha),
             cancel_token=cancel_token,
             seed_no_good_solutions=tuple(state.merged_solutions),
+            tier_solve_cache=tier_solve_cache,
         )
         state.problem = band_problem
         state.last_diagnostics = dict(band_result.diagnostics)
@@ -735,7 +824,7 @@ def run_policy_ladder_tier_step(
         if band_result.solutions:
             state.band_seeds = list(band_result.solutions[: policy_step.max_seeds])
             best_solution = band_result.solutions[0]
-            explained = _explained_military_score_2x(best_solution, catalog)
+            explained = _explained_military_score_2x(best_solution, score_lookups)
             band_residual_2x = observation.military_delta_2x - explained
             if (
                 state.best_band_residual_2x is None

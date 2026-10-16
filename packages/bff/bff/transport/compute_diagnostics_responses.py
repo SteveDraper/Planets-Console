@@ -25,6 +25,7 @@ class ComputeDiagnosticsSnapshotResponse(BaseModel):
     ready_queue: list[dict] = Field(alias="readyQueue")
     next_single_step: dict = Field(alias="nextSingleStep")
     completion_history: list[dict] = Field(alias="completionHistory")
+    recent_failures: list[dict] = Field(alias="recentFailures")
     server_streams: list[dict] = Field(alias="serverStreams")
     remote_pool: dict = Field(alias="remotePool")
     live_occupancy: dict = Field(alias="liveOccupancy")

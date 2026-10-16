@@ -10,6 +10,7 @@ from api.analytics.military_score_inference.inference_api_payload import (
     COMPLETE_INFERENCE_SEARCH_STATUSES,
     FALLBACK_COMPLETE_PERSISTED_STATUSES,
     PERSISTABLE_INFERENCE_STATUSES,
+    STATUS_HORWASP,
     InferenceProductPayload,
 )
 from api.analytics.military_score_inference.row_run import RowRun
@@ -204,7 +205,7 @@ def classify_scores_export_decision(
         assert persisted_row is not None
         return ScoresExportDecision(
             branch,
-            _persisted_row_fallback_search_status(persisted_row.status),
+            _persisted_row_fallback_search_status(persisted_row),
             needs_ensure_work=False,
         )
 
@@ -300,9 +301,32 @@ def _persisted_row_priority_search_status(status: str) -> SearchStatus | None:
     return None
 
 
-def _persisted_row_fallback_search_status(status: str) -> SearchStatus:
+# Horwasp closed-evidence is ``closed_horwasp_skip_row``. Other fallback
+# statuses stay on the shared complete set.
+_NON_HORWASP_FALLBACK_COMPLETE_STATUSES = FALLBACK_COMPLETE_PERSISTED_STATUSES - {STATUS_HORWASP}
+
+
+def horwasp_skip_closes_turn_evidence(status: str) -> bool:
+    """True when this status is the Horwasp skip the materialization probe closes."""
+    return status == STATUS_HORWASP and status in FALLBACK_COMPLETE_PERSISTED_STATUSES
+
+
+def closed_horwasp_skip_row(row: PersistedInferenceRow | None) -> PersistedInferenceRow | None:
+    """Stored Horwasp skip that closes turn evidence, or None.
+
+    A different stored status is not this row. Callers fall through instead of
+    claiming evidence the materialization probe rejects.
+    """
+    if row is None or not horwasp_skip_closes_turn_evidence(row.status):
+        return None
+    return row
+
+
+def _persisted_row_fallback_search_status(row: PersistedInferenceRow) -> SearchStatus:
     """Persisted statuses used when admission and scheduler are absent."""
-    if status in FALLBACK_COMPLETE_PERSISTED_STATUSES:
+    if closed_horwasp_skip_row(row) is not None:
+        return "complete"
+    if row.status in _NON_HORWASP_FALLBACK_COMPLETE_STATUSES:
         return "complete"
     return "not_started"
 

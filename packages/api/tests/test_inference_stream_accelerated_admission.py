@@ -186,15 +186,14 @@ def test_run_inference_tier_job_does_not_emit_on_admission_for_accel_window_segm
         max_solutions,
         solve_clip,
         military_score_window=None,
-        fixed_combo_counts=None,
-        combo_count_neighborhood=0,
+        pins=None,
         cancel_token=None,
         on_solution=None,
         seed_no_good_solutions=(),
         **_budget,
     ):
         del race_id, max_solutions, solve_clip, military_score_window
-        del fixed_combo_counts, combo_count_neighborhood, cancel_token, seed_no_good_solutions
+        del pins, cancel_token, seed_no_good_solutions
         if on_solution is not None:
             on_solution(solution)
         from api.analytics.military_score_inference.actions import build_inference_problem
@@ -265,15 +264,14 @@ def test_run_inference_tier_job_emits_on_admission_for_reported_host_turn_segmen
         max_solutions,
         solve_clip,
         military_score_window=None,
-        fixed_combo_counts=None,
-        combo_count_neighborhood=0,
+        pins=None,
         cancel_token=None,
         on_solution=None,
         seed_no_good_solutions=(),
         **_budget,
     ):
         del race_id, max_solutions, solve_clip, military_score_window
-        del fixed_combo_counts, combo_count_neighborhood, cancel_token, seed_no_good_solutions
+        del pins, cancel_token, seed_no_good_solutions
         if on_solution is not None:
             on_solution(solution)
         from api.analytics.military_score_inference.actions import build_inference_problem

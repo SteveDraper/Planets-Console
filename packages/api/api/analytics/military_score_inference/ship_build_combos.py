@@ -68,18 +68,26 @@ def ship_build_combo_label(
 
 
 def beam_count_options_for_slot_mode(hull: Hull, slot_mode: SlotCountMode) -> tuple[int, ...]:
+    """Beam counts admitted for ``slot_mode``.
+
+    ``none`` is an empty bank or a full bank. ``partial`` also admits one beam
+    and a bank one short of full.
+    """
     if hull.beams == 0:
         return (0,)
     if slot_mode == "partial":
-        return tuple(range(0, hull.beams + 1))
+        return tuple(sorted({0, 1, hull.beams - 1, hull.beams}))
     return (0, hull.beams)
 
 
-def launcher_count_options_for_slot_mode(hull: Hull, slot_mode: SlotCountMode) -> tuple[int, ...]:
+def launcher_count_options(hull: Hull) -> tuple[int, ...]:
+    """Launcher counts on a hull: an empty bank or a full bank.
+
+    Slot mode does not change launcher counts. A hull with no launcher slots
+    admits only 0.
+    """
     if hull.launchers == 0:
         return (0,)
-    if slot_mode == "partial":
-        return tuple(range(0, hull.launchers + 1))
     return (0, hull.launchers)
 
 
@@ -210,7 +218,6 @@ def generate_ship_build_combos(
     prior_catalog: PriorWeightsCatalog,
     config: ShipBuildComboConfig | None = None,
     beam_slot_counts: SlotCountMode = "none",
-    launcher_slot_counts: SlotCountMode = "none",
     extra_warship_capacity: int = 0,
     extra_freighter_capacity: int = 0,
     reserved_incoming_warships: int = 0,
@@ -235,7 +242,7 @@ def generate_ship_build_combos(
             continue
 
         beam_count_options = beam_count_options_for_slot_mode(hull, beam_slot_counts)
-        launcher_count_options = launcher_count_options_for_slot_mode(hull, launcher_slot_counts)
+        launcher_counts = launcher_count_options(hull)
 
         for engine_id in sorted(eligible_engine_ids):
             engine = engines_by_id.get(engine_id)
@@ -255,7 +262,7 @@ def generate_ship_build_combos(
                     if not beam_choices:
                         continue
 
-                for launcher_count in launcher_count_options:
+                for launcher_count in launcher_counts:
                     torp_choices: tuple[Torpedo | None, ...]
                     if launcher_count == 0:
                         torp_choices = (None,)

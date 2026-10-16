@@ -17,7 +17,7 @@ class ExactMilitaryScoreWindow:
 
 @dataclass(frozen=True, kw_only=True)
 class BandMilitaryScoreWindow:
-    """Under-explain retry: explained >= observed - alpha (no upper bound)."""
+    """Under-explain retry: observed - alpha <= explained <= observed."""
 
     kind: Literal["band"] = "band"
     alpha: int
@@ -80,7 +80,7 @@ def military_window_bounds(
         upper = rhs + window.cap_2x if window.cap_2x is not None else rhs + slack
         return MilitaryWindowBounds(lower=rhs + slack + 1, upper=upper, equal=None)
     if isinstance(window, BandMilitaryScoreWindow):
-        return MilitaryWindowBounds(lower=rhs - window.alpha, upper=None, equal=None)
+        return MilitaryWindowBounds(lower=rhs - window.alpha, upper=rhs, equal=None)
     if slack > 0:
         return MilitaryWindowBounds(lower=rhs - slack, upper=rhs + slack, equal=None)
     return MilitaryWindowBounds(lower=None, upper=None, equal=rhs)

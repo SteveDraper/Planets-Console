@@ -9,7 +9,6 @@ from api.analytics.military_score_inference.aggregate_action_registry import (
     lookup_aggregate_action_spec,
 )
 from api.analytics.military_score_inference.models import (
-    InferenceSolutionShipBuild,
     ProbabilityBucket,
     ShipBuildCombo,
     magnitude_bin_index,
@@ -165,23 +164,30 @@ def partial_weapon_slot_penalty_for_fit(
     return penalty
 
 
-def compute_partial_weapon_slot_penalty_contribution(
-    ship_builds: tuple[InferenceSolutionShipBuild, ...],
-    combo_by_id: dict[str, ShipBuildCombo],
+def ship_build_objective_coefficient(
+    combo: ShipBuildCombo,
+    *,
+    max_combo_weight: int,
     heuristics: InferenceRankingHeuristics,
 ) -> int:
-    contribution = 0
-    for ship_build in ship_builds:
-        combo = combo_by_id[ship_build.combo_id]
-        per_ship_penalty = partial_weapon_slot_penalty_for_fit(
-            beam_count=combo.beam_count,
-            launcher_count=combo.launcher_count,
-            hull_beam_slots=combo.hull_beam_slots,
-            hull_launcher_slots=combo.hull_launcher_slots,
-            heuristics=heuristics,
-        )
-        contribution += per_ship_penalty * ship_build.count
-    return contribution
+    """Per-ship objective coefficient for one fitting at count 1.
+
+    The coefficient is the negated prior-weight penalty plus the partial-slot
+    penalty. Callers scale by ship count. Action-bin and overflow terms are
+    separate and do not depend on the fitting.
+    """
+    penalty = ranking_penalty_from_marginal_weight(
+        combo.probability_weight,
+        max_marginal_weight=max_combo_weight,
+    )
+    slot_penalty = partial_weapon_slot_penalty_for_fit(
+        beam_count=combo.beam_count,
+        launcher_count=combo.launcher_count,
+        hull_beam_slots=combo.hull_beam_slots,
+        hull_launcher_slots=combo.hull_launcher_slots,
+        heuristics=heuristics,
+    )
+    return -penalty + slot_penalty
 
 
 def compute_overflow_objective_contribution(

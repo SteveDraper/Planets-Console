@@ -8,10 +8,7 @@ from pathlib import Path
 
 import pytest
 from api.analytics.fleet.chain import ensure_fleet_baseline, ensure_fleet_baseline_for_player
-from api.analytics.fleet.compute_services import (
-    FleetComputeServices,
-    build_ephemeral_fleet_compute_services,
-)
+from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.fleet_table_player_run import (
     _initial_wire_before_ledger,
     wire_ledger_progress_events,
@@ -29,6 +26,7 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,

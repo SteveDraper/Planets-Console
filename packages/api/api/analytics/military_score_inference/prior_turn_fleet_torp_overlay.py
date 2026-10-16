@@ -151,7 +151,7 @@ def _resolve_fleet_services(
     export_services: Mapping[str, object] | None,
 ):
     from api.analytics.export_context import export_service_for
-    from api.analytics.fleet.compute_services import FleetComputeServices
+    from api.analytics.fleet.injected_services import FleetComputeServices
 
     if query_context is not None:
         services = export_service_for(query_context, FLEET_ANALYTIC_ID, FleetComputeServices)

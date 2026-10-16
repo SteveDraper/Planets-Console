@@ -4,6 +4,9 @@ from api.analytics.military_score_inference.accelerated_start import accelerated
 from api.analytics.military_score_inference.inference_accelerated import (
     run_accelerated_segment_policy_ladder,
 )
+from api.analytics.military_score_inference.inference_objective import (
+    build_inference_objective_terms,
+)
 from api.analytics.military_score_inference.models import (
     CandidateAction,
     InferenceObservation,
@@ -20,6 +23,8 @@ from api.analytics.military_score_inference.ranking_heuristics import (
     compute_bin_penalty_objective_contribution,
     partial_weapon_slot_penalty_for_fit,
     ranking_heuristics_diagnostics_payload,
+    ranking_penalty_from_marginal_weight,
+    ship_build_objective_coefficient,
 )
 from api.analytics.military_score_inference.scoring import (
     LOADED_SHIP_FIGHTER_SCORE_DELTA_2X,
@@ -38,6 +43,7 @@ from api.analytics.military_score_inference.tier_policy import (
     compute_aggregate_admission_caps,
     resolve_tier_policies,
 )
+from ortools.sat.python import cp_model
 
 from tests.fixtures.military_score_inference_prior_weights import (
     probability_buckets_for_test_action,
@@ -470,6 +476,112 @@ def test_partial_weapon_slot_fill_ranks_below_full_slots():
     )
     assert _objective_value(problem, {}, (full_build,)) == 0
     assert _objective_value(problem, {}, (partial_build,)) == -50
+
+
+def test_ship_build_objective_coefficient_adds_prior_and_slot_penalties() -> None:
+    heuristics = InferenceRankingHeuristics()
+    max_combo_weight = 100
+
+    def fitting(
+        combo_id: str,
+        *,
+        beam_count: int,
+        launcher_count: int,
+        probability_weight: int,
+        label: str,
+    ) -> ShipBuildCombo:
+        return ShipBuildCombo(
+            combo_id=combo_id,
+            hull_id=24,
+            engine_id=1,
+            beam_id=1,
+            torp_id=1,
+            beam_count=beam_count,
+            launcher_count=launcher_count,
+            hull_beam_slots=4,
+            hull_launcher_slots=3,
+            labels=(label,),
+            score_delta_2x=400,
+            warship_delta=1,
+            upper_bound=1,
+            probability_weight=probability_weight,
+        )
+
+    full_fit = fitting(
+        "combo_full",
+        beam_count=4,
+        launcher_count=3,
+        probability_weight=max_combo_weight,
+        label="Full fit",
+    )
+    partial_fit = fitting(
+        "combo_partial",
+        beam_count=2,
+        launcher_count=1,
+        probability_weight=70,
+        label="Partial fit",
+    )
+    prior_penalty = ranking_penalty_from_marginal_weight(
+        partial_fit.probability_weight,
+        max_marginal_weight=max_combo_weight,
+    )
+    slot_penalty = partial_weapon_slot_penalty_for_fit(
+        beam_count=partial_fit.beam_count,
+        launcher_count=partial_fit.launcher_count,
+        hull_beam_slots=partial_fit.hull_beam_slots,
+        hull_launcher_slots=partial_fit.hull_launcher_slots,
+        heuristics=heuristics,
+    )
+    full_coefficient = ship_build_objective_coefficient(
+        full_fit,
+        max_combo_weight=max_combo_weight,
+        heuristics=heuristics,
+    )
+    partial_coefficient = ship_build_objective_coefficient(
+        partial_fit,
+        max_combo_weight=max_combo_weight,
+        heuristics=heuristics,
+    )
+    assert full_coefficient == 0
+    assert partial_coefficient == -prior_penalty + slot_penalty
+    assert partial_coefficient == -80
+
+    problem = _problem(
+        _observation(military_delta_2x=400, warship_delta=1),
+        ship_build_combos=(full_fit, partial_fit),
+        ranking_heuristics=heuristics,
+    )
+    partial_build = InferenceSolutionShipBuild(
+        combo_id=partial_fit.combo_id,
+        label=partial_fit.labels[0],
+        count=2,
+        hull_id=partial_fit.hull_id,
+        engine_id=partial_fit.engine_id,
+        beam_id=partial_fit.beam_id,
+        torp_id=partial_fit.torp_id,
+        beam_count=partial_fit.beam_count,
+        launcher_count=partial_fit.launcher_count,
+    )
+    assert _objective_value(problem, {}, (partial_build,)) == partial_coefficient * 2
+
+    model = cp_model.CpModel()
+    combo_count_vars = {
+        combo.combo_id: model.new_int_var(0, partial_build.count, combo.combo_id)
+        for combo in (full_fit, partial_fit)
+    }
+    objective_terms = build_inference_objective_terms(
+        model,
+        problem,
+        {},
+        combo_count_vars,
+        ship_build_combos=(full_fit, partial_fit),
+    )
+    model.add(combo_count_vars[full_fit.combo_id] == 0)
+    model.add(combo_count_vars[partial_fit.combo_id] == partial_build.count)
+    model.maximize(sum(objective_terms))
+    cp_solver = cp_model.CpSolver()
+    assert cp_solver.solve(model) == cp_model.OPTIMAL
+    assert cp_solver.objective_value == partial_coefficient * partial_build.count
 
 
 def test_ranking_bin_penalty_is_per_bin_not_per_unit():

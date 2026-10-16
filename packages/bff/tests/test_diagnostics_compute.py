@@ -100,6 +100,7 @@ def test_compute_diagnostics_enabled_snapshot_and_freeze():
     assert "dagNodes" in body
     assert "readyQueue" in body
     assert "completionHistory" in body
+    assert body["recentFailures"] == []
     assert "serverStreams" in body
     assert "remotePool" in body
     assert "liveOccupancy" in body

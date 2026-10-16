@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
+from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
@@ -18,10 +19,8 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
-from api.analytics.scores.prior_fleet_resolution import (
-    fleet_compute_services,
-    resolve_prior_fleet_for_scores,
-)
+from api.analytics.scores.exports import stored_closed_horwasp_skip
+from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
@@ -109,10 +108,15 @@ def build_scores_tier_solve_job_wire(
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
 
-    Skip sentinel (``runId: None``, ``evidenceClosed: True``) is allowed only when
-    turn evidence is already closed (persisted / durable terminal under the same
-    materialization probe fleet uses). Admission skips (full alliance, viewpoint
-    owner, dead, Horwasp, no prior turn) close that evidence because admit
+    Horwasp production is not modeled. That classification writes the skip row
+    and returns the evidence-closed sentinel before RowRun lookup, scheduler
+    adopt, fleet resolution, or the satisfaction probe. The persisted row is
+    the mark fleet's materialization probe reads.
+
+    Other skip sentinels (``runId: None``, ``evidenceClosed: True``) are allowed
+    only when turn evidence is already closed (persisted / durable terminal under
+    the same materialization probe fleet uses). Admission skips (full alliance,
+    viewpoint owner, dead, no prior turn) close that evidence because admit
     rewrites the skip row when it is missing; they do not need a ``RowRun``.
 
     Invariant: when ensure is satisfied and evidence is still open, this dispatch
@@ -126,6 +130,10 @@ def build_scores_tier_solve_job_wire(
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
         raise ValueError("scores tier_solve requires concrete scores scope")
+
+    horwasp_skip = _horwasp_evidence_closed_skip_wire(ctx, scope, export_scope)
+    if horwasp_skip is not None:
+        return horwasp_skip
 
     run = get_row_run_for_scope(scope)
     ensure_satisfied = True
@@ -144,14 +152,7 @@ def build_scores_tier_solve_job_wire(
         run = _adopt_scheduler_row_run_for_tier_wire(ctx, export_scope)
     if run is None:
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
-            return {
-                "runId": None,
-                "evidenceClosed": True,
-                "gameId": scope.game_id,
-                "perspective": scope.perspective,
-                "turn": scope.turn,
-                "playerId": scope.player_id,
-            }
+            return _evidence_closed_skip_wire(scope)
         raise RuntimeError(
             "scores tier_solve invariant broken: ensure "
             f"{'satisfied' if ensure_satisfied else 'unsatisfied'} but no attachable "
@@ -186,6 +187,33 @@ def build_scores_tier_solve_job_wire(
         "turn": scope.turn,
         "playerId": scope.player_id,
     }
+
+
+def _evidence_closed_skip_wire(scope: ComputeScope) -> dict[str, Any]:
+    """Tier wire that completes with no CP-SAT once turn evidence is closed."""
+    return {
+        "runId": None,
+        "evidenceClosed": True,
+        "gameId": scope.game_id,
+        "perspective": scope.perspective,
+        "turn": scope.turn,
+        "playerId": scope.player_id,
+    }
+
+
+def _horwasp_evidence_closed_skip_wire(
+    ctx: AnalyticQueryContext,
+    scope: ComputeScope,
+    export_scope: ExportScope,
+) -> dict[str, Any] | None:
+    """Return the skip wire once a Horwasp row is stored, before any solve work.
+
+    Fleet finalization reads the persisted inference row and ignores the
+    in-memory admission. The stored-row rule is ``closed_horwasp_skip_row``.
+    """
+    if stored_closed_horwasp_skip(ctx, export_scope) is None:
+        return None
+    return _evidence_closed_skip_wire(scope)
 
 
 def _adopt_scheduler_row_run_for_tier_wire(
@@ -473,7 +501,7 @@ class ScoresPersistencePolicy:
         if export_scope.turn <= 1:
             return 0
 
-        fleet_services = fleet_compute_services(ctx)
+        fleet_services = lookup_fleet_compute_services(ctx)
         if fleet_services is None:
             return 0
 

@@ -8,8 +8,8 @@ from api.analytics.military_score_inference.models import (
     ShipBuildCombo,
 )
 from api.analytics.military_score_inference.ranking_heuristics import (
-    partial_weapon_slot_penalty_for_fit,
     ranking_penalty_from_marginal_weight,
+    ship_build_objective_coefficient,
 )
 
 
@@ -65,12 +65,19 @@ def build_inference_objective_terms(
     combo_count_vars: dict[str, cp_model.IntVar],
     *,
     ship_build_combos: tuple[ShipBuildCombo, ...],
+    max_combo_weight: int | None = None,
 ) -> list[cp_model.LinearExpr]:
-    """Assemble CP-SAT linear objective terms for one inference solve."""
+    """Assemble CP-SAT linear objective terms for one inference solve.
+
+    ``max_combo_weight`` is the scale for ship penalties. Pass the weight from
+    the catalog before fittings outside the military window are removed, so a
+    dropped fitting still sets the penalty of the ships that remain.
+    """
     objective_terms: list[cp_model.LinearExpr] = []
-    max_combo_weight = (
-        max(combo.probability_weight for combo in ship_build_combos) if ship_build_combos else 0
-    )
+    if max_combo_weight is None:
+        max_combo_weight = (
+            max(combo.probability_weight for combo in ship_build_combos) if ship_build_combos else 0
+        )
 
     for action in problem.aggregate_actions:
         count_var = action_count_vars[action.id]
@@ -96,19 +103,11 @@ def build_inference_objective_terms(
             objective_terms.append(overflow_active * (-overflow_band.marginal_weight))
 
     for combo in ship_build_combos:
-        combo_penalty = ranking_penalty_from_marginal_weight(
-            combo.probability_weight,
-            max_marginal_weight=max_combo_weight,
-        )
-        partial_slot_penalty = partial_weapon_slot_penalty_for_fit(
-            beam_count=combo.beam_count,
-            launcher_count=combo.launcher_count,
-            hull_beam_slots=combo.hull_beam_slots,
-            hull_launcher_slots=combo.hull_launcher_slots,
+        coefficient = ship_build_objective_coefficient(
+            combo,
+            max_combo_weight=max_combo_weight,
             heuristics=problem.ranking_heuristics,
         )
-        objective_terms.append(
-            combo_count_vars[combo.combo_id] * (-combo_penalty + partial_slot_penalty)
-        )
+        objective_terms.append(combo_count_vars[combo.combo_id] * coefficient)
 
     return objective_terms

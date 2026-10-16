@@ -714,6 +714,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
           <SectionPanel title="DAG nodes" value={snapshot.dagNodes} onCopy={onCopy} />
           <SectionPanel title="Ready queue" value={snapshot.readyQueue} onCopy={onCopy} />
           <SectionPanel title="Completion history" value={snapshot.completionHistory} onCopy={onCopy} />
+          <SectionPanel title="Recent failures" value={snapshot.recentFailures} onCopy={onCopy} />
           <SectionPanel title="Server streams" value={snapshot.serverStreams} onCopy={onCopy} />
           <SectionPanel title="Client streams" value={snapshot.clientStreams} onCopy={onCopy} />
         </div>

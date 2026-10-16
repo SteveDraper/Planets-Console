@@ -10,7 +10,7 @@ import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.chain import get_or_materialize_fleet_snapshot
 from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
-from api.analytics.fleet.compute_services import FleetComputeServices
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -271,6 +272,23 @@ def candidate_military_subtotal_bounds_2x(action: CandidateAction, count: int) -
     return point, point
 
 
+def action_military_range_2x(action: CandidateAction) -> tuple[int, int]:
+    """Inclusive military 2x over the action's count bounds.
+
+    Each subtotal bound is a constant times the count, so on an inclusive
+    count interval the extremes are the endpoint bounds. An inverted count
+    interval contributes nothing.
+    """
+    if action.lower_bound > action.upper_bound:
+        return 0, 0
+    bounds = [
+        bound
+        for count in (action.lower_bound, action.upper_bound)
+        for bound in candidate_military_subtotal_bounds_2x(action, count)
+    ]
+    return min(bounds), max(bounds)
+
+
 class MagnitudeCountBounds(Protocol):
     """Structural type for magnitude-bin count ranges (bounds or full buckets)."""
 
@@ -409,6 +427,17 @@ class InferenceSolutionShipBuild:
 
 ShipFirstFamily = Literal["mine_overshoot", "ammo_top_up"]
 
+_solution_ids = itertools.count()
+
+
+def next_solution_id() -> int:
+    """Return a new InferenceSolution id, unique within this process.
+
+    The compute path allocates solutions on worker threads. ``next`` on
+    ``itertools.count`` runs as one call, which is atomic while the GIL is held.
+    """
+    return next(_solution_ids)
+
 
 @dataclass(frozen=True)
 class InferenceSolution:
@@ -416,6 +445,10 @@ class InferenceSolution:
     actions: tuple[InferenceSolutionAction, ...]
     ship_builds: tuple[InferenceSolutionShipBuild, ...] = ()
     ship_first_family: ShipFirstFamily | None = None
+    solution_id: int = field(init=False, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "solution_id", next_solution_id())
 
 
 @dataclass(frozen=True)

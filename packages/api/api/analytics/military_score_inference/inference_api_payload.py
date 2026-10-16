@@ -23,7 +23,10 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.military_score_inference.score_arithmetic import (
     solution_military_score_arithmetic_payload,
 )
-from api.analytics.military_score_inference.ship_first_overshoot import leftover_military_2x
+from api.analytics.military_score_inference.ship_first_overshoot import (
+    catalog_score_lookups,
+    leftover_military_2x,
+)
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
     STATUS_INVALID_PROBLEM,
@@ -294,7 +297,11 @@ def inference_result_to_api_payload(
         result.status,
         observation,
         rank1_overshoot_2x=(
-            leftover_military_2x(result.solutions[0], observation, catalog)
+            leftover_military_2x(
+                result.solutions[0],
+                observation,
+                catalog_score_lookups(catalog),
+            )
             if result.status == STATUS_MINE_SCORE_RESIDUAL and result.solutions
             else None
         ),

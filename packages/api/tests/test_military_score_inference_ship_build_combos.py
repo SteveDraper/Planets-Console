@@ -21,8 +21,10 @@ from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.ship_build_combos import (
     GENERIC_FREIGHTER_COMBO_ID,
     GENERIC_ZERO_MILITARY_SCORE_LABEL,
+    beam_count_options_for_slot_mode,
     generate_ship_build_combos,
     is_generic_zero_military_score_combo_id,
+    launcher_count_options,
     ship_build_combo_id,
 )
 from api.analytics.military_score_inference.solver import (
@@ -276,11 +278,26 @@ def test_early_tier_limits_beam_counts_to_zero_or_max(synthetic_catalog_context)
     combos = generate_ship_build_combos(
         _observation(warship_delta=1),
         beam_slot_counts="none",
-        launcher_slot_counts="none",
         **context,
     )
     beam_counts = {combo.beam_count for combo in combos if combo.hull_id == hull.id}
     assert beam_counts <= {hull.beams}
+
+
+def test_partial_slot_counts_skip_intermediate_fills(synthetic_catalog_context):
+    hull = synthetic_catalog_context["hulls_by_id"][24]
+    deep = replace(hull, beams=10, launchers=5)
+    assert beam_count_options_for_slot_mode(deep, "partial") == (0, 1, 9, 10)
+    assert launcher_count_options(deep) == (0, 5)
+    assert beam_count_options_for_slot_mode(deep, "none") == (0, 10)
+
+    one_slot = replace(hull, beams=1, launchers=1)
+    assert beam_count_options_for_slot_mode(one_slot, "partial") == (0, 1)
+    assert launcher_count_options(one_slot) == (0, 1)
+
+    two_beams = replace(hull, beams=2, launchers=0)
+    assert beam_count_options_for_slot_mode(two_beams, "partial") == (0, 1, 2)
+    assert launcher_count_options(two_beams) == (0,)
 
 
 def test_max_tier_includes_partial_beam_and_launcher_counts(synthetic_catalog_context):
@@ -297,14 +314,13 @@ def test_max_tier_includes_partial_beam_and_launcher_counts(synthetic_catalog_co
     combos = generate_ship_build_combos(
         _observation(warship_delta=1),
         beam_slot_counts="partial",
-        launcher_slot_counts="partial",
         **context,
     )
     hull_combos = [combo for combo in combos if combo.hull_id == hull.id]
     beam_counts = {combo.beam_count for combo in hull_combos if combo.launcher_count == 0}
     launcher_counts = {combo.launcher_count for combo in hull_combos if combo.beam_count == 0}
-    assert beam_counts == {1, 2, 3, 4}
-    assert launcher_counts == {1, 2, 3}
+    assert beam_counts == {1, 3, 4}
+    assert launcher_counts == {3}
 
 
 def test_solver_joint_constraints_with_combo_and_aggregate():

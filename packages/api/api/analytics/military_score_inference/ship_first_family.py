@@ -5,13 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 
-from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.aggregate_action_registry import is_torp_load_action_id
 from api.analytics.military_score_inference.models import (
-    CandidateAction,
     InferenceObservation,
     InferenceSolution,
-    ShipBuildCombo,
     ShipFirstFamily,
 )
 from api.analytics.military_score_inference.ranked_solution_buffer import (
@@ -21,7 +18,10 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
 from api.analytics.military_score_inference.score_arithmetic import (
     catalog_explained_military_delta_2x,
 )
-from api.analytics.military_score_inference.ship_first_overshoot import leftover_military_2x
+from api.analytics.military_score_inference.ship_first_overshoot import (
+    CatalogScoreLookups,
+    leftover_military_2x,
+)
 
 SHIP_FIRST_FAMILY_HOLD_FLOOR = 3
 _HOLD_FAMILIES: tuple[ShipFirstFamily, ShipFirstFamily] = ("mine_overshoot", "ammo_top_up")
@@ -46,31 +46,25 @@ def is_ship_first_overshoot_list(solutions: Iterable[InferenceSolution]) -> bool
     return any(solution.ship_first_family is not None for solution in solutions)
 
 
-def _catalog_lookups(
-    catalog: ActionCatalog,
-) -> tuple[dict[str, CandidateAction], dict[str, ShipBuildCombo]]:
-    return (
-        {action.id: action for action in catalog.aggregate_actions},
-        {combo.combo_id: combo for combo in catalog.ship_build_combos},
-    )
-
-
-def non_torp_military_2x(solution: InferenceSolution, catalog: ActionCatalog) -> int:
+def non_torp_military_2x(solution: InferenceSolution, lookups: CatalogScoreLookups) -> int:
     """Point-score military 2x excluding ``ship_torps_loaded_*`` ammo loads."""
-    actions_by_id, combos_by_id = _catalog_lookups(catalog)
     without_torps = replace(
         solution,
         actions=tuple(
             action for action in solution.actions if not is_torp_load_action_id(action.action_id)
         ),
     )
-    return catalog_explained_military_delta_2x(without_torps, actions_by_id, combos_by_id)
+    return catalog_explained_military_delta_2x(
+        without_torps,
+        lookups.actions_by_id,
+        lookups.combos_by_id,
+    )
 
 
 def classify_ship_first_family(
     solution: InferenceSolution,
     observation: InferenceObservation,
-    catalog: ActionCatalog,
+    lookups: CatalogScoreLookups,
 ) -> ShipFirstFamily | None:
     """Structural family for an in-regime ship-first near-solution.
 
@@ -78,11 +72,11 @@ def classify_ship_first_family(
     modest torps inflate leftover. Otherwise torps lifting the total above slack
     are ammo-top-up. Leftover-0 exact is untagged.
     """
-    leftover = leftover_military_2x(solution, observation, catalog)
+    leftover = leftover_military_2x(solution, observation, lookups)
     slack = observation.military_partition_slack_2x
     if leftover <= slack:
         return None
-    if non_torp_military_2x(solution, catalog) > observation.military_delta_2x + slack:
+    if non_torp_military_2x(solution, lookups) > observation.military_delta_2x + slack:
         return "mine_overshoot"
     return "ammo_top_up"
 
@@ -90,12 +84,12 @@ def classify_ship_first_family(
 def tag_ship_first_near_solution(
     solution: InferenceSolution,
     observation: InferenceObservation,
-    catalog: ActionCatalog,
+    lookups: CatalogScoreLookups,
 ) -> InferenceSolution:
     """Return ``solution`` with Core ``ship_first_family`` set (or cleared)."""
     return replace(
         solution,
-        ship_first_family=classify_ship_first_family(solution, observation, catalog),
+        ship_first_family=classify_ship_first_family(solution, observation, lookups),
     )
 
 

@@ -425,7 +425,7 @@ def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, 
     from api.analytics.compute_context import invoke_analytic_compute
     from api.analytics.fleet import materialize_fleet
     from api.analytics.fleet.chain import _materialize_fleet_ledger_chain_for_player
-    from api.analytics.fleet.compute_services import FleetComputeServices
+    from api.analytics.fleet.injected_services import FleetComputeServices
 
     turn_111, turn_112 = require_turns(load_turn, 111, 112)
     roster_size = len(roster_ids(turn_112))

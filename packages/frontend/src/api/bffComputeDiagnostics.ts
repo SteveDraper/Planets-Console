@@ -81,6 +81,7 @@ export type ComputeDiagnosticsSnapshotResponse = {
   readyQueue: Record<string, unknown>[]
   nextSingleStep: NextSingleStepPreview
   completionHistory: Record<string, unknown>[]
+  recentFailures: Record<string, unknown>[]
   serverStreams: Record<string, unknown>[]
   remotePool: {
     interpreter: RemotePoolBackendProbe

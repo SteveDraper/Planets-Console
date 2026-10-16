@@ -1,26 +1,20 @@
-"""Injected services for fleet analytic compute and snapshot chaining."""
+"""Build and require fleet compute services for snapshot chaining."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 from api.analytics.compute_context import AnalyticComputeContext
-from api.analytics.export_context import AnalyticQueryContext, export_service_for
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
+from api.analytics.fleet.injected_services import (
+    FleetComputeServices,
+    lookup_fleet_compute_services,
+)
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.storage.memory_asset import MemoryAssetBackend
-
-
-@dataclass(frozen=True)
-class FleetComputeServices:
-    persistence: FleetSnapshotPersistenceService
-    game_id: int
-    perspective: int
-    load_turn: Callable[[int], TurnInfo | None]
-    inference_materialization: FleetInferenceMaterialization | None = None
 
 
 def turn_chain_through(turn: TurnInfo) -> dict[int, TurnInfo]:
@@ -65,7 +59,7 @@ def build_ephemeral_fleet_compute_services(
 
 
 def resolve_fleet_services(exports: AnalyticQueryContext) -> FleetComputeServices:
-    services = export_service_for(exports, ANALYTIC_ID, FleetComputeServices)
+    services = lookup_fleet_compute_services(exports)
     if services is not None:
         return services
 

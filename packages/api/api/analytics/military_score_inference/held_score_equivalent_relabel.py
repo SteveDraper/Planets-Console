@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.actions import (
     ActionCatalog,
     build_inference_problem,
 )
+from api.analytics.military_score_inference.catalog_model import build_catalog_merge_plan
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     InferenceSolution,
@@ -28,10 +29,7 @@ from api.analytics.military_score_inference.ranked_solution_buffer import (
     SolutionSignature,
     solution_signature,
 )
-from api.analytics.military_score_inference.solver import (
-    expand_structural_hits_to_top_k,
-    merge_score_equivalent_combos,
-)
+from api.analytics.military_score_inference.solver import expand_structural_hits_to_top_k
 
 
 def relabeled_solutions_for_widened_classes(
@@ -64,7 +62,7 @@ def relabeled_solutions_for_widened_classes(
         race_id=race_id,
         max_solutions=max_solutions,
     )
-    merged = merge_score_equivalent_combos(problem.ship_build_combos)
+    merged = build_catalog_merge_plan(problem.ship_build_combos).unconstrained
     member_to_merged = member_combo_id_to_merged_id(merged)
     affected_merged_ids = {
         member_to_merged[combo_id] for combo_id in added_combo_ids if combo_id in member_to_merged

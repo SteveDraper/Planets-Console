@@ -715,6 +715,105 @@ def test_missing_full_alliance_row_restores_skip_instead_of_tier_solve_invariant
     assert get_row_run_for_scope(scope) is None
 
 
+def test_horwasp_tier_solve_closes_evidence_before_solve_work(
+    sample_turn,
+    persistence,
+) -> None:
+    """Horwasp writes the skip row and completes before any tier solve work.
+
+    The satisfaction probe is not consulted. A miss there used to fail the node
+    after classification, with no Horwasp row for fleet to read.
+    """
+    from dataclasses import replace
+
+    from api.analytics.export_types import ExportScope
+    from api.analytics.military_score_inference.inference_api_payload import STATUS_HORWASP
+    from api.analytics.military_score_inference.inference_scheduler import (
+        InferenceRowScheduler,
+        reset_inference_row_scheduler_for_tests,
+    )
+    from api.analytics.scores.exports import is_scores_export_turn_evidence_closed
+    from api.concepts.races import HORWASP_RACE_ID
+
+    from tests.scores_exports_helpers import (
+        GAME_ID,
+        inference_target_player_id,
+        perspective,
+        scores_query_context,
+    )
+
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler(worker_count=0, defer_orchestrator_submit=True)
+    player_id = inference_target_player_id(sample_turn)
+    horwasp_turn = replace(
+        sample_turn,
+        players=[
+            replace(player, raceid=HORWASP_RACE_ID) if player.id == player_id else player
+            for player in sample_turn.players
+        ],
+    )
+    ctx = scores_query_context(
+        horwasp_turn,
+        persistence=persistence,
+        scheduler=scheduler,
+    )
+    export_scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(horwasp_turn),
+        turn=horwasp_turn.settings.turn,
+        player_id=player_id,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=GAME_ID,
+        perspective=perspective(horwasp_turn),
+        turn=horwasp_turn.settings.turn,
+        player_id=player_id,
+    )
+
+    def _unexpected(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Horwasp tier_solve must return before solve work")
+
+    with (
+        patch(
+            "api.analytics.scores.compute_orchestration.get_row_run_for_scope",
+            side_effect=_unexpected,
+        ),
+        patch(
+            "api.analytics.scores.exports.admit_scores_export_work",
+            side_effect=_unexpected,
+        ),
+        patch.object(ScoresPersistencePolicy, "is_satisfied", side_effect=_unexpected),
+        patch(
+            "api.analytics.scores.compute_orchestration._adopt_scheduler_row_run_for_tier_wire",
+            side_effect=_unexpected,
+        ),
+        patch(
+            "api.analytics.scores.compute_orchestration.resolve_prior_fleet_for_scores",
+            side_effect=_unexpected,
+        ),
+    ):
+        skip_wire = build_scores_tier_solve_job_wire(
+            scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+        )
+
+    assert skip_wire["runId"] is None
+    assert skip_wire["evidenceClosed"] is True
+    assert run_scores_tier_solve(skip_wire).outcome == "complete"
+    stored = persistence.get_row(
+        GAME_ID,
+        perspective(horwasp_turn),
+        horwasp_turn.settings.turn,
+        player_id,
+    )
+    assert stored is not None
+    assert stored.status == STATUS_HORWASP
+    assert is_scores_export_turn_evidence_closed(ctx, export_scope) is True
+    assert get_row_run_for_scope(scope) is None
+
+
 def test_historical_materialize_schedules_row_run_for_tier_solve(
     sample_turn,
     persistence,

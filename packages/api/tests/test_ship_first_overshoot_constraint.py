@@ -45,6 +45,7 @@ from api.analytics.military_score_inference.ship_first_overshoot import (
     SHIP_FIRST_PREFIX_LAST_STEP_ID,
     SHIP_FIRST_PREFIX_STOP_REASON,
     ShipFirstOvershootPlan,
+    catalog_score_lookups,
     leftover_military_2x,
 )
 from api.analytics.military_score_inference.solver import (
@@ -332,7 +333,9 @@ def test_overshoot_admit_tags_ship_first_family(sample_turn, monkeypatch) -> Non
     assert "overshoot" in modes
     assert result.status == STATUS_MINE_SCORE_RESIDUAL
     assert result.solutions
-    assert leftover_military_2x(result.solutions[0], observation, catalog) == 20
+    assert (
+        leftover_military_2x(result.solutions[0], observation, catalog_score_lookups(catalog)) == 20
+    )
     assert result.solutions[0].ship_first_family == "mine_overshoot"
     assert PLANET_OR_STARBASE_POST_STEP_IDS.isdisjoint(attempted)
     payload = inference_result_to_api_payload(result, catalog, observation, turn, problem)
@@ -385,7 +388,9 @@ def test_leftover_0_exact_omits_ship_first_family(sample_turn, monkeypatch) -> N
     assert "overshoot" not in modes
     assert result.status == STATUS_EXACT
     assert result.solutions
-    assert leftover_military_2x(result.solutions[0], observation, catalog) == 0
+    assert (
+        leftover_military_2x(result.solutions[0], observation, catalog_score_lookups(catalog)) == 0
+    )
     assert result.solutions[0].ship_first_family is None
     assert PLANET_OR_STARBASE_POST_STEP_IDS.isdisjoint(attempted)
     payload = inference_result_to_api_payload(result, catalog, observation, turn, problem)
@@ -674,7 +679,8 @@ def test_leftover_military_2x_matches_catalog_explained_minus_observed() -> None
         {action.id: action},
         {combo.combo_id: combo},
     )
-    assert leftover_military_2x(solution, observation, catalog) == explained - 400
+    lookups = catalog_score_lookups(catalog)
+    assert leftover_military_2x(solution, observation, lookups) == explained - 400
 
 
 def test_leftover_military_2x_raises_on_missing_catalog_action() -> None:
@@ -686,7 +692,7 @@ def test_leftover_military_2x_raises_on_missing_catalog_action() -> None:
     solution = _overshoot_solution()
     observation = _observation(military_delta_2x=400, warship_delta=1)
     with pytest.raises(KeyError):
-        leftover_military_2x(solution, observation, catalog)
+        leftover_military_2x(solution, observation, catalog_score_lookups(catalog))
 
 
 def test_leftover_military_2x_raises_on_missing_catalog_combo() -> None:
@@ -704,4 +710,4 @@ def test_leftover_military_2x_raises_on_missing_catalog_combo() -> None:
     )
     observation = _observation(military_delta_2x=400, warship_delta=1)
     with pytest.raises(KeyError):
-        leftover_military_2x(solution, observation, catalog)
+        leftover_military_2x(solution, observation, catalog_score_lookups(catalog))

@@ -41,6 +41,7 @@ def _bound_orch(*, orchestrator: MagicMock) -> BoundOrchestrator:
         unregister_ready_queue_listener=lambda: None,
         unregister_inline_start_listener=lambda: None,
         unregister_lifecycle_listener=lambda: None,
+        unregister_scope_outcome_listener=lambda: None,
     )
 
 

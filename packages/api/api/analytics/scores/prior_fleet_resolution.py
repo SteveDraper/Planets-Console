@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from api.analytics.export_context import AnalyticQueryContext, export_service_for
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.fleet.prior_selection import resolve_fleet_prior_persisted
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import FleetTurnSnapshot, PersistedFleetLedger
@@ -20,22 +19,6 @@ from api.compute.scope import WILDCARD, ComputeScope, compute_scope_to_export_sc
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings, TurnInfo
-
-if TYPE_CHECKING:
-    from api.analytics.fleet.compute_services import FleetComputeServices
-
-
-def fleet_compute_services(ctx: AnalyticQueryContext) -> FleetComputeServices | None:
-    """Resolve fleet compute services from export registration or injected map."""
-    from api.analytics.fleet.compute_services import FleetComputeServices
-
-    fleet_services = export_service_for(ctx, FLEET_ANALYTIC_ID, FleetComputeServices)
-    if fleet_services is not None:
-        return fleet_services
-    injected = ctx.export_services.get(FLEET_ANALYTIC_ID)
-    if isinstance(injected, FleetComputeServices):
-        return injected
-    return None
 
 
 def prior_fleet_compute_scope(
@@ -122,7 +105,7 @@ def resolve_prior_fleet_for_scores(
             if isinstance(persisted_wire, dict):
                 prior_from_deps = persisted_fleet_ledger_from_json(persisted_wire)
 
-    fleet_services = fleet_compute_services(ctx)
+    fleet_services = lookup_fleet_compute_services(ctx)
 
     def load_prior_from_disk() -> PersistedFleetLedger | None:
         if fleet_services is None:

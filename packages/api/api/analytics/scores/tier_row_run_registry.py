@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import threading
 
+from api.analytics.fleet.counterparty_ledger import counterparty_fleet_loader
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
@@ -107,8 +108,17 @@ def initialize_tier_ladder_state(
     orchestration: InferenceStreamOrchestration | None = None,
 ) -> None:
     """Initialize ladder state for one registered scores tier row run."""
+    session = run.session
     run.orchestration = orchestration
-    run.ladder_state = new_ladder_state(run.session)
+    run.ladder_state = new_ladder_state(
+        session,
+        load_counterparty_fleet=counterparty_fleet_loader(
+            session.query_context,
+            game_id=session.game_id,
+            perspective=session.perspective,
+            turn_number=session.turn_number,
+        ),
+    )
 
 
 def register_row_run(

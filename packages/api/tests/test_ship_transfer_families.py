@@ -13,6 +13,7 @@ from api.analytics.military_score_inference.idle_dock_pp import (
 from api.analytics.military_score_inference.models import (
     InferenceObservation,
     ProbabilityBucket,
+    candidate_action_has_military_interval,
 )
 from api.analytics.military_score_inference.public_scoreboard_pairing import (
     PairingMatch,
@@ -497,6 +498,14 @@ def test_pp_gap_unknown_class_catalog_is_exclusive_not_two_reserved_columns(
     assert {action.warship_delta for action in acquired} == {0, 1}
     assert {action.freighter_delta for action in acquired} == {0, 1}
     assert all(action.upper_bound == 1 for action in acquired)
+    freighter_choices = [action for action in acquired if action.freighter_delta == 1]
+    warship_choices = [action for action in acquired if action.warship_delta == 1]
+    assert freighter_choices
+    assert all(action.score_delta_2x == 0 for action in freighter_choices)
+    assert all(not candidate_action_has_military_interval(action) for action in freighter_choices)
+    assert all(
+        action.score_delta_2x_max == observation.military_delta_2x for action in warship_choices
+    )
     assert len({action.exclusive_class_group for action in acquired}) == 1
     assert all(action.exclusive_class_group is not None for action in acquired)
     this_budget = transfer_budget_for_row(

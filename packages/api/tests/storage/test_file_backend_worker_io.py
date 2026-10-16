@@ -15,7 +15,7 @@ from api.analytics.fleet.compute_orchestration import (
     build_fleet_materialization_leg_job_wire,
 )
 from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
-from api.analytics.fleet.compute_services import FleetComputeServices
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import (

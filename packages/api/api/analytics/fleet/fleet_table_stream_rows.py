@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.fleet.compute_services import FleetComputeServices
 from api.analytics.fleet.fleet_table_player_run import (
     FleetPlayerStreamSession,
     ScheduledFleetPlayer,
@@ -18,6 +17,7 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
     get_fleet_table_stream_scheduler,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope

@@ -10,10 +10,7 @@ from pathlib import Path
 
 import pytest
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
-from api.analytics.fleet.compute_services import (
-    FleetComputeServices,
-    turn_chain_through,
-)
+from api.analytics.fleet.compute_services import turn_chain_through
 from api.analytics.fleet.fleet_table_stream_registry import (
     controller_for_scope,
     reset_fleet_table_stream_registry_for_tests,
@@ -25,6 +22,7 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -619,16 +617,14 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
     ``reschedule_fleet_table_player`` → ``reschedule_player``, which blocked forever
     on the same non-reentrant lock (0% CPU; turn-6 workers stuck; turn-8 waiting_deps).
     """
-    from api.analytics.fleet.compute_services import (
-        FleetComputeServices,
-        build_ephemeral_fleet_compute_services,
-    )
+    from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
     from api.analytics.fleet.fleet_table_player_run import (
         FleetPlayerStreamSession,
         ScheduledFleetPlayer,
     )
     from api.analytics.fleet.fleet_table_stream_controller import FleetTableStreamController
     from api.analytics.fleet.fleet_table_stream_rows import SchedulePlayerAdmission
+    from api.analytics.fleet.injected_services import FleetComputeServices
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
@@ -744,11 +740,9 @@ def test_enqueue_player_run_does_not_hold_scheduler_lock_across_get_ledger(
     """
     import concurrent.futures
 
-    from api.analytics.fleet.compute_services import (
-        FleetComputeServices,
-        build_ephemeral_fleet_compute_services,
-    )
+    from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
     from api.analytics.fleet.fleet_table_player_run import FleetPlayerStreamSession
+    from api.analytics.fleet.injected_services import FleetComputeServices
     from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests

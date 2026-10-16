@@ -212,7 +212,25 @@ def test_military_score_band_constraint_allows_lower_explained_score():
         hard_constraints=InferenceHardConstraints.from_problem(band_problem),
     )
     assert band_payload["militaryScoreAlpha"] == 50
-    assert any(">= 400" in line for line in band_payload["appliedEqualities"])
+    assert any(
+        "400 <= sum(scoreDelta2x * count) <= 450" in line
+        for line in band_payload["appliedEqualities"]
+    )
+
+    above = CandidateAction(
+        id="above_target",
+        label="Above",
+        score_delta_2x=500,
+        warship_delta=1,
+        upper_bound=1,
+    )
+    above_problem = InferenceProblem(
+        observation=observation,
+        aggregate_actions=(above,),
+        probability_buckets_by_action_id={},
+        military_score_window=BandMilitaryScoreWindow(alpha=50),
+    )
+    assert solve_inference_problem(above_problem).status == STATUS_NO_EXACT_SOLUTION
 
 
 def test_overshoot_window_rejects_under_explain_and_admits_overshoot():
