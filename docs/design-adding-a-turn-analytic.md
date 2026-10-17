@@ -306,7 +306,7 @@ These are sibling registries, not one mega plugin table:
 | Map GET query keys, fetch, merge into combined map data | **Map fetch/merge registry** (`mapAnalyticRegistry.ts` + `useMapAnalyticQueries`) |
 | Map paint (React Flow node/edge components) | Not a registry slot yet ([#383](https://github.com/SteveDraper/Planets-Console/issues/383)) |
 
-Parametric map knobs (Connections warp/flare) live in an **ephemeral** Zustand store under `src/analytics/connections/` -- not in `App.tsx`, **not persisted**. `buildQuerySpec` and the query-param adapter read `getState()`; `useMapAnalyticQueries` subscribes so query keys update when knobs change. Generic `fetchAnalyticMap` appends the map appender from `shellAnalyticQueryParams.ts`.
+Parametric map knobs (Connections warp/flare) live in an analytic-owned Zustand store under `src/analytics/connections/` -- not in `App.tsx`. **Flares** (`flareMode`) is persisted; warp, gravitonic movement, and flare depth reset on reload. `buildQuerySpec` and the query-param adapter read `getState()`; `useMapAnalyticQueries` subscribes so query keys update when knobs change. Generic `fetchAnalyticMap` appends the map appender from `shellAnalyticQueryParams.ts`.
 
 Do not add `if (analyticId === ...)` in `MainArea` for map fetch. A new parametric map analytic registers an appender in `shellAnalyticQueryParams.ts` and, when the query key must include those knobs, a map-registry `buildQuerySpec`.
 
