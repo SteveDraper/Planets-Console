@@ -90,14 +90,24 @@ export function fleetLocationRingStrengthFraction(E: number, strengthScale: numb
   return Math.min(1, Math.max(0, raw))
 }
 
+/** Rest-paint opacity floor. A zero-strength ring is half opaque. */
+export const FLEET_LOCATION_RING_OPACITY_FLOOR = 0.5
+/** Rest-paint opacity ceiling. Reached near t = 0.82 and held through full strength. */
+export const FLEET_LOCATION_RING_OPACITY_CEILING = 0.95
+const FLEET_LOCATION_RING_OPACITY_STRENGTH_SLOPE = 0.55
+
 /**
  * Stroke opacity from absolute strength fraction t.
- * clamp(0.40 + 0.55 * t, 0.40, 0.95).
+ * clamp(0.50 + 0.55 * t, 0.50, 0.95).
  */
 export function fleetLocationRingOpacity(strengthFraction: number): number {
   const t = Math.min(1, Math.max(0, strengthFraction))
-  const raw = 0.4 + 0.55 * t
-  return Math.min(0.95, Math.max(0.4, raw))
+  const raw =
+    FLEET_LOCATION_RING_OPACITY_FLOOR + FLEET_LOCATION_RING_OPACITY_STRENGTH_SLOPE * t
+  return Math.min(
+    FLEET_LOCATION_RING_OPACITY_CEILING,
+    Math.max(FLEET_LOCATION_RING_OPACITY_FLOOR, raw)
+  )
 }
 
 /**

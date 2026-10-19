@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FleetAnalyticTile } from './FleetAnalyticTile'
 import { seedShellViewpoint } from './fleetTestShell'
+import { useFleetLocationRingEmphasisStore } from '../../stores/fleetLocationRingEmphasis'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useFleetHeadingTrailExtendStore } from '../../stores/fleetHeadingTrailExtend'
 import {
@@ -57,6 +58,7 @@ function renderTile(overrides: Partial<ComponentProps<typeof FleetAnalyticTile>>
 describe('FleetAnalyticTile', () => {
   beforeEach(() => {
     useFleetPlayerVisibilityStore.setState({ overrides: {} })
+    useFleetLocationRingEmphasisStore.setState({ hover: null })
     useFleetHeadingTrailExtendStore.setState({ extendTurns: 0 })
     resetPlayerColorResolutionPort()
     resetPlayerColorsStoreState()
@@ -158,6 +160,30 @@ describe('FleetAnalyticTile', () => {
 
     const bobSwatch = screen.getByTestId('fleet-player-color-9')
     expect(bobSwatch).toHaveStyle({ backgroundColor: defaultColorForPlayerId(9) })
+  })
+
+  it('emphasises a hovered visibility row and keeps it when the checkbox toggles', async () => {
+    const user = userEvent.setup()
+    renderTile()
+    await user.click(screen.getByLabelText('Expand Fleet player visibility'))
+
+    await user.hover(screen.getByTestId('fleet-player-color-9'))
+    expect(useFleetLocationRingEmphasisStore.getState().hover).toEqual({
+      kind: 'sidebar',
+      playerId: 9,
+    })
+
+    await user.click(screen.getByLabelText('Bob'))
+    expect(screen.getByLabelText('Bob')).not.toBeChecked()
+    expect(useFleetLocationRingEmphasisStore.getState().hover).toEqual({
+      kind: 'sidebar',
+      playerId: 9,
+    })
+
+    const bobRow = screen.getByLabelText('Bob').closest('label')
+    expect(bobRow).not.toBeNull()
+    fireEvent.pointerLeave(bobRow!)
+    expect(useFleetLocationRingEmphasisStore.getState().hover).toBeNull()
   })
 
   it('keeps the color swatch visible (dimmed) when a player is unchecked', async () => {

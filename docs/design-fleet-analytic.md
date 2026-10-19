@@ -353,6 +353,7 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
 - Default: all **Players** on until the user toggles an override
 - Persisted globally (not per game), same pattern as **Cartography layer**
 - Per-player row includes a small always-visible **player color** swatch (`usePlayerColor`, same paint as map rings/trails) between the checkbox and truncated label; swatch stays when unchecked (dimmed). Row `title` shows the full untruncated label ([#303](https://github.com/SteveDraper/Planets-Console/issues/303))
+- Hovering a row (checkbox, swatch, or name) sets **fleet location ring emphasis** for that player while Fleet is enabled in map view, including when the toggle is off (see 8.2). Toggling the checkbox does not clear that hover
 
 ### 8.2 Map (fleet stream → location rings)
 
@@ -362,7 +363,8 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
   - Outer diameter (px): `min(20, 14 + 2 * floor(log2(max(1, shipCount))))` (1 ship → 14px; 8+ → 20px)
   - Arc length ∝ that player's ship count / stack total
   - Strength fraction: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `scale` = `FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE` (`10000`, frontend AFK constant); `t = clamp(E / scale, 0, 1)`
-  - Stroke opacity: `clamp(0.40 + 0.55 * t, 0.40, 0.95)`
+  - Stroke opacity: `clamp(0.50 + 0.55 * t, 0.50, 0.95)`
+  - **Fleet location ring emphasis**: hovering a ring emphasises every player with an arc on it (full opacity, thin contrasting outline) across every rest ring; other players stay at rest paint. Hovering a **fleet player visibility** row emphasises that one player. A visibility-off row hover paints that player's rings from a side **fleet stream** admission that does not reconnect or blank players already on screen. Those rings use that player's ships alone, do not change a co-located rest ring, and do not show the **fleet table tile** or **fleet heading trail**s. Emphasis is not persisted, does not pulse, and is absent in tabular **view mode** or while the fleet analytic is off. Map hover does not reveal a visibility-off player.
   - Annulus stroke width (inward from outer radius `R`): `maxStroke = max(0, R - 3)` (min inner hole radius 3px); stroke `min(maxStroke, max(2.5px, t * maxStroke))` (when the ring is too small for both floors, the hole floor wins); SVG paint radius `R - strokeWidth/2` keeps the outer edge fixed
   - Colors from **player color** module
 - Hover: per-player header, then indented ship lines (shared hull icon, id, hull name, mil-score host points). Omit alibi / possibly-lost on map tooltip (table owns status)

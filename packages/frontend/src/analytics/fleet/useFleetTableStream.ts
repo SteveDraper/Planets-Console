@@ -21,7 +21,7 @@ export type UseFleetTableStreamResult = {
   streamPlayersById: Map<number, FleetPlayerStreamSlice>
 }
 
-const fleetTableStreamPolicy: PerPlayerAnalyticStreamPolicy<
+export const fleetTableStreamPolicy: PerPlayerAnalyticStreamPolicy<
   FleetTableStreamEvent,
   FleetPlayerStreamState,
   FleetPlayerStreamSlice

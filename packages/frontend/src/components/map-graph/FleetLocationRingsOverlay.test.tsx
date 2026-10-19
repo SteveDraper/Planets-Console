@@ -150,4 +150,44 @@ describe('FleetLocationRingsOverlay', () => {
       [...container.querySelectorAll('circle[stroke]')].map((el) => el.getAttribute('stroke'))
     ).toContain('#112233')
   })
+
+  it('emphasises one player on a mixed ring and paints a temporary ring on its own', () => {
+    const rest = sampleStack()
+    const bobArc = rest.arcs[1]!
+    const temporary = sampleStack({
+      shipCount: 7,
+      diameterPx: 18,
+      opacity: 0.95,
+      strokeWidthPx: 4,
+      arcs: [{ ...bobArc, shipCount: 7, share: 1 }],
+    })
+    const { container } = render(
+      <FleetLocationRingsOverlay
+        stacks={[rest]}
+        temporaryStacks={[temporary]}
+        emphasisedPlayerIds={new Set([9])}
+      />,
+      { wrapper }
+    )
+
+    const restLayer = container.querySelector('[data-fleet-ring-layer="rest"]')
+    const temporaryLayer = container.querySelector('[data-fleet-ring-layer="temporary"]')
+    const restAlice = restLayer?.querySelector('[data-player-id="8"]')
+    const restBob = restLayer?.querySelector('[data-player-id="9"]')
+    const temporaryBob = temporaryLayer?.querySelector('[data-player-id="9"]')
+
+    expect(restAlice?.getAttribute('data-emphasis')).toBe('rest')
+    expect(restAlice?.parentElement?.getAttribute('opacity')).toBe('0.4')
+    expect(restAlice?.getAttribute('stroke-width')).toBe('2.5')
+    expect(restAlice?.parentElement?.querySelector('[data-emphasis-outline]')).toBeNull()
+
+    expect(restBob?.getAttribute('data-emphasis')).toBe('emphasis')
+    expect(restBob?.parentElement?.getAttribute('opacity')).toBe('1')
+    expect(restBob?.getAttribute('stroke-width')).toBe('2.5')
+    expect(restBob?.parentElement?.querySelector('[data-emphasis-outline]')).not.toBeNull()
+
+    expect(temporaryBob?.getAttribute('data-emphasis')).toBe('emphasis')
+    expect(temporaryBob?.getAttribute('stroke-width')).toBe('4')
+    expect(temporaryLayer?.querySelector('[data-player-id="8"]')).toBeNull()
+  })
 })
