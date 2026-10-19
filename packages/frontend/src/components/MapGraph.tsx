@@ -35,6 +35,7 @@ import { FleetHeadingTrailsOverlay } from './map-graph/FleetHeadingTrailsOverlay
 import { FleetLocationRingsOverlay } from './map-graph/FleetLocationRingsOverlay'
 import { FleetLocationRingStacksProvider } from '../analytics/fleet/FleetLocationRingStacksContext'
 import { useFleetHeadingTrails } from '../analytics/fleet/useFleetHeadingTrails'
+import { useFleetLocationRingEmphasis } from '../analytics/fleet/useFleetLocationRingEmphasis'
 import { useFleetLocationRingStacks } from '../analytics/fleet/useFleetLocationRingStacks'
 import { HomeworldMapContextMenu } from '../analytics/homeworld-locator/HomeworldMapContextMenu'
 import { HOMEWORLD_LOCATOR_ANALYTIC_ID } from '../analytics/homeworld-locator/constants'
@@ -275,6 +276,10 @@ function MapGraphFlow({
     [roster, turnUsernames]
   )
   const fleetStacks = useFleetLocationRingStacks(analyticScope, fleetEnabled)
+  const { emphasisedPlayerIds, temporaryStacks } = useFleetLocationRingEmphasis(
+    analyticScope,
+    fleetEnabled
+  )
   const fleetHeadingTrails = useFleetHeadingTrails(
     analyticScope,
     fleetEnabled,
@@ -389,7 +394,11 @@ function MapGraphFlow({
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
       <FleetHeadingTrailsOverlay trails={fleetHeadingTrails} />
-      <FleetLocationRingsOverlay stacks={fleetStacks} />
+      <FleetLocationRingsOverlay
+        stacks={fleetStacks}
+        temporaryStacks={temporaryStacks}
+        emphasisedPlayerIds={emphasisedPlayerIds}
+      />
       <MapAttentionOrchestrator homeworldMarkers={data.homeworldMarkers} />
       <MapInteractionSurface>
         <PlanetMapInteraction

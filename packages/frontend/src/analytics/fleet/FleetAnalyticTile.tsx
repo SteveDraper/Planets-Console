@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
 import { deriveShellTurnMax, deriveTurnView } from '../../shell/shellContext'
 import type { PerspectiveRow } from '../../lib/gameInfoShell'
 import { useTurnRacePlayerLabels } from '../../lib/turnRacePlayerLabels'
 import { cn } from '../../lib/utils'
+import { useFleetLocationRingEmphasisStore } from '../../stores/fleetLocationRingEmphasis'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import {
   FLEET_HEADING_TRAIL_MAX_EXTEND_TURNS,
@@ -44,11 +45,22 @@ function FleetPlayerVisibilityRow({
 }: FleetPlayerVisibilityRowProps) {
   const color = usePlayerColor(player.playerId)
   const playerLabel = fleetPlayerDisplayLabel(player, racePlayerLabels, undefined)
+  const setSidebarHover = useFleetLocationRingEmphasisStore((state) => state.setSidebarHover)
+  const clearSidebarHover = useFleetLocationRingEmphasisStore((state) => state.clearSidebarHover)
+
+  useEffect(
+    () => () => {
+      clearSidebarHover(player.playerId)
+    },
+    [clearSidebarHover, player.playerId]
+  )
 
   return (
     <label
       title={playerLabel}
       className="flex cursor-pointer items-center gap-2"
+      onPointerEnter={() => setSidebarHover(player.playerId)}
+      onPointerLeave={() => clearSidebarHover(player.playerId)}
     >
       <input
         type="checkbox"

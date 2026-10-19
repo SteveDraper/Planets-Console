@@ -65,10 +65,12 @@ describe('fleetLocationRingStrengthFraction', () => {
 })
 
 describe('fleetLocationRingOpacity', () => {
-  it('clamps to [0.40, 0.95] from strength fraction', () => {
-    expect(fleetLocationRingOpacity(0)).toBe(0.4)
+  it('floors at 0.50 for zero strength and ceilings at 0.95 for full strength', () => {
+    expect(fleetLocationRingOpacity(0)).toBe(0.5)
     expect(fleetLocationRingOpacity(1)).toBe(0.95)
-    expect(fleetLocationRingOpacity(0.5)).toBeCloseTo(0.675)
+    expect(fleetLocationRingOpacity(-1)).toBe(0.5)
+    expect(fleetLocationRingOpacity(2)).toBe(0.95)
+    expect(fleetLocationRingOpacity(0.5)).toBeCloseTo(0.775)
   })
 })
 
@@ -162,7 +164,7 @@ describe('buildFleetLocationRingStacks', () => {
     expect(stacked.hostMilitaryPointsSum).toBe(50)
     expect(stacked.diameterPx).toBe(16)
     expect(stacked.strengthFraction).toBe(0.5)
-    expect(stacked.opacity).toBeCloseTo(0.675)
+    expect(stacked.opacity).toBeCloseTo(0.775)
     // Diameter 16 → R=8; maxStroke=5; t=0.5 → 2.5 (min stroke).
     expect(stacked.strokeWidthPx).toBe(2.5)
     expect(stacked.arcs).toHaveLength(2)
@@ -183,7 +185,7 @@ describe('buildFleetLocationRingStacks', () => {
     expect(alone.shipCount).toBe(1)
     expect(alone.hostMilitaryPointsSum).toBe(5)
     expect(alone.strengthFraction).toBe(0.05)
-    expect(alone.opacity).toBeCloseTo(0.4 + 0.55 * 0.05)
+    expect(alone.opacity).toBeCloseTo(0.5 + 0.55 * 0.05)
     expect(alone.diameterPx).toBe(14)
   })
 
