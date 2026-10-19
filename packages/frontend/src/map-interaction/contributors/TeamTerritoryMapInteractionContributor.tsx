@@ -5,10 +5,8 @@
 
 import { useMemo } from 'react'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import {
-  playerTerritoryHoverLinesAtMapPoint,
-  teamTerritoryHoverLinesAtMapPoint,
-} from '../../analytics/team-information/teamTerritoryHover'
+import { territoryPartition } from '../../analytics/team-information/kinds'
+import { territoryHoverLinesAtMapPoint } from '../../analytics/team-information/teamTerritoryHover'
 import { clientToFlowPosition } from '../../lib/mapFlowGeometry'
 import { flowCenterToPlanet } from '../../lib/planetSpatialGrid'
 import type { MapInteractionContributor } from '../mapInteractionContributorTypes'
@@ -27,6 +25,7 @@ export function TeamTerritoryMapInteractionContributor({
   byTeam: boolean
   enabled: boolean
 }) {
+  const partition = territoryPartition(byTeam)
   const contributor = useMemo<MapInteractionContributor | null>(() => {
     if (!enabled || regionOverlays.length === 0) return null
     return {
@@ -41,9 +40,14 @@ export function TeamTerritoryMapInteractionContributor({
         )
         if (flow == null) return null
         const { px, py } = flowCenterToPlanet(flow.x, flow.y)
-        const lines = byTeam
-          ? teamTerritoryHoverLinesAtMapPoint(regionOverlays, px, py, namesByLeagueTeamId)
-          : playerTerritoryHoverLinesAtMapPoint(regionOverlays, px, py, usernamesByPlayerId)
+        const lines = territoryHoverLinesAtMapPoint(
+          regionOverlays,
+          px,
+          py,
+          partition,
+          namesByLeagueTeamId,
+          usernamesByPlayerId
+        )
         if (lines.length === 0) return null
         return {
           id: 'team-territory',
@@ -55,13 +59,13 @@ export function TeamTerritoryMapInteractionContributor({
         }
       },
     }
-  }, [byTeam, enabled, namesByLeagueTeamId, regionOverlays, usernamesByPlayerId])
+  }, [enabled, namesByLeagueTeamId, partition, regionOverlays, usernamesByPlayerId])
 
   useMapInteractionContributor(contributor, [
     regionOverlays,
     namesByLeagueTeamId,
     usernamesByPlayerId,
-    byTeam,
+    partition,
     enabled,
   ])
   return null

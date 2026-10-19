@@ -11,6 +11,7 @@ import {
   applyTerritoryKindFilter,
   mapRegionOverlaysForPaint,
   omitHiddenTeamTerritoryOverlays,
+  territoryOverlaysForHighlight,
 } from './teamTerritoryPaint'
 
 function boundary(
@@ -109,6 +110,58 @@ describe('omitHiddenTeamTerritoryOverlays', () => {
       'ship-scan',
       'team-territory-owned-only:9:0',
       'player-territory:1:0',
+    ])
+  })
+})
+
+describe('territoryOverlaysForHighlight', () => {
+  const team4 = boundary(TEAM_TERRITORY_KIND, 'team-territory:4:0', { leagueTeamId: 4 })
+  const team4Owned = boundary(TEAM_TERRITORY_OWNED_ONLY_KIND, 'team-territory-owned-only:4:0', {
+    leagueTeamId: 4,
+  })
+  const player4 = boundary(PLAYER_TERRITORY_KIND, 'player-territory:4:0', { playerId: 4 })
+  const player1 = boundary(PLAYER_TERRITORY_KIND, 'player-territory:1:0', { playerId: 1 })
+  const player1Owned = boundary(
+    PLAYER_TERRITORY_OWNED_ONLY_KIND,
+    'player-territory-owned-only:1:0',
+    { playerId: 1 }
+  )
+  const overlays = [team4, team4Owned, player4, player1, player1Owned]
+
+  it('returns nothing when nothing is hovered', () => {
+    expect(territoryOverlaysForHighlight(overlays, null, true)).toEqual([])
+  })
+
+  it('outlines the hovered league team, including both team kinds', () => {
+    const out = territoryOverlaysForHighlight(overlays, { partition: 'team', id: 4 }, true)
+    expect(out.map((overlay) => overlay.id)).toEqual([
+      'team-territory:4:0',
+      'team-territory-owned-only:4:0',
+    ])
+  })
+
+  it('does not apply a hovered league team while By team is off', () => {
+    expect(
+      territoryOverlaysForHighlight(overlays, { partition: 'team', id: 4 }, false)
+    ).toEqual([])
+  })
+
+  it('outlines the hovered player and not the league team with the same id', () => {
+    const out = territoryOverlaysForHighlight(overlays, { partition: 'player', id: 4 }, false)
+    expect(out.map((overlay) => overlay.id)).toEqual(['player-territory:4:0'])
+  })
+
+  it('does not apply a hovered player while By team is on', () => {
+    expect(
+      territoryOverlaysForHighlight(overlays, { partition: 'player', id: 1 }, true)
+    ).toEqual([])
+  })
+
+  it('outlines both player kinds for the hovered player', () => {
+    const out = territoryOverlaysForHighlight(overlays, { partition: 'player', id: 1 }, false)
+    expect(out.map((overlay) => overlay.id)).toEqual([
+      'player-territory:1:0',
+      'player-territory-owned-only:1:0',
     ])
   })
 })

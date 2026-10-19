@@ -5,52 +5,40 @@
 
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import { collectRegionOverlayHoverSummaries } from '../../lib/mapRegionOverlayHitTest'
-import { isPlayerTerritoryKind, isTeamTerritoryKind } from './kinds'
+import {
+  territoryOwnerId,
+  type TerritoryPartition,
+} from './kinds'
 import { playerTerritoryLegendLabel } from './playerLegend'
 import { teamInformationLegendLabel } from './teamLegend'
 
-export function formatTeamTerritoryHoverLine(
-  overlay: MapRegionOverlay,
-  namesByLeagueTeamId: ReadonlyMap<number, string | null>
-): string | null {
-  if (!isTeamTerritoryKind(overlay.kind)) return null
-  const leagueTeamId = overlay.leagueTeamId
-  if (leagueTeamId == null) return null
-  return teamInformationLegendLabel(leagueTeamId, namesByLeagueTeamId)
+function territoryHoverLabel(
+  ownerId: number,
+  partition: TerritoryPartition,
+  namesByLeagueTeamId: ReadonlyMap<number, string | null>,
+  usernamesByPlayerId: ReadonlyMap<number, string>
+): string {
+  switch (partition) {
+    case 'team':
+      return teamInformationLegendLabel(ownerId, namesByLeagueTeamId)
+    case 'player':
+      return playerTerritoryLegendLabel(ownerId, usernamesByPlayerId)
+  }
 }
 
-/** One line per league team whose painted territory contains the map point. */
-export function teamTerritoryHoverLinesAtMapPoint(
+/** One line per owner whose painted territory contains the map point. */
+export function territoryHoverLinesAtMapPoint(
   overlays: readonly MapRegionOverlay[],
   mapX: number,
   mapY: number,
-  namesByLeagueTeamId: ReadonlyMap<number, string | null>
-): string[] {
-  const lines = collectRegionOverlayHoverSummaries(overlays, mapX, mapY, (overlay) =>
-    formatTeamTerritoryHoverLine(overlay, namesByLeagueTeamId)
-  )
-  return [...new Set(lines)]
-}
-
-export function formatPlayerTerritoryHoverLine(
-  overlay: MapRegionOverlay,
-  usernamesByPlayerId: ReadonlyMap<number, string>
-): string | null {
-  if (!isPlayerTerritoryKind(overlay.kind)) return null
-  const playerId = overlay.playerId
-  if (playerId == null) return null
-  return playerTerritoryLegendLabel(playerId, usernamesByPlayerId)
-}
-
-/** One line per player whose painted territory contains the map point. */
-export function playerTerritoryHoverLinesAtMapPoint(
-  overlays: readonly MapRegionOverlay[],
-  mapX: number,
-  mapY: number,
+  partition: TerritoryPartition,
+  namesByLeagueTeamId: ReadonlyMap<number, string | null>,
   usernamesByPlayerId: ReadonlyMap<number, string>
 ): string[] {
-  const lines = collectRegionOverlayHoverSummaries(overlays, mapX, mapY, (overlay) =>
-    formatPlayerTerritoryHoverLine(overlay, usernamesByPlayerId)
-  )
+  const lines = collectRegionOverlayHoverSummaries(overlays, mapX, mapY, (overlay) => {
+    const ownerId = territoryOwnerId(overlay, partition)
+    if (ownerId == null) return null
+    return territoryHoverLabel(ownerId, partition, namesByLeagueTeamId, usernamesByPlayerId)
+  })
   return [...new Set(lines)]
 }

@@ -1,5 +1,12 @@
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import { isTeamTerritoryKind, isTerritoryKind, territoryPaintKind } from './kinds'
+import {
+  isTeamTerritoryKind,
+  isTerritoryKind,
+  territoryOwnerId,
+  territoryPaintKind,
+  territoryPartition,
+  type HoveredTerritory,
+} from './kinds'
 
 /**
  * Keep one territory kind. Other kinds pass through.
@@ -13,6 +20,23 @@ export function applyTerritoryKindFilter(
 ): MapRegionOverlay[] {
   const kept = territoryPaintKind(byTeam, ownedPlanetsOnly)
   return overlays.filter((overlay) => !isTerritoryKind(overlay.kind) || overlay.kind === kept)
+}
+
+/**
+ * Overlays to outline for the legend hover.
+ * A hover applies only while its partition is the active one.
+ * Callers pass overlays from before ``omitHiddenTeamTerritoryOverlays``
+ * so a hidden league team still outlines.
+ */
+export function territoryOverlaysForHighlight(
+  overlays: readonly MapRegionOverlay[],
+  hovered: HoveredTerritory | null,
+  byTeam: boolean
+): MapRegionOverlay[] {
+  if (hovered == null || hovered.partition !== territoryPartition(byTeam)) return []
+  return overlays.filter(
+    (overlay) => territoryOwnerId(overlay, hovered.partition) === hovered.id
+  )
 }
 
 /**

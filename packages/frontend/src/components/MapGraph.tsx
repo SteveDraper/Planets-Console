@@ -48,11 +48,11 @@ import {
   useEffectiveHomeworldSectorIndexes,
   useHomeworldRegionSelectionMaterialize,
 } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
-import { isPlayerTerritoryKind, isTeamTerritoryKind } from '../analytics/team-information/kinds'
 import { applyPlayerTerritoryFillColors } from '../analytics/team-information/playerTerritoryColor'
 import {
   mapRegionOverlaysForPaint,
   omitHiddenTeamTerritoryOverlays,
+  territoryOverlaysForHighlight,
 } from '../analytics/team-information/teamTerritoryPaint'
 import { useLeagueTeamNames } from '../analytics/team-information/useLeagueTeamNames'
 import { useTurnRosterUsernames } from '../analytics/team-information/useTurnRosterUsernames'
@@ -264,8 +264,7 @@ function MapGraphFlow({
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
   const minefieldsEnabled = enabledAnalyticIds.includes(MINEFIELDS_ANALYTIC_ID)
   const teamInformationEnabled = enabledAnalyticIds.includes(TEAM_INFORMATION_ANALYTIC_ID)
-  const hoveredLeagueTeamId = useTeamInformationHighlightStore((s) => s.hoveredLeagueTeamId)
-  const hoveredPlayerId = useTeamInformationHighlightStore((s) => s.hoveredPlayerId)
+  const hoveredTerritory = useTeamInformationHighlightStore((s) => s.hoveredTerritory)
   const teamNamesByLeagueTeamId = useLeagueTeamNames(
     analyticScope.gameId,
     teamInformationEnabled
@@ -344,24 +343,8 @@ function MapGraphFlow({
   )
   const highlightedTerritoryOverlays = useMemo(() => {
     if (!teamInformationEnabled) return []
-    if (byTeam) {
-      if (hoveredLeagueTeamId == null) return []
-      return regionOverlays.filter(
-        (overlay) =>
-          isTeamTerritoryKind(overlay.kind) && overlay.leagueTeamId === hoveredLeagueTeamId
-      )
-    }
-    if (hoveredPlayerId == null) return []
-    return regionOverlays.filter(
-      (overlay) => isPlayerTerritoryKind(overlay.kind) && overlay.playerId === hoveredPlayerId
-    )
-  }, [
-    byTeam,
-    hoveredLeagueTeamId,
-    hoveredPlayerId,
-    regionOverlays,
-    teamInformationEnabled,
-  ])
+    return territoryOverlaysForHighlight(regionOverlays, hoveredTerritory, byTeam)
+  }, [byTeam, hoveredTerritory, regionOverlays, teamInformationEnabled])
 
   return (
     <FleetLocationRingStacksProvider stacks={fleetStacks}>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import { playerTerritoryHoverLinesAtMapPoint, teamTerritoryHoverLinesAtMapPoint } from './teamTerritoryHover'
+import { territoryHoverLinesAtMapPoint } from './teamTerritoryHover'
 
 function territory(leagueTeamId: number, vertices: { x: number; y: number }[]): MapRegionOverlay {
   return {
@@ -23,22 +23,39 @@ const triangle = territory(4, [
   { x: 0, y: 10 },
 ])
 
-describe('teamTerritoryHoverLinesAtMapPoint', () => {
+const noNames = new Map<number, string | null>()
+const noUsernames = new Map<number, string>()
+
+describe('territoryHoverLinesAtMapPoint', () => {
   it('names the league team whose territory contains the point', () => {
     expect(
-      teamTerritoryHoverLinesAtMapPoint([triangle], 2, 2, new Map([[4, 'Alpha']]))
+      territoryHoverLinesAtMapPoint(
+        [triangle],
+        2,
+        2,
+        'team',
+        new Map([[4, 'Alpha']]),
+        noUsernames
+      )
     ).toEqual(['Alpha'])
   })
 
   it('uses the numeric id when the directory name is null', () => {
     expect(
-      teamTerritoryHoverLinesAtMapPoint([triangle], 2, 2, new Map([[4, null]]))
+      territoryHoverLinesAtMapPoint([triangle], 2, 2, 'team', new Map([[4, null]]), noUsernames)
     ).toEqual(['4'])
   })
 
   it('returns nothing outside the territory', () => {
     expect(
-      teamTerritoryHoverLinesAtMapPoint([triangle], 9, 9, new Map([[4, 'Alpha']]))
+      territoryHoverLinesAtMapPoint(
+        [triangle],
+        9,
+        9,
+        'team',
+        new Map([[4, 'Alpha']]),
+        noUsernames
+      )
     ).toEqual([])
   })
 
@@ -49,7 +66,14 @@ describe('teamTerritoryHoverLinesAtMapPoint', () => {
       id: 'sector',
     }
     expect(
-      teamTerritoryHoverLinesAtMapPoint([homeworld], 2, 2, new Map([[4, 'Alpha']]))
+      territoryHoverLinesAtMapPoint(
+        [homeworld],
+        2,
+        2,
+        'team',
+        new Map([[4, 'Alpha']]),
+        noUsernames
+      )
     ).toEqual([])
   })
 
@@ -61,13 +85,18 @@ describe('teamTerritoryHoverLinesAtMapPoint', () => {
     ])
     second.id = 'team-territory:4:1'
     expect(
-      teamTerritoryHoverLinesAtMapPoint([triangle, second], 1, 1, new Map([[4, 'Alpha']]))
+      territoryHoverLinesAtMapPoint(
+        [triangle, second],
+        1,
+        1,
+        'team',
+        new Map([[4, 'Alpha']]),
+        noUsernames
+      )
     ).toEqual(['Alpha'])
   })
-})
 
-describe('playerTerritoryHoverLinesAtMapPoint', () => {
-  const region: MapRegionOverlay = {
+  const playerRegion: MapRegionOverlay = {
     kind: 'player-territory',
     id: 'player-territory:1:0',
     fillColor: '#000000',
@@ -78,18 +107,38 @@ describe('playerTerritoryHoverLinesAtMapPoint', () => {
   }
 
   it('names the player whose territory contains the point', () => {
-    expect(playerTerritoryHoverLinesAtMapPoint([region], 2, 2, new Map([[1, 'alice']]))).toEqual([
-      'alice',
-    ])
+    expect(
+      territoryHoverLinesAtMapPoint(
+        [playerRegion],
+        2,
+        2,
+        'player',
+        noNames,
+        new Map([[1, 'alice']])
+      )
+    ).toEqual(['alice'])
   })
 
   it('uses the numeric id when the username is missing', () => {
-    expect(playerTerritoryHoverLinesAtMapPoint([region], 2, 2, new Map())).toEqual(['1'])
+    expect(
+      territoryHoverLinesAtMapPoint([playerRegion], 2, 2, 'player', noNames, noUsernames)
+    ).toEqual(['1'])
   })
 
-  it('ignores league-team territory', () => {
+  it('ignores league-team territory while the player partition is active', () => {
     expect(
-      playerTerritoryHoverLinesAtMapPoint([triangle], 2, 2, new Map([[1, 'alice']]))
+      territoryHoverLinesAtMapPoint([triangle], 2, 2, 'player', noNames, new Map([[1, 'alice']]))
     ).toEqual([])
+  })
+
+  it('labels only the active partition when both unions contain the point', () => {
+    const names = new Map<number, string | null>([[4, 'Alpha']])
+    const usernames = new Map([[1, 'alice']])
+    expect(
+      territoryHoverLinesAtMapPoint([triangle, playerRegion], 2, 2, 'team', names, usernames)
+    ).toEqual(['Alpha'])
+    expect(
+      territoryHoverLinesAtMapPoint([triangle, playerRegion], 2, 2, 'player', names, usernames)
+    ).toEqual(['alice'])
   })
 })

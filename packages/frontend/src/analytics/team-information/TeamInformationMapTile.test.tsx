@@ -77,7 +77,7 @@ describe('TeamInformationMapTile', () => {
       hiddenLeagueTeamIds: [],
       byTeamByGameId: {},
     })
-    useTeamInformationHighlightStore.setState({ hoveredLeagueTeamId: null, hoveredPlayerId: null })
+    useTeamInformationHighlightStore.setState({ hoveredTerritory: null })
     useSessionStore.setState({ name: 'alice', password: null, credentialsRevision: 0 })
     useShellStore.setState({
       gameInfoContext: {
@@ -143,9 +143,12 @@ describe('TeamInformationMapTile', () => {
     const aliceSwatch = document.querySelector('[data-fill-pattern="solid"]')
     expect(aliceSwatch).toHaveStyle({ backgroundColor: defaultColorForPlayerId(1) })
     await user.hover(screen.getByText('alice'))
-    expect(useTeamInformationHighlightStore.getState().hoveredPlayerId).toBe(1)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 1,
+    })
     await user.unhover(screen.getByText('alice'))
-    expect(useTeamInformationHighlightStore.getState().hoveredPlayerId).toBeNull()
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
     await waitFor(() => {
       expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
       expect(fetchLeagueTeams).toHaveBeenCalledTimes(1)
@@ -159,9 +162,12 @@ describe('TeamInformationMapTile', () => {
     expect(screen.queryByText('alice, carol')).not.toBeInTheDocument()
     expect(document.querySelector('[data-fill-pattern="forward"]')).not.toBeNull()
     await user.hover(screen.getByRole('listitem'))
-    expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBe(4)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'team',
+      id: 4,
+    })
     await user.unhover(screen.getByRole('listitem'))
-    expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBeNull()
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
     await user.click(screen.getByRole('checkbox', { name: 'Owned planets only' }))
     expect(useTeamInformationPreferencesStore.getState().ownedPlanetsOnly).toBe(true)
     expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
@@ -193,9 +199,12 @@ describe('TeamInformationMapTile', () => {
     expect(useTeamInformationPreferencesStore.getState().hiddenLeagueTeamIds).toEqual([4])
     expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
     await user.hover(screen.getByRole('listitem'))
-    expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBe(4)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'team',
+      id: 4,
+    })
     await user.unhover(screen.getByRole('listitem'))
-    expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBeNull()
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
   })
 
   it('shows the numeric id when the directory name is null and still hides usernames', async () => {
@@ -249,6 +258,37 @@ describe('TeamInformationMapTile', () => {
     await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
     expect(await screen.findByText('1')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
+  })
+
+  it('clears a team hover while the player legend is shown, and clears on unmount', async () => {
+    const user = userEvent.setup()
+    useTeamInformationHighlightStore.setState({
+      hoveredTerritory: { partition: 'team', id: 4 },
+    })
+    const { unmount } = renderTile(
+      <TeamInformationMapTile
+        name="Territory"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        analyticScope={sampleScope}
+        turnDataReady
+      />,
+      seedTurnRoster
+    )
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    expect(await screen.findByText('alice')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
+    })
+    await user.hover(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 1,
+    })
+    unmount()
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
   })
 
   it('does not write by team when no game is open', async () => {

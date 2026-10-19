@@ -52,10 +52,7 @@ export function TeamInformationMapTile({
   )
   const byTeamByGameId = useTeamInformationPreferencesStore((s) => s.byTeamByGameId)
   const setByTeamForGame = useTeamInformationPreferencesStore((s) => s.setByTeamForGame)
-  const setHoveredLeagueTeamId = useTeamInformationHighlightStore(
-    (s) => s.setHoveredLeagueTeamId
-  )
-  const setHoveredPlayerId = useTeamInformationHighlightStore((s) => s.setHoveredPlayerId)
+  const setHoveredTerritory = useTeamInformationHighlightStore((s) => s.setHoveredTerritory)
   const paintSnapshot = usePlayerColorsStore((s) => s.paintSnapshot)
   const perspectives = useShellStore((s) => s.gameInfoContext?.perspectives)
   const turnUsernames = useTurnRosterUsernames(analyticScope)
@@ -93,22 +90,13 @@ export function TeamInformationMapTile({
   const showPlayerLegend = supportsMode && enabled && !byTeam && playerRows.length > 0
 
   useEffect(() => {
-    if (showTeamLegend) return
-    setHoveredLeagueTeamId(null)
-  }, [setHoveredLeagueTeamId, showTeamLegend])
-
-  useEffect(() => {
-    if (showPlayerLegend) return
-    setHoveredPlayerId(null)
-  }, [setHoveredPlayerId, showPlayerLegend])
-
-  useEffect(
-    () => () => {
-      setHoveredLeagueTeamId(null)
-      setHoveredPlayerId(null)
-    },
-    [setHoveredLeagueTeamId, setHoveredPlayerId]
-  )
+    const hovered = useTeamInformationHighlightStore.getState().hoveredTerritory
+    if (hovered != null) {
+      const legendShown = hovered.partition === 'team' ? showTeamLegend : showPlayerLegend
+      if (!legendShown) setHoveredTerritory(null)
+    }
+    return () => setHoveredTerritory(null)
+  }, [setHoveredTerritory, showPlayerLegend, showTeamLegend])
 
   return (
     <AnalyticSidebarTile
@@ -149,8 +137,10 @@ export function TeamInformationMapTile({
                 key={row.leagueTeamId}
                 className="flex min-w-0 items-start gap-2"
                 title={teamInformationLegendHoverTitle(row.usernames)}
-                onMouseEnter={() => setHoveredLeagueTeamId(row.leagueTeamId)}
-                onMouseLeave={() => setHoveredLeagueTeamId(null)}
+                onMouseEnter={() =>
+                  setHoveredTerritory({ partition: 'team', id: row.leagueTeamId })
+                }
+                onMouseLeave={() => setHoveredTerritory(null)}
               >
                 <input
                   type="checkbox"
@@ -194,8 +184,10 @@ export function TeamInformationMapTile({
               <li
                 key={row.playerId}
                 className="flex min-w-0 items-center gap-2"
-                onMouseEnter={() => setHoveredPlayerId(row.playerId)}
-                onMouseLeave={() => setHoveredPlayerId(null)}
+                onMouseEnter={() =>
+                  setHoveredTerritory({ partition: 'player', id: row.playerId })
+                }
+                onMouseLeave={() => setHoveredTerritory(null)}
               >
                 <span
                   aria-hidden
