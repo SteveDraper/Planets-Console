@@ -39,7 +39,7 @@ class TerritorySite:
     x: float
     y: float
     league_team_id: int
-    owner_id: int = 0
+    owner_id: int
 
 
 @dataclass(frozen=True)
@@ -363,23 +363,3 @@ def territory_unions(
         _components(player_regions),
         _touching_teams(team_regions, rectangle=rectangle, sphere=sphere),
     )
-
-
-def territory_partition(
-    sites: Sequence[TerritorySite],
-    *,
-    width: int,
-    height: int,
-    sphere: bool,
-) -> tuple[list[tuple[int, list[Point]]], dict[int, set[int]]]:
-    """Painted team components and which league teams share a border.
-
-    Components are ``(league_team_id, ring)``. Cells whose site has
-    ``league_team_id <= 0`` are omitted. Same-team cells that share a border
-    become one ring. A hole in that union is cut into the same ring so the hole
-    is not filled.
-    """
-    team_components, _player_components, neighbors = territory_unions(
-        sites, width=width, height=height, sphere=sphere
-    )
-    return team_components, neighbors

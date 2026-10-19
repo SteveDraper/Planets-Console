@@ -13,7 +13,7 @@ from api.analytics.team_territory import (
     TerritoryRingError,
     TerritorySite,
     nu_map_rectangle,
-    territory_partition,
+    territory_unions,
 )
 from api.models.player import Player
 
@@ -269,7 +269,7 @@ def test_unowned_cell_is_absent_until_owned_planets_only() -> None:
     assert _owners_at(payload, KIND_PLAYER_OWNED, 32, 5, width=width, height=height) == {1}
 
 
-def test_player_without_league_team_is_absent_from_both_site_sets() -> None:
+def test_player_without_league_team_is_only_in_player_kinds() -> None:
     width, height = 40, 10
     turn = _territory_turn(
         [
@@ -440,7 +440,11 @@ def _nu_sites(
     width: int,
     height: int,
 ) -> list[TerritorySite]:
-    """sites are (planet_id, x, y, league_team_id) in rectangle-local coordinates."""
+    """sites are (planet_id, x, y, league_team_id) in rectangle-local coordinates.
+
+    The planet id is the owner. These geometry tests assert team unions, so the
+    owner only has to be a real player rather than unowned.
+    """
     rectangle = nu_map_rectangle(width, height)
     return [
         TerritorySite(
@@ -448,6 +452,7 @@ def _nu_sites(
             x=x + rectangle.left,
             y=y + rectangle.bottom,
             league_team_id=league_team_id,
+            owner_id=planet_id,
         )
         for planet_id, x, y, league_team_id in sites
     ]
@@ -474,7 +479,7 @@ def _neighbors(
     height: int,
     sphere: bool,
 ) -> dict[int, set[int]]:
-    _components, neighbors = territory_partition(
+    _team_components, _player_components, neighbors = territory_unions(
         _nu_sites(sites, width=width, height=height),
         width=width,
         height=height,
@@ -555,10 +560,14 @@ def test_painted_ring_covers_the_nu_center() -> None:
 def test_hole_cut_that_fills_the_hole_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(team_territory, "_splice_hole", lambda ring, hole: ring)
     with pytest.raises(TerritoryRingError):
-        territory_partition(_surrounded_sites(), width=100, height=100, sphere=False)
+        _team_components, _player_components, _neighbors = territory_unions(
+            _surrounded_sites(), width=100, height=100, sphere=False
+        )
 
 
 def test_hole_cut_without_a_boundary_edge_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(team_territory, "_splice_hole", lambda ring, hole: None)
     with pytest.raises(TerritoryRingError):
-        territory_partition(_surrounded_sites(), width=100, height=100, sphere=False)
+        _team_components, _player_components, _neighbors = territory_unions(
+            _surrounded_sites(), width=100, height=100, sphere=False
+        )
