@@ -76,7 +76,7 @@ TURN_ANALYTIC_CATALOG: tuple[TurnAnalyticCatalogEntry, ...] = (
     ),
     TurnAnalyticCatalogEntry(
         id="team-information",
-        name="Team information",
+        name="Territory",
         supports_table=False,
         supports_map=True,
         type="selectable",

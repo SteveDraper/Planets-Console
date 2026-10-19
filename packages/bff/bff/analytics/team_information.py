@@ -1,4 +1,4 @@
-"""BFF Team information analytic handler (passthrough)."""
+"""BFF Territory analytic handler (passthrough)."""
 
 from api.analytics.catalog import catalog_entry
 from api.diagnostics import Diagnostics

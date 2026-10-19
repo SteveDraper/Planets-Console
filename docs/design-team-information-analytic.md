@@ -1,6 +1,6 @@
-# Team information map analytic
+# Territory map analytic
 
-Map-only **turn analytic** (`analytic_id` `team-information`) that paints **team territory**: the map colored by the **league team** of the owner of the nearest planet. Phase 1: [issue 546](https://github.com/SteveDraper/Planets-Console/issues/546). Phase 2: [issue 547](https://github.com/SteveDraper/Planets-Console/issues/547). Glossary: **Team information analytic**, **League team**, **Team territory**, **Team territory site set**, **Sphere map** in [CONTEXT.md](../CONTEXT.md).
+Map-only **turn analytic** (`analytic_id` `team-information`) that paints **Territory**: the map colored by who owns the nearest planet. **By team** off (the default) paints **player territory**. **By team** on paints **team territory**. Phase 1: [issue 546](https://github.com/SteveDraper/Planets-Console/issues/546). Phase 2: [issue 547](https://github.com/SteveDraper/Planets-Console/issues/547). Both partitions: [issue 586](https://github.com/SteveDraper/Planets-Console/issues/586). Glossary: **Territory**, **Player territory**, **Team territory**, **Team territory site set**, **League team**, **Sphere map** in [CONTEXT.md](../CONTEXT.md).
 
 Related: [Adding a turn analytic](design-adding-a-turn-analytic.md), [Analytics structure](design-analytics-structure.md), [ADR 0008](adr/0008-shared-map-region-overlays.md) (shared `regionOverlays`).
 
@@ -8,14 +8,15 @@ Related: [Adding a turn analytic](design-adding-a-turn-analytic.md), [Analytics 
 
 | Requirement | Decision |
 |-------------|----------|
-| Registration | Selectable, `supports_table=false`, `supports_map=true`, display name `Team information` |
-| Sites | Shell-turn planets. Unowned means `ownerid == 0`. **League team** is `Player.leagueteamid` on that owner (`0` means no league team) |
+| Registration | Selectable, `supports_table=false`, `supports_map=true`, display name `Territory`. `analytic_id` stays `team-information` |
+| Sites | Shell-turn planets. Unowned means `ownerid == 0`. **League team** is `Player.leagueteamid` on that owner (`0` means no league team). In-game `Player.teamid` is ignored |
 | Distance | Euclidean light-years. On a **sphere map** (`GameSettings.sphere`), toroidal distance on the rectangle of size `mapwidth` by `mapheight` centered on `(2000, 2000)`, both axes. `mapshape` does not change the period. `Game.maptype` is a hosting category and is ignored |
 | Site sets | Both **team territory site set**s are computed on every map response. Checkbox **Owned planets only** (default off, global localStorage) chooses which set is painted. Toggling does not refetch |
-| Holes | Cells whose winning site is unowned are omitted from the all-planets set. Cells whose winning owner has `leagueteamid == 0` are omitted from both sets. Owned-planets-only fills the rectangle when every owner has a league team |
-| Paint | Shared **map region overlay** boundary polygons (line edges only). One overlay per disjoint component of a league team's union. Semi-transparent fill so planet dots stay readable |
-| Color | Each league team on the turn gets a distinct hue. Teams that share a border are placed as far apart on the wheel as the team count allows. A shared border whose hues are still within 60 degrees uses a different hatch (`solid`, `forward`, `back`, `horizontal`, `vertical`, `dots`). Both site sets share that style. Independent of **player color** |
-| Legend | Sidebar lists each league team that appears: a checkbox, swatch, and league team name ([#549](https://github.com/SteveDraper/Planets-Console/issues/549), [#550](https://github.com/SteveDraper/Planets-Console/issues/550), [#557](https://github.com/SteveDraper/Planets-Console/issues/557)). The numeric id shows only when the name is unresolved. Member usernames are hover text on the row, not drawn in the row. Each checkbox starts checked. Unchecked league team ids are stored in the same global localStorage entry as **Owned planets only**; a team that is not in that list stays visible, including teams that appear later. The same league team id is the same team in every game. An unchecked row omits that team's fill from the painted site set. Hovering a row outlines that team's regions on the active site set with a solid high-opacity stroke, whether or not the row is checked. Cell hover names the team territory under the pointer from that same site set, including when the fill is hidden. Legend hover, the outline, and the cell hover run only while the analytic is enabled. Toggling a row does not refetch |
+| Partitions | Each site set is unioned twice on that same response. Checkbox **By team** (default off, localStorage per game id) chooses the union. Toggling does not refetch. With no open game the checkbox shows off and does not write storage |
+| Holes | Cells whose winning site is unowned are omitted from the all-planets set. Owned-planets-only assigns that area to the nearest owned planet. **Team territory** also omits an owner with `leagueteamid == 0`. **Player territory** keeps every owned player, including `leagueteamid == 0` |
+| Paint | Shared **map region overlay** boundary polygons (line edges only). One overlay per disjoint component. Exactly one of the four kinds is painted. Semi-transparent fill so planet dots stay readable |
+| Color | **Team territory**: each league team on the turn gets a distinct hue. Teams that share a border are placed as far apart on the wheel as the team count allows. A shared border whose hues are still within 60 degrees uses a different hatch (`solid`, `forward`, `back`, `horizontal`, `vertical`, `dots`). Both team site sets share that style. **Player territory**: the shared per-player palette (preset plus per-player overrides), solid pattern, opacity `0.35`. Ignores global diplomacy color mode, the same rule as minefield owner paint. The SPA applies that color at paint and in the legend, so a settings change updates the map without a refetch. The wire still carries a `fillColor`; the SPA replaces it |
+| Legend | **By team** on: each league team that owns a planet, with a checkbox, swatch, and league team name ([#549](https://github.com/SteveDraper/Planets-Console/issues/549), [#550](https://github.com/SteveDraper/Planets-Console/issues/550), [#557](https://github.com/SteveDraper/Planets-Console/issues/557)). The numeric id shows only when the name is unresolved. Member usernames are hover text on the row, not drawn in the row. Each checkbox starts checked. Unchecked league team ids are stored in the same global localStorage entry as **Owned planets only**; a team that is not in that list stays visible, including teams that appear later. The same league team id is the same team in every game. An unchecked row omits that team's fill. Hovering a row outlines that team's regions on the active site set, whether or not the row is checked. **By team** off: one row per player who owns at least one planet: palette swatch and roster username (numeric id when the name is missing). No per-player hide. Hovering a row outlines that player's regions. Cell hover names the team or the player under the pointer from the active site set. Legend hover, the outline, and the cell hover run only while the analytic is enabled. Toggling a row or **By team** does not refetch |
 | Exports | Empty catalog. No orchestrator profile. No map query params |
 
 Example sphere game: [686674](https://planets.nu) Bundy Sector (`sphere: true`, `mapshape` rectangular, 2278 by 2278). Help: planets.nu Sphere is a flattened torus; leaving one edge re-enters the opposite edge, and the wrap rectangle is used even when the planet disk is round.
@@ -30,7 +31,7 @@ Core owns the partition. The SPA blits.
    - `sphere` true: `dx = min(d, W - d)` where `d = abs(Sx - Px) mod W` and `W = mapwidth`; same for `y` with `mapheight`; then `hypot(dx, dy)`.
 3. Build the Voronoi partition of the site set on the map rectangle. On a sphere map, replicate each site across the eight neighboring periods (3 by 3 tiling) and clip the diagram back to the fundamental rectangle. Split any polygon that crosses a seam so every emitted ring lies inside the rectangle.
 4. The winning site at a point is the nearest site. An exact distance tie uses the lower planet id.
-5. A cell is painted only when its winning site has an owner with `leagueteamid > 0`. Union painted cells that share a league team id. Disjoint components stay separate overlays with the same color and team id.
+5. Union the same cells two ways. **Team territory** paints a cell only when its winning site has an owner with `leagueteamid > 0`, and unions by that league team id. **Player territory** paints a cell only when its winning site has `ownerid > 0`, and unions by that owner id. Disjoint components stay separate overlays.
 6. Clip every ring to the map rectangle: `[2000 - mapwidth / 2, 2000 + mapwidth / 2] x [2000 - mapheight / 2, 2000 + mapheight / 2]`.
 
 ## Wire
@@ -40,76 +41,71 @@ Core `compute` returns a JSON object:
 - `analyticId`: `team-information`
 - `sphere`: bool from settings
 - `teams`: `{ leagueTeamId, fillColor, fillPattern, playerIds }[]` for every league team that owns at least one planet on the turn (even if a site set paints nothing for them)
-- `regionOverlays`: both partitions
+- `players`: `{ playerId }[]` for every player who owns at least one planet on the turn, including `leagueteamid == 0`
+- `regionOverlays`: both site sets, each unioned both ways
 
-Each overlay is a shared boundary **map region overlay**:
+| By team | Owned planets only | `kind` | `id` |
+|---------|--------------------|--------|------|
+| on | off | `team-territory` | `team-territory:{leagueTeamId}:{component}` |
+| on | on | `team-territory-owned-only` | `team-territory-owned-only:{leagueTeamId}:{component}` |
+| off | off | `player-territory` | `player-territory:{playerId}:{component}` |
+| off | on | `player-territory-owned-only` | `player-territory-owned-only:{playerId}:{component}` |
 
-| Field | Value |
-|-------|--------|
-| `kind` | `team-territory` (all planets) or `team-territory-owned-only` |
-| `id` | `team-territory:{leagueTeamId}:{component}` or `team-territory-owned-only:{leagueTeamId}:{component}` |
-| `fillColor` | distinct hue for that team on this turn |
-| `fillPattern` | `solid`, `forward`, `back`, `horizontal`, `vertical`, or `dots` |
-| `fillOpacity` | `0.35` |
-| `geometry` | `{ type: "boundary", vertices: [{x, y}, ...], edges: [{type: "line"}, ...] }` closed, clockwise or counterclockwise, no arcs |
-| `leagueTeamId` | int domain fact. No English strings |
+Each overlay is a shared boundary **map region overlay**. Team overlays carry `leagueTeamId`, `fillColor`, and `fillPattern` (`solid`, `forward`, `back`, `horizontal`, `vertical`, or `dots`), opacity `0.35`. Player overlays carry `playerId` and `fillPattern: solid`. They do not carry a league team id. `fillColor` is present so the shared overlay shape stays intact; the SPA replaces it. `geometry` is `{ type: "boundary", vertices: [{x, y}, ...], edges: [{type: "line"}, ...] }`, closed, no arcs. No English strings.
 
-`fillPattern` is the same on the team row and on every overlay for that team. The SPA draws the hatch in screen pixels so it stays readable when zoomed out. Hatch strokes are white at 0.35 opacity so the team color stays dominant, and the legend swatch uses the same marks.
+`fillPattern` on a team row matches every team overlay for that team. The SPA draws the hatch in screen pixels so it stays readable when zoomed out. Hatch strokes are white at 0.35 opacity so the team color stays dominant, and the legend swatch uses the same marks.
 
 BFF map handler passes the Core object through. The table route stays a validation error.
 
 ## Frontend
 
 - Register the map merger so `regionOverlays` from this analytic join the combined map.
-- Persist **Owned planets only** in localStorage (global, same sticky scope as other analytic display toggles). Default off.
-- Paint exactly one kind: `team-territory` when the checkbox is off, `team-territory-owned-only` when it is on. Filter in a team-information-owned function. Do not run these kinds through Visibility kind preferences.
-- Sidebar: the shared `AnalyticSidebarTile` enable row. **Owned planets only** and the legend sit in the chevron pane (closed until expanded, and only while the analytic is enabled). Legend rows come from `teams` on the map payload (visibility checkbox, swatch, directory name or the numeric id when that name is null). Usernames are resolved from the turn roster onto the row, shown as hover text, and are not drawn in the row. The visibility checkbox defaults checked. Persist unchecked league team ids beside **Owned planets only**. Paint drops those ids after the site-set filter; hover and the outline use the site set before that drop. Hovering a row sets the outlined league team. Names load from `GET /bff/games/{game_id}/league-teams` with TanStack Query for the open game, separate from the map query. Grey the tile in tabular **view mode** via `supports_table=false`.
-- Cell hover: a **map interaction contributor** (role `team-territory`) hit-tests the active site set, including league teams whose fill is hidden, and contributes the team label. It `yieldsTo` planet hover and `mergesWith` fleet, region, and cartography (off a planet, the fleet card anchored at the ship hosts the team section). It is registered only while the analytic is enabled.
-- No edge-mirror strip. Opposite edges of one team share a color, which is the wrap cue.
+- Persist **Owned planets only** and hidden league-team ids in localStorage (global). Default off and all teams visible.
+- Persist **By team** as a map of game id to boolean in that same entry. Missing id reads as off. Bump the persist version; a blob without the field rehydrates as off for every game. Other games are unchanged.
+- Paint exactly one kind from the checkbox pair. Filter in a territory-owned function. Do not run these kinds through Visibility kind preferences. Hidden league-team ids do not filter player overlays.
+- Sidebar: the shared `AnalyticSidebarTile` enable row, display name **Territory**. **By team** sits above **Owned planets only** in the chevron pane (closed until expanded, and only while the analytic is enabled). Accessible name: `By team`. **By team** on: legend rows from `teams` (visibility checkbox, swatch, directory name or the numeric id when that name is null). Usernames are hover text and are not drawn in the row. **By team** off: legend rows from `players` (palette swatch, roster username or the numeric id). Names load from `GET /bff/games/{game_id}/league-teams` with TanStack Query for the open game, separate from the map query, and only the team legend uses them. Grey the tile in tabular **view mode** via `supports_table=false`.
+- Cell hover: a **map interaction contributor** (role `team-territory`) hit-tests the active site set. **By team** on includes league teams whose fill is hidden and contributes the team label. **By team** off contributes the player label. Title is `Territory`. It `yieldsTo` planet hover and `mergesWith` fleet, region, and cartography (off a planet, the fleet card anchored at the ship hosts the territory section). It is registered only while the analytic is enabled.
+- No edge-mirror strip. Opposite edges of one region share a color, which is the wrap cue.
 
 ## Layers
 
 - **Core** (`api/analytics/team_information.py`): partition and wire. Toroidal distance and Voronoi live next to the analytic unless a second caller needs them; then extract to `api/concepts/`.
 - **BFF** (`bff/analytics/team_information.py`): passthrough `get_map`. Empty export catalog on the Core registration.
-- **SPA** (`src/analytics/team-information/`): merge, preference store, sidebar legend and checkbox, kind filter.
+- **SPA** (`src/analytics/team-information/`): merge, preference store, sidebar legend and checkboxes, kind filter, player-palette paint.
 
 Reuse the turn-analytic catalog, `empty_export_catalog_for`, shared boundary `regionOverlays`, and the map fetch/merge registry. Do not add a query parameter to the shared map route. Do not import another analytic for the partition.
 
 ## League team directory
 
-Legend names come from the **league team directory**, not from this analytic ([#549](https://github.com/SteveDraper/Planets-Console/issues/549)). Drawing them is [#550](https://github.com/SteveDraper/Planets-Console/issues/550).
+Legend names for **team territory** come from the **league team directory**, not from this analytic ([#549](https://github.com/SteveDraper/Planets-Console/issues/549)). Drawing them is [#550](https://github.com/SteveDraper/Planets-Console/issues/550).
 
-Stored GameInfo players already carry `username` and `leagueteamid`. `leagueteamid == 0` is omitted. Each distinct id is resolved once: one public `GET /account/loadprofile` for any member of that id, then the `playergroups` row whose `groupid` equals the id, and `_group.name`. The `{id, name}` pair is cached by league team id, across games. A cached id is not fetched again. An unknown id, a profile with no matching row, or an upstream failure for that id returns `name: null` and leaves the other ids intact. Failures are not cached.
+Stored GameInfo players already carry `username` and `leagueteamid`. `leagueteamid == 0` is omitted from the directory. Each distinct id is resolved once: one public `GET /account/loadprofile` for any member of that id, then the `playergroups` row whose `groupid` equals the id, and `_group.name`. The `{id, name}` pair is cached by league team id, across games. A cached id is not fetched again. An unknown id, a profile with no matching row, or an upstream failure for that id returns `name: null` and leaves the other ids intact. Failures are not cached.
 
 - Core `GET /api/v1/games/{game_id}/league-teams`
 - BFF `GET /bff/games/{game_id}/league-teams` forwards to Core and returns the same body: `{ "teams": [{ "id", "name" }] }`
 
-`api/analytics/team_information.py` does not import the directory service. The SPA does not fold this fetch into the team-information map compute.
+`api/analytics/team_information.py` does not import the directory service. The SPA does not fold this fetch into the Territory map compute. **Player territory** labels come from the turn roster, not this directory.
 
 ## Tests
 
-**Phase 1 (Core)** -- write the failing geometry tests first:
+**Geometry (Core)**:
 
 - Sphere: a site at `x = 1` is nearer to `x = mapwidth - 1` than a site at the middle of the same row. The painted component crosses the seam as two rings inside the rectangle (or one ring per side) with the edge site's league team.
 - Non-sphere: the same pair uses planar distance, so the far side of the seam is not claimed by the edge site.
-- All-planets set: an unowned planet's cell is absent. Owned-planets-only assigns that area to the nearest owned league team.
-- `leagueteamid == 0`: that owner's cells are absent from both kinds.
-- Two adjacent planets on one league team union into one component when they share a border.
+- All-planets set: an unowned planet's cell is absent from both unions. Owned-planets-only assigns that area to the nearest owned player and, when that owner has a league team, to that league team.
+- `leagueteamid == 0`: that owner's cells are absent from both team kinds and present in the player kinds.
+- Two adjacent planets with different owners on one league team: one team component, two player components.
 - Exact tie: lower planet id wins.
 
-**Phase 2 (BFF and SPA)** -- do not repeat the geometry cases:
+**BFF and SPA**:
 
-- Registry metadata: map yes, table no, selectable, catalog order.
+- Registry metadata: map yes, table no, selectable, display name Territory.
 - BFF map returns the Core shape; table route is a validation error.
-- Merger keeps both kinds. The preference filter emits only the selected kind.
-- Legend lists the league team name when the directory has one, otherwise the id. Member usernames stay on the row and are not drawn.
-- Browser: enable the analytic, confirm the tint, toggle **Owned planets only** and confirm holes close without a refetch, and confirm the tile is grey in tabular mode. On a sphere game, confirm color continues across an edge.
-
-## Phases
-
-1. **Core geometry** ([#546](https://github.com/SteveDraper/Planets-Console/issues/546)). Module, catalog entry, registration, empty exports, geometry tests above. No SPA.
-2. **Map and sidebar** ([#547](https://github.com/SteveDraper/Planets-Console/issues/547)). BFF descriptor, frontend merge, checkbox, legend, kind filter, registry tests, quick-reference row in [design-analytics-structure.md](design-analytics-structure.md), browser check. Starts after phase 1 has merged.
+- Merger keeps every kind. The preference filter emits only the selected kind and leaves non-territory overlays alone.
+- **By team** on: legend lists the league team name when the directory has one, otherwise the id. Member usernames stay on the row and are not drawn.
+- **By team** off: legend and hover use the player. Preferences default off, a stored true sticks for that game id only, and a pre-change blob stays off.
+- Browser: the row reads Territory; with the analytic enabled, player colors show; checking **By team** switches to league-team colors with no refetch; reload keeps that choice for this game and not for another. The tile is grey in tabular mode.
 
 ## Out of scope
 
-Context menu for member usernames, edge-mirror margin, in-game `teamid` coloring, tabular tile, export queries, per-team color pickers, client-side distance. League team names are [#549](https://github.com/SteveDraper/Planets-Console/issues/549) and [#550](https://github.com/SteveDraper/Planets-Console/issues/550).
+Context menu for member usernames, edge-mirror margin, in-game `teamid` coloring, tabular tile, export queries, per-team color pickers, per-player legend hide, client-side distance, renaming `analytic_id` or the preferences storage key. League team names are [#549](https://github.com/SteveDraper/Planets-Console/issues/549) and [#550](https://github.com/SteveDraper/Planets-Console/issues/550).

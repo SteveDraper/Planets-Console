@@ -1,15 +1,16 @@
 import { create } from 'zustand'
+import type { HoveredTerritory } from '../analytics/team-information/kinds'
 
 type TeamInformationHighlightState = {
-  /** League team whose regions are outlined. Null when the legend is not hovered. */
-  hoveredLeagueTeamId: number | null
-  setHoveredLeagueTeamId: (hoveredLeagueTeamId: number | null) => void
+  /** Territory legend row under the pointer. Null when no row is hovered. */
+  hoveredTerritory: HoveredTerritory | null
+  setHoveredTerritory: (hoveredTerritory: HoveredTerritory | null) => void
 }
 
 /** Ephemeral legend hover. Not persisted. */
 export const useTeamInformationHighlightStore = create<TeamInformationHighlightState>()(
   (set) => ({
-    hoveredLeagueTeamId: null,
-    setHoveredLeagueTeamId: (hoveredLeagueTeamId) => set({ hoveredLeagueTeamId }),
+    hoveredTerritory: null,
+    setHoveredTerritory: (hoveredTerritory) => set({ hoveredTerritory }),
   })
 )

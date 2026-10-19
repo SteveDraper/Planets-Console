@@ -462,9 +462,9 @@ _Avoid_: cartography overlay circles, Visibility region kinds, painter's-algorit
 One **descriptive** **map hover contribution** (role `minefield`) listing every enabled-type **known minefield** whose pre-decay disk contains the pointer -- same many-rows idea as a **fleet location ring** tooltip listing every ship in the stack. Click / context menu out of scope.
 _Avoid_: picking only the smallest field, one contribution per overlapping field, analytic-private mouse capture
 
-**Team information analytic**:
-A map-only **turn analytic** (`analytic_id` `team-information`) that paints **team territory** for each **league team** on the shell turn. Selectable in the sidebar; greyed in tabular **view mode**. Each legend row can hide that league team's painted fill. Legend hover and map hover still outline and name the team when its fill is hidden. Spec: [design-team-information-analytic.md](docs/design-team-information-analytic.md).
-_Avoid_: in-game team coloring (`Player.teamid`), a tabular roster tile, tinting planet markers only
+**Territory**:
+A map-only **turn analytic** (`analytic_id` `team-information`) that paints the nearest-planet partition of the shell turn. **By team** off paints **player territory**. **By team** on paints **team territory**. Selectable in the sidebar; greyed in tabular **view mode**. Spec: [design-team-information-analytic.md](docs/design-team-information-analytic.md).
+_Avoid_: Team information (as the display name), in-game team coloring (`Player.teamid`), a tabular roster tile
 
 **League team**:
 The competitive organization identified by `Player.leagueteamid`. `0` means that **Player** has no league team. The turn carries the id. The name is the Planets.nu player-group name for that same id (`playergroups.groupid`), not a turn field.
@@ -475,11 +475,15 @@ The shared map from a **league team** id to that team's Planets.nu group name. A
 _Avoid_: team-information analytic payload, in-game team roster
 
 **Team territory**:
-The region of the map closer to a planet owned by that **league team** than to any other site in the active **team territory site set**. Distance is Euclidean light-years, or toroidal on the map rectangle when the game is a **sphere map**.
-_Avoid_: a fixed-radius ownership disk, **player color** as the territory key
+The **Territory** partition unioned by **league team**. Owners with no league team stay unpainted. Each legend row can hide that league team's fill; legend hover and map hover still outline and name it.
+_Avoid_: **player territory**, a fixed-radius ownership disk, in-game team (`Player.teamid`)
+
+**Player territory**:
+The **Territory** partition unioned by the owning **Player**. Every player who owns a planet is a region, including a player with no **league team**. Fills use the per-player palette and ignore diplomacy color mode.
+_Avoid_: **team territory**, diplomacy-family colors
 
 **Team territory site set**:
-Which planets compete as nearest-planet sites for **team territory**. **All planets** leaves cells nearest an unowned planet (`ownerid == 0`) unpainted. **Owned planets only** drops unowned planets, so those cells join the nearest owned planet. Cells whose owner has no **league team** stay unpainted in both sets.
+Which planets compete as nearest-planet sites for **Territory**. **All planets** leaves cells nearest an unowned planet (`ownerid == 0`) unpainted. **Owned planets only** drops unowned planets, so those cells join the nearest owned planet.
 _Avoid_: a second analytic, recomputing the partition in the SPA
 
 **Sphere map**:

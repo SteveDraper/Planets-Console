@@ -5,7 +5,7 @@
 
 import type { HomeworldMapMarker } from '../analytics/homeworld-locator/wireSchema'
 import type { KnownMinefield } from '../analytics/minefields/wireSchema'
-import type { TeamInformationTeam } from '../analytics/team-information/wireSchema'
+import type { TeamInformationPlayer, TeamInformationTeam } from '../analytics/team-information/wireSchema'
 import type { components } from './schema-games'
 import type { MapRegionOverlay } from './mapRegionOverlayTypes'
 
@@ -194,8 +194,10 @@ export type MapDataResponse = {
   homeworldMarkers?: HomeworldMapMarkerWire[]
   /** Known minefields for the Minefields analytic pane. */
   minefields?: KnownMinefield[]
-  /** League teams from the team-information map payload (sidebar legend). */
+  /** League teams from the Territory map payload (by-team legend). */
   teamInformationTeams?: TeamInformationTeam[]
+  /** Players who own a planet on the Territory map payload (by-player legend). */
+  teamInformationPlayers?: TeamInformationPlayer[]
   /** Homeworld locator: baseline used a turn later than 1. */
   baselineDegraded?: boolean
   /** Homeworld locator: turn number used when baseline is degraded. */

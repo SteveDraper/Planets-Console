@@ -29,6 +29,7 @@ export function teamInformationMapDataResponse(
     edges: [],
     regionOverlays: normalizeMapRegionOverlays(payload.regionOverlays),
     teamInformationTeams: payload.teams,
+    teamInformationPlayers: payload.players,
   }
 }
 
