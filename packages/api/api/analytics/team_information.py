@@ -29,9 +29,10 @@ KIND_PLAYER_OWNED = "player-territory-owned-only"
 # with the per-player palette at paint time.
 PLAYER_TERRITORY_FILL_COLOR = "#000000"
 PLAYER_TERRITORY_FILL_PATTERN = "solid"
+_PLAYER_KINDS = frozenset({KIND_PLAYER_ALL, KIND_PLAYER_OWNED})
 
-# (kind, by_player, components of (group id, ring))
-_PaintedPartition = tuple[str, bool, list[tuple[int, list[tuple[float, float]]]]]
+# (kind, components of (group id, ring))
+_PaintedPartition = tuple[str, list[tuple[int, list[tuple[float, float]]]]]
 
 # (owned_only, team kind, player kind)
 _SITE_SETS = (
@@ -106,10 +107,18 @@ def _boundary_overlay(
     group_id: int,
     component: int,
     ring: list[tuple[float, float]],
-    fill_color: str,
-    fill_pattern: str,
-    by_player: bool,
+    styles: dict[int, TeamStyle],
 ) -> dict:
+    """Player kinds carry a player id and a placeholder fill; other kinds carry a league team."""
+    if kind in _PLAYER_KINDS:
+        fill_color = PLAYER_TERRITORY_FILL_COLOR
+        fill_pattern = PLAYER_TERRITORY_FILL_PATTERN
+        owner_field = "playerId"
+    else:
+        style = styles[group_id]
+        fill_color = style.fill_color
+        fill_pattern = style.fill_pattern
+        owner_field = "leagueTeamId"
     overlay = boundary_to_overlay(
         kind=kind,
         overlay_id=f"{kind}:{group_id}:{component}",
@@ -120,10 +129,7 @@ def _boundary_overlay(
         fill_pattern=fill_pattern,
     )
     wire = map_region_overlay_to_wire(overlay)
-    if by_player:
-        wire["playerId"] = group_id
-    else:
-        wire["leagueTeamId"] = group_id
+    wire[owner_field] = group_id
     return wire
 
 
@@ -137,7 +143,7 @@ def _painted_partitions(
     turn: TurnInfo,
     league_team_by_player: dict[int, int],
 ) -> tuple[list[_PaintedPartition], dict[int, set[int]]]:
-    """Each entry is ``(kind, by_player, components)``."""
+    """Each entry is ``(kind, components)``."""
     width = turn.settings.mapwidth
     height = turn.settings.mapheight
     sphere = turn.settings.sphere
@@ -150,8 +156,8 @@ def _painted_partitions(
             height=height,
             sphere=sphere,
         )
-        partitions.append((team_kind, False, team_components))
-        partitions.append((player_kind, True, player_components))
+        partitions.append((team_kind, team_components))
+        partitions.append((player_kind, player_components))
         for team_id, bordering in adjacent.items():
             neighbors[team_id].update(bordering)
     return partitions, neighbors
@@ -162,18 +168,11 @@ def _region_overlays(
     styles: dict[int, TeamStyle],
 ) -> list[dict]:
     overlays: list[dict] = []
-    for kind, by_player, components in partitions:
+    for kind, components in partitions:
         grouped: dict[int, list[list[tuple[float, float]]]] = defaultdict(list)
         for group_id, ring in components:
             grouped[group_id].append(ring)
         for group_id in sorted(grouped):
-            if by_player:
-                fill_color = PLAYER_TERRITORY_FILL_COLOR
-                fill_pattern = PLAYER_TERRITORY_FILL_PATTERN
-            else:
-                style = styles[group_id]
-                fill_color = style.fill_color
-                fill_pattern = style.fill_pattern
             for component, ring in enumerate(grouped[group_id]):
                 overlays.append(
                     _boundary_overlay(
@@ -181,9 +180,7 @@ def _region_overlays(
                         group_id=group_id,
                         component=component,
                         ring=ring,
-                        fill_color=fill_color,
-                        fill_pattern=fill_pattern,
-                        by_player=by_player,
+                        styles=styles,
                     )
                 )
     return overlays
