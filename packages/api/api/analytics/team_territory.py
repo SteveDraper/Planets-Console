@@ -9,7 +9,7 @@ to the lower planet id.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import shapely
@@ -29,12 +29,17 @@ class TerritoryRingError(CoreAPIError):
 
 @dataclass(frozen=True)
 class TerritorySite:
-    """One planet competing for team territory."""
+    """One planet competing for nearest-planet territory.
+
+    ``league_team_id`` unions **team territory** (``0`` stays unpainted).
+    ``owner_id`` unions **player territory** (``0`` is unowned and stays unpainted).
+    """
 
     planet_id: int
     x: float
     y: float
     league_team_id: int
+    owner_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -111,6 +116,7 @@ def _replicated_sites(
                         x=site.x + i * rectangle.width,
                         y=site.y + j * rectangle.height,
                         league_team_id=site.league_team_id,
+                        owner_id=site.owner_id,
                     )
                 )
     return replicas
@@ -127,23 +133,37 @@ def _coincident_winners(sites: Sequence[TerritorySite]) -> list[TerritorySite]:
     return list(winners.values())
 
 
-def _team_regions(
+def _voronoi_cells(
     sites: Sequence[TerritorySite],
     *,
     rectangle: Polygon,
-) -> dict[int, list[Polygon]]:
-    """Voronoi cells unioned by league team and clipped to ``rectangle``."""
+) -> list[tuple[TerritorySite, Polygon]]:
+    """One clipped-ready Voronoi cell per site, in site order."""
     points = MultiPoint([(site.x, site.y) for site in sites])
     extent = box(*shapely.union(points.envelope, rectangle).bounds)
     cells = shapely.voronoi_polygons(points, extend_to=extent, ordered=True).geoms
-    cells_by_team: dict[int, list[Polygon]] = defaultdict(list)
-    for site, cell in zip(sites, cells, strict=True):
-        if site.league_team_id > 0:
-            cells_by_team[site.league_team_id].append(cell)
+    return list(zip(sites, cells, strict=True))
+
+
+def _regions_for_group(
+    cells: Sequence[tuple[TerritorySite, Polygon]],
+    *,
+    rectangle: Polygon,
+    group_id: Callable[[TerritorySite], int],
+) -> dict[int, list[Polygon]]:
+    """Union cells that share a positive group id and clip them to ``rectangle``.
+
+    Group id ``0`` is omitted (no league team, or an unowned planet).
+    """
+    cells_by_group: dict[int, list[Polygon]] = defaultdict(list)
+    for site, cell in cells:
+        key = group_id(site)
+        if key > 0:
+            cells_by_group[key].append(cell)
     regions: dict[int, list[Polygon]] = {}
-    for team_id, cells_for_team in cells_by_team.items():
-        clipped = shapely.intersection(shapely.union_all(cells_for_team), rectangle)
-        regions[team_id] = [
+    for key, cells_for_group in cells_by_group.items():
+        clipped = shapely.intersection(shapely.union_all(cells_for_group), rectangle)
+        regions[key] = [
             polygon
             for polygon in shapely.get_parts(clipped)
             if isinstance(polygon, Polygon) and polygon.area > 0.0
@@ -289,6 +309,62 @@ def _touching_teams(
     return neighbors
 
 
+def _components(regions: dict[int, list[Polygon]]) -> list[tuple[int, list[Point]]]:
+    """``(group_id, ring)`` for each disjoint piece, group ids ascending."""
+    components: list[tuple[int, list[Point]]] = []
+    for group_id in sorted(regions):
+        rings = sorted(
+            (_single_ring(polygon) for polygon in regions[group_id]),
+            key=_ring_sort_key,
+        )
+        components.extend((group_id, ring) for ring in rings)
+    return components
+
+
+def _prepared_cells(
+    sites: Sequence[TerritorySite],
+    *,
+    width: int,
+    height: int,
+    sphere: bool,
+) -> tuple[MapRectangle, list[tuple[TerritorySite, Polygon]]] | None:
+    if width <= 0 or height <= 0 or not sites:
+        return None
+    rectangle = nu_map_rectangle(width, height)
+    replicas = _replicated_sites(sites, rectangle=rectangle, sphere=sphere)
+    clip = box(rectangle.left, rectangle.bottom, rectangle.right, rectangle.top)
+    return rectangle, _voronoi_cells(_coincident_winners(replicas), rectangle=clip)
+
+
+def territory_unions(
+    sites: Sequence[TerritorySite],
+    *,
+    width: int,
+    height: int,
+    sphere: bool,
+) -> tuple[list[tuple[int, list[Point]]], list[tuple[int, list[Point]]], dict[int, set[int]]]:
+    """Team components, player components, and which league teams share a border.
+
+    One Voronoi of the site set. Team components union cells by ``league_team_id``
+    and omit ``<= 0``. Player components union the same cells by ``owner_id`` and
+    omit unowned sites. A hole in a union is cut into that component's ring.
+    """
+    prepared = _prepared_cells(sites, width=width, height=height, sphere=sphere)
+    if prepared is None:
+        return [], [], {}
+    rectangle, cells = prepared
+    clip = box(rectangle.left, rectangle.bottom, rectangle.right, rectangle.top)
+    team_regions = _regions_for_group(
+        cells, rectangle=clip, group_id=lambda site: site.league_team_id
+    )
+    player_regions = _regions_for_group(cells, rectangle=clip, group_id=lambda site: site.owner_id)
+    return (
+        _components(team_regions),
+        _components(player_regions),
+        _touching_teams(team_regions, rectangle=rectangle, sphere=sphere),
+    )
+
+
 def territory_partition(
     sites: Sequence[TerritorySite],
     *,
@@ -296,23 +372,14 @@ def territory_partition(
     height: int,
     sphere: bool,
 ) -> tuple[list[tuple[int, list[Point]]], dict[int, set[int]]]:
-    """Painted components and which league teams share a border.
+    """Painted team components and which league teams share a border.
 
     Components are ``(league_team_id, ring)``. Cells whose site has
     ``league_team_id <= 0`` are omitted. Same-team cells that share a border
     become one ring. A hole in that union is cut into the same ring so the hole
     is not filled.
     """
-    if width <= 0 or height <= 0 or not sites:
-        return [], {}
-    rectangle = nu_map_rectangle(width, height)
-    replicas = _replicated_sites(sites, rectangle=rectangle, sphere=sphere)
-    regions = _team_regions(
-        _coincident_winners(replicas),
-        rectangle=box(rectangle.left, rectangle.bottom, rectangle.right, rectangle.top),
+    team_components, _player_components, neighbors = territory_unions(
+        sites, width=width, height=height, sphere=sphere
     )
-    components: list[tuple[int, list[Point]]] = []
-    for team_id in sorted(regions):
-        rings = sorted((_single_ring(polygon) for polygon in regions[team_id]), key=_ring_sort_key)
-        components.extend((team_id, ring) for ring in rings)
-    return components, _touching_teams(regions, rectangle=rectangle, sphere=sphere)
+    return team_components, neighbors

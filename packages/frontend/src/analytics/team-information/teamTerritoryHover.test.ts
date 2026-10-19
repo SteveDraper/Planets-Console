@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import { teamTerritoryHoverLinesAtMapPoint } from './teamTerritoryHover'
+import { playerTerritoryHoverLinesAtMapPoint, teamTerritoryHoverLinesAtMapPoint } from './teamTerritoryHover'
 
 function territory(leagueTeamId: number, vertices: { x: number; y: number }[]): MapRegionOverlay {
   return {
@@ -63,5 +63,33 @@ describe('teamTerritoryHoverLinesAtMapPoint', () => {
     expect(
       teamTerritoryHoverLinesAtMapPoint([triangle, second], 1, 1, new Map([[4, 'Alpha']]))
     ).toEqual(['Alpha'])
+  })
+})
+
+describe('playerTerritoryHoverLinesAtMapPoint', () => {
+  const region: MapRegionOverlay = {
+    kind: 'player-territory',
+    id: 'player-territory:1:0',
+    fillColor: '#000000',
+    fillOpacity: 0.35,
+    fillPattern: 'solid',
+    playerId: 1,
+    geometry: triangle.geometry,
+  }
+
+  it('names the player whose territory contains the point', () => {
+    expect(playerTerritoryHoverLinesAtMapPoint([region], 2, 2, new Map([[1, 'alice']]))).toEqual([
+      'alice',
+    ])
+  })
+
+  it('uses the numeric id when the username is missing', () => {
+    expect(playerTerritoryHoverLinesAtMapPoint([region], 2, 2, new Map())).toEqual(['1'])
+  })
+
+  it('ignores league-team territory', () => {
+    expect(
+      playerTerritoryHoverLinesAtMapPoint([triangle], 2, 2, new Map([[1, 'alice']]))
+    ).toEqual([])
   })
 })

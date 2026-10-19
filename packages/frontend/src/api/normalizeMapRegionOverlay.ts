@@ -247,6 +247,11 @@ export function normalizeMapRegionOverlay(raw: unknown): MapRegionOverlay | null
     return null
   }
   if (leagueTeamId !== undefined) overlay.leagueTeamId = leagueTeamId
+  const playerId = normalizeOptionalPositiveInt(o.playerId ?? o.player_id)
+  if ((o.playerId !== undefined || o.player_id !== undefined) && playerId === undefined) {
+    return null
+  }
+  if (playerId !== undefined) overlay.playerId = playerId
   const isPinned = normalizeOptionalBoolean(o.isPinned ?? o.is_pinned)
   if (isPinned !== undefined) overlay.isPinned = isPinned
   // Reject non-boolean isPinned when the key is present

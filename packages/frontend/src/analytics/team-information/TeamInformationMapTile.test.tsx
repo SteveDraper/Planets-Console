@@ -14,6 +14,7 @@ import {
   TEAM_INFORMATION_PREFERENCES_STORAGE_KEY,
   useTeamInformationPreferencesStore,
 } from '../../stores/teamInformationPreferences'
+import { defaultColorForPlayerId } from '../../lib/playerColor'
 import { fetchTeamInformationMap } from './api'
 import { TeamInformationMapTile } from './TeamInformationMapTile'
 
@@ -44,6 +45,7 @@ const mapPayload: MapDataResponse = {
   teamInformationTeams: [
     { leagueTeamId: 4, fillColor: '#38bdf8', fillPattern: 'forward', playerIds: [1, 2] },
   ],
+  teamInformationPlayers: [{ playerId: 1 }, { playerId: 2 }],
 }
 
 function seedTurnRoster(client: QueryClient) {
@@ -73,8 +75,9 @@ describe('TeamInformationMapTile', () => {
     useTeamInformationPreferencesStore.setState({
       ownedPlanetsOnly: false,
       hiddenLeagueTeamIds: [],
+      byTeamByGameId: {},
     })
-    useTeamInformationHighlightStore.setState({ hoveredLeagueTeamId: null })
+    useTeamInformationHighlightStore.setState({ hoveredLeagueTeamId: null, hoveredPlayerId: null })
     useSessionStore.setState({ name: 'alice', password: null, credentialsRevision: 0 })
     useShellStore.setState({
       gameInfoContext: {
@@ -100,7 +103,7 @@ describe('TeamInformationMapTile', () => {
   it('greys the tile in tabular mode', () => {
     const { container } = renderTile(
       <TeamInformationMapTile
-        name="Team information"
+        name="Territory"
         enabled
         supportsMode={false}
         depressed={false}
@@ -110,18 +113,18 @@ describe('TeamInformationMapTile', () => {
       />
     )
     expect(container.firstChild).toHaveClass('opacity-50')
-    expect(screen.getByRole('checkbox', { name: 'Team information' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Expand Team information options' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: 'Territory' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Expand Territory options' })).toBeDisabled()
     expect(screen.queryByRole('checkbox', { name: 'Owned planets only' })).not.toBeInTheDocument()
     expect(fetchTeamInformationMap).not.toHaveBeenCalled()
     expect(fetchLeagueTeams).not.toHaveBeenCalled()
   })
 
-  it('shows the league team name, hides member usernames, and toggling does not refetch', async () => {
+  it('shows player names by default and switches to league teams without a refetch', async () => {
     const user = userEvent.setup()
     renderTile(
       <TeamInformationMapTile
-        name="Team information"
+        name="Territory"
         enabled
         supportsMode
         depressed
@@ -131,19 +134,30 @@ describe('TeamInformationMapTile', () => {
       />,
       seedTurnRoster
     )
-    await user.click(screen.getByRole('button', { name: 'Expand Team information options' }))
-    expect(await screen.findByText('Blue Squadron')).toBeInTheDocument()
-    expect(screen.getByRole('listitem')).toHaveAttribute('title', 'alice, carol')
-    expect(screen.queryByText('4')).not.toBeInTheDocument()
-    expect(screen.queryByText('alice, carol')).not.toBeInTheDocument()
-    expect(screen.queryByText('alice')).not.toBeInTheDocument()
-    expect(screen.queryByText('carol')).not.toBeInTheDocument()
-    expect(document.querySelector('[data-fill-pattern="forward"]')).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    expect(screen.getByRole('checkbox', { name: 'By team' })).not.toBeChecked()
+    expect(await screen.findByText('alice')).toBeInTheDocument()
+    expect(screen.getByText('carol')).toBeInTheDocument()
+    expect(screen.queryByText('Blue Squadron')).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /Show .* territory/ })).not.toBeInTheDocument()
+    const aliceSwatch = document.querySelector('[data-fill-pattern="solid"]')
+    expect(aliceSwatch).toHaveStyle({ backgroundColor: defaultColorForPlayerId(1) })
+    await user.hover(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredPlayerId).toBe(1)
+    await user.unhover(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredPlayerId).toBeNull()
     await waitFor(() => {
       expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
       expect(fetchLeagueTeams).toHaveBeenCalledTimes(1)
-      expect(fetchLeagueTeams).toHaveBeenCalledWith('628580')
     })
+    await user.click(screen.getByRole('checkbox', { name: 'By team' }))
+    expect(useTeamInformationPreferencesStore.getState().byTeamByGameId).toEqual({
+      '628580': true,
+    })
+    expect(await screen.findByText('Blue Squadron')).toBeInTheDocument()
+    expect(screen.getByRole('listitem')).toHaveAttribute('title', 'alice, carol')
+    expect(screen.queryByText('alice, carol')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-fill-pattern="forward"]')).not.toBeNull()
     await user.hover(screen.getByRole('listitem'))
     expect(useTeamInformationHighlightStore.getState().hoveredLeagueTeamId).toBe(4)
     await user.unhover(screen.getByRole('listitem'))
@@ -158,7 +172,7 @@ describe('TeamInformationMapTile', () => {
     const user = userEvent.setup()
     renderTile(
       <TeamInformationMapTile
-        name="Team information"
+        name="Territory"
         enabled
         supportsMode
         depressed
@@ -168,7 +182,8 @@ describe('TeamInformationMapTile', () => {
       />,
       seedTurnRoster
     )
-    await user.click(screen.getByRole('button', { name: 'Expand Team information options' }))
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    await user.click(screen.getByRole('checkbox', { name: 'By team' }))
     const showTerritory = await screen.findByRole('checkbox', {
       name: 'Show Blue Squadron territory',
     })
@@ -190,7 +205,7 @@ describe('TeamInformationMapTile', () => {
     })
     renderTile(
       <TeamInformationMapTile
-        name="Team information"
+        name="Territory"
         enabled
         supportsMode
         depressed
@@ -200,10 +215,60 @@ describe('TeamInformationMapTile', () => {
       />,
       seedTurnRoster
     )
-    await user.click(screen.getByRole('button', { name: 'Expand Team information options' }))
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    await user.click(screen.getByRole('checkbox', { name: 'By team' }))
     expect(await screen.findByText('4')).toBeInTheDocument()
     expect(screen.queryByText('alice, carol')).not.toBeInTheDocument()
     expect(screen.queryByText('alice')).not.toBeInTheDocument()
     expect(screen.queryByText('carol')).not.toBeInTheDocument()
+  })
+
+  it('shows the numeric player id when the roster name is missing', async () => {
+    const user = userEvent.setup()
+    useShellStore.setState({
+      gameInfoContext: {
+        turn: 5,
+        perspectives: [],
+        isGameFinished: true,
+        sectorDisplayName: null,
+        stellarCartographyGates: EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES,
+        homeworldInactiveReason: null,
+      },
+    })
+    renderTile(
+      <TeamInformationMapTile
+        name="Territory"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        analyticScope={sampleScope}
+        turnDataReady
+      />
+    )
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    expect(await screen.findByText('1')).toBeInTheDocument()
+    expect(screen.getByText('2')).toBeInTheDocument()
+  })
+
+  it('does not write by team when no game is open', async () => {
+    const user = userEvent.setup()
+    renderTile(
+      <TeamInformationMapTile
+        name="Territory"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        analyticScope={null}
+        turnDataReady
+      />
+    )
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    const byTeam = screen.getByRole('checkbox', { name: 'By team' })
+    expect(byTeam).not.toBeChecked()
+    await user.click(byTeam)
+    expect(byTeam).not.toBeChecked()
+    expect(useTeamInformationPreferencesStore.getState().byTeamByGameId).toEqual({})
   })
 })

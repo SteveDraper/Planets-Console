@@ -94,7 +94,7 @@ def test_registry_metadata_keeps_team_information_selectable_map_only():
     team_information = next(a for a in ANALYTICS_LIST if a["id"] == "team-information")
     assert team_information == {
         "id": "team-information",
-        "name": "Team information",
+        "name": "Territory",
         "supportsTable": False,
         "supportsMap": True,
         "type": "selectable",

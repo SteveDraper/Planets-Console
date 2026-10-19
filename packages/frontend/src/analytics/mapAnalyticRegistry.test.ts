@@ -188,7 +188,7 @@ describe('map analytic registry', () => {
       TEAM_INFORMATION_ANALYTIC_ID,
       'map',
       sampleScope,
-      'territory-v2',
+      'territory-v3',
     ])
     expect(spec.enabled).toBe(true)
   })

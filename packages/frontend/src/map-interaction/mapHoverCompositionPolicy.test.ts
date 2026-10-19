@@ -187,7 +187,7 @@ describe('composeMapHoverContributions', () => {
         id: 'team-territory',
         role: 'team-territory',
         kind: 'descriptive',
-        title: 'Team information',
+        title: 'Territory',
       }),
       contribution({
         id: 'cartography:1',
@@ -216,7 +216,7 @@ describe('composeMapHoverContributions', () => {
         id: 'team-territory',
         role: 'team-territory',
         kind: 'descriptive',
-        title: 'Team information',
+        title: 'Territory',
       }),
     ])
     expect(onPlanet.suppressedIds).toEqual(['team-territory'])
@@ -325,7 +325,7 @@ describe('composeMapHoverContributions', () => {
         id: 'team-territory',
         role: 'team-territory',
         kind: 'descriptive',
-        title: 'Team information',
+        title: 'Territory',
       }),
     ])
 

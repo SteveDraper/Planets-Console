@@ -1,4 +1,4 @@
-"""Team information analytic: nearest-planet territory geometry."""
+"""Territory analytic: nearest-planet territory geometry."""
 
 from __future__ import annotations
 
@@ -21,6 +21,10 @@ from tests.homeworld_locator_test_helpers import _planet, load_sample_turn
 
 KIND_ALL = "team-territory"
 KIND_OWNED = "team-territory-owned-only"
+KIND_PLAYER_ALL = "player-territory"
+KIND_PLAYER_OWNED = "player-territory-owned-only"
+_TEAM_KINDS = {KIND_ALL, KIND_OWNED}
+_PLAYER_KINDS = {KIND_PLAYER_ALL, KIND_PLAYER_OWNED}
 
 
 def _roster_player(template: Player, *, player_id: int, league_team_id: int) -> Player:
@@ -114,6 +118,24 @@ def _teams_at_absolute(payload: dict, kind: str, x: float, y: float) -> set[int]
     return found
 
 
+def _owners_at_absolute(payload: dict, kind: str, x: float, y: float) -> set[int]:
+    found: set[int] = set()
+    for overlay in payload["regionOverlays"]:
+        if overlay["kind"] != kind:
+            continue
+        if _contains(_rings(overlay), x, y):
+            found.add(overlay["playerId"])
+    return found
+
+
+def _owners_at(
+    payload: dict, kind: str, x: float, y: float, *, width: int, height: int
+) -> set[int]:
+    """Probe a point given in rectangle-local coordinates (origin at the lower left)."""
+    rectangle = nu_map_rectangle(width, height)
+    return _owners_at_absolute(payload, kind, x + rectangle.left, y + rectangle.bottom)
+
+
 def _teams_at(payload: dict, kind: str, x: float, y: float, *, width: int, height: int) -> set[int]:
     """Probe a point given in rectangle-local coordinates (origin at the lower left)."""
     rectangle = nu_map_rectangle(width, height)
@@ -130,7 +152,6 @@ def _assert_boundary_wire(payload: dict, *, width: int, height: int) -> None:
     rectangle = nu_map_rectangle(width, height)
     for overlay in payload["regionOverlays"]:
         assert overlay["fillOpacity"] == 0.35
-        assert isinstance(overlay["leagueTeamId"], int)
         assert "name" not in overlay
         assert "label" not in overlay
         geometry = overlay["geometry"]
@@ -141,12 +162,21 @@ def _assert_boundary_wire(payload: dict, *, width: int, height: int) -> None:
         for vertex in vertices:
             assert rectangle.left <= vertex["x"] <= rectangle.right
             assert rectangle.bottom <= vertex["y"] <= rectangle.top
-        assert overlay["id"].startswith(f"{overlay['kind']}:{overlay['leagueTeamId']}:")
+        if overlay["kind"] in _TEAM_KINDS:
+            assert isinstance(overlay["leagueTeamId"], int)
+            assert "playerId" not in overlay
+            assert overlay["id"].startswith(f"{overlay['kind']}:{overlay['leagueTeamId']}:")
+        else:
+            assert overlay["kind"] in _PLAYER_KINDS
+            assert isinstance(overlay["playerId"], int)
+            assert "leagueTeamId" not in overlay
+            assert overlay["fillPattern"] == "solid"
+            assert overlay["id"].startswith(f"{overlay['kind']}:{overlay['playerId']}:")
 
 
 def test_catalog_registers_map_only_team_information() -> None:
     entry = catalog_entry(ANALYTIC_ID)
-    assert entry.name == "Team information"
+    assert entry.name == "Territory"
     assert entry.supports_table is False
     assert entry.supports_map is True
     assert entry.type == "selectable"
@@ -191,7 +221,7 @@ def test_sphere_edge_site_claims_far_side_inside_the_rectangle() -> None:
         },
     ]
     for overlay in payload["regionOverlays"]:
-        if overlay["leagueTeamId"] == 4:
+        if overlay.get("leagueTeamId") == 4:
             assert overlay["fillColor"] == fill_hex_for_hue(0)
             assert overlay["fillPattern"] == "solid"
 
@@ -234,6 +264,9 @@ def test_unowned_cell_is_absent_until_owned_planets_only() -> None:
     assert _teams_at(payload, KIND_ALL, 8, 5, width=width, height=height) == {5}
     assert _teams_at(payload, KIND_OWNED, 32, 5, width=width, height=height) == {5}
     assert _teams_at(payload, KIND_OWNED, 8, 5, width=width, height=height) == {5}
+    assert _owners_at(payload, KIND_PLAYER_ALL, 32, 5, width=width, height=height) == set()
+    assert _owners_at(payload, KIND_PLAYER_ALL, 8, 5, width=width, height=height) == {1}
+    assert _owners_at(payload, KIND_PLAYER_OWNED, 32, 5, width=width, height=height) == {1}
 
 
 def test_player_without_league_team_is_absent_from_both_site_sets() -> None:
@@ -253,6 +286,10 @@ def test_player_without_league_team_is_absent_from_both_site_sets() -> None:
     assert _teams_at(payload, KIND_OWNED, 8, 5, width=width, height=height) == set()
     assert _teams_at(payload, KIND_ALL, 32, 5, width=width, height=height) == {7}
     assert _teams_at(payload, KIND_OWNED, 32, 5, width=width, height=height) == {7}
+    assert _owners_at(payload, KIND_PLAYER_ALL, 8, 5, width=width, height=height) == {1}
+    assert _owners_at(payload, KIND_PLAYER_OWNED, 8, 5, width=width, height=height) == {1}
+    assert _owners_at(payload, KIND_PLAYER_ALL, 32, 5, width=width, height=height) == {2}
+    assert payload["players"] == [{"playerId": 1}, {"playerId": 2}]
     assert payload["teams"] == [
         {
             "leagueTeamId": 7,
@@ -280,6 +317,12 @@ def test_bordering_planets_on_one_league_team_union_into_one_component() -> None
     assert len(same_team) == 1
     assert same_team[0]["leagueTeamId"] == 4
     assert same_team[0]["id"] == "team-territory:4:0"
+    player = [
+        overlay for overlay in payload["regionOverlays"] if overlay["kind"] == KIND_PLAYER_ALL
+    ]
+    assert len(player) == 2
+    assert {overlay["playerId"] for overlay in player} == {1, 2}
+    assert payload["players"] == [{"playerId": 1}, {"playerId": 2}]
     ring = _rings(same_team[0])
     assert _contains(ring, *_local(width, height, 1, 1))
     assert _contains(ring, *_local(width, height, 39, 19))
@@ -308,7 +351,17 @@ def test_exact_tie_lower_planet_id_wins() -> None:
     _assert_boundary_wire(payload, width=width, height=height)
     assert _teams_at(payload, KIND_ALL, 1, 1, width=width, height=height) == {2}
     assert _teams_at(payload, KIND_OWNED, 1, 1, width=width, height=height) == {2}
-    assert all(overlay["leagueTeamId"] != 9 for overlay in payload["regionOverlays"])
+    assert _owners_at(payload, KIND_PLAYER_ALL, 1, 1, width=width, height=height) == {1}
+    assert all(
+        overlay.get("leagueTeamId") != 9
+        for overlay in payload["regionOverlays"]
+        if overlay["kind"] in _TEAM_KINDS
+    )
+    assert all(
+        overlay.get("playerId") != 2
+        for overlay in payload["regionOverlays"]
+        if overlay["kind"] in _PLAYER_KINDS
+    )
     assert {team["leagueTeamId"] for team in payload["teams"]} == {2, 9}
 
 

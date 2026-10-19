@@ -48,19 +48,23 @@ import {
   useEffectiveHomeworldSectorIndexes,
   useHomeworldRegionSelectionMaterialize,
 } from '../analytics/homeworld-locator/useHomeworldRegionSelection'
-import { isTeamTerritoryKind } from '../analytics/team-information/kinds'
+import { isPlayerTerritoryKind, isTeamTerritoryKind } from '../analytics/team-information/kinds'
+import { applyPlayerTerritoryFillColors } from '../analytics/team-information/playerTerritoryColor'
 import {
   mapRegionOverlaysForPaint,
   omitHiddenTeamTerritoryOverlays,
 } from '../analytics/team-information/teamTerritoryPaint'
 import { useLeagueTeamNames } from '../analytics/team-information/useLeagueTeamNames'
+import { useTurnRosterUsernames } from '../analytics/team-information/useTurnRosterUsernames'
+import { rosterUsernames } from '../analytics/team-information/rosterUsernames'
 import { applyVisibilityRegionPreferences } from '../analytics/visibility/visibilityRegionPreferences'
 import { homeworldOverlaysReadyForMaterialize } from '../lib/homeworldRegionSelection'
 import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
 import { useTeamInformationHighlightStore } from '../stores/teamInformationHighlight'
-import { useTeamInformationPreferencesStore } from '../stores/teamInformationPreferences'
+import { byTeamForGame, useTeamInformationPreferencesStore } from '../stores/teamInformationPreferences'
+import { usePlayerColorsStore } from '../stores/playerColors'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
 import { useWormholeLineRevealStore } from '../stores/wormholeLineReveal'
@@ -251,15 +255,25 @@ function MapGraphFlow({
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
   const ownedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.ownedPlanetsOnly)
   const hiddenLeagueTeamIds = useTeamInformationPreferencesStore((s) => s.hiddenLeagueTeamIds)
+  const byTeam = useTeamInformationPreferencesStore((s) =>
+    byTeamForGame(s.byTeamByGameId, analyticScope.gameId)
+  )
+  const paintSnapshot = usePlayerColorsStore((s) => s.paintSnapshot)
   const enabledAnalyticIds = useEnabledAnalyticsStore((s) => s.enabledIds)
   const homeworldEnabled = enabledAnalyticIds.includes(HOMEWORLD_LOCATOR_ANALYTIC_ID)
   const fleetEnabled = enabledAnalyticIds.includes(FLEET_ANALYTIC_ID)
   const minefieldsEnabled = enabledAnalyticIds.includes(MINEFIELDS_ANALYTIC_ID)
   const teamInformationEnabled = enabledAnalyticIds.includes(TEAM_INFORMATION_ANALYTIC_ID)
   const hoveredLeagueTeamId = useTeamInformationHighlightStore((s) => s.hoveredLeagueTeamId)
+  const hoveredPlayerId = useTeamInformationHighlightStore((s) => s.hoveredPlayerId)
   const teamNamesByLeagueTeamId = useLeagueTeamNames(
     analyticScope.gameId,
     teamInformationEnabled
+  )
+  const turnUsernames = useTurnRosterUsernames(analyticScope)
+  const usernamesByPlayerId = useMemo(
+    () => rosterUsernames(roster, turnUsernames),
+    [roster, turnUsernames]
   )
   const fleetStacks = useFleetLocationRingStacks(analyticScope, fleetEnabled)
   const fleetHeadingTrails = useFleetHeadingTrails(
@@ -297,20 +311,28 @@ function MapGraphFlow({
   // Raw homeworld sector overlays for ownership assert keying (independent of paint filter).
   const ownershipRegionOverlays = data.regionOverlays
 
-  // Visibility prefs → region selection + envelope toggle.
-  // Site-set selection only. Legend checkboxes filter paint, not hover.
+  // Kind selection, then player-palette colors. Legend checkboxes filter paint, not hover.
   const regionOverlays = useMemo(
     () =>
-      mapRegionOverlaysForPaint(data.regionOverlays, ownedPlanetsOnly, (nonTeam) =>
-        buildHomeworldRegionOverlaysForPaint({
-          overlays: applyVisibilityRegionPreferences(nonTeam, visibilityKinds),
-          effectiveSelectedSectorIndexes: selectedSectorIndexes,
-          showEnvelopeOverlays,
-        })
+      applyPlayerTerritoryFillColors(
+        mapRegionOverlaysForPaint(
+          data.regionOverlays,
+          byTeam,
+          ownedPlanetsOnly,
+          (nonTerritory) =>
+            buildHomeworldRegionOverlaysForPaint({
+              overlays: applyVisibilityRegionPreferences(nonTerritory, visibilityKinds),
+              effectiveSelectedSectorIndexes: selectedSectorIndexes,
+              showEnvelopeOverlays,
+            })
+        ),
+        paintSnapshot
       ),
     [
+      byTeam,
       data.regionOverlays,
       ownedPlanetsOnly,
+      paintSnapshot,
       visibilityKinds,
       selectedSectorIndexes,
       showEnvelopeOverlays,
@@ -320,13 +342,26 @@ function MapGraphFlow({
     () => omitHiddenTeamTerritoryOverlays(regionOverlays, hiddenLeagueTeamIds),
     [hiddenLeagueTeamIds, regionOverlays]
   )
-  const highlightedTeamOverlays = useMemo(() => {
-    if (!teamInformationEnabled || hoveredLeagueTeamId == null) return []
+  const highlightedTerritoryOverlays = useMemo(() => {
+    if (!teamInformationEnabled) return []
+    if (byTeam) {
+      if (hoveredLeagueTeamId == null) return []
+      return regionOverlays.filter(
+        (overlay) =>
+          isTeamTerritoryKind(overlay.kind) && overlay.leagueTeamId === hoveredLeagueTeamId
+      )
+    }
+    if (hoveredPlayerId == null) return []
     return regionOverlays.filter(
-      (overlay) =>
-        isTeamTerritoryKind(overlay.kind) && overlay.leagueTeamId === hoveredLeagueTeamId
+      (overlay) => isPlayerTerritoryKind(overlay.kind) && overlay.playerId === hoveredPlayerId
     )
-  }, [hoveredLeagueTeamId, regionOverlays, teamInformationEnabled])
+  }, [
+    byTeam,
+    hoveredLeagueTeamId,
+    hoveredPlayerId,
+    regionOverlays,
+    teamInformationEnabled,
+  ])
 
   return (
     <FleetLocationRingStacksProvider stacks={fleetStacks}>
@@ -366,7 +401,7 @@ function MapGraphFlow({
         />
       ) : null}
       <MapRegionOverlayPane regionOverlays={paintedRegionOverlays} />
-      <TeamTerritoryHighlightOutline regionOverlays={highlightedTeamOverlays} />
+      <TeamTerritoryHighlightOutline regionOverlays={highlightedTerritoryOverlays} />
       <MinefieldMapPane minefields={data.minefields} shellTurn={analyticScope.turn} />
       <NormalWarpWellOutlinesOverlay mapNodes={planetMapNodes} />
       <HomeworldMarkersOverlay markers={data.homeworldMarkers} />
@@ -401,6 +436,8 @@ function MapGraphFlow({
         <TeamTerritoryMapInteractionContributor
           regionOverlays={regionOverlays}
           namesByLeagueTeamId={teamNamesByLeagueTeamId}
+          usernamesByPlayerId={usernamesByPlayerId}
+          byTeam={byTeam}
           enabled={teamInformationEnabled}
         />
         <CartographyMapInteractionContributor cartography={cartography} />

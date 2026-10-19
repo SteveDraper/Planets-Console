@@ -8,7 +8,7 @@ Related docs:
 - [Compute orchestrator](design-compute-orchestrator.md) -- unified Core compute scheduling (ADR 0005)
 - [Analytic exports](design-analytic-exports.md) -- cross-analytic queries, JSONPath, materializers
 - [Connections analytic](design-connections-analytic.md) -- reference for a map analytic with query params
-- [Team information analytic](design-team-information-analytic.md) -- map-only nearest-planet league-team territory
+- [Territory analytic](design-team-information-analytic.md) -- map-only nearest-planet partition, by player or by league team
 - [Frontend/backend state](design-frontend-and-backend-state.md) -- shell context and turn ensure gating
 
 ## Layer responsibilities
@@ -152,6 +152,6 @@ Unregistered selectable ids keep generic checkbox + generic table -- not an erro
 | `visibility` | `visibility.py` | `visibility.py` | no | yes (region overlays) | shell chrome + map registry (`src/analytics/visibility/`) |
 | `homeworld-locator` | `homeworld_locator/` | `homeworld_locator.py` | yes | yes (markers) | shell chrome + `availability` (`src/analytics/homeworld-locator/`) |
 | `minefields` | `minefields.py` | `minefields.py` | no | yes (minefield pane) | shell chrome + `availability` + map registry (`src/analytics/minefields/`) |
-| `team-information` | `team_information.py` | `team_information.py` | no | yes (region overlays) | shell chrome + map registry (`src/analytics/team-information/`) |
+| `team-information` | `team_information.py` | `team_information.py` | no | yes (region overlays; player or league-team partition) | shell chrome + map registry (`src/analytics/team-information/`); display name Territory |
 
 `fleet` is the first **selectable** analytic that supports both table and map.

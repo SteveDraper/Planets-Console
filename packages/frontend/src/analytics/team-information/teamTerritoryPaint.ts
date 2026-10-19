@@ -1,22 +1,24 @@
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
-import { isTeamTerritoryKind, TEAM_TERRITORY_KIND, TEAM_TERRITORY_OWNED_ONLY_KIND } from './kinds'
+import { isTeamTerritoryKind, isTerritoryKind, territoryPaintKind } from './kinds'
 
 /**
- * Keep one team-territory site set. Other kinds pass through.
- * ``ownedPlanetsOnly`` false paints ``team-territory``; true paints
- * ``team-territory-owned-only``.
+ * Keep one territory kind. Other kinds pass through.
+ * ``byTeam`` chooses league-team vs player union. ``ownedPlanetsOnly`` chooses
+ * the site set. Exactly one of the four territory kinds remains.
  */
-export function applyTeamTerritorySiteSet(
+export function applyTerritoryKindFilter(
   overlays: readonly MapRegionOverlay[],
+  byTeam: boolean,
   ownedPlanetsOnly: boolean
 ): MapRegionOverlay[] {
-  const omittedKind = ownedPlanetsOnly ? TEAM_TERRITORY_KIND : TEAM_TERRITORY_OWNED_ONLY_KIND
-  return overlays.filter((overlay) => overlay.kind !== omittedKind)
+  const kept = territoryPaintKind(byTeam, ownedPlanetsOnly)
+  return overlays.filter((overlay) => !isTerritoryKind(overlay.kind) || overlay.kind === kept)
 }
 
 /**
- * Drop territory fills for unchecked legend rows.
- * Hover and the legend outline use the list from before this filter.
+ * Drop team-territory fills for unchecked legend rows.
+ * Player-territory kinds are not filtered. Hover and the legend outline use
+ * the list from before this filter.
  */
 export function omitHiddenTeamTerritoryOverlays(
   overlays: readonly MapRegionOverlay[],
@@ -32,29 +34,31 @@ export function omitHiddenTeamTerritoryOverlays(
 }
 
 /**
- * Paint pipeline: team-territory kinds stay out of ``paintNonTeamTerritory``
- * (Visibility kind preferences and homeworld selection). The selected site set
+ * Paint pipeline: territory kinds stay out of ``paintNonTerritory``
+ * (Visibility kind preferences and homeworld selection). The selected kind
  * is inserted back in its original order. Legend visibility is a later filter
  * (``omitHiddenTeamTerritoryOverlays``) so hover can still see hidden teams.
  */
 export function mapRegionOverlaysForPaint(
   overlays: readonly MapRegionOverlay[],
+  byTeam: boolean,
   ownedPlanetsOnly: boolean,
-  paintNonTeamTerritory: (overlays: readonly MapRegionOverlay[]) => readonly MapRegionOverlay[]
+  paintNonTerritory: (overlays: readonly MapRegionOverlay[]) => readonly MapRegionOverlay[]
 ): MapRegionOverlay[] {
-  const nonTeam = overlays.filter((overlay) => !isTeamTerritoryKind(overlay.kind))
-  const paintedNonTeam = paintNonTeamTerritory(nonTeam)
-  const paintedById = new Map(paintedNonTeam.map((overlay) => [overlay.id, overlay]))
-  const selectedTeam = new Set(
-    applyTeamTerritorySiteSet(
-      overlays.filter((overlay) => isTeamTerritoryKind(overlay.kind)),
+  const nonTerritory = overlays.filter((overlay) => !isTerritoryKind(overlay.kind))
+  const paintedNonTerritory = paintNonTerritory(nonTerritory)
+  const paintedById = new Map(paintedNonTerritory.map((overlay) => [overlay.id, overlay]))
+  const selectedTerritory = new Set(
+    applyTerritoryKindFilter(
+      overlays.filter((overlay) => isTerritoryKind(overlay.kind)),
+      byTeam,
       ownedPlanetsOnly
     )
   )
   const result: MapRegionOverlay[] = []
   for (const overlay of overlays) {
-    if (isTeamTerritoryKind(overlay.kind)) {
-      if (selectedTeam.has(overlay)) result.push(overlay)
+    if (isTerritoryKind(overlay.kind)) {
+      if (selectedTerritory.has(overlay)) result.push(overlay)
       continue
     }
     const painted = paintedById.get(overlay.id)

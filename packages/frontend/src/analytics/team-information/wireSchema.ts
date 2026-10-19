@@ -1,5 +1,5 @@
 /**
- * Team information map wire: runtime validation and TypeScript types.
+ * Territory map wire: runtime validation and TypeScript types.
  * Core/BFF passthrough -- not central OpenAPI codegen.
  */
 
@@ -13,15 +13,21 @@ export const teamInformationTeamSchema = z.object({
   playerIds: z.array(z.number().int()),
 })
 
+export const teamInformationPlayerSchema = z.object({
+  playerId: z.number().int().positive(),
+})
+
 export const teamInformationPayloadSchema = z.object({
   analyticId: z.literal('team-information'),
   sphere: z.boolean(),
   teams: z.array(teamInformationTeamSchema),
+  players: z.array(teamInformationPlayerSchema),
   /** Normalized via ``normalizeMapRegionOverlays`` after Zod accepts the array. */
   regionOverlays: z.array(z.unknown()),
 })
 
 export type TeamInformationTeam = z.infer<typeof teamInformationTeamSchema>
+export type TeamInformationPlayer = z.infer<typeof teamInformationPlayerSchema>
 export type TeamInformationPayload = z.infer<typeof teamInformationPayloadSchema>
 
 export function parseTeamInformationPayload(raw: unknown): TeamInformationPayload | null {

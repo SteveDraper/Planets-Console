@@ -10,8 +10,8 @@ const HIGHLIGHT_STROKE_PX = 3
 const HIGHLIGHT_STROKE_OPACITY = 1
 
 /**
- * Solid outline of the legend-hovered team's regions on the active site set.
- * The caller passes only those overlays, and only while Team information is enabled.
+ * Solid outline of the legend-hovered territory on the active site set.
+ * The caller passes only those overlays, and only while Territory is enabled.
  * The outline is independent of whether that team's fill is shown.
  */
 export function TeamTerritoryHighlightOutline({
