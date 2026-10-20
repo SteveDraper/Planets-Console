@@ -727,8 +727,20 @@ Map-gen neighborhood rules from **GameSettings** (`verycloseplanets` within 81 L
 _Avoid_: ring-only candidate generation without cluster minima, treating cluster counts as overlay paint only, counting debris-disk planetoids as neighborhood planets, assuming `rst.planets` is a complete `numplanets` census
 
 **Fleet analytic**:
-A **turn analytic** (tabular and map) that maintains each **Player**'s inferred fleet composition as of the shell turn. Computed at `(game, turn T, perspective P)` using turns `1..T` stored at **perspective** `P` only -- not an omniscient merge across slots. Combines **fleet observed ship** sightings from `TurnInfo.ships` with **fleet inferred acquisition** rows from **military score build inference** (and later trade/capture sources). Map layers are per-player, individually color-coded and toggleable; tabular output is one ship list per **Player**. v1 may leave many **fleet field constraint** branches empty; the wire and export schema must still represent partial knowledge when available. See [design-fleet-analytic.md](docs/design-fleet-analytic.md) ([#114](https://github.com/SteveDraper/Planets-Console/issues/114)).
+A **turn analytic** (tabular and map) that maintains each **Player**'s inferred fleet composition as of the shell turn. Computed at `(game, turn T, perspective P)` using turns stored at **perspective** `P` only -- not an omniscient merge across slots. Combines **fleet observed ship** sightings from `TurnInfo.ships` with **fleet inferred acquisition** rows from **military score build inference** when those results are available. Map layers are per-player, individually color-coded and toggleable; tabular output is one ship list per **Player**. v1 may leave many **fleet field constraint** branches empty; the wire and export schema must still represent partial knowledge when available. See [design-fleet-analytic.md](docs/design-fleet-analytic.md) ([#114](https://github.com/SteveDraper/Planets-Console/issues/114)).
 _Avoid_: omniscient fleet, viewpoint-player-only fleet (unless explicitly scoped)
+
+**Backfill earlier turns**:
+Per-game setting, default off, shared by every perspective of that game. When on, the **fleet analytic** may cause missing **military score build inference** on earlier turns. When off, a stale open turn may materialize earlier fleet ledgers and must not cause scoreboard solves on those earlier turns.
+_Avoid_: recursive computation, deep inference, per-perspective compute toggle
+
+**Approximate fleet**:
+A **Player**'s fleet for one turn written from the prior ledger and that turn's visible ships, without a same-turn scoreboard solve. While **Backfill earlier turns** is off, scoreboard at the next turn may use that ledger as its prior fleet. Not ensure-final for the **homeworld locator**.
+_Avoid_: ensure-final fleet, partial provenance (the flag pair on a ledger file, not this product state)
+
+**Analytic freshness**:
+Per-player state of the fleet roster or scoreboard row on screen: turn-load only, subject to revision, first compute in progress, or complete. On the scoreboard it sits beside inference cell status. A stored row behind the latest **fleet evidence generation** is subject to revision, including while no recompute is in flight. A row is complete when its stored generation matches the mark and nothing further is scheduled for it; a later mark bump returns it to subject to revision. A recompute is in flight from schedule until the write that stamps the mark. Turn-load only is the first paint when no stored row for that player exists yet.
+_Avoid_: displayStatus, searchStatus, inference product status, ensure-final
 
 **Fleet observation scope**:
 Which stored turns and visibility feed the **fleet analytic** for one shell context. Direct evidence: ships appearing in `turn.ships` on turns `1..T` at the shell **perspective**. Build evidence: **scores** inference per `player_id` on host turns in that same turn range. Cross-perspective union is out of scope. Location constraints from starbase builds may later consume **homeworld locator** or planet-ownership analytics when those exist; v1 may record unconstrained location.
@@ -795,7 +807,7 @@ Per-**Player** persisted **fleet acquisition ledger** at one `(game_id, perspect
 _Avoid_: monolithic all-players fleet blob as ensure-final, perspective-wide invalidation for one player's scores update
 
 **Fleet evidence generation**:
-Monotonic integer on one mark document per `(game, perspective, player)`. A ledger is ensure-final only when its stored generation matches the mark, or its turn is before the mark's `appliesFromTurn`, and provenance is `(true, true)` with a current materialization version. Durable scores evidence bumps the mark and leaves ledger files in place. Held solutions bump only the in-memory invalidation epoch.
+Monotonic integer on one mark document per `(game, perspective, player)`. A ledger is ensure-final only when its stored generation matches the mark, or its turn is before the mark's `appliesFromTurn`, and provenance is `(true, true)` with a current materialization version. A scoreboard persist that carries new information for a later turn bumps the mark and leaves ledger files in place. The shell turn, and any later turn that already has a live table stream, recompute; in-flight work built from the previous prior is discarded. A catch-up persist of the turn already being refreshed writes the current mark and does not increment it. An absent mark is generation 0 with `appliesFromTurn` unset: no durable bump has narrowed the range, and a missing prior ledger is not a stale chain. The first originating scoreboard persist sets generation 1 and `appliesFromTurn` to that host turn. Held solutions bump only the in-memory invalidation epoch.
 _Avoid_: staleFromTurn watermark alone, deleting a ledger to force recalc, treating a generation mismatch as absence for display
 
 **Fleet materialization provenance**:
@@ -803,7 +815,7 @@ Per-player pair at `fleet@N`: `turnEvidenceAtN` (turn-*N* RST ingest + `scores@N
 _Avoid_: inferring finality from cache hit, global provenance for all players
 
 **Fleet turn snapshot**:
-Legacy name for the turn-scoped fleet persistence document at `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. **Current model (ADR 0004):** one **fleet ledger persistence** document per player at `.../analytics/fleet/{playerId}`, not one undifferentiated all-players snapshot. Materialize each player by chaining from that player's prior ledger plus turn-*T* evidence. Shared global id-bound inputs are read from RST per turn, not stored as a cross-player ledger. Turn document replace at *T* deletes ledger files at turns `>= T`. Durable scores evidence bumps that player's **fleet evidence generation** from the host turn forward and leaves the files in place.
+Legacy name for the turn-scoped fleet persistence document at `games/{gameId}/{perspective}/turns/{turn}/analytics/fleet`. **Current model (ADR 0004):** one **fleet ledger persistence** document per player at `.../analytics/fleet/{playerId}`, not one undifferentiated all-players snapshot. Materialize each player by chaining from that player's prior ledger plus turn-*T* evidence. Shared global id-bound inputs are read from RST per turn, not stored as a cross-player ledger. Turn document replace at *T* deletes ledger files at turns `>= T`. A scoreboard persist leaves the files in place. One that carries new information for a later turn bumps that player's **fleet evidence generation**; a catch-up persist of the turn already being refreshed does not.
 _Avoid_: perspective-wide single ledger file as ensure-final, recompute 1..T on every GET
 
 **Fleet ensure baseline**:
