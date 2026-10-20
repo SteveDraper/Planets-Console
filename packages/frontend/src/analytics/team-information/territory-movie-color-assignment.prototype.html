@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Territory movie colors (prototype)</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c1917;
+      --muted: #57534e;
+      --paper: #f4f1ea;
+      --line: #e7e5e4;
+      --panel: #fffcf7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: 17px/1.5 system-ui, sans-serif;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 36px 24px 96px;
+    }
+
+    .kicker {
+      margin: 0;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    h1 {
+      margin: 6px 0 0;
+      font-size: 1.85rem;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.2rem;
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+    }
+
+    .question {
+      margin: 16px 0 8px;
+      font-size: 1.15rem;
+    }
+
+    .rules {
+      margin: 0;
+      max-width: 68ch;
+      color: var(--muted);
+    }
+
+    section { margin-top: 40px; }
+
+    .change {
+      margin: 0 0 18px;
+      padding: 12px 16px;
+      background: var(--panel);
+      border-left: 4px solid var(--ink);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 640px) minmax(260px, 1fr);
+      gap: 28px;
+      align-items: start;
+    }
+
+    @media (max-width: 920px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+
+    .map-frame {
+      background: #000;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .map-frame svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .map-meta,
+    .caption,
+    .touching,
+    .hole,
+    .next-line,
+    .waiting,
+    .done-note,
+    .group-label,
+    .roster-note {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .map-meta { margin: 10px 0 0; color: var(--ink); }
+
+    .hole { color: var(--ink); }
+
+    .selection + .selection { margin-top: 22px; }
+
+    .order {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 8px;
+    }
+
+    .chip {
+      width: 88px;
+      padding: 6px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .chip.is-hidden { border-style: dashed; }
+
+    .swatch {
+      display: block;
+      height: 40px;
+      border-radius: 4px;
+    }
+
+    .chip .who {
+      display: block;
+      margin-top: 4px;
+      font-size: 0.85rem;
+      font-weight: 650;
+    }
+
+    .chip .meta {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .rows { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 16px; }
+
+    button {
+      font: inherit;
+      font-size: 0.95rem;
+      padding: 8px 14px;
+      border: 1px solid #d6d3d1;
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    button:hover { border-color: var(--ink); }
+
+    button[aria-pressed="true"],
+    button.is-next,
+    .tab[aria-selected="true"] {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: #fff;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    button:disabled:hover { border-color: #d6d3d1; }
+
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+
+    .walkthrough {
+      padding: 16px 18px 8px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+
+    .steps { margin: 12px 0 16px; padding-left: 0; list-style: none; }
+
+    .steps li { margin: 8px 0; }
+
+    .steps .step-no {
+      display: inline-block;
+      width: 1.5rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="kicker">Prototype. Not part of the console.</p>
+    <h1>Territory movie colors</h1>
+    <p class="question">Does add-order color assignment stay readable when owners are added and removed, and stay stable when only the frame changes?</p>
+    <p class="rules">The first owner you check in a selection gets the first color. Each new owner gets the next color. Owners already checked keep theirs. Unchecking hides their planets, but they keep that color until you start over, and nobody else receives it. Checking them again brings the same color back. Players and league teams each have their own sequence. Changing the turn, switching By team, or switching Owned planets only does not change colors.</p>
+    <p class="rules">Fills are the full baked color, with no outline, and the planet dots are painted on top. That is the recorded drawing rule. The paint buttons can still show the earlier stacking, fills at 35% with the dots underneath, which washed the colors out. Flipping them does not change who has which color.</p>
+
+    <section>
+      <h2>What the movie is doing now</h2>
+      <p class="change" id="change" aria-live="polite"></p>
+      <div class="layout">
+        <div>
+          <div class="map-frame" id="map"></div>
+          <p class="map-meta" id="map-meta"></p>
+          <p class="caption">Judge the fills, not the names. Names are only here so you can tell who is beside whom. The movie itself does not draw names.</p>
+          <p class="touching" id="touching"></p>
+          <p class="hole" id="hole"></p>
+        </div>
+        <div id="selections"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Free play</h2>
+      <p class="group-label">These buttons always work, in any order.</p>
+      <div class="rows" id="mode-buttons"></div>
+      <div class="rows" id="site-buttons"></div>
+      <div class="rows" id="turn-buttons"></div>
+      <p class="group-label">Paint. This does not change who has which color.</p>
+      <div class="rows" id="paint-buttons"></div>
+      <div class="rows" id="reload-buttons"></div>
+      <p class="group-label">Players. North is Ada and Bo. South is Chen and Dax. East is Ellis and Fern. West is Gio. Hana has no league team, so her planets stay blank while league teams are showing.</p>
+      <div class="rows" id="player-buttons"></div>
+      <p class="group-label">League teams</p>
+      <div class="rows" id="team-buttons"></div>
+    </section>
+
+    <section>
+      <h2>Walkthroughs</h2>
+      <div class="tabs" id="tabs"></div>
+      <div class="walkthrough" id="walkthrough"></div>
+    </section>
+  </main>
+
+  <!--
+    Pure assignment module. No DOM. This is the piece that can move into
+    the real movie later. The page below is throwaway.
+    Palette: nested CIEDE2000 maximin, 60 baked sRGB colors, index 0 #8fff00.
+    Removal: an unchecked owner keeps that index for the life of this state.
+  -->
+  <script>
+    const TerritoryMovieColors = (() => {
+      const PALETTE = [
+        '#8fff00', '#00006e', '#ffc0ff', '#1f3c00', '#bd2d00', '#00dcff', '#ffae00', '#3974fd',
+        '#d0008e', '#809276', '#290e00', '#fffcef', '#005a65', '#ff927e', '#826000', '#8e8593',
+        '#00ffd2', '#4b475d', '#001313', '#7800f4', '#a7c1ff', '#a9ac00', '#c66aff', '#88032e',
+        '#007f00', '#00959e', '#af8e69', '#00be57', '#fd0050', '#5f5e53', '#da7ca1', '#fff48f',
+        '#865d57', '#40002f', '#0045a3', '#e76900', '#d4bcbd', '#663101', '#a8cdc3', '#03a2e6',
+        '#845fa1', '#00785f', '#05001f', '#fed1a7', '#7f007f', '#d1ffc7', '#362e1a', '#c0bd92',
+        '#787f23', '#04b99f', '#687c85', '#e7eaff', '#8f8bcd', '#00382d', '#9eaab3', '#76415d',
+        '#b3827c', '#006b9b', '#a36538', '#ab8700',
+      ]
+
+      function emptySelection() {
+        return { checked: {}, indexByOwnerId: {}, nextIndex: 0 }
+      }
+
+      function initialState() {
+        return {
+          byTeam: false,
+          ownedPlanetsOnly: false,
+          frame: 0,
+          selections: {
+            players: emptySelection(),
+            teams: emptySelection(),
+          },
+        }
+      }
+
+      function isSelection(selection) {
+        return selection === 'players' || selection === 'teams'
+      }
+
+      function toggleOwner(state, selection, ownerId) {
+        if (!isSelection(selection)) return state
+        const current = state.selections[selection]
+        const checked = { ...current.checked }
+        const indexByOwnerId = { ...current.indexByOwnerId }
+        let nextIndex = current.nextIndex
+        if (checked[ownerId] === true) {
+          delete checked[ownerId]
+        } else if (!Object.prototype.hasOwnProperty.call(indexByOwnerId, ownerId)) {
+          indexByOwnerId[ownerId] = nextIndex
+          nextIndex += 1
+          checked[ownerId] = true
+        } else {
+          checked[ownerId] = true
+        }
+        return {
+          ...state,
+          selections: {
+            ...state.selections,
+            [selection]: { checked, indexByOwnerId, nextIndex },
+          },
+        }
+      }
+
+      function reduce(state, action) {
+        switch (action.type) {
+          case 'toggle-owner':
+            return toggleOwner(state, action.selection, action.ownerId)
+          case 'set-by-team':
+            if (state.byTeam === action.value) return state
+            return { ...state, byTeam: action.value }
+          case 'set-owned-planets-only':
+            if (state.ownedPlanetsOnly === action.value) return state
+            return { ...state, ownedPlanetsOnly: action.value }
+          case 'set-frame':
+            if (action.frame !== 0 && action.frame !== 1 && action.frame !== 2) return state
+            if (state.frame === action.frame) return state
+            return { ...state, frame: action.frame }
+          case 'reload':
+            return initialState()
+          default:
+            return state
+        }
+      }
+
+      function assignments(state, selection) {
+        const current = state.selections[selection]
+        return Object.keys(current.indexByOwnerId)
+          .map((ownerId) => ({
+            ownerId,
+            index: current.indexByOwnerId[ownerId],
+            checked: current.checked[ownerId] === true,
+          }))
+          .sort((a, b) => a.index - b.index)
+      }
+
+      function isChecked(state, selection, ownerId) {
+        return state.selections[selection].checked[ownerId] === true
+      }
+
+      function colorIndex(state, selection, ownerId) {
+        const value = state.selections[selection].indexByOwnerId[ownerId]
+        return value === undefined ? null : value
+      }
+
+      function nextIndex(state, selection) {
+        return state.selections[selection].nextIndex
+      }
+
+      return {
+        PALETTE,
+        initialState,
+        reduce,
+        assignments,
+        isChecked,
+        colorIndex,
+        nextIndex,
+      }
+    })()
+  </script>
+
+  <script>
+    const WASHED_FILL_OPACITY = 0.35
+    const COLS = 4
+    const ROWS = 4
+    const CELL_W = 150
+    const CELL_H = 112
+    const ORIGIN_X = 20
+    const ORIGIN_Y = 16
+
+    const PLAYERS = [
+      { id: 'ada', name: 'Ada', teamId: 'north' },
+      { id: 'bo', name: 'Bo', teamId: 'north' },
+      { id: 'chen', name: 'Chen', teamId: 'south' },
+      { id: 'dax', name: 'Dax', teamId: 'south' },
+      { id: 'ellis', name: 'Ellis', teamId: 'east' },
+      { id: 'fern', name: 'Fern', teamId: 'east' },
+      { id: 'gio', name: 'Gio', teamId: 'west' },
+      { id: 'hana', name: 'Hana', teamId: null },
+    ]
+
+    const TEAMS = [
+      { id: 'north', name: 'North' },
+      { id: 'south', name: 'South' },
+      { id: 'east', name: 'East' },
+      { id: 'west', name: 'West' },
+    ]
+
+    const PLANETS = [
+      ['Orion', 'Vega', 'Rigel', 'Deneb'],
+      ['Altair', 'Sirius', 'Procyon', 'Pollux'],
+      ['Castor', 'Capella', 'Arcturus', 'Spica'],
+      ['Antares', 'Aldebaran', 'Betelgeuse', 'Canopus'],
+    ]
+
+    const OWNERSHIP = [
+      [
+        ['ada', 'ada', 'bo', 'bo'],
+        ['ada', null, 'bo', 'chen'],
+        ['dax', 'dax', null, 'chen'],
+        ['ellis', 'ellis', 'fern', 'gio'],
+      ],
+      [
+        ['ada', 'bo', 'bo', 'bo'],
+        ['ada', 'ada', 'chen', 'chen'],
+        ['dax', null, 'chen', 'chen'],
+        ['ellis', 'fern', 'fern', 'hana'],
+      ],
+      [
+        ['ada', 'ada', 'bo', 'hana'],
+        ['dax', 'bo', 'chen', 'chen'],
+        ['dax', 'ellis', null, 'fern'],
+        ['ellis', 'ellis', 'gio', 'gio'],
+      ],
+    ]
+
+    const NEAREST_OWNED = [
+      [
+        [null, null, null, null],
+        [null, 'ada', null, null],
+        [null, null, 'chen', null],
+        [null, null, null, null],
+      ],
+      [
+        [null, null, null, null],
+        [null, null, null, null],
+        [null, 'dax', null, null],
+        [null, null, null, null],
+      ],
+      [
+        [null, null, null, null],
+        [null, null, null, null],
+        [null, null, 'ellis', null],
+        [null, null, null, null],
+      ],
+    ]
+
+    const WALKTHROUGHS = [
+      {
+        id: 'first-then-turn',
+        title: 'First colors, then a new turn',
+        body: 'Check three players who share borders, then move to the next turn. The regions move. The colors should not.',
+        steps: [
+          { label: 'Check Ada', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ada' } },
+          { label: 'Check Bo', action: { type: 'toggle-owner', selection: 'players', ownerId: 'bo' } },
+          { label: 'Check Chen', action: { type: 'toggle-owner', selection: 'players', ownerId: 'chen' } },
+          { label: 'Go to turn 2', action: { type: 'set-frame', frame: 1 } },
+        ],
+      },
+      {
+        id: 'removal-hole',
+        title: 'Uncheck someone in the middle',
+        body: 'Four players get the first four colors. Uncheck the second. The others should keep their colors, not slide down. The next new player should not receive the hidden color. Check that hidden player again and the old color should come back.',
+        steps: [
+          { label: 'Check Ada', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ada' } },
+          { label: 'Check Bo', action: { type: 'toggle-owner', selection: 'players', ownerId: 'bo' } },
+          { label: 'Check Chen', action: { type: 'toggle-owner', selection: 'players', ownerId: 'chen' } },
+          { label: 'Check Dax', action: { type: 'toggle-owner', selection: 'players', ownerId: 'dax' } },
+          { label: 'Uncheck Bo', action: { type: 'toggle-owner', selection: 'players', ownerId: 'bo' } },
+          { label: 'Check Ellis', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ellis' } },
+          { label: 'Check Bo again', action: { type: 'toggle-owner', selection: 'players', ownerId: 'bo' } },
+        ],
+      },
+      {
+        id: 'empty-keeps',
+        title: 'An empty selection does not free colors',
+        body: 'Check two players, then uncheck both so nothing is painted. The next player you check should not restart at the first color. The original player, checked again, should still have the first color.',
+        steps: [
+          { label: 'Check Ada', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ada' } },
+          { label: 'Check Bo', action: { type: 'toggle-owner', selection: 'players', ownerId: 'bo' } },
+          { label: 'Uncheck Ada', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ada' } },
+          { label: 'Uncheck Bo', action: { type: 'toggle-owner', selection: 'players', ownerId: 'bo' } },
+          { label: 'Check Chen', action: { type: 'toggle-owner', selection: 'players', ownerId: 'chen' } },
+          { label: 'Check Ada again', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ada' } },
+        ],
+      },
+      {
+        id: 'two-selections',
+        title: 'League teams have their own colors',
+        body: 'Give three players colors, then switch to league teams. The team map starts blank. The first team you check gets the first color, even though players already used it. Switch back. Player colors should be unchanged. Then change the turn. Neither list should change.',
+        steps: [
+          { label: 'Check Ada', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ada' } },
+          { label: 'Check Bo', action: { type: 'toggle-owner', selection: 'players', ownerId: 'bo' } },
+          { label: 'Check Chen', action: { type: 'toggle-owner', selection: 'players', ownerId: 'chen' } },
+          { label: 'Show league teams', action: { type: 'set-by-team', value: true } },
+          { label: 'Check North', action: { type: 'toggle-owner', selection: 'teams', ownerId: 'north' } },
+          { label: 'Check South', action: { type: 'toggle-owner', selection: 'teams', ownerId: 'south' } },
+          { label: 'Show players', action: { type: 'set-by-team', value: false } },
+          { label: 'Go to turn 3', action: { type: 'set-frame', frame: 2 } },
+        ],
+      },
+      {
+        id: 'controls-stable',
+        title: 'Turn and Owned planets only do not recolor',
+        body: 'Check five players. Turn on Owned planets only so a blank planet joins a neighbor. Then step through the later turns and switch back to All planets. Who is painted changes. The color numbers should not.',
+        steps: [
+          { label: 'Check Ada', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ada' } },
+          { label: 'Check Bo', action: { type: 'toggle-owner', selection: 'players', ownerId: 'bo' } },
+          { label: 'Check Chen', action: { type: 'toggle-owner', selection: 'players', ownerId: 'chen' } },
+          { label: 'Check Dax', action: { type: 'toggle-owner', selection: 'players', ownerId: 'dax' } },
+          { label: 'Check Ellis', action: { type: 'toggle-owner', selection: 'players', ownerId: 'ellis' } },
+          { label: 'Owned planets only', action: { type: 'set-owned-planets-only', value: true } },
+          { label: 'Go to turn 2', action: { type: 'set-frame', frame: 1 } },
+          { label: 'Go to turn 3', action: { type: 'set-frame', frame: 2 } },
+          { label: 'All planets', action: { type: 'set-owned-planets-only', value: false } },
+        ],
+      },
+    ]
+
+    const playerById = Object.fromEntries(PLAYERS.map((player) => [player.id, player]))
+    const teamById = Object.fromEntries(TEAMS.map((team) => [team.id, team]))
+
+    let movie = TerritoryMovieColors.initialState()
+    let dotsOnTop = true
+    let changeText = 'Nothing yet. Both selections are empty. Fills are the full color, and the planet dots are on top.'
+    let openWalkthrough = WALKTHROUGHS[0].id
+    let activeWalkthrough = null
+    let walkthroughStep = 0
+    let walkthroughBroken = false
+
+    function ownerName(selection, ownerId) {
+      if (selection === 'players') return playerById[ownerId].name
+      return teamById[ownerId].name
+    }
+
+    function selectionNoun(selection) {
+      return selection === 'players' ? 'player' : 'league team'
+    }
+
+    function esc(text) {
+      return String(text).replace(/[&<>"]/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+      })[ch])
+    }
+
+    function paintGrid(state) {
+      const owners = OWNERSHIP[state.frame]
+      const nearest = NEAREST_OWNED[state.frame]
+      const grid = []
+      for (let row = 0; row < ROWS; row += 1) {
+        grid[row] = []
+        for (let col = 0; col < COLS; col += 1) {
+          const planet = PLANETS[row][col]
+          let playerId = owners[row][col]
+          let joined = false
+          if (playerId == null && state.ownedPlanetsOnly) {
+            playerId = nearest[row][col]
+            joined = true
+          }
+          const base = { planet, paint: null, key: null, label: null, index: null, title: '' }
+          if (playerId == null) {
+            base.title = planet + '. Unowned. Blank while All planets is on.'
+            grid[row][col] = base
+            continue
+          }
+          const player = playerById[playerId]
+          if (state.byTeam) {
+            if (player.teamId == null) {
+              base.title = planet + '. ' + player.name + ' has no league team, so this stays blank.'
+              grid[row][col] = base
+              continue
+            }
+            const team = teamById[player.teamId]
+            if (!TerritoryMovieColors.isChecked(state, 'teams', team.id)) {
+              base.title = planet + '. ' + team.name + ' is not checked.'
+              grid[row][col] = base
+              continue
+            }
+            const index = TerritoryMovieColors.colorIndex(state, 'teams', team.id)
+            base.paint = TerritoryMovieColors.PALETTE[index]
+            base.key = 'team:' + team.id
+            base.label = team.name
+            base.index = index
+            base.title = joined
+              ? planet + '. Unowned planet, joined to ' + team.name + ', color ' + index + '.'
+              : planet + '. ' + team.name + ', color ' + index + '.'
+            grid[row][col] = base
+            continue
+          }
+          if (!TerritoryMovieColors.isChecked(state, 'players', playerId)) {
+            base.title = planet + '. ' + player.name + ' is not checked.'
+            grid[row][col] = base
+            continue
+          }
+          const index = TerritoryMovieColors.colorIndex(state, 'players', playerId)
+          base.paint = TerritoryMovieColors.PALETTE[index]
+          base.key = 'player:' + playerId
+          base.label = player.name
+          base.index = index
+          base.title = joined
+            ? planet + '. Unowned planet, joined to ' + player.name + ', color ' + index + '.'
+            : planet + '. ' + player.name + ', color ' + index + '.'
+          grid[row][col] = base
+        }
+      }
+      return grid
+    }
+
+    function touchingPairs(grid) {
+      const pairs = new Map()
+      function consider(left, right) {
+        if (left == null || right == null || left.key == null || right.key == null) return
+        if (left.key === right.key) return
+        const ordered = left.index < right.index || (left.index === right.index && left.label < right.label)
+          ? [left, right]
+          : [right, left]
+        const id = ordered[0].key + '|' + ordered[1].key
+        if (!pairs.has(id)) pairs.set(id, ordered)
+      }
+      for (let row = 0; row < ROWS; row += 1) {
+        for (let col = 0; col < COLS; col += 1) {
+          if (col + 1 < COLS) consider(grid[row][col], grid[row][col + 1])
+          if (row + 1 < ROWS) consider(grid[row][col], grid[row + 1][col])
+        }
+      }
+      return [...pairs.values()].sort((a, b) => a[0].index - b[0].index || a[1].index - b[1].index)
+    }
+
+    function ownerIsPainted(grid, key) {
+      return grid.some((row) => row.some((cell) => cell.key === key))
+    }
+
+    function sameAssignments(prev, next, selection) {
+      const before = TerritoryMovieColors.assignments(prev, selection)
+      const after = TerritoryMovieColors.assignments(next, selection)
+      if (before.length !== after.length) return false
+      return before.every((item, index) => (
+        item.ownerId === after[index].ownerId
+        && item.index === after[index].index
+        && item.checked === after[index].checked
+      ))
+    }
+
+    function describeTransition(prev, next) {
+      const nextCount = TerritoryMovieColors.assignments(next, 'players').length
+        + TerritoryMovieColors.assignments(next, 'teams').length
+      const prevCount = TerritoryMovieColors.assignments(prev, 'players').length
+        + TerritoryMovieColors.assignments(prev, 'teams').length
+      const reset = !next.byTeam && !next.ownedPlanetsOnly && next.frame === 0 && nextCount === 0
+      if (reset && (prevCount > 0 || prev.byTeam || prev.ownedPlanetsOnly || prev.frame !== 0)) {
+        return 'Started over. Both selections are empty, and nobody holds a color.'
+      }
+
+      const lines = []
+      const grid = paintGrid(next)
+      for (const selection of ['players', 'teams']) {
+        const before = Object.fromEntries(
+          TerritoryMovieColors.assignments(prev, selection).map((item) => [item.ownerId, item]),
+        )
+        const after = TerritoryMovieColors.assignments(next, selection)
+        let toggled = false
+        for (const item of after) {
+          const prior = before[item.ownerId]
+          const label = ownerName(selection, item.ownerId)
+          if (prior == null) {
+            toggled = true
+            lines.push(label + ' is checked and gets color ' + item.index + '.')
+            const showingThis = (selection === 'teams') === next.byTeam
+            if (showingThis && !ownerIsPainted(grid, (selection === 'players' ? 'player:' : 'team:') + item.ownerId)) {
+              lines.push(label + ' has no planets on this turn.')
+            }
+          } else if (prior.checked && !item.checked) {
+            toggled = true
+            lines.push(label + ' is unchecked and keeps color ' + item.index + '. Nobody else receives it.')
+          } else if (!prior.checked && item.checked) {
+            toggled = true
+            lines.push(label + ' is checked again and still has color ' + item.index + '.')
+          } else if (prior.index !== item.index) {
+            lines.push(label + ' moved from color ' + prior.index + ' to color ' + item.index + '.')
+          }
+        }
+        const showingThis = (selection === 'teams') === next.byTeam
+        if (toggled && !showingThis) {
+          const other = selection === 'players' ? 'league teams' : 'players'
+          lines.push('The map is still showing ' + other + ', so that ' + selectionNoun(selection) + ' change is not painted.')
+        }
+      }
+
+      if (prev.byTeam !== next.byTeam) {
+        lines.push(next.byTeam ? 'The map is showing league teams.' : 'The map is showing players.')
+      }
+      if (prev.ownedPlanetsOnly !== next.ownedPlanetsOnly) {
+        lines.push(next.ownedPlanetsOnly
+          ? 'Owned planets only. Cells that sat on an unowned planet join the nearest owned planet.'
+          : 'All planets. Cells nearest an unowned planet stay blank.')
+      }
+      if (prev.frame !== next.frame) lines.push('Turn ' + (next.frame + 1) + '.')
+
+      const controlsChanged = prev.byTeam !== next.byTeam
+        || prev.ownedPlanetsOnly !== next.ownedPlanetsOnly
+        || prev.frame !== next.frame
+      const indexesSame = sameAssignments(prev, next, 'players') && sameAssignments(prev, next, 'teams')
+      if (controlsChanged && indexesSame) lines.push('Color indexes stayed put.')
+      if (lines.length === 0) return 'No change.'
+      return lines.join(' ')
+    }
+
+    function holeNote(state) {
+      const selection = state.byTeam ? 'teams' : 'players'
+      const list = TerritoryMovieColors.assignments(state, selection)
+      const hidden = list.filter((item) => !item.checked)
+      const shown = list.filter((item) => item.checked)
+      const between = hidden.filter((item) => shown.some((other) => other.index > item.index))
+      if (between.length === 0) return ''
+      const who = between
+        .map((item) => ownerName(selection, item.ownerId) + ' (color ' + item.index + ')')
+        .join(', ')
+      return 'A hidden ' + selectionNoun(selection) + ' still holds a color between the ones on the map: ' + who + '.'
+    }
+
+    function inkOn(hex) {
+      const red = parseInt(hex.slice(1, 3), 16)
+      const green = parseInt(hex.slice(3, 5), 16)
+      const blue = parseInt(hex.slice(5, 7), 16)
+      const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255
+      return luminance > 0.62 ? '#1c1917' : '#f8fafc'
+    }
+
+    function renderMap(state) {
+      const grid = paintGrid(state)
+      const width = ORIGIN_X * 2 + CELL_W * COLS
+      const height = ORIGIN_Y * 2 + CELL_H * ROWS
+      const fillOpacity = dotsOnTop ? 1 : WASHED_FILL_OPACITY
+      let fills = ''
+      let dots = ''
+      let names = ''
+      for (let row = 0; row < ROWS; row += 1) {
+        for (let col = 0; col < COLS; col += 1) {
+          const cell = grid[row][col]
+          const x = ORIGIN_X + col * CELL_W
+          const y = ORIGIN_Y + row * CELL_H
+          const fill = cell.paint == null ? 'none' : cell.paint
+          const opacity = cell.paint == null ? 0 : fillOpacity
+          const stroke = cell.paint == null ? '#2a2a2a' : 'none'
+          const labelInk = cell.paint != null && dotsOnTop ? inkOn(cell.paint) : '#f8fafc'
+          const planetInk = cell.paint != null && dotsOnTop ? inkOn(cell.paint) : '#cbd5e1'
+          fills += '<rect x="' + x + '" y="' + y + '" width="' + CELL_W + '" height="' + CELL_H
+            + '" fill="' + fill + '" fill-opacity="' + opacity + '" stroke="' + stroke + '"><title>'
+            + esc(cell.title) + '</title></rect>'
+          dots += '<circle cx="' + (x + CELL_W / 2) + '" cy="' + (y + CELL_H / 2)
+            + '" r="2" fill="#9ca3af"></circle>'
+          names += '<text x="' + (x + CELL_W / 2) + '" y="' + (y + 28)
+            + '" text-anchor="middle" fill="' + planetInk + '" font-size="13" font-family="system-ui, sans-serif">'
+            + esc(cell.planet) + '</text>'
+          if (cell.label != null) {
+            names += '<text x="' + (x + CELL_W / 2) + '" y="' + (y + CELL_H - 28)
+              + '" text-anchor="middle" fill="' + labelInk + '" font-size="15" font-weight="650" font-family="system-ui, sans-serif">'
+              + esc(cell.label) + '</text>'
+          }
+        }
+      }
+      const body = dotsOnTop ? fills + dots + names : dots + fills + names
+      document.getElementById('map').innerHTML = '<svg viewBox="0 0 ' + width + ' ' + height
+        + '" role="img" aria-label="Fake territory map for this turn">' + body + '</svg>'
+
+      const mode = state.byTeam ? 'Team territory' : 'Player territory'
+      const site = state.ownedPlanetsOnly ? 'Owned planets only' : 'All planets'
+      const paint = dotsOnTop ? 'Dots on top, full color' : 'Dots underneath, 35% fill'
+      document.getElementById('map-meta').textContent = mode + ' · Turn ' + (state.frame + 1) + ' of 3 · ' + site + ' · ' + paint
+
+      const pairs = touchingPairs(grid)
+      document.getElementById('touching').textContent = pairs.length === 0
+        ? 'No two painted owners share a border on this turn.'
+        : 'Touching: ' + pairs
+          .map((pair) => pair[0].label + ' (color ' + pair[0].index + ') beside ' + pair[1].label + ' (color ' + pair[1].index + ')')
+          .join('. ') + '.'
+      document.getElementById('hole').textContent = holeNote(state)
+    }
+
+    function renderSelection(selection, title) {
+      const list = TerritoryMovieColors.assignments(movie, selection)
+      const roster = selection === 'players' ? PLAYERS : TEAMS
+      const chosen = new Set(list.map((item) => item.ownerId))
+      const waiting = roster.filter((owner) => !chosen.has(owner.id)).map((owner) => owner.name)
+      const noun = selection === 'players' ? 'player' : 'league team'
+      const chips = list.length === 0
+        ? '<p class="waiting">No colors yet.</p>'
+        : '<div class="order">' + list.map((item) => {
+          const hex = TerritoryMovieColors.PALETTE[item.index]
+          return '<div class="chip' + (item.checked ? '' : ' is-hidden') + '">'
+            + '<span class="swatch" style="background:' + hex + '"></span>'
+            + '<span class="who">' + esc(ownerName(selection, item.ownerId)) + '</span>'
+            + '<span class="meta">Color ' + item.index + (item.checked ? ' · showing' : ' · hidden') + '</span>'
+            + '</div>'
+        }).join('') + '</div>'
+      const waitingText = waiting.length === 0
+        ? 'Everyone in this handful has a color.'
+        : 'Not chosen yet: ' + waiting.join(', ') + '.'
+      return '<div class="selection"><h3>' + title + '</h3>' + chips
+        + '<p class="next-line">Next new ' + noun + ' gets color '
+        + TerritoryMovieColors.nextIndex(movie, selection) + '.</p>'
+        + '<p class="waiting">' + esc(waitingText) + '</p></div>'
+    }
+
+    function renderSelections() {
+      const paintNote = dotsOnTop
+        ? 'Swatches match the map. Fills are the full baked color, and the planet dots are painted on top.'
+        : 'Swatches are the baked color. The map paints that color at 35% opacity, with the planet dots underneath.'
+      document.getElementById('selections').innerHTML = '<p class="caption">' + paintNote + '</p>'
+        + renderSelection('players', 'Player colors')
+        + renderSelection('teams', 'League team colors')
+    }
+
+    function checkLabel(selection, owner) {
+      const index = TerritoryMovieColors.colorIndex(movie, selection, owner.id)
+      if (index == null) return 'Check ' + owner.name
+      if (TerritoryMovieColors.isChecked(movie, selection, owner.id)) return 'Uncheck ' + owner.name
+      return 'Check ' + owner.name + ' again'
+    }
+
+    function renderFreePlay() {
+      const mode = [
+        ['Show players', false],
+        ['Show league teams', true],
+      ]
+      document.getElementById('mode-buttons').innerHTML = mode.map(([label, value]) => (
+        '<button type="button" data-free="set-by-team" data-value="' + value
+        + '" aria-pressed="' + (movie.byTeam === value) + '">' + label + '</button>'
+      )).join('')
+
+      const sites = [
+        ['All planets', false],
+        ['Owned planets only', true],
+      ]
+      document.getElementById('site-buttons').innerHTML = sites.map(([label, value]) => (
+        '<button type="button" data-free="set-owned-planets-only" data-value="' + value
+        + '" aria-pressed="' + (movie.ownedPlanetsOnly === value) + '">' + label + '</button>'
+      )).join('')
+
+      document.getElementById('turn-buttons').innerHTML = [0, 1, 2].map((frame) => (
+        '<button type="button" data-free="set-frame" data-frame="' + frame
+        + '" aria-pressed="' + (movie.frame === frame) + '">Turn ' + (frame + 1) + '</button>'
+      )).join('')
+
+      document.getElementById('paint-buttons').innerHTML = [
+        ['Dots on top, full color', 'top', true],
+        ['Dots underneath, 35% fill', 'under', false],
+      ].map(([label, value, onTop]) => (
+        '<button type="button" data-free="set-paint" data-value="' + value
+        + '" aria-pressed="' + (dotsOnTop === onTop) + '">' + label + '</button>'
+      )).join('')
+
+      document.getElementById('reload-buttons').innerHTML = '<button type="button" data-free="reload">Start over</button>'
+
+      document.getElementById('player-buttons').innerHTML = PLAYERS.map((player) => (
+        '<button type="button" data-free="toggle-owner" data-selection="players" data-owner="'
+        + player.id + '">' + esc(checkLabel('players', player)) + '</button>'
+      )).join('')
+
+      document.getElementById('team-buttons').innerHTML = TEAMS.map((team) => (
+        '<button type="button" data-free="toggle-owner" data-selection="teams" data-owner="'
+        + team.id + '">' + esc(checkLabel('teams', team)) + '</button>'
+      )).join('')
+    }
+
+    function renderWalkthrough() {
+      document.getElementById('tabs').innerHTML = WALKTHROUGHS.map((item) => (
+        '<button type="button" class="tab" data-tab="' + item.id + '" aria-selected="'
+        + (item.id === openWalkthrough) + '">' + esc(item.title) + '</button>'
+      )).join('')
+
+      const item = WALKTHROUGHS.find((entry) => entry.id === openWalkthrough)
+      const runningHere = activeWalkthrough === item.id
+      const finished = runningHere && !walkthroughBroken && walkthroughStep >= item.steps.length
+      let steps = ''
+      if (runningHere && walkthroughBroken) {
+        steps = '<p class="done-note">Free play changed the movie, so this script no longer matches. Start it again to watch it from the beginning.</p>'
+      } else if (!runningHere) {
+        steps = '<ol class="steps">' + item.steps.map((step, index) => (
+          '<li><span class="step-no">' + (index + 1) + '</span> <button type="button" disabled>'
+          + esc(step.label) + '</button></li>'
+        )).join('') + '</ol>'
+      } else {
+        steps = '<ol class="steps">' + item.steps.map((step, index) => {
+          const done = index < walkthroughStep
+          const current = index === walkthroughStep
+          const cls = current ? ' class="is-next"' : ''
+          const disabled = current ? '' : ' disabled'
+          return '<li><span class="step-no">' + (index + 1) + '</span> <button type="button"'
+            + cls + disabled + ' data-step="' + index + '">'
+            + esc(done ? step.label + ' (done)' : step.label) + '</button></li>'
+        }).join('') + '</ol>'
+      }
+      const tail = finished
+        ? '<p class="done-note">End of this walkthrough. Free play is still there if you want to keep going.</p>'
+        : ''
+      document.getElementById('walkthrough').innerHTML = '<h3>' + esc(item.title) + '</h3><p>'
+        + esc(item.body) + '</p><p><button type="button" data-start="' + item.id
+        + '">Start this walkthrough</button></p>' + steps + tail
+    }
+
+    function render() {
+      document.getElementById('change').textContent = changeText
+      renderMap(movie)
+      renderSelections()
+      renderFreePlay()
+      renderWalkthrough()
+    }
+
+    function applyAction(action) {
+      const next = TerritoryMovieColors.reduce(movie, action)
+      changeText = describeTransition(movie, next)
+      movie = next
+    }
+
+    document.body.addEventListener('click', (event) => {
+      const button = event.target.closest('button')
+      if (button == null) return
+
+      if (button.dataset.tab != null) {
+        openWalkthrough = button.dataset.tab
+        render()
+        return
+      }
+
+      if (button.dataset.start != null) {
+        movie = TerritoryMovieColors.initialState()
+        changeText = 'Walkthrough reset. Both selections are empty.'
+        activeWalkthrough = button.dataset.start
+        openWalkthrough = button.dataset.start
+        walkthroughStep = 0
+        walkthroughBroken = false
+        render()
+        return
+      }
+
+      if (button.dataset.step != null) {
+        const item = WALKTHROUGHS.find((entry) => entry.id === activeWalkthrough)
+        const index = Number(button.dataset.step)
+        if (item == null || walkthroughBroken || index !== walkthroughStep) return
+        applyAction(item.steps[index].action)
+        walkthroughStep += 1
+        render()
+        return
+      }
+
+      if (button.dataset.free == null) return
+      const kind = button.dataset.free
+      if (kind === 'set-paint') {
+        const nextDotsOnTop = button.dataset.value === 'top'
+        if (nextDotsOnTop === dotsOnTop) {
+          changeText = 'No change.'
+        } else {
+          dotsOnTop = nextDotsOnTop
+          changeText = nextDotsOnTop
+            ? 'Planet dots are on top of the fills. Fills are the full color. Color indexes stayed put.'
+            : 'Fills are on top of the planet dots at 35% opacity, so the dots show through. Color indexes stayed put.'
+        }
+        render()
+        return
+      }
+      let action = null
+      if (kind === 'toggle-owner') {
+        action = {
+          type: 'toggle-owner',
+          selection: button.dataset.selection,
+          ownerId: button.dataset.owner,
+        }
+      } else if (kind === 'set-by-team') {
+        action = { type: 'set-by-team', value: button.dataset.value === 'true' }
+      } else if (kind === 'set-owned-planets-only') {
+        action = { type: 'set-owned-planets-only', value: button.dataset.value === 'true' }
+      } else if (kind === 'set-frame') {
+        action = { type: 'set-frame', frame: Number(button.dataset.frame) }
+      } else if (kind === 'reload') {
+        action = { type: 'reload' }
+      }
+      if (action == null) return
+      applyAction(action)
+      if (activeWalkthrough != null) {
+        const item = WALKTHROUGHS.find((entry) => entry.id === activeWalkthrough)
+        if (item != null && walkthroughStep < item.steps.length) walkthroughBroken = true
+      }
+      render()
+    })
+
+    render()
+  </script>
+</body>
+</html>

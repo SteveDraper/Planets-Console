@@ -486,6 +486,10 @@ _Avoid_: **team territory**, diplomacy-family colors
 Which planets compete as nearest-planet sites for **Territory**. **All planets** leaves cells nearest an unowned planet (`ownerid == 0`) unpainted. **Owned planets only** drops unowned planets, so those cells join the nearest owned planet.
 _Avoid_: a second analytic, recomputing the partition in the SPA
 
+**Territory movie**:
+Playback of **Territory** at the current **viewpoint**, one frame per host turn from 1 through the game's current host turn. Each frame paints that turn's **base map** over that turn's **Territory**.
+_Avoid_: load-all, the shell's selected turn, a video file
+
 **Sphere map**:
 A game with `GameSettings.sphere` true. The map rectangle of size `mapwidth` by `mapheight`, centered on `(2000, 2000)`, is a torus: distance wraps on both axes, including when `mapshape` is round. Planets.nu calls this setup Sphere.
 _Avoid_: `Game.maptype` (hosting category), treating `mapshape` as the wrap flag, black-hole ergosphere
