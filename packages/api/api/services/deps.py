@@ -7,6 +7,7 @@ from api.services.game_service import GameService
 from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import ServiceStack, build_service_stack
+from api.services.territory_movie import TerritoryMovieService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
@@ -60,3 +61,11 @@ def get_turn_analytic_service(
     stack: ServiceStack = Depends(get_service_stack),
 ) -> TurnAnalyticService:
     return stack.analytics
+
+
+def get_territory_movie_service(
+    games: GameService = Depends(get_game_service),
+    turns: TurnLoadService = Depends(get_turn_load_service),
+    directory: LeagueTeamDirectoryService = Depends(get_league_team_directory_service),
+) -> TerritoryMovieService:
+    return TerritoryMovieService(games, turns, directory)

@@ -21,6 +21,7 @@ from api.services.game_service import GameService
 from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import get_process_service_stack
+from api.services.territory_movie import TerritoryMovieService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
@@ -42,6 +43,7 @@ from api.transport.homeworld_assertions import (
 )
 from api.transport.league_teams import LeagueTeamsResponse
 from api.transport.load_all_turns import LoadAllStreamItem
+from api.transport.territory_movie import TerritoryMovieResponse
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import HTTPException
 
@@ -123,6 +125,12 @@ class CoreClient:
         """Forward the league team directory read. Planets.nu is called inside Core."""
         planets = self._planets_client_factory()
         return self._invoke(lambda: self._league_teams.teams_for_game(game_id, planets))
+
+    def territory_movie(self, game_id: int, perspective: int) -> TerritoryMovieResponse:
+        """Forward the packed Territory movie. Core packs it; this method does not."""
+        planets = self._planets_client_factory()
+        movies = TerritoryMovieService(self._games, self._turns, self._league_teams)
+        return self._invoke(lambda: movies.for_perspective(game_id, perspective, planets))
 
     def viewpoint_eligibility(self, game_id: int, username: str) -> ViewpointEligibilityResponse:
         def work() -> ViewpointEligibilityResponse:

@@ -41,7 +41,8 @@ _SITE_SETS = (
 )
 
 
-def _league_team_by_player(turn: TurnInfo) -> dict[int, int]:
+def league_team_id_by_player(turn: TurnInfo) -> dict[int, int]:
+    """``Player.id`` to ``leagueteamid`` on this turn, including the viewpoint player."""
     by_player = {player.id: player.leagueteamid for player in turn.players}
     by_player.setdefault(turn.player.id, turn.player.leagueteamid)
     return by_player
@@ -139,15 +140,19 @@ def _player_rows(turn: TurnInfo) -> list[dict]:
     return [{"playerId": player_id} for player_id in sorted(owner_ids)]
 
 
-def _painted_partitions(
+def territory_sections(
     turn: TurnInfo,
-    league_team_by_player: dict[int, int],
-) -> tuple[list[_PaintedPartition], dict[int, set[int]]]:
-    """Each entry is ``(kind, components)``."""
+) -> tuple[dict[str, list[tuple[int, list[tuple[float, float]]]]], dict[int, set[int]]]:
+    """Four partitions and which league teams share a border.
+
+    Keys are the four territory kinds. Group id 0 is absent. Owned-planets-only
+    is a second diagram, not a filter of the all-planets rings.
+    """
+    league_team_by_player = league_team_id_by_player(turn)
     width = turn.settings.mapwidth
     height = turn.settings.mapheight
     sphere = turn.settings.sphere
-    partitions: list[_PaintedPartition] = []
+    sections: dict[str, list[tuple[int, list[tuple[float, float]]]]] = {}
     neighbors: dict[int, set[int]] = defaultdict(set)
     for owned_only, team_kind, player_kind in _SITE_SETS:
         team_components, player_components, adjacent = territory_unions(
@@ -156,10 +161,22 @@ def _painted_partitions(
             height=height,
             sphere=sphere,
         )
-        partitions.append((team_kind, team_components))
-        partitions.append((player_kind, player_components))
+        sections[team_kind] = team_components
+        sections[player_kind] = player_components
         for team_id, bordering in adjacent.items():
             neighbors[team_id].update(bordering)
+    return sections, neighbors
+
+
+def _painted_partitions(
+    turn: TurnInfo,
+) -> tuple[list[_PaintedPartition], dict[int, set[int]]]:
+    """Each entry is ``(kind, components)``, in site-set order."""
+    sections, neighbors = territory_sections(turn)
+    partitions: list[_PaintedPartition] = []
+    for _owned_only, team_kind, player_kind in _SITE_SETS:
+        partitions.append((team_kind, sections[team_kind]))
+        partitions.append((player_kind, sections[player_kind]))
     return partitions, neighbors
 
 
@@ -204,8 +221,8 @@ def _styles_for_turn(
 def compute_team_information(ctx: AnalyticComputeContext) -> dict:
     """Return player and league-team partitions for both site sets."""
     turn = ctx.turn
-    league_team_by_player = _league_team_by_player(turn)
-    partitions, neighbors = _painted_partitions(turn, league_team_by_player)
+    league_team_by_player = league_team_id_by_player(turn)
+    partitions, neighbors = _painted_partitions(turn)
     styles = _styles_for_turn(turn, league_team_by_player, neighbors)
     return {
         "analyticId": ANALYTIC_ID,

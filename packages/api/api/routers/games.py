@@ -11,12 +11,14 @@ from api.services.deps import (
     get_game_service,
     get_league_team_directory_service,
     get_load_all_turns_service,
+    get_territory_movie_service,
     get_turn_analytic_service,
     get_turn_load_service,
 )
 from api.services.game_service import GameService
 from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
+from api.services.territory_movie import TerritoryMovieService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_load_service import TurnLoadService
 from api.transport.connections_options import (
@@ -41,6 +43,7 @@ from api.transport.load_all_turns import (
     LoadAllTurnsStatusResponse,
     stream_load_all_turns,
 )
+from api.transport.territory_movie import TerritoryMovieResponse
 
 router = APIRouter(prefix="/v1/games", tags=["games"])
 
@@ -125,6 +128,24 @@ def get_turn_info(
 ) -> TurnInfo:
     """Return turn data for the given game, player perspective, and turn."""
     return turns.get_turn_info(game_id, perspective, turn_number)
+
+
+@router.get(
+    "/{game_id}/{perspective}/territory-movie",
+    response_model=TerritoryMovieResponse,
+)
+def get_territory_movie(
+    game_id: int,
+    perspective: int,
+    movies: TerritoryMovieService = Depends(get_territory_movie_service),
+    planets: PlanetsNuClient = Depends(get_planets_client),
+) -> TerritoryMovieResponse:
+    """Packed Territory movie through the game's current host turn.
+
+    Turns 1 through ``GameInfo.game.turn`` must already be stored. A missing
+    turn fails the request. This route does not fetch turns from Planets.nu.
+    """
+    return movies.for_perspective(game_id, perspective, planets)
 
 
 @router.get("/{game_id}/{perspective}/turns/{turn_number}/analytics/scores/inference")

@@ -11,7 +11,8 @@ optional ``sectorName`` from in-process memo or ``games/{id}/info`` (empty list 
 ``games`` prefix is absent).
 
 **GET /games/{game_id}/league-teams** forwards the Core league team directory. Profile fetches
-stay in Core. **POST /games/{game_id}/info** refreshes game info from Planets.nu.
+stay in Core. **GET /games/{game_id}/{perspective}/territory-movie** forwards the packed
+Territory movie; Core packs it. **POST /games/{game_id}/info** refreshes game info from Planets.nu.
 **POST .../turns/ensure** loads a turn when missing. **GET .../viewpoint-eligibility** returns the
 Core allowed **perspective** set for a login (username query required). Warp-well and Stellar
 Cartography routes use shared Core handlers.
@@ -31,6 +32,7 @@ from api.transport.concept_warp_well import (
 from api.transport.game_info_update import GameInfoUpdateRequest
 from api.transport.league_teams import LeagueTeamsResponse
 from api.transport.load_all_turns import stream_load_all_turns
+from api.transport.territory_movie import TerritoryMovieResponse
 from api.transport.turn_ensure import TurnEnsureRequest
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import StreamingResponse
@@ -173,6 +175,35 @@ def get_league_teams(
         "get_league_teams",
         "total",
         lambda: core.league_teams_for_game(game_id),
+    )
+    return finish_response(result, root)
+
+
+@router.get(
+    "/{game_id}/{perspective}/territory-movie",
+    response_model=TerritoryMovieResponse,
+)
+def get_territory_movie(
+    game_id: int,
+    perspective: int,
+    include: IncludeDiagnostics = False,
+    *,
+    core: CoreClientDep,
+) -> object:
+    """Packed Territory movie. Forwards the Core body without repacking."""
+    root = optional_request_root(
+        include,
+        "GET",
+        f"/games/{game_id}/{perspective}/territory-movie",
+        gameId=game_id,
+        perspective=perspective,
+        handler="get_territory_movie",
+    )
+    result = with_timed_child(
+        root,
+        "get_territory_movie",
+        "total",
+        lambda: core.territory_movie(game_id, perspective),
     )
     return finish_response(result, root)
 

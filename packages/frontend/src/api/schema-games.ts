@@ -110,6 +110,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/{perspective}/territory-movie": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Territory Movie
+         * @description Packed Territory movie. Forwards the Core body without repacking.
+         */
+        get: operations["get_territory_movie_games__game_id___perspective__territory_movie_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/turns/load-all-status": {
         parameters: {
             query?: never;
@@ -443,6 +463,59 @@ export interface components {
         StellarCartographyTurnSummaryResponse: unknown;
         StoredTurnPerspectivesResponse: unknown;
         /**
+         * TerritoryMovieLegendEntry
+         * @description One owner who holds a planet on any turn in the span. Name is null when unknown.
+         */
+        TerritoryMovieLegendEntry: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string | null;
+        };
+        /**
+         * TerritoryMovieRectangle
+         * @description Map rectangle the ring grid is measured from, centered on (2000, 2000).
+         */
+        TerritoryMovieRectangle: {
+            /** Left */
+            left: number;
+            /** Bottom */
+            bottom: number;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+        };
+        /**
+         * TerritoryMovieResponse
+         * @description Rings, planet dots, and the span-wide legend for one perspective.
+         *
+         *     rings and planets are base64 of gzip-compressed little-endian uint16 bytes.
+         *     The page inflates them. Colors, selection, and HTML are not in this body.
+         */
+        TerritoryMovieResponse: {
+            /**
+             * Turn
+             * @description GameInfo.game.turn. Frames are host turns 1 through this turn.
+             */
+            turn: number;
+            rectangle: components["schemas"]["TerritoryMovieRectangle"];
+            /**
+             * Rings
+             * @description Base64 gzip of the four sections, in order: team-territory, player-territory, team-territory-owned-only, player-territory-owned-only. Each section is turns 1..turn. A turn is a component count, then that many components of group id, vertex count, and dx, dy pairs on a 0.1 LY grid.
+             */
+            rings: string;
+            /**
+             * Planets
+             * @description Base64 gzip of a uint16 count, then rows sorted by planet id: id, host x, host y, first_turn.
+             */
+            planets: string;
+            /** Players */
+            players: components["schemas"]["TerritoryMovieLegendEntry"][];
+            /** Teams */
+            teams: components["schemas"]["TerritoryMovieLegendEntry"][];
+        };
+        /**
          * TurnEnsureRequest
          * @description Parameters to ensure turn data exists in storage for a game and perspective slot.
          */
@@ -682,6 +755,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LeagueTeamsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_territory_movie_games__game_id___perspective__territory_movie_get: {
+        parameters: {
+            query?: {
+                includeDiagnostics?: boolean;
+            };
+            header?: never;
+            path: {
+                game_id: number;
+                perspective: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerritoryMovieResponse"];
                 };
             };
             /** @description Validation Error */
