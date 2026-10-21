@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   byTeamForGame,
+  hiddenPlayerIdsForGame,
   TEAM_INFORMATION_PREFERENCES_STORAGE_KEY,
   useTeamInformationPreferencesStore,
 } from './teamInformationPreferences'
@@ -12,6 +13,7 @@ describe('teamInformationPreferences store', () => {
       ownedPlanetsOnly: false,
       hiddenLeagueTeamIds: [],
       byTeamByGameId: {},
+      hiddenPlayerIdsByGameId: {},
     })
   })
 
@@ -19,8 +21,10 @@ describe('teamInformationPreferences store', () => {
     const state = useTeamInformationPreferencesStore.getState()
     expect(state.ownedPlanetsOnly).toBe(false)
     expect(state.hiddenLeagueTeamIds).toEqual([])
+    expect(state.hiddenPlayerIdsByGameId).toEqual({})
     expect(byTeamForGame(state.byTeamByGameId, '628580')).toBe(false)
     expect(byTeamForGame(state.byTeamByGameId, null)).toBe(false)
+    expect(hiddenPlayerIdsForGame(state.hiddenPlayerIdsByGameId, null)).toEqual([])
   })
 
   it('persists the checkbox to localStorage', () => {
@@ -50,6 +54,7 @@ describe('teamInformationPreferences store', () => {
     expect(state.ownedPlanetsOnly).toBe(true)
     expect(state.hiddenLeagueTeamIds).toEqual([])
     expect(state.byTeamByGameId).toEqual({})
+    expect(state.hiddenPlayerIdsByGameId).toEqual({})
   })
 
   it('stores by team for one game and leaves other games off', () => {
@@ -79,5 +84,70 @@ describe('teamInformationPreferences store', () => {
     expect(state.ownedPlanetsOnly).toBe(true)
     expect(state.hiddenLeagueTeamIds).toEqual([4])
     expect(state.byTeamByGameId).toEqual({})
+    expect(state.hiddenPlayerIdsByGameId).toEqual({})
+  })
+
+  it('hides players for one game and leaves other games visible', () => {
+    const store = useTeamInformationPreferencesStore.getState()
+    store.setPlayerTerritoryVisible('111', 9, false)
+    store.setPlayerTerritoryVisible('111', 7, false)
+    store.setPlayerTerritoryVisible('222', 3, false)
+    store.setPlayerTerritoryVisible('', 1, false)
+    const state = useTeamInformationPreferencesStore.getState()
+    expect(state.hiddenPlayerIdsByGameId).toEqual({ '111': [7, 9], '222': [3] })
+    expect(hiddenPlayerIdsForGame(state.hiddenPlayerIdsByGameId, '333')).toEqual([])
+    const raw = localStorage.getItem(TEAM_INFORMATION_PREFERENCES_STORAGE_KEY)
+    expect(raw).toContain('"111":[7,9]')
+    expect(raw).toContain('"222":[3]')
+    store.setPlayerTerritoryVisible('111', 7, true)
+    expect(useTeamInformationPreferencesStore.getState().hiddenPlayerIdsByGameId).toEqual({
+      '111': [9],
+      '222': [3],
+    })
+    useTeamInformationPreferencesStore.getState().setPlayerTerritoryVisible('111', 9, true)
+    expect(useTeamInformationPreferencesStore.getState().hiddenPlayerIdsByGameId).toEqual({
+      '222': [3],
+    })
+  })
+
+  it('rehydrates a blob with no player-hide field as every player visible', async () => {
+    localStorage.setItem(
+      TEAM_INFORMATION_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          ownedPlanetsOnly: true,
+          hiddenLeagueTeamIds: [4],
+          byTeamByGameId: { '111': true },
+        },
+        version: 3,
+      })
+    )
+    await useTeamInformationPreferencesStore.persist.rehydrate()
+    const state = useTeamInformationPreferencesStore.getState()
+    expect(state.ownedPlanetsOnly).toBe(true)
+    expect(state.hiddenLeagueTeamIds).toEqual([4])
+    expect(state.byTeamByGameId).toEqual({ '111': true })
+    expect(state.hiddenPlayerIdsByGameId).toEqual({})
+    expect(hiddenPlayerIdsForGame(state.hiddenPlayerIdsByGameId, '111')).toEqual([])
+  })
+
+  it('rehydrates hidden players for one game and drops empty or invalid ids', async () => {
+    localStorage.setItem(
+      TEAM_INFORMATION_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          ownedPlanetsOnly: false,
+          hiddenLeagueTeamIds: [],
+          byTeamByGameId: {},
+          hiddenPlayerIdsByGameId: { '111': [0, -1, 1.5, 7], '222': [], '': [4] },
+        },
+        version: 4,
+      })
+    )
+    await useTeamInformationPreferencesStore.persist.rehydrate()
+    const state = useTeamInformationPreferencesStore.getState()
+    expect(state.hiddenPlayerIdsByGameId).toEqual({ '111': [7] })
+    expect(hiddenPlayerIdsForGame(state.hiddenPlayerIdsByGameId, '222')).toEqual([])
+    expect(hiddenPlayerIdsForGame(state.hiddenPlayerIdsByGameId, null)).toEqual([])
   })
 })

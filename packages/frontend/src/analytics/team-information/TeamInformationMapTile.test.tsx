@@ -76,6 +76,7 @@ describe('TeamInformationMapTile', () => {
       ownedPlanetsOnly: false,
       hiddenLeagueTeamIds: [],
       byTeamByGameId: {},
+      hiddenPlayerIdsByGameId: {},
     })
     useTeamInformationHighlightStore.setState({ hoveredTerritory: null })
     useSessionStore.setState({ name: 'alice', password: null, credentialsRevision: 0 })
@@ -139,7 +140,8 @@ describe('TeamInformationMapTile', () => {
     expect(await screen.findByText('alice')).toBeInTheDocument()
     expect(screen.getByText('carol')).toBeInTheDocument()
     expect(screen.queryByText('Blue Squadron')).not.toBeInTheDocument()
-    expect(screen.queryByRole('checkbox', { name: /Show .* territory/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Show alice territory' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Show carol territory' })).toBeChecked()
     const aliceSwatch = document.querySelector('[data-fill-pattern="solid"]')
     expect(aliceSwatch).toHaveStyle({ backgroundColor: defaultColorForPlayerId(1) })
     await user.hover(screen.getByText('alice'))
@@ -172,6 +174,43 @@ describe('TeamInformationMapTile', () => {
     expect(useTeamInformationPreferencesStore.getState().ownedPlanetsOnly).toBe(true)
     expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
     expect(fetchLeagueTeams).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts player rows checked, persists an uncheck for this game, and still hovers', async () => {
+    const user = userEvent.setup()
+    renderTile(
+      <TeamInformationMapTile
+        name="Territory"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        analyticScope={sampleScope}
+        turnDataReady
+      />,
+      seedTurnRoster
+    )
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    const showAlice = await screen.findByRole('checkbox', { name: 'Show alice territory' })
+    expect(showAlice).toBeChecked()
+    const swatch = document.querySelector('[data-fill-pattern="solid"]')
+    expect(swatch).toHaveStyle({ backgroundColor: defaultColorForPlayerId(1) })
+    await user.click(showAlice)
+    expect(showAlice).not.toBeChecked()
+    expect(swatch).toHaveStyle({ backgroundColor: defaultColorForPlayerId(1) })
+    expect(screen.getByRole('checkbox', { name: 'Show carol territory' })).toBeChecked()
+    expect(useTeamInformationPreferencesStore.getState().hiddenPlayerIdsByGameId).toEqual({
+      '628580': [1],
+    })
+    expect(useTeamInformationPreferencesStore.getState().hiddenLeagueTeamIds).toEqual([])
+    expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
+    await user.hover(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 1,
+    })
+    await user.unhover(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
   })
 
   it('starts checked, persists an uncheck, and still hovers an unchecked row', async () => {

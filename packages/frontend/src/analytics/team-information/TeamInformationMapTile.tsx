@@ -7,6 +7,7 @@ import { useShellStore } from '../../stores/shell'
 import { useTeamInformationHighlightStore } from '../../stores/teamInformationHighlight'
 import {
   byTeamForGame,
+  hiddenPlayerIdsForGame,
   useTeamInformationPreferencesStore,
 } from '../../stores/teamInformationPreferences'
 import { AnalyticSidebarTile, analyticDetailCheckboxClassName } from '../AnalyticSidebarTile'
@@ -50,6 +51,12 @@ export function TeamInformationMapTile({
   const setLeagueTeamRegionVisible = useTeamInformationPreferencesStore(
     (s) => s.setLeagueTeamRegionVisible
   )
+  const hiddenPlayerIdsByGameId = useTeamInformationPreferencesStore(
+    (s) => s.hiddenPlayerIdsByGameId
+  )
+  const setPlayerTerritoryVisible = useTeamInformationPreferencesStore(
+    (s) => s.setPlayerTerritoryVisible
+  )
   const byTeamByGameId = useTeamInformationPreferencesStore((s) => s.byTeamByGameId)
   const setByTeamForGame = useTeamInformationPreferencesStore((s) => s.setByTeamForGame)
   const setHoveredTerritory = useTeamInformationHighlightStore((s) => s.setHoveredTerritory)
@@ -61,6 +68,7 @@ export function TeamInformationMapTile({
   const mapQuery = useQuery(teamInformationMapQuerySpec(analyticScope, fetchEnabled))
   const gameId = analyticScope?.gameId ?? null
   const byTeam = byTeamForGame(byTeamByGameId, gameId)
+  const hiddenPlayerIds = hiddenPlayerIdsForGame(hiddenPlayerIdsByGameId, gameId)
   const namesByLeagueTeamId = useLeagueTeamNames(gameId, supportsMode && enabled)
   const usernamesByPlayerId = useMemo(
     () => rosterUsernames(perspectives ?? [], turnUsernames),
@@ -183,16 +191,26 @@ export function TeamInformationMapTile({
             return (
               <li
                 key={row.playerId}
-                className="flex min-w-0 items-center gap-2"
+                className="flex min-w-0 items-start gap-2"
                 onMouseEnter={() =>
                   setHoveredTerritory({ partition: 'player', id: row.playerId })
                 }
                 onMouseLeave={() => setHoveredTerritory(null)}
               >
+                <input
+                  type="checkbox"
+                  checked={!hiddenPlayerIds.includes(row.playerId)}
+                  aria-label={`Show ${legendText} territory`}
+                  onChange={(event) => {
+                    if (gameId == null || gameId.length === 0) return
+                    setPlayerTerritoryVisible(gameId, row.playerId, event.target.checked)
+                  }}
+                  className={cn(analyticDetailCheckboxClassName, 'mt-0.5')}
+                />
                 <span
                   aria-hidden
                   data-fill-pattern="solid"
-                  className="h-3 w-3 shrink-0 rounded-sm border border-black/30"
+                  className="mt-0.5 h-3 w-3 shrink-0 rounded-sm border border-black/30"
                   style={{ backgroundColor: row.fillColor }}
                 />
                 <span

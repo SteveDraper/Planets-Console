@@ -1,5 +1,6 @@
 import type { MapRegionOverlay } from '../../api/mapRegionOverlayTypes'
 import {
+  isPlayerTerritoryKind,
   isTeamTerritoryKind,
   isTerritoryKind,
   territoryOwnerId,
@@ -25,8 +26,8 @@ export function applyTerritoryKindFilter(
 /**
  * Overlays to outline for the legend hover.
  * A hover applies only while its partition is the active one.
- * Callers pass overlays from before ``omitHiddenTeamTerritoryOverlays``
- * so a hidden league team still outlines.
+ * Callers pass overlays from before ``omitHiddenTerritoryOverlays``
+ * so a hidden league team or player still outlines.
  */
 export function territoryOverlaysForHighlight(
   overlays: readonly MapRegionOverlay[],
@@ -40,20 +41,30 @@ export function territoryOverlaysForHighlight(
 }
 
 /**
- * Drop team-territory fills for unchecked legend rows.
- * Player-territory kinds are not filtered. Hover and the legend outline use
- * the list from before this filter.
+ * Drop territory fills for unchecked legend rows.
+ * A hidden league team drops only team-territory kinds.
+ * A hidden player drops both player site sets and leaves team-territory overlays.
+ * Other kinds pass through. Hover and the legend outline use the list from
+ * before this filter.
  */
-export function omitHiddenTeamTerritoryOverlays(
+export function omitHiddenTerritoryOverlays(
   overlays: readonly MapRegionOverlay[],
-  hiddenLeagueTeamIds: readonly number[]
+  hiddenLeagueTeamIds: readonly number[],
+  hiddenPlayerIds: readonly number[]
 ): readonly MapRegionOverlay[] {
-  if (hiddenLeagueTeamIds.length === 0) return overlays
-  const hidden = new Set(hiddenLeagueTeamIds)
+  if (hiddenLeagueTeamIds.length === 0 && hiddenPlayerIds.length === 0) return overlays
+  const hiddenTeams = new Set(hiddenLeagueTeamIds)
+  const hiddenPlayers = new Set(hiddenPlayerIds)
   return overlays.filter((overlay) => {
-    if (!isTeamTerritoryKind(overlay.kind)) return true
-    const leagueTeamId = overlay.leagueTeamId
-    return leagueTeamId == null || !hidden.has(leagueTeamId)
+    if (isTeamTerritoryKind(overlay.kind)) {
+      const leagueTeamId = overlay.leagueTeamId
+      return leagueTeamId == null || !hiddenTeams.has(leagueTeamId)
+    }
+    if (isPlayerTerritoryKind(overlay.kind)) {
+      const playerId = overlay.playerId
+      return playerId == null || !hiddenPlayers.has(playerId)
+    }
+    return true
   })
 }
 
@@ -61,7 +72,7 @@ export function omitHiddenTeamTerritoryOverlays(
  * Paint pipeline: territory kinds stay out of ``paintNonTerritory``
  * (Visibility kind preferences and homeworld selection). The selected kind
  * is inserted back in its original order. Legend visibility is a later filter
- * (``omitHiddenTeamTerritoryOverlays``) so hover can still see hidden teams.
+ * (``omitHiddenTerritoryOverlays``) so hover can still see hidden owners.
  */
 export function mapRegionOverlaysForPaint(
   overlays: readonly MapRegionOverlay[],

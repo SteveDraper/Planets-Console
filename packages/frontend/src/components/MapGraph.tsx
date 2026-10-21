@@ -52,7 +52,7 @@ import {
 import { applyPlayerTerritoryFillColors } from '../analytics/team-information/playerTerritoryColor'
 import {
   mapRegionOverlaysForPaint,
-  omitHiddenTeamTerritoryOverlays,
+  omitHiddenTerritoryOverlays,
   territoryOverlaysForHighlight,
 } from '../analytics/team-information/teamTerritoryPaint'
 import { useLeagueTeamNames } from '../analytics/team-information/useLeagueTeamNames'
@@ -64,7 +64,11 @@ import { isHomeworldSectorOverlay } from '../lib/homeworldSectorIndex'
 import { useEnabledAnalyticsStore } from '../stores/enabledAnalytics'
 import { useHomeworldRegionSelectionStore } from '../stores/homeworldRegionSelectionStore'
 import { useTeamInformationHighlightStore } from '../stores/teamInformationHighlight'
-import { byTeamForGame, useTeamInformationPreferencesStore } from '../stores/teamInformationPreferences'
+import {
+  byTeamForGame,
+  hiddenPlayerIdsForGame,
+  useTeamInformationPreferencesStore,
+} from '../stores/teamInformationPreferences'
 import { usePlayerColorsStore } from '../stores/playerColors'
 import { useVisibilityPreferencesStore } from '../stores/visibilityPreferences'
 import type { PerspectiveRow } from '../lib/gameInfoShell'
@@ -256,6 +260,9 @@ function MapGraphFlow({
   const visibilityKinds = useVisibilityPreferencesStore((s) => s.kinds)
   const ownedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.ownedPlanetsOnly)
   const hiddenLeagueTeamIds = useTeamInformationPreferencesStore((s) => s.hiddenLeagueTeamIds)
+  const hiddenPlayerIds = useTeamInformationPreferencesStore((s) =>
+    hiddenPlayerIdsForGame(s.hiddenPlayerIdsByGameId, analyticScope.gameId)
+  )
   const byTeam = useTeamInformationPreferencesStore((s) =>
     byTeamForGame(s.byTeamByGameId, analyticScope.gameId)
   )
@@ -343,8 +350,8 @@ function MapGraphFlow({
     ]
   )
   const paintedRegionOverlays = useMemo(
-    () => omitHiddenTeamTerritoryOverlays(regionOverlays, hiddenLeagueTeamIds),
-    [hiddenLeagueTeamIds, regionOverlays]
+    () => omitHiddenTerritoryOverlays(regionOverlays, hiddenLeagueTeamIds, hiddenPlayerIds),
+    [hiddenLeagueTeamIds, hiddenPlayerIds, regionOverlays]
   )
   const highlightedTerritoryOverlays = useMemo(() => {
     if (!teamInformationEnabled) return []

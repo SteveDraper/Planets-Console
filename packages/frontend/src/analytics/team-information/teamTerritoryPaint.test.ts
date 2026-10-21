@@ -10,7 +10,7 @@ import {
 import {
   applyTerritoryKindFilter,
   mapRegionOverlaysForPaint,
-  omitHiddenTeamTerritoryOverlays,
+  omitHiddenTerritoryOverlays,
   territoryOverlaysForHighlight,
 } from './teamTerritoryPaint'
 
@@ -91,26 +91,47 @@ describe('mapRegionOverlaysForPaint', () => {
   })
 })
 
-describe('omitHiddenTeamTerritoryOverlays', () => {
+describe('omitHiddenTerritoryOverlays', () => {
   const team4 = boundary(TEAM_TERRITORY_KIND, 'team-territory:4:0', { leagueTeamId: 4 })
   const team9 = boundary(TEAM_TERRITORY_OWNED_ONLY_KIND, 'team-territory-owned-only:9:0', {
     leagueTeamId: 9,
   })
   const player = boundary(PLAYER_TERRITORY_KIND, 'player-territory:1:0', { playerId: 1 })
+  const playerOwned = boundary(
+    PLAYER_TERRITORY_OWNED_ONLY_KIND,
+    'player-territory-owned-only:1:0',
+    { playerId: 1 }
+  )
+  const otherPlayer = boundary(PLAYER_TERRITORY_KIND, 'player-territory:2:0', { playerId: 2 })
   const shipScan = boundary('ship-scan', 'ship-scan')
-  const overlays = [shipScan, team4, team9, player]
+  const overlays = [shipScan, team4, team9, player, playerOwned, otherPlayer]
 
-  it('returns the same list when no league team is hidden', () => {
-    expect(omitHiddenTeamTerritoryOverlays(overlays, [])).toBe(overlays)
+  it('returns the same list when nothing is hidden', () => {
+    expect(omitHiddenTerritoryOverlays(overlays, [], [])).toBe(overlays)
   })
 
-  it('drops hidden league teams and keeps other teams and non-team overlays', () => {
-    const out = omitHiddenTeamTerritoryOverlays(overlays, [4])
+  it('drops hidden league teams and keeps player overlays', () => {
+    const out = omitHiddenTerritoryOverlays(overlays, [4], [])
     expect(out.map((overlay) => overlay.id)).toEqual([
       'ship-scan',
       'team-territory-owned-only:9:0',
       'player-territory:1:0',
+      'player-territory-owned-only:1:0',
+      'player-territory:2:0',
     ])
+    expect(out[2]).toBe(player)
+  })
+
+  it('drops a hidden player on both site sets and keeps team overlays', () => {
+    const out = omitHiddenTerritoryOverlays(overlays, [], [1])
+    expect(out.map((overlay) => overlay.id)).toEqual([
+      'ship-scan',
+      'team-territory:4:0',
+      'team-territory-owned-only:9:0',
+      'player-territory:2:0',
+    ])
+    expect(out[1]).toBe(team4)
+    expect(out[3]).toBe(otherPlayer)
   })
 })
 
