@@ -4,7 +4,9 @@
  * and runs that copy from `file://`.
  */
 export function createTerritoryMovieRuntime() {
-  const PLAY_STEP_MS = 2000
+  const PLAY_STEP_MS = 1000
+  const MIN_FRAME_PERIOD_MS = 100
+  const MAX_FRAME_PERIOD_MS = 5000
   const SVG_NS = 'http://www.w3.org/2000/svg'
   const DOT_FILL = '#9ca3af'
 
@@ -239,6 +241,14 @@ export function createTerritoryMovieRuntime() {
     return (2 * viewBoxWidth) / cssWidth
   }
 
+  /** Faster shortens the period by 10 percent. Slower lengthens it. */
+  function nextFramePeriod(period: number, faster: boolean): number {
+    const scaled = period * (faster ? 0.9 : 1.1)
+    if (scaled < MIN_FRAME_PERIOD_MS) return MIN_FRAME_PERIOD_MS
+    if (scaled > MAX_FRAME_PERIOD_MS) return MAX_FRAME_PERIOD_MS
+    return scaled
+  }
+
   /** CSS width of the viewBox after it meets inside the SVG element. */
   function fittedCssWidth(
     rectangle: Rectangle,
@@ -303,13 +313,19 @@ export function createTerritoryMovieRuntime() {
     const backFrameButton = required(doc, 'frame-back')
     const byTeamInput = required(doc, 'by-team') as HTMLInputElement
     const ownedInput = required(doc, 'owned-only') as HTMLInputElement
-    const title = required(doc, 'frame-title')
     const map = required(doc, 'map')
     const legend = required(doc, 'legend')
+    const timeline = required(doc, 'timeline')
+    const ticks = required(doc, 'ticks')
+    const playhead = required(doc, 'playhead')
+    const slowerButton = required(doc, 'speed-down')
+    const fasterButton = required(doc, 'speed-up')
 
     let state = initialState()
     let playing = false
     let timer = 0
+    let framePeriod = PLAY_STEP_MS
+    let dragging = false
 
     lockSidebarWidth(doc)
     map.setAttribute('viewBox', viewBoxFor(movie.rectangle))
@@ -328,9 +344,7 @@ export function createTerritoryMovieRuntime() {
     }
 
     function renderFrame(): void {
-      const turnText = String(state.frame)
-      title.textContent = turnText
-      doc.title = turnText
+      doc.title = String(state.frame)
       const selection = selectionKey(state)
       const section = movie.sections[sectionIndex(state.byTeam, state.ownedPlanetsOnly)] ?? []
       const components = section[state.frame - 1] ?? []
@@ -361,6 +375,60 @@ export function createTerritoryMovieRuntime() {
         circle.setAttribute('fill', DOT_FILL)
         dots.append(circle)
       }
+      renderPlayhead()
+    }
+
+    function frameRatio(frame: number): number {
+      if (movie.turn <= 1) return 0
+      return (frame - 1) / (movie.turn - 1)
+    }
+
+    function renderPlayhead(): void {
+      playhead.style.left = `${frameRatio(state.frame) * 100}%`
+    }
+
+    function renderTicks(): void {
+      ticks.replaceChildren()
+      for (let turn = 1; turn <= movie.turn; turn += 1) {
+        const numbered = turn === 1 || turn % 10 === 0
+        const tick = doc.createElement('span')
+        tick.className = numbered ? 'tick major' : 'tick minor'
+        tick.style.left = `${frameRatio(turn) * 100}%`
+        ticks.append(tick)
+        if (!numbered) continue
+        const label = doc.createElement('span')
+        label.className = 'tick-label'
+        label.textContent = String(turn)
+        label.style.left = `${frameRatio(turn) * 100}%`
+        ticks.append(label)
+      }
+    }
+
+    function seek(frame: number): void {
+      const next = Math.min(movie.turn, Math.max(1, Math.round(frame)))
+      if (next === state.frame) return
+      state = setFrame(state, next, movie.turn)
+      renderFrame()
+      if (playing && state.frame >= movie.turn) {
+        pause()
+        return
+      }
+      if (playing) armTimer()
+      renderTransport()
+    }
+
+    function seekFromClientX(clientX: number): void {
+      const rect = timeline.getBoundingClientRect()
+      if (!(rect.width > 0)) return
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+      const frame = movie.turn <= 1 ? 1 : 1 + ratio * (movie.turn - 1)
+      seek(frame)
+    }
+
+    function clientXFrom(event: Event): number | null {
+      if (!('clientX' in event)) return null
+      const clientX = event.clientX
+      return typeof clientX === 'number' ? clientX : null
     }
 
     function renderLegend(): void {
@@ -405,7 +473,7 @@ export function createTerritoryMovieRuntime() {
           return
         }
         renderTransport()
-      }, PLAY_STEP_MS)
+      }, framePeriod)
     }
 
     function pause(): void {
@@ -455,6 +523,42 @@ export function createTerritoryMovieRuntime() {
     backFrameButton.addEventListener('click', () => {
       step(-1)
     })
+    slowerButton.addEventListener('click', () => {
+      framePeriod = nextFramePeriod(framePeriod, false)
+      if (playing) armTimer()
+    })
+    fasterButton.addEventListener('click', () => {
+      framePeriod = nextFramePeriod(framePeriod, true)
+      if (playing) armTimer()
+    })
+    timeline.addEventListener('pointerdown', (event) => {
+      const clientX = clientXFrom(event)
+      if (clientX == null) return
+      dragging = true
+      if (
+        'pointerId' in event &&
+        typeof event.pointerId === 'number' &&
+        typeof timeline.setPointerCapture === 'function'
+      ) {
+        try {
+          timeline.setPointerCapture(event.pointerId)
+        } catch {
+          dragging = true
+        }
+      }
+      seekFromClientX(clientX)
+    })
+    timeline.addEventListener('pointermove', (event) => {
+      if (!dragging) return
+      const clientX = clientXFrom(event)
+      if (clientX == null) return
+      seekFromClientX(clientX)
+    })
+    const endDrag = (): void => {
+      dragging = false
+    }
+    timeline.addEventListener('pointerup', endDrag)
+    timeline.addEventListener('pointercancel', endDrag)
     byTeamInput.addEventListener('change', () => {
       state = setByTeam(state, byTeamInput.checked)
       renderLegend()
@@ -479,6 +583,7 @@ export function createTerritoryMovieRuntime() {
 
     byTeamInput.checked = false
     ownedInput.checked = false
+    renderTicks()
     renderLegend()
     renderFrame()
     renderTransport()
@@ -515,6 +620,9 @@ export function createTerritoryMovieRuntime() {
 
   return {
     PLAY_STEP_MS,
+    MIN_FRAME_PERIOD_MS,
+    MAX_FRAME_PERIOD_MS,
+    nextFramePeriod,
     initialState,
     toggleOwner,
     setByTeam,

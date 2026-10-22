@@ -58,15 +58,33 @@ export function buildTerritoryMovieDocument(payload: TerritoryMovieDocumentPaylo
     .switch-measure, .owner-measure { display: flex; align-items: center; gap: 6px; width: max-content; white-space: nowrap; }
     .owner-measure { padding-left: 1.25rem; }
     .box { width: 16px; height: 16px; flex: none; }
-    .controls { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .bottom { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; background: #3a3f44; color: #f5f5f4; }
+    .scrub-row { display: flex; align-items: flex-end; gap: 12px; }
+    .scrubber { flex: 1; min-width: 0; padding: 0 14px; }
+    .timeline { position: relative; height: 40px; touch-action: none; cursor: pointer; }
+    #ticks { position: absolute; inset: 0; }
+    .track { position: absolute; left: 0; right: 0; bottom: 7px; height: 2px; background: #c5c8cc; }
+    .tick { position: absolute; bottom: 7px; width: 1px; background: #d5d8dc; transform: translateX(-50%); }
+    .tick.minor { height: 6px; }
+    .tick.major { height: 12px; background: #f5f5f4; }
+    .tick-label { position: absolute; bottom: 22px; transform: translateX(-50%); font-size: 11px; line-height: 1; color: #f5f5f4; }
+    .playhead { position: absolute; bottom: 1px; width: 2px; height: 18px; background: #b6ff4a; transform: translateX(-50%); cursor: grab; }
+    .playhead::after { content: ""; position: absolute; left: 50%; top: -3px; width: 10px; height: 10px; transform: translateX(-50%); border-radius: 50%; background: #b6ff4a; }
+    .speed { display: flex; align-items: center; gap: 6px; flex: none; }
+    .speed-label { font-size: 13px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     button, label { font: inherit; }
-    .controls button { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; padding: 0; border: 1px solid #22262a; border-radius: 8px; background: linear-gradient(180deg, #6b7076 0%, #4c5156 48%, #3c4044 100%); box-shadow: inset 0 1px 0 #a0a6ab, inset 0 -1px 0 #2c2f33; cursor: pointer; }
-    .controls button svg { width: 22px; height: 22px; display: block; background: none; }
-    #back-to-start, #frame-back, #frame-forward { color: #3ecbff; }
-    #play, #pause { color: #b6ff4a; }
-    .controls button:disabled { opacity: 0.45; cursor: default; }
+    .bottom button { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid #1c1f22; border-radius: 8px; background: linear-gradient(180deg, #f4f5f6 0%, #d7dbdf 46%, #b7bcc1 100%); box-shadow: inset 0 1px 0 #ffffff, inset 0 -1px 0 #8d9298; cursor: pointer; }
+    .controls button { width: 42px; height: 42px; }
+    .speed button { width: 28px; height: 28px; }
+    .bottom button svg { display: block; background: none; }
+    .controls button svg { width: 22px; height: 22px; }
+    .speed button svg { width: 14px; height: 14px; }
+    #back-to-start, #frame-back, #frame-forward { color: #067a99; }
+    #play, #pause { color: #3d7a00; }
+    #speed-down, #speed-up { color: #1c1f22; }
+    .bottom button:disabled { opacity: 0.45; cursor: default; }
     .frame { grid-column: 2; grid-row: 1; position: relative; min-width: 0; min-height: 0; background: #000; }
-    h1 { position: absolute; z-index: 1; margin: 0; top: 8px; left: 12px; color: #e5e7eb; font-size: 20px; font-weight: 600; pointer-events: none; }
     #map { display: block; width: 100%; height: 100%; background: #000; pointer-events: none; }
     #legend { list-style: none; margin: 0; padding: 0 0 0 1.25rem; display: flex; flex-direction: column; gap: 6px; }
     #legend label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -82,15 +100,30 @@ export function buildTerritoryMovieDocument(payload: TerritoryMovieDocumentPaylo
       <ul id="legend"></ul>
     </aside>
     <div class="frame">
-      <h1 id="frame-title"></h1>
       <svg id="map" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
-    <div class="controls">
-      <button type="button" id="back-to-start" aria-label="Back to turn 1">${icon('M6 5.5h2.2v13H6v-13zm12.2 0L8.8 12l9.4 6.5v-13z')}</button>
-      <button type="button" id="frame-back" aria-label="One frame back">${icon('M17 5.5 6.5 12 17 18.5v-13z')}</button>
-      <button type="button" id="play" aria-label="Play">${icon('M7.5 5.5v13l11-6.5-11-6.5z')}</button>
-      <button type="button" id="pause" aria-label="Pause">${icon('M6 5.5h3.4v13H6v-13zm8.6 0H18v13h-3.4v-13z')}</button>
-      <button type="button" id="frame-forward" aria-label="One frame forward">${icon('M5.5 5.5v13L15 12 5.5 5.5zM16.2 5.5H18.4v13h-2.2v-13z')}</button>
+    <div class="bottom">
+      <div class="scrub-row">
+        <div class="scrubber">
+          <div id="timeline" class="timeline">
+            <div id="ticks"></div>
+            <div class="track"></div>
+            <div id="playhead" class="playhead"></div>
+          </div>
+        </div>
+        <div class="speed">
+          <span class="speed-label">Speed</span>
+          <button type="button" id="speed-down" aria-label="Slower">${icon('M5 11h14v2H5z')}</button>
+          <button type="button" id="speed-up" aria-label="Faster">${icon('M11 5h2v14h-2zM5 11h14v2H5z')}</button>
+        </div>
+      </div>
+      <div class="controls">
+        <button type="button" id="back-to-start" aria-label="Back to turn 1">${icon('M6 5.5h2.2v13H6v-13zm12.2 0L8.8 12l9.4 6.5v-13z')}</button>
+        <button type="button" id="frame-back" aria-label="One frame back">${icon('M14 5.5 5.5 12 14 18.5zM16.3 5.5h2.2v13h-2.2z')}</button>
+        <button type="button" id="play" aria-label="Play">${icon('M7.5 5.5v13l11-6.5-11-6.5z')}</button>
+        <button type="button" id="pause" aria-label="Pause">${icon('M6 5.5h3.4v13H6v-13zm8.6 0H18v13h-3.4v-13z')}</button>
+        <button type="button" id="frame-forward" aria-label="One frame forward">${icon('M5.5 5.5h2.2v13H5.5zM10 5.5v13l8.5-6.5L10 5.5z')}</button>
+      </div>
     </div>
   </main>
   <script type="application/json" id="territory-movie-payload">${json}</script>

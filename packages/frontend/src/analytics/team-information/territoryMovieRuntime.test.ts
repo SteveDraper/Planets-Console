@@ -128,7 +128,13 @@ describe('territory movie runtime', () => {
     expect(runtime.dotRadius(4000, 800)).toBe(10)
     expect(runtime.fittedCssWidth(rectangle, 800, 800)).toBe(800)
     expect(runtime.fittedCssWidth(rectangle, 1200, 600)).toBe(800)
-    expect(runtime.PLAY_STEP_MS).toBe(2000)
+    expect(runtime.nextFramePeriod(2000, true)).toBe(1800)
+    expect(runtime.nextFramePeriod(2000, false)).toBe(2200)
+    expect(runtime.nextFramePeriod(110, true)).toBe(runtime.MIN_FRAME_PERIOD_MS)
+    expect(runtime.nextFramePeriod(4600, false)).toBe(runtime.MAX_FRAME_PERIOD_MS)
+    expect(runtime.MIN_FRAME_PERIOD_MS).toBe(100)
+    expect(runtime.MAX_FRAME_PERIOD_MS).toBe(5000)
+    expect(runtime.PLAY_STEP_MS).toBe(1000)
   })
 
   it('keeps a legend row with no ring, paints dots above fills, and hides early planets', () => {
@@ -181,7 +187,6 @@ describe('territory movie runtime', () => {
       teams: [{ id: 7, name: null }],
       palette: ['#8fff00', '#00006e'],
     })
-    expect(doc.getElementById('frame-title')?.textContent).toBe('1')
     expect(doc.title).toBe('1')
     const clickLegend = (index: number) => {
       const input = doc.querySelectorAll('#legend input')[index]
@@ -254,7 +259,7 @@ describe('territory movie runtime', () => {
     expect(sidebar.style.width).toBe('240px')
   })
 
-  it('steps one frame every 2 seconds and returns to turn 1', () => {
+  it('steps one frame every second and returns to turn 1', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const doc = page()
     const sections: { groupId: number; vertices: { dx: number; dy: number }[] }[][][] = [
@@ -271,19 +276,66 @@ describe('territory movie runtime', () => {
     })
     expect(doc.querySelector('circle')).toBeNull()
     doc.getElementById('play')?.dispatchEvent(new Event('click'))
-    expect(doc.getElementById('frame-title')?.textContent).toBe('1')
-    vi.advanceTimersByTime(2000)
-    expect(doc.getElementById('frame-title')?.textContent).toBe('2')
-    doc.getElementById('pause')?.dispatchEvent(new Event('click'))
-    vi.advanceTimersByTime(2000)
-    expect(doc.getElementById('frame-title')?.textContent).toBe('2')
-    doc.getElementById('frame-forward')?.dispatchEvent(new Event('click'))
-    expect(doc.getElementById('frame-title')?.textContent).toBe('3')
-    doc.getElementById('frame-back')?.dispatchEvent(new Event('click'))
-    expect(doc.getElementById('frame-title')?.textContent).toBe('2')
-    doc.getElementById('back-to-start')?.dispatchEvent(new Event('click'))
-    expect(doc.getElementById('frame-title')?.textContent).toBe('1')
     expect(doc.title).toBe('1')
+    vi.advanceTimersByTime(1000)
+    expect(doc.title).toBe('2')
+    doc.getElementById('pause')?.dispatchEvent(new Event('click'))
+    vi.advanceTimersByTime(1000)
+    expect(doc.title).toBe('2')
+    doc.getElementById('frame-forward')?.dispatchEvent(new Event('click'))
+    expect(doc.title).toBe('3')
+    doc.getElementById('frame-back')?.dispatchEvent(new Event('click'))
+    expect(doc.title).toBe('2')
+    doc.getElementById('back-to-start')?.dispatchEvent(new Event('click'))
+    expect(doc.title).toBe('1')
+    vi.useRealTimers()
+  })
+
+  it('scrubs the cursor to a turn and shortens the frame period by 10 percent', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const doc = page()
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 40,
+      right: 200,
+      width: 200,
+      height: 40,
+      toJSON() {
+        return {}
+      },
+    })
+    const sections: { groupId: number; vertices: { dx: number; dy: number }[] }[][][] = [
+      0, 1, 2, 3,
+    ].map(() => [])
+    runtime.start(doc, {
+      turn: 21,
+      rectangle,
+      sections,
+      planets: { valid: false, rows: [] },
+      players: [],
+      teams: [],
+      palette: ['#8fff00'],
+    })
+    expect([...doc.querySelectorAll('.tick-label')].map((node) => node.textContent)).toEqual([
+      '1',
+      '10',
+      '20',
+    ])
+    expect(doc.querySelectorAll('.tick')).toHaveLength(21)
+    doc.getElementById('timeline')?.dispatchEvent(
+      new MouseEvent('pointerdown', { clientX: 100, bubbles: true })
+    )
+    expect(doc.title).toBe('11')
+    expect(doc.getElementById('playhead')?.style.left).toBe('50%')
+    doc.getElementById('speed-up')?.dispatchEvent(new Event('click'))
+    doc.getElementById('play')?.dispatchEvent(new Event('click'))
+    vi.advanceTimersByTime(899)
+    expect(doc.title).toBe('11')
+    vi.advanceTimersByTime(1)
+    expect(doc.title).toBe('12')
     vi.useRealTimers()
   })
 
