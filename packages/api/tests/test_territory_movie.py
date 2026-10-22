@@ -11,13 +11,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from api.analytics.team_information import territory_sections
-from api.analytics.team_territory import nu_map_rectangle
-from api.analytics.territory_movie import (
-    SECTION_KINDS,
-    build_territory_movie,
-    quantize_offset,
+from api.analytics.team_territory import (
+    TERRITORY_SECTION_KINDS,
+    nu_map_rectangle,
+    territory_sections,
 )
+from api.analytics.territory_movie import build_territory_movie, quantize_offset
 from api.compute.turn_cache import clear_process_turn_info_cache
 from api.config import ApiConfig, set_config
 from api.errors import UpstreamPlanetsError, ValidationError
@@ -58,7 +57,7 @@ def _parse_rings(
         return value
 
     parsed: dict[str, list[list[tuple[int, list[tuple[int, int]]]]]] = {}
-    for kind in SECTION_KINDS:
+    for kind in TERRITORY_SECTION_KINDS:
         turns: list[list[tuple[int, list[tuple[int, int]]]]] = []
         for _turn_index in range(turn_count):
             components: list[tuple[int, list[tuple[int, int]]]] = []
@@ -118,8 +117,8 @@ def test_vertices_match_tenth_light_year_grid() -> None:
     assert movie.rectangle.height == rectangle.height
     assert movie.turn == 1
     packed = _parse_rings(_inflate(movie.rings), 1)
-    sections, _neighbors = territory_sections(turn)
-    for kind in SECTION_KINDS:
+    sections = dict(territory_sections(turn))
+    for kind in TERRITORY_SECTION_KINDS:
         assert len(packed[kind]) == 1
         decoded = packed[kind][0]
         assert len(decoded) == len(sections[kind])

@@ -3,13 +3,14 @@
 The rectangle has size ``mapwidth`` by ``mapheight`` and is centered on the
 classical Nu origin ``(2000, 2000)``. Sphere maps place a 3 by 3 copy of each
 site and clip the diagram back to that rectangle. An exact distance tie belongs
-to the lower planet id.
+to the lower planet id. One site-set table orders the four sections used by the
+live map and the Territory movie.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 
 import shapely
@@ -19,8 +20,11 @@ from shapely.geometry.polygon import orient
 
 from api.concepts.homeworld_layout import DEFAULT_MAP_CENTER_XY
 from api.errors import CoreAPIError
+from api.models.game import TurnInfo
 
 Point = tuple[float, float]
+TerritoryComponents = list[tuple[int, list[Point]]]
+TerritorySection = tuple[str, TerritoryComponents]
 
 
 class TerritoryRingError(CoreAPIError):
@@ -336,30 +340,206 @@ def _prepared_cells(
     return rectangle, _voronoi_cells(_coincident_winners(replicas), rectangle=clip)
 
 
-def territory_unions(
+_PartitionedCells = tuple[
+    TerritoryComponents,
+    TerritoryComponents,
+    dict[int, list[Polygon]],
+    MapRectangle | None,
+]
+
+
+def _partition_cells(
     sites: Sequence[TerritorySite],
     *,
     width: int,
     height: int,
     sphere: bool,
-) -> tuple[list[tuple[int, list[Point]]], list[tuple[int, list[Point]]], dict[int, set[int]]]:
-    """Team components, player components, and which league teams share a border.
+) -> _PartitionedCells:
+    """Team components, player components, and the team regions from one Voronoi.
 
-    One Voronoi of the site set. Team components union cells by ``league_team_id``
-    and omit ``<= 0``. Player components union the same cells by ``owner_id`` and
-    omit unowned sites. A hole in a union is cut into that component's ring.
+    Does not compute border neighbors. Group id ``<= 0`` is omitted. An empty
+    site set returns empty components and no rectangle.
     """
     prepared = _prepared_cells(sites, width=width, height=height, sphere=sphere)
     if prepared is None:
-        return [], [], {}
+        return [], [], {}, None
     rectangle, cells = prepared
     clip = box(rectangle.left, rectangle.bottom, rectangle.right, rectangle.top)
     team_regions = _regions_for_group(
         cells, rectangle=clip, group_id=lambda site: site.league_team_id
     )
     player_regions = _regions_for_group(cells, rectangle=clip, group_id=lambda site: site.owner_id)
+    return _components(team_regions), _components(player_regions), team_regions, rectangle
+
+
+def territory_unions(
+    sites: Sequence[TerritorySite],
+    *,
+    width: int,
+    height: int,
+    sphere: bool,
+) -> tuple[TerritoryComponents, TerritoryComponents, dict[int, set[int]]]:
+    """Team components, player components, and which league teams share a border.
+
+    One Voronoi of the site set. Team components union cells by ``league_team_id``
+    and omit ``<= 0``. Player components union the same cells by ``owner_id`` and
+    omit unowned sites. A hole in a union is cut into that component's ring.
+    Neighbors come from that same Voronoi.
+    """
+    team_components, player_components, team_regions, rectangle = _partition_cells(
+        sites, width=width, height=height, sphere=sphere
+    )
+    if rectangle is None:
+        return [], [], {}
     return (
-        _components(team_regions),
-        _components(player_regions),
+        team_components,
+        player_components,
         _touching_teams(team_regions, rectangle=rectangle, sphere=sphere),
     )
+
+
+KIND_TEAM_ALL = "team-territory"
+KIND_TEAM_OWNED = "team-territory-owned-only"
+KIND_PLAYER_ALL = "player-territory"
+KIND_PLAYER_OWNED = "player-territory-owned-only"
+
+# All-planets, then owned-planets. Each row is one Voronoi.
+_TERRITORY_SITE_SETS = (
+    (False, KIND_TEAM_ALL, KIND_PLAYER_ALL),
+    (True, KIND_TEAM_OWNED, KIND_PLAYER_OWNED),
+)
+
+
+def _site_set_section_kinds(team_kind: str, player_kind: str) -> tuple[str, str]:
+    """Team kind, then player kind: the section order within one site set."""
+    return (team_kind, player_kind)
+
+
+# Flatten of ``_TERRITORY_SITE_SETS`` in section order.
+TERRITORY_SECTION_KINDS = tuple(
+    kind
+    for _owned_only, team_kind, player_kind in _TERRITORY_SITE_SETS
+    for kind in _site_set_section_kinds(team_kind, player_kind)
+)
+
+PLAYER_TERRITORY_KINDS = frozenset(
+    player_kind for _owned_only, _team_kind, player_kind in _TERRITORY_SITE_SETS
+)
+
+
+def league_team_id_by_player(turn: TurnInfo) -> dict[int, int]:
+    """``Player.id`` to ``leagueteamid`` on this turn, including the viewpoint player."""
+    by_player = {player.id: player.leagueteamid for player in turn.players}
+    by_player.setdefault(turn.player.id, turn.player.leagueteamid)
+    return by_player
+
+
+def _territory_sites(
+    turn: TurnInfo,
+    league_team_by_player: dict[int, int],
+    *,
+    owned_only: bool,
+) -> list[TerritorySite]:
+    """Planets on ``turn``. ``owned_only`` drops ``ownerid == 0``."""
+    sites: list[TerritorySite] = []
+    for planet in turn.planets:
+        if owned_only and planet.ownerid == 0:
+            continue
+        if planet.ownerid == 0:
+            league_team_id = 0
+        else:
+            league_team_id = league_team_by_player.get(planet.ownerid, 0)
+        sites.append(
+            TerritorySite(
+                planet_id=planet.id,
+                x=float(planet.x),
+                y=float(planet.y),
+                league_team_id=league_team_id,
+                owner_id=planet.ownerid,
+            )
+        )
+    return sites
+
+
+@dataclass(frozen=True)
+class _SiteSetPartition:
+    """Components of one site set, and the team regions from its Voronoi."""
+
+    team_kind: str
+    team_components: TerritoryComponents
+    player_kind: str
+    player_components: TerritoryComponents
+    team_regions: dict[int, list[Polygon]]
+    rectangle: MapRectangle | None
+
+
+def _iter_site_set_partitions(turn: TurnInfo) -> Iterator[_SiteSetPartition]:
+    """One Voronoi per site set. Does not build the border-neighbor map."""
+    league_team_by_player = league_team_id_by_player(turn)
+    width = turn.settings.mapwidth
+    height = turn.settings.mapheight
+    sphere = turn.settings.sphere
+    for owned_only, team_kind, player_kind in _TERRITORY_SITE_SETS:
+        team_components, player_components, team_regions, rectangle = _partition_cells(
+            _territory_sites(turn, league_team_by_player, owned_only=owned_only),
+            width=width,
+            height=height,
+            sphere=sphere,
+        )
+        yield _SiteSetPartition(
+            team_kind=team_kind,
+            team_components=team_components,
+            player_kind=player_kind,
+            player_components=player_components,
+            team_regions=team_regions,
+            rectangle=rectangle,
+        )
+
+
+def _append_site_set_sections(
+    sections: list[TerritorySection],
+    site_set: _SiteSetPartition,
+) -> None:
+    components = (site_set.team_components, site_set.player_components)
+    for kind, kind_components in zip(
+        _site_set_section_kinds(site_set.team_kind, site_set.player_kind),
+        components,
+        strict=True,
+    ):
+        sections.append((kind, kind_components))
+
+
+def territory_sections(turn: TurnInfo) -> list[TerritorySection]:
+    """Four partitions in section order. Does not build the border-neighbor map.
+
+    Group id 0 is absent. Owned-planets-only is a second diagram, not a filter
+    of the all-planets rings.
+    """
+    sections: list[TerritorySection] = []
+    for site_set in _iter_site_set_partitions(turn):
+        _append_site_set_sections(sections, site_set)
+    return sections
+
+
+def territory_sections_with_neighbors(
+    turn: TurnInfo,
+) -> tuple[list[TerritorySection], dict[int, set[int]]]:
+    """Four partitions in section order, and which league teams share a border.
+
+    Neighbors come from the Voronoi that built each site set. One Voronoi per
+    site set.
+    """
+    sections: list[TerritorySection] = []
+    neighbors: dict[int, set[int]] = defaultdict(set)
+    sphere = turn.settings.sphere
+    for site_set in _iter_site_set_partitions(turn):
+        _append_site_set_sections(sections, site_set)
+        if site_set.rectangle is None:
+            continue
+        for team_id, bordering in _touching_teams(
+            site_set.team_regions,
+            rectangle=site_set.rectangle,
+            sphere=sphere,
+        ).items():
+            neighbors[team_id].update(bordering)
+    return sections, dict(neighbors)

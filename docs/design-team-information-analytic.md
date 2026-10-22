@@ -70,7 +70,7 @@ BFF map handler passes the Core object through. The table route stays a validati
 
 ## Layers
 
-- **Core** (`api/analytics/team_information.py`): partition and wire. Toroidal distance and Voronoi stay in `team_territory.py`. The Territory movie packer calls `territory_sections` from this module.
+- **Core** (`api/analytics/team_information.py`): paint, styles, overlays, and wire. The Voronoi and the four-section partition live in `team_territory.py`. One site-set table orders the live partitions and the movie file sections: team kind then player kind, all-planets then owned-planets. `territory_sections` returns those sections and does not compute border neighbors. The live map calls `territory_sections_with_neighbors`, which takes border neighbors from the same Voronoi that built each site set. The Territory movie packer calls `territory_sections` in `team_territory.py`. It does not import `team_information.py`.
 - **BFF** (`bff/analytics/team_information.py`): passthrough `get_map`. Empty export catalog on the Core registration.
 - **SPA** (`src/analytics/team-information/`): merge, preference store, sidebar legend and checkboxes, kind filter, player-palette paint.
 

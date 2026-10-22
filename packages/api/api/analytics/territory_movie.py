@@ -10,15 +10,12 @@ import gzip
 import struct
 from collections.abc import Mapping, Sequence
 
-from api.analytics.team_information import (
-    KIND_PLAYER_ALL,
-    KIND_PLAYER_OWNED,
-    KIND_TEAM_ALL,
-    KIND_TEAM_OWNED,
+from api.analytics.team_territory import (
+    MapRectangle,
     league_team_id_by_player,
+    nu_map_rectangle,
     territory_sections,
 )
-from api.analytics.team_territory import MapRectangle, nu_map_rectangle
 from api.errors import ValidationError
 from api.models.game import TurnInfo
 from api.transport.territory_movie import (
@@ -27,13 +24,6 @@ from api.transport.territory_movie import (
     TerritoryMovieResponse,
 )
 
-# File order. Owned-planets-only is its own diagram, stored after the all-planets sections.
-SECTION_KINDS = (
-    KIND_TEAM_ALL,
-    KIND_PLAYER_ALL,
-    KIND_TEAM_OWNED,
-    KIND_PLAYER_OWNED,
-)
 _GRID_PER_LY = 10
 _UINT16_MAX = 0xFFFF
 
@@ -126,11 +116,12 @@ def _legend(
 
 
 def _pack_rings(turns: Sequence[TurnInfo], rectangle: MapRectangle) -> bytes:
-    per_turn = [territory_sections(turn)[0] for turn in turns]
+    """Pack ``territory_sections`` in the order that function returns."""
+    per_turn = [territory_sections(turn) for turn in turns]
     buffer = bytearray()
-    for kind in SECTION_KINDS:
-        for sections in per_turn:
-            components = [(group_id, ring) for group_id, ring in sections[kind] if group_id > 0]
+    for section_index in range(len(per_turn[0])):
+        for turn_sections in per_turn:
+            kind, components = turn_sections[section_index]
             _append_u16(buffer, len(components), label=f"{kind} component count")
             for group_id, ring in components:
                 _append_u16(buffer, group_id, label=f"{kind} group id")
