@@ -42,6 +42,7 @@ import type {
 import { fetchAnalyticTableNdjsonStream } from './fetchAnalyticTableNdjsonStream'
 import { readNdjsonStream } from './readNdjsonStream'
 import type { components } from './schema-games'
+import type { components as territoryMovieComponents } from './schema-territory-movie'
 import {
   throwBffHttpError,
   throwBffHttpErrorFromResponse,
@@ -431,10 +432,8 @@ export async function fetchTerritoryMovie(
   return r.json()
 }
 
-export type TerritoryMoviePageRef = {
-  id: string
-  path: string
-}
+export type TerritoryMoviePageRef =
+  territoryMovieComponents['schemas']['TerritoryMoviePageCreateResponse']
 
 /** Hold one movie document at an http address until the window closes. */
 export async function publishTerritoryMoviePage(html: string): Promise<TerritoryMoviePageRef> {

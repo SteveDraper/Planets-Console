@@ -9,6 +9,7 @@ from bff.territory_movie_pages import (
     territory_movie_page_path,
     territory_movie_pages,
 )
+from bff.transport.territory_movie_page_responses import TerritoryMoviePageCreateResponse
 
 router = APIRouter()
 
@@ -19,18 +20,25 @@ _PAGE_HEADERS = {
 }
 
 
-@router.post("/territory-movie-pages", status_code=201)
-async def create_territory_movie_page(request: Request) -> dict[str, str]:
+@router.post(
+    "/territory-movie-pages",
+    status_code=201,
+    response_model=TerritoryMoviePageCreateResponse,
+)
+async def create_territory_movie_page(request: Request) -> TerritoryMoviePageCreateResponse:
     raw = await request.body()
     try:
         html = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise BFFValidationError("Territory movie page must be UTF-8 HTML.") from exc
     page_id = territory_movie_pages.put(html)
-    return {"id": page_id, "path": territory_movie_page_path(page_id)}
+    return TerritoryMoviePageCreateResponse(
+        id=page_id,
+        path=territory_movie_page_path(page_id),
+    )
 
 
-@router.get("/territory-movie-pages/{page_id}")
+@router.get("/territory-movie-pages/{page_id}", response_class=HTMLResponse)
 async def read_territory_movie_page(page_id: str) -> HTMLResponse:
     html = territory_movie_pages.get(page_id)
     return HTMLResponse(content=html, headers=_PAGE_HEADERS)

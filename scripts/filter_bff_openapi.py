@@ -2,7 +2,8 @@
 """
 Subset a full BFF OpenAPI JSON dump into per-slice documents for frontend codegen.
 
-Each slice aligns with a BFF router mount (games, analytics, shell, diagnostics, credentials).
+Each slice aligns with a BFF router mount (games, analytics, shell, diagnostics,
+credentials, territory-movie).
 Paths are selected by prefix; ``/health`` is included in the shell slice only.
 Each output document embeds the full transitive ``#/components/schemas/*`` closure
 for its paths (duplicate shared schemas across slices is intentional).
@@ -33,6 +34,7 @@ SLICE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "shell": ("/shell", "/health"),
     "diagnostics": ("/diagnostics",),
     "credentials": ("/credentials",),
+    "territory-movie": ("/territory-movie-pages",),
 }
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
