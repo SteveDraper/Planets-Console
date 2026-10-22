@@ -121,6 +121,7 @@ describe('territory movie runtime', () => {
     expect(runtime.visibleDots(planets, 1)).toEqual([])
     expect(runtime.visibleDots(planets, 2)).toEqual([{ id: 3, x: 4, y: 5, firstTurn: 2 }])
     expect(runtime.decodeRings(u16([1]), 1)).toBeNull()
+    expect(runtime.decodeRings(new Uint8Array(8), 1)).toEqual([[[]], [[]], [[]], [[]]])
   })
 
   it('flips the viewBox so host +y is up and sizes dots at 4px', () => {
@@ -369,5 +370,70 @@ describe('territory movie runtime', () => {
     expect(doc.querySelector('#map path')?.getAttribute('fill')).toBe('#8fff00')
     expect(doc.querySelector('#map circle')?.getAttribute('cx')).toBe('150')
     expect(TERRITORY_MOVIE_PALETTE[0]).toBe('#8fff00')
+  })
+
+  it('plays a ring blob whose component counts are all zero and paints no dots for an invalid planet blob', async () => {
+    const rings = gzipBase64(new Uint8Array(8))
+    const planets = gzipBase64(u16([1]))
+    const doc = new DOMParser().parseFromString(
+      buildTerritoryMovieDocument({
+        turn: 1,
+        rectangle,
+        rings,
+        planets,
+        players: [],
+        teams: [],
+        palette: ['#8fff00'],
+      }),
+      'text/html'
+    )
+    await runtime.boot(doc, {
+      turn: 1,
+      rectangle,
+      rings,
+      planets,
+      players: [],
+      teams: [],
+      palette: ['#8fff00'],
+    })
+    expect(doc.title).toBe('1')
+    expect(doc.getElementById('map')).not.toBeNull()
+    expect(doc.getElementById('play')).not.toBeNull()
+    expect(doc.getElementById('territory-movie-error')).toBeNull()
+    expect(doc.querySelector('#map path')).toBeNull()
+    expect(doc.querySelector('#map circle')).toBeNull()
+  })
+
+  it.each([
+    ['rejected', gzipBase64(u16([1]))],
+    ['not decodable', 'RINGSBLOB'],
+  ])('shows a visible error when the saved ring blob is %s', async (_kind, rings) => {
+    const doc = new DOMParser().parseFromString(
+      buildTerritoryMovieDocument({
+        turn: 1,
+        rectangle,
+        rings,
+        planets: gzipBase64(u16([0])),
+        players: [],
+        teams: [],
+        palette: ['#8fff00'],
+      }),
+      'text/html'
+    )
+    await runtime.boot(doc, {
+      turn: 1,
+      rectangle,
+      rings,
+      planets: gzipBase64(u16([0])),
+      players: [],
+      teams: [],
+      palette: ['#8fff00'],
+    })
+    expect(doc.title).toBe('Territory movie')
+    expect(doc.getElementById('territory-movie-error')?.textContent).toBe(
+      'The Territory movie could not be read.'
+    )
+    expect(doc.getElementById('map')).toBeNull()
+    expect(doc.getElementById('play')).toBeNull()
   })
 })

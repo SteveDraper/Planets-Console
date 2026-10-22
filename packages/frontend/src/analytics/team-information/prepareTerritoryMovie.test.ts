@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   discardTerritoryMoviePage,
@@ -19,10 +20,21 @@ vi.mock('../../api/bff', () => ({
   discardTerritoryMoviePage: vi.fn(),
 }))
 
+function gzipBase64(bytes: Uint8Array): string {
+  return gzipSync(bytes).toString('base64')
+}
+
+/** Four sections, `turnCount` frames, every component count zero. */
+function emptyRingsBase64(turnCount: number): string {
+  return gzipBase64(new Uint8Array(4 * turnCount * 2))
+}
+
+const emptyRings = emptyRingsBase64(3)
+
 const payload = {
   turn: 3,
   rectangle: { left: 0, bottom: 0, width: 10, height: 10 },
-  rings: 'RINGSBLOB',
+  rings: emptyRings,
   planets: 'PLANETSBLOB',
   players: [{ id: 1, name: 'Ada' }],
   teams: [{ id: 4, name: null }],
@@ -54,7 +66,7 @@ describe('prepareTerritoryMovie', () => {
     ])
     expect(ensureTurnData).toHaveBeenCalledTimes(3)
     expect(fetchTerritoryMovie).toHaveBeenCalledWith('628580', 2)
-    expect(html).toContain('RINGSBLOB')
+    expect(html).toContain(emptyRings)
     expect(html).toContain('PLANETSBLOB')
     expect(html).toContain('Back to turn 1')
     expect(html).toContain('#8fff00')
@@ -98,6 +110,31 @@ describe('prepareTerritoryMovie', () => {
       })
     ).rejects.toThrow('payload failed')
   })
+
+  it.each([
+    ['truncated', gzipBase64(Uint8Array.of(1, 0))],
+    ['not decodable', 'RINGSBLOB'],
+  ])(
+    'does not build a document when the ring blob is %s',
+    async (_kind, rings) => {
+      vi.mocked(ensureTurnData).mockResolvedValue({
+        ready: true,
+        turnUsernamesByPlayerId: new Map(),
+        turnRelations: [],
+      })
+      vi.mocked(fetchTerritoryMovie).mockResolvedValue({ ...payload, rings })
+      vi.mocked(publishTerritoryMoviePage).mockClear()
+      await expect(
+        prepareTerritoryMovie({
+          gameId: '628580',
+          perspective: 1,
+          gameTurn: 3,
+          username: 'ada',
+        })
+      ).rejects.toThrow('The Territory movie could not be read.')
+      expect(publishTerritoryMoviePage).not.toHaveBeenCalled()
+    }
+  )
 
   it('rejects a missing game turn before ensuring', async () => {
     await expect(

@@ -6,6 +6,20 @@ import {
 } from '../../api/bff'
 import { buildTerritoryMovieDocument } from './territoryMovieDocument'
 import { moviePalette } from './territoryMoviePalette'
+import { createTerritoryMovieRuntime } from './territoryMovieRuntime'
+
+async function assertReadableRings(encoded: string, turnCount: number): Promise<void> {
+  const runtime = createTerritoryMovieRuntime()
+  let bytes: Uint8Array
+  try {
+    bytes = await runtime.inflateBase64(encoded)
+  } catch {
+    throw new Error(runtime.unreadableMovieMessage)
+  }
+  if (runtime.decodeRings(bytes, turnCount) == null) {
+    throw new Error(runtime.unreadableMovieMessage)
+  }
+}
 
 export type PrepareTerritoryMovieInput = {
   gameId: string
@@ -32,6 +46,7 @@ export async function prepareTerritoryMovie(input: PrepareTerritoryMovieInput): 
     })
   }
   const payload = await fetchTerritoryMovie(input.gameId, input.perspective)
+  await assertReadableRings(payload.rings, payload.turn)
   const ownerCount = Math.max(payload.players.length, payload.teams.length)
   const palette = await moviePalette(ownerCount)
   return buildTerritoryMovieDocument({ ...payload, palette })

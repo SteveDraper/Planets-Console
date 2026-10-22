@@ -9,6 +9,7 @@ export function createTerritoryMovieRuntime() {
   const MAX_FRAME_PERIOD_MS = 5000
   const SVG_NS = 'http://www.w3.org/2000/svg'
   const DOT_FILL = '#9ca3af'
+  const unreadableMovieMessage = 'The Territory movie could not be read.'
 
   type Vertex = { dx: number; dy: number }
   type Ring = { groupId: number; vertices: Vertex[] }
@@ -176,10 +177,6 @@ export function createTerritoryMovieRuntime() {
       sections.push(frames)
     }
     return sections
-  }
-
-  function emptySections(turnCount: number): Ring[][][] {
-    return [0, 1, 2, 3].map(() => Array.from({ length: turnCount }, () => []))
   }
 
   function decodePlanets(bytes: Uint8Array): PlanetDots {
@@ -592,6 +589,17 @@ export function createTerritoryMovieRuntime() {
     })
   }
 
+  function showUnreadableMovie(doc: Document): void {
+    doc.title = 'Territory movie'
+    const body = doc.body
+    if (body == null) return
+    body.replaceChildren()
+    const message = doc.createElement('p')
+    message.id = 'territory-movie-error'
+    message.textContent = unreadableMovieMessage
+    body.append(message)
+  }
+
   async function boot(
     doc: Document,
     payload: {
@@ -604,14 +612,25 @@ export function createTerritoryMovieRuntime() {
       palette: string[]
     }
   ): Promise<void> {
-    const rings = await inflateBase64(payload.rings)
-    const planets = await inflateBase64(payload.planets)
-    const sections = decodeRings(rings, payload.turn) ?? emptySections(payload.turn)
+    let ringBytes: Uint8Array
+    let planetBytes: Uint8Array
+    try {
+      ringBytes = await inflateBase64(payload.rings)
+      planetBytes = await inflateBase64(payload.planets)
+    } catch {
+      showUnreadableMovie(doc)
+      return
+    }
+    const sections = decodeRings(ringBytes, payload.turn)
+    if (sections == null) {
+      showUnreadableMovie(doc)
+      return
+    }
     start(doc, {
       turn: payload.turn,
       rectangle: payload.rectangle,
       sections,
-      planets: decodePlanets(planets),
+      planets: decodePlanets(planetBytes),
       players: payload.players,
       teams: payload.teams,
       palette: payload.palette,
@@ -633,6 +652,8 @@ export function createTerritoryMovieRuntime() {
     legendRows,
     decodeRings,
     decodePlanets,
+    inflateBase64,
+    unreadableMovieMessage,
     visibleDots,
     framePaths,
     dotRadius,
