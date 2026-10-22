@@ -43,6 +43,7 @@ function renderBar(
       viewMode={viewMode}
       turnDataReady
       analyticScope={null}
+      reportShellError={() => {}}
     />,
     {
       wrapper: ({ children }: { children: ReactNode }) => (

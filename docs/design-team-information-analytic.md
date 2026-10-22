@@ -103,6 +103,20 @@ The body is `turn` (`GameInfo.game.turn`), `rectangle` (`left`, `bottom`, `width
 
 Turns in the span share one map rectangle (`mapwidth`, `mapheight`, `sphere`). Measurements: [issue 601](https://github.com/SteveDraper/Planets-Console/issues/601). Planet-dot layout: [issue 606](https://github.com/SteveDraper/Planets-Console/issues/606).
 
+## Territory movie page
+
+The Territory tile's details pane includes a **Territory movie** button with **By team** and **Owned planets only**. While the file is built the button is disabled. There is no progress strip.
+
+The click ensures the current viewpoint's host turns 1 through `GameInfo.game.turn` with the existing turn-ensure route, including turns after elimination. It then fetches the Territory movie payload and wraps it in one HTML document. A failed ensure or payload sets the shell error bar and opens no window. The button does not read or write the live analytic's player-hide preference.
+
+The document is `text/html` at a `blob:` URL. That URL stays alive until the window closes, so Save As, HTML only, writes one file that runs from `file://`. The page is HTML, CSS, and one script. It inflates the two gzip blobs with `DecompressionStream`. No React and no graph library.
+
+Each frame is one SVG of the map rectangle on a `#000` background. The viewBox flips y so host +y is up. Rings for the section selected by **By team** and **Owned planets only** are filled at opacity 1 with no stroke, even-odd, one path per visible group id and a closed subpath per ring. Planet dots are 4px `#9ca3af`, painted on top of the rings, for every id whose `first_turn` is at or before the frame. A planet blob whose count disagrees with its length, or that repeats an id, paints no dots. The frame title is the host turn number.
+
+Playback starts on turn 1. The controls are back to turn 1, play, pause, one frame forward, and one frame back. Play advances one frame every 2 seconds. Both legends start empty. Checking an owner assigns the next Territory movie color index that selection has not given out. Unchecking keeps the index. Changing frame or either section switch does not reassign indexes. A selected owner with no ring on the frame keeps the legend row. Fill is the movie palette at full opacity.
+
+The file embeds palette indexes 0 through 59. A legend longer than 60 appends further colors with the same maximin rule before the file is written, and does not recompute indexes 0 through 59. The page only indexes that list.
+
 ## Tests
 
 **Geometry (Core)**:
@@ -123,6 +137,7 @@ Turns in the span share one map rectangle (`mapwidth`, `mapheight`, `sphere`). M
 - **By team** off: legend and hover use the player. Preferences default off, a stored true sticks for that game id only, and a pre-change blob stays off. Each owning player has a show checkbox, default checked. Uncheck removes that player's fill on both site sets, does not change the fill color, and survives reload for this game only. Another game's hidden players are unchanged. A blob with no player-hide field still shows every player. With the fill hidden, legend hover still outlines that player and cell hover still names them.
 - **By team** on still hides only league teams. A hidden player does not drop team-territory overlays.
 - Browser: the row reads Territory; with the analytic enabled, player colors show; checking **By team** switches to league-team colors with no refetch; reload keeps that choice for this game and not for another. The tile is grey in tabular mode.
+- Territory movie: the button ensures turns 1 through `GameInfo.game.turn` for the current viewpoint. A failed ensure or payload sets the shell error bar and opens no window. The document contains both blobs and the playback controls. Index assignment, an empty-frame legend row, full-opacity fills under 4px dots, and a 2 second play step are covered in the page runtime.
 
 ## Out of scope
 

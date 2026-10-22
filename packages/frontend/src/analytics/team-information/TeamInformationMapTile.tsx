@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AnalyticShellScope } from '../../api/bff'
 import { cn } from '../../lib/utils'
@@ -25,6 +25,7 @@ import { teamInformationMapQuerySpec } from './mapAnalytic'
 import { useLeagueTeamNames } from './useLeagueTeamNames'
 import { useTurnRosterUsernames } from './useTurnRosterUsernames'
 import { FillPatternMarks } from '../../lib/mapRegionFillPatternMarks'
+import { openTerritoryMovieWindow, prepareTerritoryMovie } from './prepareTerritoryMovie'
 
 type TeamInformationMapTileProps = {
   name: string
@@ -34,6 +35,7 @@ type TeamInformationMapTileProps = {
   onToggle: () => void
   analyticScope: AnalyticShellScope | null
   turnDataReady: boolean
+  reportShellError: (message: string) => void
 }
 
 export function TeamInformationMapTile({
@@ -44,6 +46,7 @@ export function TeamInformationMapTile({
   onToggle,
   analyticScope,
   turnDataReady,
+  reportShellError,
 }: TeamInformationMapTileProps) {
   const ownedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.ownedPlanetsOnly)
   const setOwnedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.setOwnedPlanetsOnly)
@@ -67,6 +70,10 @@ export function TeamInformationMapTile({
   const fetchEnabled = supportsMode && enabled && turnDataReady
   const mapQuery = useQuery(teamInformationMapQuerySpec(analyticScope, fetchEnabled))
   const gameId = analyticScope?.gameId ?? null
+  const gameTurn = useShellStore((s) => s.gameInfoContext?.turn ?? null)
+  const [movieBuilding, setMovieBuilding] = useState(false)
+  const movieBuildingRef = useRef(false)
+  const movieMountedRef = useRef(true)
   const byTeam = byTeamForGame(byTeamByGameId, gameId)
   const hiddenPlayerIds = hiddenPlayerIdsForGame(hiddenPlayerIdsByGameId, gameId)
   const namesByLeagueTeamId = useLeagueTeamNames(gameId, supportsMode && enabled)
@@ -96,6 +103,43 @@ export function TeamInformationMapTile({
 
   const showTeamLegend = supportsMode && enabled && byTeam && teamRows.length > 0
   const showPlayerLegend = supportsMode && enabled && !byTeam && playerRows.length > 0
+
+  useEffect(() => {
+    movieMountedRef.current = true
+    return () => {
+      movieMountedRef.current = false
+    }
+  }, [])
+
+  async function openMovie(): Promise<void> {
+    if (movieBuildingRef.current) return
+    if (analyticScope == null) {
+      reportShellError('Choose a game and viewpoint before opening the Territory movie.')
+      return
+    }
+    if (gameTurn == null) {
+      reportShellError("Territory movie needs the game's current turn.")
+      return
+    }
+    movieBuildingRef.current = true
+    setMovieBuilding(true)
+    try {
+      const html = await prepareTerritoryMovie({
+        gameId: analyticScope.gameId,
+        perspective: analyticScope.perspective,
+        gameTurn,
+        username: analyticScope.username ?? '',
+      })
+      if (!movieMountedRef.current) return
+      openTerritoryMovieWindow(html)
+    } catch (err: unknown) {
+      if (!movieMountedRef.current) return
+      reportShellError(err instanceof Error ? err.message : 'Territory movie failed.')
+    } finally {
+      movieBuildingRef.current = false
+      if (movieMountedRef.current) setMovieBuilding(false)
+    }
+  }
 
   useEffect(() => {
     const hovered = useTeamInformationHighlightStore.getState().hoveredTerritory
@@ -136,6 +180,16 @@ export function TeamInformationMapTile({
         />
         <span className="min-w-0 truncate">Owned planets only</span>
       </label>
+      <button
+        type="button"
+        className="rounded border border-[#52575d] bg-[#2b2e32] px-2 py-1 text-left text-xs text-slate-200 hover:bg-[#4a4f54] disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={movieBuilding}
+        onClick={() => {
+          void openMovie()
+        }}
+      >
+        Territory movie
+      </button>
       {showTeamLegend ? (
         <ul aria-label="League teams" className="flex flex-col gap-1">
           {teamRows.map((row) => {

@@ -415,6 +415,22 @@ export async function fetchLeagueTeams(gameId: string): Promise<LeagueTeamsRespo
   return r.json()
 }
 
+export type TerritoryMovieResponse = components['schemas']['TerritoryMovieResponse']
+
+/** Packed Territory movie for one game at one viewpoint. The BFF does not repack it. */
+export async function fetchTerritoryMovie(
+  gameId: string,
+  perspective: number
+): Promise<TerritoryMovieResponse> {
+  const path = `/bff/games/${encodeURIComponent(gameId)}/${encodeURIComponent(String(perspective))}/territory-movie`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, undefined, endpointLabel)
+  if (!r.ok) {
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
+  }
+  return r.json()
+}
+
 export type LoadAllTurnsRequestBody = components['schemas']['LoadAllTurnsRequest']
 
 export type LoadAllTurnsStatusResponse = components['schemas']['LoadAllTurnsStatusResponse']

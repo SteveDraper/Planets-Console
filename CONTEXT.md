@@ -487,7 +487,7 @@ Which planets compete as nearest-planet sites for **Territory**. **All planets**
 _Avoid_: a second analytic, recomputing the partition in the SPA
 
 **Territory movie**:
-Playback of **Territory** at the current **viewpoint**, one frame per host turn from 1 through the game's current host turn. Each frame paints that turn's **base map** over that turn's **Territory**.
+Playback of **Territory** at the current **viewpoint**, one frame per host turn from 1 through the game's current host turn. Each frame paints that turn's **base map** over that turn's **Territory**. The Territory tile writes that playback into one HTML document and opens it in a new window.
 _Avoid_: load-all, the shell's selected turn, a video file
 
 **Territory movie color index**:
