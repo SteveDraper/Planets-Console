@@ -7,8 +7,8 @@ const payload = {
   rectangle: { left: 0, bottom: 0, width: 100, height: 80 },
   rings: 'RINGSBLOB',
   planets: 'PLANETSBLOB',
-  players: [{ id: 4, name: 'A<B' }],
-  teams: [{ id: 7, name: null }],
+  players: [{ id: 4, name: 'A<B' }, { id: 9, name: 'Short' }],
+  teams: [{ id: 7, name: null }, { id: 2, name: 'A much longer league team' }],
   palette: ['#8fff00', '#fff48f', '#ab8700'],
 }
 
@@ -17,16 +17,35 @@ describe('territory movie document', () => {
     const html = buildTerritoryMovieDocument(payload)
     expect(html).toContain('RINGSBLOB')
     expect(html).toContain('PLANETSBLOB')
-    expect(html).toContain('Back to turn 1')
-    expect(html).toContain('>Play<')
-    expect(html).toContain('>Pause<')
-    expect(html).toContain('One frame forward')
-    expect(html).toContain('One frame back')
+    expect(html).toContain('aria-label="Back to turn 1"')
+    expect(html).toContain('aria-label="Play"')
+    expect(html).toContain('aria-label="Pause"')
+    expect(html).toContain('aria-label="One frame forward"')
+    expect(html).toContain('aria-label="One frame back"')
+    expect(html).toContain('<svg')
+    expect(html).toContain('#map { display: block; width: 100%; height: 100%; background: #000')
+    expect(html).not.toContain('svg { display: block; width: 100%; height: 100%; background: #000')
+    expect(html).toContain('#play, #pause { color: #b6ff4a')
+    expect(html).toContain('#back-to-start, #frame-back, #frame-forward { color: #3ecbff')
     expect(html).toContain('By team')
     expect(html).toContain('Owned planets only')
+    expect(html).toContain('background: #3a3f44')
+    expect(html).toContain('padding: 0 0 0 1.25rem')
+    const measuresAt = html.indexOf('class="measures"')
+    const ownerAt = html.indexOf('class="owner-measure"')
+    expect(measuresAt).toBeGreaterThan(-1)
+    expect(ownerAt).toBeGreaterThan(measuresAt)
+    const sidebarAt = html.indexOf('id="by-team"')
+    const mapAt = html.indexOf('id="map"')
+    const playAt = html.indexOf('id="play"')
+    expect(sidebarAt).toBeGreaterThan(-1)
+    expect(sidebarAt).toBeLessThan(mapAt)
+    expect(mapAt).toBeLessThan(playAt)
     expect(html).toContain('#8fff00')
     expect(html).not.toContain('A<B')
+    expect(html).toContain('A&lt;B')
     expect(html).toContain('A\\u003cB')
+    expect(html).toContain('A much longer league team')
     expect(html).toContain('DecompressionStream')
 
     const marker = 'const runtime = ('

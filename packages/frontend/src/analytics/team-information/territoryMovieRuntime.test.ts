@@ -126,6 +126,8 @@ describe('territory movie runtime', () => {
   it('flips the viewBox so host +y is up and sizes dots at 4px', () => {
     expect(runtime.viewBoxFor(rectangle)).toBe('100 -3050 4000 3000')
     expect(runtime.dotRadius(4000, 800)).toBe(10)
+    expect(runtime.fittedCssWidth(rectangle, 800, 800)).toBe(800)
+    expect(runtime.fittedCssWidth(rectangle, 1200, 600)).toBe(800)
     expect(runtime.PLAY_STEP_MS).toBe(2000)
   })
 
@@ -188,25 +190,25 @@ describe('territory movie runtime', () => {
     }
     clickLegend(0)
     expect(doc.getElementById('legend')?.textContent).toContain('4')
-    expect(doc.querySelector('path')).toBeNull()
-    expect(doc.querySelector('circle')).toBeNull()
+    expect(doc.querySelector('#map path')).toBeNull()
+    expect(doc.querySelector('#map circle')).toBeNull()
 
     doc.getElementById('frame-forward')?.dispatchEvent(new Event('click'))
-    const path = doc.querySelector('path')
-    const circle = doc.querySelector('circle')
+    const path = doc.querySelector('#map path')
+    const circle = doc.querySelector('#map circle')
     expect(path?.getAttribute('fill')).toBe('#8fff00')
     expect(path?.getAttribute('fill-opacity')).toBe('1')
     expect(path?.getAttribute('fill-rule')).toBe('evenodd')
     expect(path?.hasAttribute('stroke')).toBe(false)
     expect(circle?.getAttribute('fill')).toBe('#9ca3af')
     expect(circle?.getAttribute('r')).toBe('10')
-    const painted = [...doc.querySelectorAll('path, circle')]
+    const painted = [...doc.querySelectorAll('#map path, #map circle')]
     expect(painted[0]?.tagName.toLowerCase()).toBe('path')
     expect(painted[1]?.tagName.toLowerCase()).toBe('circle')
 
     clickLegend(1)
     expect(doc.querySelector('[data-group-id="4"]')?.getAttribute('fill')).toBe('#8fff00')
-    const swatches = [...doc.querySelectorAll('.swatch')].map((node) =>
+    const swatches = [...doc.querySelectorAll('#legend .swatch')].map((node) =>
       node.getAttribute('data-color-index')
     )
     expect(swatches).toEqual(['0', '1'])
@@ -224,6 +226,32 @@ describe('territory movie runtime', () => {
     byTeam.dispatchEvent(new Event('change', { bubbles: true }))
     expect(doc.querySelector('[data-group-id="4"]')?.getAttribute('fill')).toBe('#8fff00')
     bounds.mockRestore()
+  })
+
+  it('locks the sidebar to the measure width and keeps it when the legend changes', () => {
+    const doc = page()
+    const measures = doc.querySelector('.measures')
+    if (!(measures instanceof HTMLElement)) throw new Error('missing measures')
+    Object.defineProperty(measures, 'scrollWidth', { configurable: true, value: 240 })
+    const sections: { groupId: number; vertices: { dx: number; dy: number }[] }[][][] = [
+      0, 1, 2, 3,
+    ].map(() => [[]])
+    runtime.start(doc, {
+      turn: 1,
+      rectangle,
+      sections,
+      planets: { valid: false, rows: [] },
+      players: [{ id: 4, name: 'Ada' }],
+      teams: [{ id: 7, name: 'A much longer league team' }],
+      palette: ['#8fff00'],
+    })
+    const sidebar = doc.querySelector('.sidebar')
+    if (!(sidebar instanceof HTMLElement)) throw new Error('missing sidebar')
+    expect(sidebar.style.width).toBe('240px')
+    const byTeam = doc.getElementById('by-team') as HTMLInputElement
+    byTeam.checked = true
+    byTeam.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(sidebar.style.width).toBe('240px')
   })
 
   it('steps one frame every 2 seconds and returns to turn 1', () => {
@@ -286,8 +314,8 @@ describe('territory movie runtime', () => {
     const owner = doc.querySelector('#legend input') as HTMLInputElement
     owner.checked = true
     owner.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(doc.querySelector('path')?.getAttribute('fill')).toBe('#8fff00')
-    expect(doc.querySelector('circle')?.getAttribute('cx')).toBe('150')
+    expect(doc.querySelector('#map path')?.getAttribute('fill')).toBe('#8fff00')
+    expect(doc.querySelector('#map circle')?.getAttribute('cx')).toBe('150')
     expect(TERRITORY_MOVIE_PALETTE[0]).toBe('#8fff00')
   })
 })

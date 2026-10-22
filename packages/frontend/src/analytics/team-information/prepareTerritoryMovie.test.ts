@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ensureTurnData, fetchTerritoryMovie } from '../../api/bff'
-import { openTerritoryMovieWindow, prepareTerritoryMovie } from './prepareTerritoryMovie'
+import {
+  closeTerritoryMovieWindow,
+  prepareTerritoryMovie,
+  reserveTerritoryMovieWindow,
+  showTerritoryMovieDocument,
+} from './prepareTerritoryMovie'
 
 vi.mock('../../api/bff', () => ({
   ensureTurnData: vi.fn(),
@@ -100,7 +105,7 @@ describe('prepareTerritoryMovie', () => {
   })
 })
 
-describe('openTerritoryMovieWindow', () => {
+describe('territory movie window', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.useRealTimers()
@@ -123,7 +128,27 @@ describe('openTerritoryMovieWindow', () => {
     }
   }
 
-  it('revokes the blob url only after the window closes', () => {
+  it('opens the blank window during the click', () => {
+    const opened = {
+      closed: false,
+      document: { title: '', body: { textContent: '' } },
+    }
+    const open = vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
+    expect(reserveTerritoryMovieWindow()).toBe(opened)
+    expect(open).toHaveBeenCalledWith('about:blank', '_blank')
+    expect(opened.document.title).toBe('Territory movie')
+    expect(opened.document.body.textContent).toBe('Building the Territory movie…')
+  })
+
+  it('reports a blocked window before a blob url exists', () => {
+    installBlobUrl()
+    const create = vi.spyOn(URL, 'createObjectURL')
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    expect(() => reserveTerritoryMovieWindow()).toThrow(/blocked/)
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('navigates the reserved window and revokes the blob url after it closes', () => {
     installBlobUrl()
     vi.useFakeTimers()
     vi.spyOn(URL, 'createObjectURL').mockImplementation((value) => {
@@ -132,21 +157,19 @@ describe('openTerritoryMovieWindow', () => {
       return 'blob:movie'
     })
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
-    const opened = { closed: false }
-    vi.spyOn(window, 'open').mockReturnValue(opened as Window)
-    openTerritoryMovieWindow('<html></html>')
+    const opened = { closed: false, location: { href: 'about:blank' } }
+    showTerritoryMovieDocument(opened as unknown as Window, '<html></html>')
+    expect(opened.location.href).toBe('blob:movie')
     expect(revoke).not.toHaveBeenCalled()
     opened.closed = true
     vi.advanceTimersByTime(1000)
     expect(revoke).toHaveBeenCalledWith('blob:movie')
   })
 
-  it('does not leave a url when the browser blocks the window', () => {
-    installBlobUrl()
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:movie')
-    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
-    vi.spyOn(window, 'open').mockReturnValue(null)
-    expect(() => openTerritoryMovieWindow('<html></html>')).toThrow(/blocked/)
-    expect(revoke).toHaveBeenCalledWith('blob:movie')
+  it('closes a window that is still open', () => {
+    const close = vi.fn()
+    closeTerritoryMovieWindow({ closed: false, close } as unknown as Window)
+    closeTerritoryMovieWindow({ closed: true, close } as unknown as Window)
+    expect(close).toHaveBeenCalledTimes(1)
   })
 })

@@ -239,9 +239,36 @@ export function createTerritoryMovieRuntime() {
     return (2 * viewBoxWidth) / cssWidth
   }
 
+  /** CSS width of the viewBox after it meets inside the SVG element. */
+  function fittedCssWidth(
+    rectangle: Rectangle,
+    cssWidth: number,
+    cssHeight: number
+  ): number {
+    if (
+      !(rectangle.width > 0) ||
+      !(rectangle.height > 0) ||
+      !(cssWidth > 0) ||
+      !(cssHeight > 0)
+    ) {
+      return 0
+    }
+    const viewAspect = rectangle.width / rectangle.height
+    const boxAspect = cssWidth / cssHeight
+    return boxAspect > viewAspect ? cssHeight * viewAspect : cssWidth
+  }
+
   function viewBoxFor(rectangle: Rectangle): string {
     const top = -(rectangle.bottom + rectangle.height)
     return `${rectangle.left} ${top} ${rectangle.width} ${rectangle.height}`
+  }
+
+  function lockSidebarWidth(doc: Document): void {
+    const sidebar = doc.querySelector('.sidebar')
+    const measures = doc.querySelector('.measures')
+    if (!(sidebar instanceof HTMLElement) || !(measures instanceof HTMLElement)) return
+    const width = measures.scrollWidth
+    if (width > 0) sidebar.style.width = `${width}px`
   }
 
   function required(doc: Document, id: string): HTMLElement {
@@ -284,6 +311,7 @@ export function createTerritoryMovieRuntime() {
     let playing = false
     let timer = 0
 
+    lockSidebarWidth(doc)
     map.setAttribute('viewBox', viewBoxFor(movie.rectangle))
     const flip = doc.createElementNS(SVG_NS, 'g')
     flip.setAttribute('transform', 'scale(1,-1)')
@@ -319,7 +347,11 @@ export function createTerritoryMovieRuntime() {
         element.setAttribute('fill-rule', 'evenodd')
         rings.append(element)
       }
-      const radius = dotRadius(movie.rectangle.width, map.getBoundingClientRect().width)
+      const bounds = map.getBoundingClientRect()
+      const radius = dotRadius(
+        movie.rectangle.width,
+        fittedCssWidth(movie.rectangle, bounds.width, bounds.height)
+      )
       dots.replaceChildren()
       for (const row of visibleDots(movie.planets, state.frame)) {
         const circle = doc.createElementNS(SVG_NS, 'circle')
@@ -496,6 +528,7 @@ export function createTerritoryMovieRuntime() {
     visibleDots,
     framePaths,
     dotRadius,
+    fittedCssWidth,
     viewBoxFor,
     start,
     boot,

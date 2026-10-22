@@ -25,7 +25,12 @@ import { teamInformationMapQuerySpec } from './mapAnalytic'
 import { useLeagueTeamNames } from './useLeagueTeamNames'
 import { useTurnRosterUsernames } from './useTurnRosterUsernames'
 import { FillPatternMarks } from '../../lib/mapRegionFillPatternMarks'
-import { openTerritoryMovieWindow, prepareTerritoryMovie } from './prepareTerritoryMovie'
+import {
+  closeTerritoryMovieWindow,
+  prepareTerritoryMovie,
+  reserveTerritoryMovieWindow,
+  showTerritoryMovieDocument,
+} from './prepareTerritoryMovie'
 
 type TeamInformationMapTileProps = {
   name: string
@@ -74,6 +79,7 @@ export function TeamInformationMapTile({
   const [movieBuilding, setMovieBuilding] = useState(false)
   const movieBuildingRef = useRef(false)
   const movieMountedRef = useRef(true)
+  const reservedMovieRef = useRef<{ window: Window; delivered: boolean } | null>(null)
   const byTeam = byTeamForGame(byTeamByGameId, gameId)
   const hiddenPlayerIds = hiddenPlayerIdsForGame(hiddenPlayerIdsByGameId, gameId)
   const namesByLeagueTeamId = useLeagueTeamNames(gameId, supportsMode && enabled)
@@ -108,8 +114,17 @@ export function TeamInformationMapTile({
     movieMountedRef.current = true
     return () => {
       movieMountedRef.current = false
+      const reserved = reservedMovieRef.current
+      reservedMovieRef.current = null
+      if (reserved != null && !reserved.delivered) closeTerritoryMovieWindow(reserved.window)
     }
   }, [])
+
+  function discardReservedMovie(): void {
+    const reserved = reservedMovieRef.current
+    reservedMovieRef.current = null
+    if (reserved != null) closeTerritoryMovieWindow(reserved.window)
+  }
 
   async function openMovie(): Promise<void> {
     if (movieBuildingRef.current) return
@@ -121,6 +136,14 @@ export function TeamInformationMapTile({
       reportShellError("Territory movie needs the game's current turn.")
       return
     }
+    let opened: Window
+    try {
+      opened = reserveTerritoryMovieWindow()
+    } catch (err: unknown) {
+      reportShellError(err instanceof Error ? err.message : 'Territory movie failed.')
+      return
+    }
+    reservedMovieRef.current = { window: opened, delivered: false }
     movieBuildingRef.current = true
     setMovieBuilding(true)
     try {
@@ -130,9 +153,16 @@ export function TeamInformationMapTile({
         gameTurn,
         username: analyticScope.username ?? '',
       })
-      if (!movieMountedRef.current) return
-      openTerritoryMovieWindow(html)
+      const reserved = reservedMovieRef.current
+      if (!movieMountedRef.current || reserved == null) {
+        discardReservedMovie()
+        return
+      }
+      reserved.delivered = true
+      showTerritoryMovieDocument(reserved.window, html)
+      reservedMovieRef.current = null
     } catch (err: unknown) {
+      discardReservedMovie()
       if (!movieMountedRef.current) return
       reportShellError(err instanceof Error ? err.message : 'Territory movie failed.')
     } finally {
@@ -182,13 +212,13 @@ export function TeamInformationMapTile({
       </label>
       <button
         type="button"
-        className="rounded border border-[#52575d] bg-[#2b2e32] px-2 py-1 text-left text-xs text-slate-200 hover:bg-[#4a4f54] disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-fit self-start cursor-pointer rounded-sm border-2 border-b-[#141618] border-l-[#6e747a] border-r-[#141618] border-t-[#c4c8cc] bg-[#3c4146] px-2.5 py-1 text-xs font-medium text-slate-100 shadow-[1px_1px_0_#0c0d0e] hover:bg-[#4a5056] active:translate-y-px active:border-b-[#c4c8cc] active:border-l-[#141618] active:border-r-[#6e747a] active:border-t-[#141618] active:shadow-none disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0"
         disabled={movieBuilding}
         onClick={() => {
           void openMovie()
         }}
       >
-        Territory movie
+        Generate movie
       </button>
       {showTeamLegend ? (
         <ul aria-label="League teams" className="flex flex-col gap-1">

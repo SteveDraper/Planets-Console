@@ -16,12 +16,19 @@ import {
 } from '../../stores/teamInformationPreferences'
 import { defaultColorForPlayerId } from '../../lib/playerColor'
 import { fetchTeamInformationMap } from './api'
-import { openTerritoryMovieWindow, prepareTerritoryMovie } from './prepareTerritoryMovie'
+import {
+  closeTerritoryMovieWindow,
+  prepareTerritoryMovie,
+  reserveTerritoryMovieWindow,
+  showTerritoryMovieDocument,
+} from './prepareTerritoryMovie'
 import { TeamInformationMapTile } from './TeamInformationMapTile'
 
 vi.mock('./prepareTerritoryMovie', () => ({
   prepareTerritoryMovie: vi.fn(),
-  openTerritoryMovieWindow: vi.fn(),
+  reserveTerritoryMovieWindow: vi.fn(() => ({ close: vi.fn(), closed: false })),
+  showTerritoryMovieDocument: vi.fn(),
+  closeTerritoryMovieWindow: vi.fn(),
 }))
 
 vi.mock('./api', () => ({
@@ -106,7 +113,10 @@ describe('TeamInformationMapTile', () => {
       teams: [{ id: 4, name: 'Blue Squadron' }],
     })
     vi.mocked(prepareTerritoryMovie).mockReset()
-    vi.mocked(openTerritoryMovieWindow).mockReset()
+    vi.mocked(reserveTerritoryMovieWindow).mockReset()
+    vi.mocked(reserveTerritoryMovieWindow).mockReturnValue({ close: vi.fn(), closed: false } as unknown as Window)
+    vi.mocked(showTerritoryMovieDocument).mockReset()
+    vi.mocked(closeTerritoryMovieWindow).mockReset()
   })
 
   it('greys the tile in tabular mode', () => {
@@ -126,7 +136,7 @@ describe('TeamInformationMapTile', () => {
     expect(screen.getByRole('checkbox', { name: 'Territory' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Expand Territory options' })).toBeDisabled()
     expect(screen.queryByRole('checkbox', { name: 'Owned planets only' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Territory movie' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate movie' })).not.toBeInTheDocument()
     expect(fetchTeamInformationMap).not.toHaveBeenCalled()
     expect(fetchLeagueTeams).not.toHaveBeenCalled()
   })
@@ -391,7 +401,7 @@ describe('TeamInformationMapTile', () => {
       />
     )
     await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
-    await user.click(screen.getByRole('button', { name: 'Territory movie' }))
+    await user.click(screen.getByRole('button', { name: 'Generate movie' }))
     await waitFor(() => {
       expect(prepareTerritoryMovie).toHaveBeenCalledWith({
         gameId: '628580',
@@ -400,7 +410,11 @@ describe('TeamInformationMapTile', () => {
         username: 'alice',
       })
     })
-    expect(openTerritoryMovieWindow).toHaveBeenCalledWith('<!DOCTYPE html><title>1</title>')
+    expect(reserveTerritoryMovieWindow).toHaveBeenCalledTimes(1)
+    expect(showTerritoryMovieDocument).toHaveBeenCalledWith(
+      expect.anything(),
+      '<!DOCTYPE html><title>1</title>'
+    )
   })
 
   it('disables the movie button while the file is built', async () => {
@@ -425,18 +439,20 @@ describe('TeamInformationMapTile', () => {
       />
     )
     await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
-    await user.click(screen.getByRole('button', { name: 'Territory movie' }))
-    expect(screen.getByRole('button', { name: 'Territory movie' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Generate movie' }))
+    expect(screen.getByRole('button', { name: 'Generate movie' })).toBeDisabled()
     resolveMovie('<!DOCTYPE html>')
     await waitFor(() => {
-      expect(openTerritoryMovieWindow).toHaveBeenCalledWith('<!DOCTYPE html>')
+      expect(showTerritoryMovieDocument).toHaveBeenCalledWith(expect.anything(), '<!DOCTYPE html>')
     })
-    expect(screen.getByRole('button', { name: 'Territory movie' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Generate movie' })).toBeEnabled()
   })
 
-  it('reports a failed ensure on the shell error bar and opens no window', async () => {
+  it('reports a failed ensure on the shell error bar and closes the blank window', async () => {
     const user = userEvent.setup()
     const reportShellError = vi.fn()
+    const reserved = { close: vi.fn(), closed: false } as unknown as Window
+    vi.mocked(reserveTerritoryMovieWindow).mockReturnValue(reserved)
     vi.mocked(prepareTerritoryMovie).mockRejectedValue(new Error('Ensure failed'))
     renderTile(
       <TeamInformationMapTile
@@ -451,12 +467,14 @@ describe('TeamInformationMapTile', () => {
       />
     )
     await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
-    await user.click(screen.getByRole('button', { name: 'Territory movie' }))
+    await user.click(screen.getByRole('button', { name: 'Generate movie' }))
     await waitFor(() => {
       expect(reportShellError).toHaveBeenCalledWith('Ensure failed')
     })
-    expect(openTerritoryMovieWindow).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Territory movie' })).toBeEnabled()
+    expect(reserveTerritoryMovieWindow).toHaveBeenCalledTimes(1)
+    expect(showTerritoryMovieDocument).not.toHaveBeenCalled()
+    expect(closeTerritoryMovieWindow).toHaveBeenCalledWith(reserved)
+    expect(screen.getByRole('button', { name: 'Generate movie' })).toBeEnabled()
   })
 
   it('reports a missing game on the shell error bar and opens no window', async () => {
@@ -475,11 +493,37 @@ describe('TeamInformationMapTile', () => {
       />
     )
     await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
-    await user.click(screen.getByRole('button', { name: 'Territory movie' }))
+    await user.click(screen.getByRole('button', { name: 'Generate movie' }))
     expect(reportShellError).toHaveBeenCalledWith(
       'Choose a game and viewpoint before opening the Territory movie.'
     )
     expect(prepareTerritoryMovie).not.toHaveBeenCalled()
-    expect(openTerritoryMovieWindow).not.toHaveBeenCalled()
+    expect(reserveTerritoryMovieWindow).not.toHaveBeenCalled()
+    expect(showTerritoryMovieDocument).not.toHaveBeenCalled()
+  })
+
+  it('reports a blocked window on the shell error bar and does not build the file', async () => {
+    const user = userEvent.setup()
+    const reportShellError = vi.fn()
+    vi.mocked(reserveTerritoryMovieWindow).mockImplementation(() => {
+      throw new Error('The browser blocked the Territory movie window.')
+    })
+    renderTile(
+      <TeamInformationMapTile
+        name="Territory"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        analyticScope={sampleScope}
+        turnDataReady
+        reportShellError={reportShellError}
+      />
+    )
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    await user.click(screen.getByRole('button', { name: 'Generate movie' }))
+    expect(reportShellError).toHaveBeenCalledWith('The browser blocked the Territory movie window.')
+    expect(prepareTerritoryMovie).not.toHaveBeenCalled()
+    expect(showTerritoryMovieDocument).not.toHaveBeenCalled()
   })
 })
