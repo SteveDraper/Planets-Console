@@ -46,6 +46,7 @@ export type ShellAnalyticSidebarContext = {
   onToggle: () => void
   turnDataReady: boolean
   analyticScope: AnalyticShellScope | null
+  reportShellError: (message: string) => void
 }
 
 export type ShellAnalyticTableViewProps = {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AnalyticShellScope } from '../../api/bff'
 import { cn } from '../../lib/utils'
@@ -25,6 +25,12 @@ import { teamInformationMapQuerySpec } from './mapAnalytic'
 import { useLeagueTeamNames } from './useLeagueTeamNames'
 import { useTurnRosterUsernames } from './useTurnRosterUsernames'
 import { FillPatternMarks } from '../../lib/mapRegionFillPatternMarks'
+import {
+  closeTerritoryMovieWindow,
+  prepareTerritoryMovie,
+  reserveTerritoryMovieWindow,
+  showTerritoryMovieDocument,
+} from './prepareTerritoryMovie'
 
 type TeamInformationMapTileProps = {
   name: string
@@ -34,6 +40,7 @@ type TeamInformationMapTileProps = {
   onToggle: () => void
   analyticScope: AnalyticShellScope | null
   turnDataReady: boolean
+  reportShellError: (message: string) => void
 }
 
 export function TeamInformationMapTile({
@@ -44,6 +51,7 @@ export function TeamInformationMapTile({
   onToggle,
   analyticScope,
   turnDataReady,
+  reportShellError,
 }: TeamInformationMapTileProps) {
   const ownedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.ownedPlanetsOnly)
   const setOwnedPlanetsOnly = useTeamInformationPreferencesStore((s) => s.setOwnedPlanetsOnly)
@@ -67,6 +75,11 @@ export function TeamInformationMapTile({
   const fetchEnabled = supportsMode && enabled && turnDataReady
   const mapQuery = useQuery(teamInformationMapQuerySpec(analyticScope, fetchEnabled))
   const gameId = analyticScope?.gameId ?? null
+  const gameTurn = useShellStore((s) => s.gameInfoContext?.turn ?? null)
+  const [movieBuilding, setMovieBuilding] = useState(false)
+  const movieBuildingRef = useRef(false)
+  const movieMountedRef = useRef(true)
+  const reservedMovieRef = useRef<{ window: Window; delivered: boolean } | null>(null)
   const byTeam = byTeamForGame(byTeamByGameId, gameId)
   const hiddenPlayerIds = hiddenPlayerIdsForGame(hiddenPlayerIdsByGameId, gameId)
   const namesByLeagueTeamId = useLeagueTeamNames(gameId, supportsMode && enabled)
@@ -96,6 +109,67 @@ export function TeamInformationMapTile({
 
   const showTeamLegend = supportsMode && enabled && byTeam && teamRows.length > 0
   const showPlayerLegend = supportsMode && enabled && !byTeam && playerRows.length > 0
+
+  useEffect(() => {
+    movieMountedRef.current = true
+    return () => {
+      movieMountedRef.current = false
+      const reserved = reservedMovieRef.current
+      reservedMovieRef.current = null
+      if (reserved != null && !reserved.delivered) closeTerritoryMovieWindow(reserved.window)
+    }
+  }, [])
+
+  function discardReservedMovie(): void {
+    const reserved = reservedMovieRef.current
+    reservedMovieRef.current = null
+    if (reserved != null) closeTerritoryMovieWindow(reserved.window)
+  }
+
+  async function openMovie(): Promise<void> {
+    if (movieBuildingRef.current) return
+    if (analyticScope == null) {
+      reportShellError('Choose a game and viewpoint before opening the Territory movie.')
+      return
+    }
+    if (gameTurn == null) {
+      reportShellError("Territory movie needs the game's current turn.")
+      return
+    }
+    let opened: Window
+    try {
+      opened = reserveTerritoryMovieWindow()
+    } catch (err: unknown) {
+      reportShellError(err instanceof Error ? err.message : 'Territory movie failed.')
+      return
+    }
+    reservedMovieRef.current = { window: opened, delivered: false }
+    movieBuildingRef.current = true
+    setMovieBuilding(true)
+    try {
+      const html = await prepareTerritoryMovie({
+        gameId: analyticScope.gameId,
+        perspective: analyticScope.perspective,
+        gameTurn,
+        username: analyticScope.username ?? '',
+      })
+      const reserved = reservedMovieRef.current
+      if (!movieMountedRef.current || reserved == null) {
+        discardReservedMovie()
+        return
+      }
+      reserved.delivered = true
+      await showTerritoryMovieDocument(reserved.window, html)
+      reservedMovieRef.current = null
+    } catch (err: unknown) {
+      discardReservedMovie()
+      if (!movieMountedRef.current) return
+      reportShellError(err instanceof Error ? err.message : 'Territory movie failed.')
+    } finally {
+      movieBuildingRef.current = false
+      if (movieMountedRef.current) setMovieBuilding(false)
+    }
+  }
 
   useEffect(() => {
     const hovered = useTeamInformationHighlightStore.getState().hoveredTerritory
@@ -136,6 +210,16 @@ export function TeamInformationMapTile({
         />
         <span className="min-w-0 truncate">Owned planets only</span>
       </label>
+      <button
+        type="button"
+        className="w-fit self-start cursor-pointer rounded-sm border-2 border-b-[#141618] border-l-[#6e747a] border-r-[#141618] border-t-[#c4c8cc] bg-[#3c4146] px-2.5 py-1 text-xs font-medium text-slate-100 shadow-[1px_1px_0_#0c0d0e] hover:bg-[#4a5056] active:translate-y-px active:border-b-[#c4c8cc] active:border-l-[#141618] active:border-r-[#6e747a] active:border-t-[#141618] active:shadow-none disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0"
+        disabled={movieBuilding}
+        onClick={() => {
+          void openMovie()
+        }}
+      >
+        Generate movie
+      </button>
       {showTeamLegend ? (
         <ul aria-label="League teams" className="flex flex-col gap-1">
           {teamRows.map((row) => {

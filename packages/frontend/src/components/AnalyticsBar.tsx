@@ -10,6 +10,7 @@ type AnalyticsBarProps = {
   viewMode: ViewMode
   turnDataReady: boolean
   analyticScope: AnalyticShellScope | null
+  reportShellError: (message: string) => void
 }
 
 /** Only analytics the user can toggle; base map is excluded from the pane. */
@@ -24,6 +25,7 @@ export function AnalyticsBar({
   viewMode,
   turnDataReady,
   analyticScope,
+  reportShellError,
 }: AnalyticsBarProps) {
   const list = selectableAnalytics(analytics)
   return (
@@ -43,6 +45,7 @@ export function AnalyticsBar({
                 onToggle: () => onToggle(a.id),
                 turnDataReady,
                 analyticScope,
+                reportShellError,
               })}
             </li>
           )

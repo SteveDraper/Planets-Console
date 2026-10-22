@@ -73,6 +73,7 @@ describe('shell analytic registry', () => {
         onToggle: () => {},
         turnDataReady: true,
         analyticScope: null,
+        reportShellError: () => {},
       })
     )
     expect(getByRole('checkbox')).toBeInTheDocument()
@@ -192,6 +193,7 @@ describe('sidebarTileChrome', () => {
         onToggle,
         turnDataReady: true,
         analyticScope: null,
+        reportShellError: () => {},
       })
     ).toEqual({
       name: 'Example',
@@ -208,6 +210,7 @@ describe('sidebarTileChrome', () => {
         onToggle,
         turnDataReady: true,
         analyticScope: null,
+        reportShellError: () => {},
       })
     ).toEqual({
       name: 'Example',
@@ -227,6 +230,7 @@ describe('sidebarTileChrome', () => {
         onToggle,
         turnDataReady: true,
         analyticScope: null,
+        reportShellError: () => {},
       }).depressed
     ).toBe(false)
   })

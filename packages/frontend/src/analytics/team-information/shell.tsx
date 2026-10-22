@@ -8,6 +8,7 @@ export const teamInformationShellAnalytic: ShellAnalyticChrome = {
         {...sidebarTileChrome(ctx)}
         analyticScope={ctx.analyticScope}
         turnDataReady={ctx.turnDataReady}
+        reportShellError={ctx.reportShellError}
       />
     )
   },

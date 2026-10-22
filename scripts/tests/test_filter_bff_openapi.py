@@ -44,6 +44,10 @@ def _minimal_openapi(*, paths: dict, schemas: dict | None = None) -> dict:
         ("/diagnostics/recent", "diagnostics", True),
         ("/diagnostics", "diagnostics", True),
         ("/diagnostic", "diagnostics", False),
+        ("/territory-movie-pages", "territory-movie", True),
+        ("/territory-movie-pages/abc", "territory-movie", True),
+        ("/territory-movie", "territory-movie", False),
+        ("/territory-movie-pages", "games", False),
         ("/games", "analytics", False),
         ("/health", "games", False),
     ],
@@ -213,6 +217,10 @@ def test_filter_bff_openapi_emits_all_v1_slices() -> None:
             "/shell/bootstrap": {"get": {"responses": {"200": {"description": "ok"}}}},
             "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
             "/diagnostics/recent": {"get": {"responses": {"200": {"description": "ok"}}}},
+            "/territory-movie-pages": {"post": {"responses": {"201": {"description": "created"}}}},
+            "/territory-movie-pages/{page_id}": {
+                "get": {"responses": {"200": {"description": "html"}}}
+            },
         },
     )
 
@@ -223,6 +231,10 @@ def test_filter_bff_openapi_emits_all_v1_slices() -> None:
     assert set(slices["analytics"]["paths"]) == {"/analytics"}
     assert set(slices["shell"]["paths"]) == {"/shell/bootstrap", "/health"}
     assert set(slices["diagnostics"]["paths"]) == {"/diagnostics/recent"}
+    assert set(slices["territory-movie"]["paths"]) == {
+        "/territory-movie-pages",
+        "/territory-movie-pages/{page_id}",
+    }
 
 
 def test_write_slice_documents_creates_json_files(tmp_path: Path) -> None:
@@ -260,6 +272,17 @@ def test_real_bff_openapi_slices_have_closed_refs() -> None:
     assert set(slices["diagnostics"]["paths"]) == {
         path for path in full["paths"] if path == "/diagnostics" or path.startswith("/diagnostics/")
     }
+    assert set(slices["territory-movie"]["paths"]) == {
+        path
+        for path in full["paths"]
+        if path == "/territory-movie-pages" or path.startswith("/territory-movie-pages/")
+    }
+    create = slices["territory-movie"]["paths"]["/territory-movie-pages"]["post"]
+    create_schema = create["responses"]["201"]["content"]["application/json"]["schema"]
+    assert create_schema["$ref"] == "#/components/schemas/TerritoryMoviePageCreateResponse"
+    page = slices["territory-movie"]["paths"]["/territory-movie-pages/{page_id}"]
+    assert set(page["get"]["responses"]["200"]["content"]) == {"text/html"}
+    assert "204" in page["delete"]["responses"]
 
     full_schemas = full.get("components", {}).get("schemas", {})
     for slice_name, document in slices.items():

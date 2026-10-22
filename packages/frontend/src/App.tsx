@@ -320,6 +320,7 @@ function ConsoleShell() {
           viewMode={viewMode}
           turnDataReady={turnDataReady}
           analyticScope={analyticScope}
+          reportShellError={addShellError}
         />
         {isPending ? (
           <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
