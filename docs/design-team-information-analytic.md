@@ -109,7 +109,7 @@ The Territory tile's details pane includes a **Generate movie** button with **By
 
 The click opens a blank window immediately, then ensures the current viewpoint's host turns 1 through `GameInfo.game.turn` with the existing turn-ensure route, including turns after elimination. It then fetches the Territory movie payload, wraps it in one HTML document, and navigates that window to the document. A failed ensure or payload closes the blank window and sets the shell error bar. The button does not read or write the live analytic's player-hide preference.
 
-The document is `text/html` at a `blob:` URL. That URL stays alive until the window closes, so Save As, HTML only, writes one file that runs from `file://`. The page is HTML, CSS, and one script. It inflates the two gzip blobs with `DecompressionStream`. No React and no graph library.
+The document is `text/html` served by the console at `/bff/territory-movie-pages/{id}` until the window closes, so Save Page As, HTML only, writes one file that runs from `file://`. The address is an ordinary console URL. The page is HTML, CSS, and one script. It inflates the two gzip blobs with `DecompressionStream`. No React and no graph library.
 
 Each frame is one SVG of the map rectangle on a `#000` background. The viewBox flips y so host +y is up. Rings for the section selected by **By team** and **Owned planets only** are filled at opacity 1 with no stroke, even-odd, one path per visible group id and a closed subpath per ring. Planet dots are 4px `#9ca3af`, painted on top of the rings, for every id whose `first_turn` is at or before the frame. A planet blob whose count disagrees with its length, or that repeats an id, paints no dots. The turn scale under the map is the frame indicator.
 

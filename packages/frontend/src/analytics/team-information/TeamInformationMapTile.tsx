@@ -159,7 +159,7 @@ export function TeamInformationMapTile({
         return
       }
       reserved.delivered = true
-      showTerritoryMovieDocument(reserved.window, html)
+      await showTerritoryMovieDocument(reserved.window, html)
       reservedMovieRef.current = null
     } catch (err: unknown) {
       discardReservedMovie()

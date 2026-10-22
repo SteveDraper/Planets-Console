@@ -1,4 +1,9 @@
-import { ensureTurnData, fetchTerritoryMovie } from '../../api/bff'
+import {
+  discardTerritoryMoviePage,
+  ensureTurnData,
+  fetchTerritoryMovie,
+  publishTerritoryMoviePage,
+} from '../../api/bff'
 import { buildTerritoryMovieDocument } from './territoryMovieDocument'
 import { moviePalette } from './territoryMoviePalette'
 
@@ -49,15 +54,18 @@ export function reserveTerritoryMovieWindow(): Window {
   return opened
 }
 
-/** Replace the blank window with the movie blob and keep that URL until the window closes. */
-export function showTerritoryMovieDocument(opened: Window, html: string): void {
-  const blob = new Blob([html], { type: 'text/html' })
-  const url = URL.createObjectURL(blob)
-  opened.location.href = url
+/** Navigate the blank window to the console address for this document. */
+export async function showTerritoryMovieDocument(opened: Window, html: string): Promise<void> {
+  const page = await publishTerritoryMoviePage(html)
+  if (opened.closed) {
+    await discardTerritoryMoviePage(page.id)
+    return
+  }
+  opened.location.href = new URL(page.path, window.location.origin).href
   const watch = window.setInterval(() => {
     if (opened.closed) {
       window.clearInterval(watch)
-      URL.revokeObjectURL(url)
+      void discardTerritoryMoviePage(page.id)
     }
   }, 1000)
 }

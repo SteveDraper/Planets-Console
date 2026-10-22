@@ -127,7 +127,7 @@ export function buildTerritoryMovieDocument(payload: TerritoryMovieDocumentPaylo
     </div>
   </main>
   <script type="application/json" id="territory-movie-payload">${json}</script>
-  <script type="module">
+  <script>
 const runtime = (${runtime})();
 runtime.boot(document, JSON.parse(document.getElementById("territory-movie-payload").textContent));
   </script>

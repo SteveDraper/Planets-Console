@@ -431,6 +431,44 @@ export async function fetchTerritoryMovie(
   return r.json()
 }
 
+export type TerritoryMoviePageRef = {
+  id: string
+  path: string
+}
+
+/** Hold one movie document at an http address until the window closes. */
+export async function publishTerritoryMoviePage(html: string): Promise<TerritoryMoviePageRef> {
+  const path = '/bff/territory-movie-pages'
+  const endpointLabel = `POST ${path}`
+  const r = await bffRequest(
+    path,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      body: html,
+    },
+    endpointLabel
+  )
+  if (!r.ok) {
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
+  }
+  return r.json()
+}
+
+/** Drop a movie document after its window closes. A missed delete ends with the process. */
+export async function discardTerritoryMoviePage(pageId: string): Promise<void> {
+  const path = `/bff/territory-movie-pages/${encodeURIComponent(pageId)}`
+  const endpointLabel = `DELETE ${path}`
+  try {
+    const r = await bffRequest(path, { method: 'DELETE' }, endpointLabel)
+    if (!r.ok && r.status !== 404) {
+      await throwBffHttpErrorFromResponse(r, endpointLabel)
+    }
+  } catch {
+    // The window is already gone. The process drops the page on exit.
+  }
+}
+
 export type LoadAllTurnsRequestBody = components['schemas']['LoadAllTurnsRequest']
 
 export type LoadAllTurnsStatusResponse = components['schemas']['LoadAllTurnsStatusResponse']
