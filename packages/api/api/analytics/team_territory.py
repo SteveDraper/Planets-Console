@@ -410,16 +410,11 @@ _TERRITORY_SITE_SETS = (
 )
 
 
-def _site_set_section_kinds(team_kind: str, player_kind: str) -> tuple[str, str]:
-    """Team kind, then player kind: the section order within one site set."""
-    return (team_kind, player_kind)
-
-
-# Flatten of ``_TERRITORY_SITE_SETS`` in section order.
+# Flatten of ``_TERRITORY_SITE_SETS``: team kind, then player kind, per site set.
 TERRITORY_SECTION_KINDS = tuple(
     kind
     for _owned_only, team_kind, player_kind in _TERRITORY_SITE_SETS
-    for kind in _site_set_section_kinds(team_kind, player_kind)
+    for kind in (team_kind, player_kind)
 )
 
 PLAYER_TERRITORY_KINDS = frozenset(
@@ -472,6 +467,13 @@ class _SiteSetPartition:
     team_regions: dict[int, list[Polygon]]
     rectangle: MapRectangle | None
 
+    def sections(self) -> tuple[TerritorySection, TerritorySection]:
+        """Team section, then the player section from this same Voronoi."""
+        return (
+            (self.team_kind, self.team_components),
+            (self.player_kind, self.player_components),
+        )
+
 
 def _iter_site_set_partitions(turn: TurnInfo) -> Iterator[_SiteSetPartition]:
     """One Voronoi per site set. Does not build the border-neighbor map."""
@@ -496,19 +498,6 @@ def _iter_site_set_partitions(turn: TurnInfo) -> Iterator[_SiteSetPartition]:
         )
 
 
-def _append_site_set_sections(
-    sections: list[TerritorySection],
-    site_set: _SiteSetPartition,
-) -> None:
-    components = (site_set.team_components, site_set.player_components)
-    for kind, kind_components in zip(
-        _site_set_section_kinds(site_set.team_kind, site_set.player_kind),
-        components,
-        strict=True,
-    ):
-        sections.append((kind, kind_components))
-
-
 def territory_sections(turn: TurnInfo) -> list[TerritorySection]:
     """Four partitions in section order. Does not build the border-neighbor map.
 
@@ -517,7 +506,7 @@ def territory_sections(turn: TurnInfo) -> list[TerritorySection]:
     """
     sections: list[TerritorySection] = []
     for site_set in _iter_site_set_partitions(turn):
-        _append_site_set_sections(sections, site_set)
+        sections.extend(site_set.sections())
     return sections
 
 
@@ -533,7 +522,7 @@ def territory_sections_with_neighbors(
     neighbors: dict[int, set[int]] = defaultdict(set)
     sphere = turn.settings.sphere
     for site_set in _iter_site_set_partitions(turn):
-        _append_site_set_sections(sections, site_set)
+        sections.extend(site_set.sections())
         if site_set.rectangle is None:
             continue
         for team_id, bordering in _touching_teams(
