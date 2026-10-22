@@ -1,4 +1,4 @@
-"""Territory analytic: nearest-planet partition by player or by league team."""
+"""Territory analytic: paint the nearest-planet partition by player or by league team."""
 
 from __future__ import annotations
 
@@ -10,7 +10,12 @@ from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.team_palette import TeamStyle, assign_team_styles
-from api.analytics.team_territory import TerritorySite, territory_unions
+from api.analytics.team_territory import (
+    PLAYER_TERRITORY_KINDS,
+    TerritorySection,
+    league_team_id_by_player,
+    territory_sections_with_neighbors,
+)
 from api.concepts.map_region_coverage import (
     MapRegionBoundaryLineEdge,
     MapRegionOverlayVertex,
@@ -21,30 +26,10 @@ from api.models.game import TurnInfo
 
 ANALYTIC_ID = "team-information"
 FILL_OPACITY = 0.35
-KIND_TEAM_ALL = "team-territory"
-KIND_TEAM_OWNED = "team-territory-owned-only"
-KIND_PLAYER_ALL = "player-territory"
-KIND_PLAYER_OWNED = "player-territory-owned-only"
 # Present on the wire so the overlay shape stays shared. The SPA replaces it
 # with the per-player palette at paint time.
 PLAYER_TERRITORY_FILL_COLOR = "#000000"
 PLAYER_TERRITORY_FILL_PATTERN = "solid"
-_PLAYER_KINDS = frozenset({KIND_PLAYER_ALL, KIND_PLAYER_OWNED})
-
-# (kind, components of (group id, ring))
-_PaintedPartition = tuple[str, list[tuple[int, list[tuple[float, float]]]]]
-
-# (owned_only, team kind, player kind)
-_SITE_SETS = (
-    (False, KIND_TEAM_ALL, KIND_PLAYER_ALL),
-    (True, KIND_TEAM_OWNED, KIND_PLAYER_OWNED),
-)
-
-
-def _league_team_by_player(turn: TurnInfo) -> dict[int, int]:
-    by_player = {player.id: player.leagueteamid for player in turn.players}
-    by_player.setdefault(turn.player.id, turn.player.leagueteamid)
-    return by_player
 
 
 def _team_rows(
@@ -75,32 +60,6 @@ def _team_rows(
     ]
 
 
-def _sites(
-    turn: TurnInfo,
-    league_team_by_player: dict[int, int],
-    *,
-    owned_only: bool,
-) -> list[TerritorySite]:
-    sites: list[TerritorySite] = []
-    for planet in turn.planets:
-        if owned_only and planet.ownerid == 0:
-            continue
-        if planet.ownerid == 0:
-            league_team_id = 0
-        else:
-            league_team_id = league_team_by_player.get(planet.ownerid, 0)
-        sites.append(
-            TerritorySite(
-                planet_id=planet.id,
-                x=float(planet.x),
-                y=float(planet.y),
-                league_team_id=league_team_id,
-                owner_id=planet.ownerid,
-            )
-        )
-    return sites
-
-
 def _boundary_overlay(
     *,
     kind: str,
@@ -110,7 +69,7 @@ def _boundary_overlay(
     styles: dict[int, TeamStyle],
 ) -> dict:
     """Player kinds carry a player id and a placeholder fill; other kinds carry a league team."""
-    if kind in _PLAYER_KINDS:
+    if kind in PLAYER_TERRITORY_KINDS:
         fill_color = PLAYER_TERRITORY_FILL_COLOR
         fill_pattern = PLAYER_TERRITORY_FILL_PATTERN
         owner_field = "playerId"
@@ -139,32 +98,8 @@ def _player_rows(turn: TurnInfo) -> list[dict]:
     return [{"playerId": player_id} for player_id in sorted(owner_ids)]
 
 
-def _painted_partitions(
-    turn: TurnInfo,
-    league_team_by_player: dict[int, int],
-) -> tuple[list[_PaintedPartition], dict[int, set[int]]]:
-    """Each entry is ``(kind, components)``."""
-    width = turn.settings.mapwidth
-    height = turn.settings.mapheight
-    sphere = turn.settings.sphere
-    partitions: list[_PaintedPartition] = []
-    neighbors: dict[int, set[int]] = defaultdict(set)
-    for owned_only, team_kind, player_kind in _SITE_SETS:
-        team_components, player_components, adjacent = territory_unions(
-            _sites(turn, league_team_by_player, owned_only=owned_only),
-            width=width,
-            height=height,
-            sphere=sphere,
-        )
-        partitions.append((team_kind, team_components))
-        partitions.append((player_kind, player_components))
-        for team_id, bordering in adjacent.items():
-            neighbors[team_id].update(bordering)
-    return partitions, neighbors
-
-
 def _region_overlays(
-    partitions: list[_PaintedPartition],
+    partitions: list[TerritorySection],
     styles: dict[int, TeamStyle],
 ) -> list[dict]:
     overlays: list[dict] = []
@@ -204,8 +139,8 @@ def _styles_for_turn(
 def compute_team_information(ctx: AnalyticComputeContext) -> dict:
     """Return player and league-team partitions for both site sets."""
     turn = ctx.turn
-    league_team_by_player = _league_team_by_player(turn)
-    partitions, neighbors = _painted_partitions(turn, league_team_by_player)
+    league_team_by_player = league_team_id_by_player(turn)
+    partitions, neighbors = territory_sections_with_neighbors(turn)
     styles = _styles_for_turn(turn, league_team_by_player, neighbors)
     return {
         "analyticId": ANALYTIC_ID,

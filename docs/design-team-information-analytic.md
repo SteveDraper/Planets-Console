@@ -70,7 +70,7 @@ BFF map handler passes the Core object through. The table route stays a validati
 
 ## Layers
 
-- **Core** (`api/analytics/team_information.py`): partition and wire. Toroidal distance and Voronoi live next to the analytic unless a second caller needs them; then extract to `api/concepts/`.
+- **Core** (`api/analytics/team_information.py`): paint, styles, overlays, and wire. The Voronoi and the four-section partition live in `team_territory.py`. One site-set table orders the live partitions and the movie file sections: team kind then player kind, all-planets then owned-planets. `territory_sections` returns those sections and does not compute border neighbors. The live map calls `territory_sections_with_neighbors`, which takes border neighbors from the same Voronoi that built each site set. The Territory movie packer calls `territory_sections` in `team_territory.py`. It does not import `team_information.py`.
 - **BFF** (`bff/analytics/team_information.py`): passthrough `get_map`. Empty export catalog on the Core registration.
 - **SPA** (`src/analytics/team-information/`): merge, preference store, sidebar legend and checkboxes, kind filter, player-palette paint.
 
@@ -86,6 +86,22 @@ Stored GameInfo players already carry `username` and `leagueteamid`. `leagueteam
 - BFF `GET /bff/games/{game_id}/league-teams` forwards to Core and returns the same body: `{ "teams": [{ "id", "name" }] }`
 
 `api/analytics/team_information.py` does not import the directory service. The SPA does not fold this fetch into the Territory map compute. **Player territory** labels come from the turn roster, not this directory.
+
+## Territory movie payload
+
+Core packs one movie for a game at one perspective. The span is stored host turns 1 through `GameInfo.game.turn`, not the shell's selected turn. A missing stored turn fails the request. The route does not fetch turns from Planets.nu and does not skip a turn after elimination.
+
+`GET /api/v1/games/{game_id}/{perspective}/territory-movie`
+
+The BFF route is the same path under `/bff/games` and returns that body unchanged. OpenAPI for the route lives in the games slice.
+
+The body is `turn` (`GameInfo.game.turn`), `rectangle` (`left`, `bottom`, `width`, `height`), base64 gzip blobs `rings` and `planets`, and a span-wide legend `players` and `teams` (`id`, `name`). `name` is null when the roster username or the league team directory name is missing. No colors, selection, or HTML.
+
+`rings` is little-endian `uint16`, four sections in order: `team-territory`, `player-territory`, `team-territory-owned-only`, `player-territory-owned-only`. Inside a section, turns `1..turn`. A turn is a component count, then that many components of `group_id`, vertex count, and `dx`, `dy` pairs. `x = rectangle.left + dx / 10`, `y = rectangle.bottom + dy / 10`. Quantization is Python 3 `round` (ties to even). Group id `0` is omitted. An empty turn is a zero count. Owned-planets-only is the second diagram from `territory_unions`, not a filter of the all-planets rings.
+
+`planets` is a `uint16` count, then rows sorted by planet id: `id`, host `x`, host `y`, `first_turn`. `first_turn` is the first stored turn that contains that id. The coordinates are that turn's host coordinates.
+
+Turns in the span share one map rectangle (`mapwidth`, `mapheight`, `sphere`). Measurements: [issue 601](https://github.com/SteveDraper/Planets-Console/issues/601). Planet-dot layout: [issue 606](https://github.com/SteveDraper/Planets-Console/issues/606).
 
 ## Tests
 
