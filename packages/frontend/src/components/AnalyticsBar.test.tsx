@@ -69,6 +69,39 @@ describe('AnalyticsBar shell registration', () => {
     expect(mystery?.querySelector('input[type="checkbox"]')).not.toBeNull()
   })
 
+  it('scrolls inside the bar so a tall list stays in the sidebar column', () => {
+    const { container } = renderBar()
+    const aside = container.querySelector('aside')
+    expect(aside).toHaveClass(
+      'h-full',
+      'max-h-full',
+      'min-h-0',
+      'overflow-y-auto',
+      'overflow-x-clip'
+    )
+  })
+
+  it('scrolls the bar on the wheel and keeps the gesture off the page', () => {
+    const { container } = renderBar()
+    const aside = container.querySelector('aside')
+    expect(aside).toBeInstanceOf(HTMLElement)
+    if (!(aside instanceof HTMLElement)) return
+    Object.defineProperty(aside, 'scrollHeight', { configurable: true, value: 800 })
+    Object.defineProperty(aside, 'clientHeight', { configurable: true, value: 200 })
+    let scrollTop = 0
+    Object.defineProperty(aside, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value
+      },
+    })
+    const event = new WheelEvent('wheel', { deltaY: 40, cancelable: true, bubbles: true })
+    aside.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(scrollTop).toBe(40)
+  })
+
   it('falls back to a generic checkbox when a registered factory returns null', () => {
     renderBar('map', new Set(['scores']))
     expect(screen.getByText('Scores')).toBeInTheDocument()

@@ -92,6 +92,7 @@ The left column is titled **Analytics**. Each row is one analytic with a **check
 - Check an analytic to **include** it in the current view (tabular tables or map layers, depending on mode).
 - When an analytic has extra controls (filters, a legend, layer toggles), they sit in a **chevron** pane on that row. The pane opens only while the analytic is enabled.
 - Analytics that **do not support** the current mode stay visible but look **greyed out**; their checkboxes are disabled until you switch mode.
+- When the sidebar is taller than the space beside the main area, scrolling with the pointer over the sidebar moves only the sidebar. The map or tables stay on screen. The mouse wheel over the map still zooms the map.
 - The **base map** layer (planet positions as nodes) is **not** listed here; in **map** mode it is still fetched and combined automatically with whatever map-capable analytics you enable (see below).
 - Which analytics are enabled, and **Stellar Cartography** layer toggles when that analytic is used, are **remembered in the browser** and restored when you reload the page. **Minefields** type enablement, color policy, and stance colors persist the same way.
 - **Connections** is a separate **selectable** analytic: it adds **travel reachability** edges between planets. Enable its checkbox to load those edges; see [Connections analytic](#connections-analytic-map-mode).

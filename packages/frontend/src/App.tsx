@@ -279,7 +279,7 @@ function ConsoleShell() {
   }, [])
 
   return (
-    <div className="flex h-screen flex-col bg-black">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-black">
       <TurnKeyboardShortcuts
         enabled={shellTurnMax != null && selectedTurn != null}
         stepTurn={stepTurn}
@@ -312,7 +312,7 @@ function ConsoleShell() {
       />
       <ShellErrorBar errors={shellErrors} onDismiss={dismissShellError} />
       {loadAllProgress ? <ShellLoadAllProgressBar progress={loadAllProgress} /> : null}
-      <div className="flex min-h-0 flex-1">
+      <div className="grid min-h-0 flex-1 grid-cols-[14rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden">
         <AnalyticsBar
           analytics={analytics}
           enabledIds={enabledIds}
@@ -323,7 +323,7 @@ function ConsoleShell() {
           reportShellError={addShellError}
         />
         {isPending ? (
-          <main className="flex flex-1 items-center justify-center bg-black p-8 text-gray-400">
+          <main className="flex h-full min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto bg-black p-8 text-gray-400">
             Loading analytics…
           </main>
         ) : (

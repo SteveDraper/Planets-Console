@@ -230,7 +230,7 @@ export function MainArea({
         enabledAnalyticIds={enabledAnalyticIds}
         streamEnabled={streamEnabled}
       >
-        <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto bg-black p-4">
+        <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-auto bg-black p-4">
           {tableAnalyticIds.map((id) => {
             const TableView =
               shellAnalyticRegistrationFor(id)?.TableView ?? GenericTableTile
