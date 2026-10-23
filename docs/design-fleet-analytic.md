@@ -23,7 +23,7 @@ Players need a consolidated view of each **Player**'s fleet -- not only ships vi
 2. Combines **fleet observed ship** evidence from `TurnInfo.ships` (turns `1..T` at shell **perspective** `P`)
 3. Adds **fleet inferred acquisition** rows from **military score build inference** (`shipBuilds` on host turns in the same range)
 4. Represents partial knowledge with structured **fleet field constraint** values and **fleet build option set** lists (consistent tuples, not per-field Cartesian products)
-5. Exposes **map** layers (**fleet location ring**s from the **fleet stream**) and **tabular** tiles (one per enabled **Player**)
+5. Exposes **map** layers (**fleet location ring**s and **fleet heading trail**s; §7.3 says when that paint is the stored ledger and when it is this turn's ships) and **tabular** tiles (one per enabled **Player**)
 6. Participates in the **analytic export** graph (`fleet@N` <-> `scores@N` / `scores@N-1` ensure chain)
 
 **Not in scope for v1:** omniscient merge across perspectives; guessed disposition changes on ship-count decreases; user-facing **fleet reconciliation correction** UI; report parsing; homeworld-derived starbase regions on map.
@@ -342,6 +342,20 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
 
 `GET …/fleet/map` may remain a no-op scaffold for catalog symmetry; it is not required for the console map layer ([#126](https://github.com/SteveDraper/Planets-Console/issues/126) superseded).
 
+### 7.3 When the map paints
+
+Resolved on [Fleet map from the loaded turn](https://github.com/SteveDraper/Planets-Console/issues/592).
+
+Per player. A stored fleet ledger for the shell turn is that player's paint, including an **approximate fleet** and a ledger whose **analytic freshness** is subject to revision. Opening a turn that already has that ledger paints it: rings, heading trails, and **fleet location ring strength**. That player does not flash a turn-load frame.
+
+**Turn-load only** is that player's paint while no ledger for this turn is stored. It comes from this turn's ships: **fleet location ring**s at sighted coordinates, **fleet heading trail**s from those ships' waypoint, warp, and hull, and a sighting-only **fleet ship military estimate** (known components as scanned; unknown beam, tube, and engine slots filled full at minimal tech). That paint does not read a previous turn's ledger and does not wait on the compute DAG. One map can show a stored ledger for one player and turn-load only for another.
+
+The map holds that picture until a new ledger for that player is saved, then replaces that player's rings, trails, and strength in place. Those saves are the approximate ledger where none existed, the later ledger that replaces that approximate fleet, and any newer ledger saved after that. If nothing later is saved, the approximate fleet stays on the map. Stream updates that have not saved a ledger leave the map unchanged.
+
+Ships that share a coordinate share one ring. Diameter, arc shares, and one **fleet location ring strength** are recomputed from the players painted at that save. One player's new ledger can change another player's arc length and the shared opacity.
+
+A **fleet inferred acquisition** not sighted this turn stays off the map. A this-turn sighting keeps that ship's coordinates. A ship leaves the ring when the saved ledger no longer has it active with `lastSeen` on this turn.
+
 ---
 
 ## 8. Frontend
@@ -358,11 +372,12 @@ Client projects **fleet player visibility**-filtered **`active`** rows whose `la
 ### 8.2 Map (fleet stream → location rings)
 
 - Own the **fleet stream** session above table vs map **view mode** (call site survives `viewMode` toggles -- e.g. shell main area -- not only inside the table tile)
+- Paint source and update timing are §7.3. Recompute a player's rings, trails, and **fleet location ring strength** when that player's ledger for the shell turn is saved
 - Keep registry map analytic registration for enablement; paint via a dedicated **screen-fixed** overlay pane (homeworld-markers pattern), not `mergeLayer` planet nodes and not map-LY-scaled disks
 - **Fleet location ring** encoding (AFK constants for #128):
   - Outer diameter (px): `min(20, 14 + 2 * floor(log2(max(1, shipCount))))` (1 ship → 14px; 8+ → 20px)
   - Arc length ∝ that player's ship count / stack total
-  - Strength fraction: let `E` = sum of host mil points (`militaryEstimate2x / 2`) in the stack; `scale` = `FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE` (`10000`, frontend AFK constant); `t = clamp(E / scale, 0, 1)`
+  - Strength fraction: `E` is **fleet location ring strength**, the sum of host mil points (`militaryEstimate2x / 2`) in the stack; `scale` = `FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE` (`10000`, frontend AFK constant); `t = clamp(E / scale, 0, 1)`. One `E` for the ring, shared by every arc
   - Stroke opacity: `clamp(0.50 + 0.55 * t, 0.50, 0.95)`
   - **Fleet location ring emphasis**: hovering a ring emphasises every player with an arc on it (full opacity, thin contrasting outline) across every rest ring; other players stay at rest paint. Hovering a **fleet player visibility** row emphasises that one player. A visibility-off row hover paints that player's rings from a side **fleet stream** admission that does not reconnect or blank players already on screen. Those rings use that player's ships alone, do not change a co-located rest ring, and do not show the **fleet table tile** or **fleet heading trail**s. Emphasis is not persisted, does not pulse, and is absent in tabular **view mode** or while the fleet analytic is off. Map hover does not reveal a visibility-off player.
   - Annulus stroke width (inward from outer radius `R`): `maxStroke = max(0, R - 3)` (min inner hole radius 3px); stroke `min(maxStroke, max(2.5px, t * maxStroke))` (when the ring is too small for both floors, the hole floor wins); SVG paint radius `R - strokeWidth/2` keeps the outer edge fixed
