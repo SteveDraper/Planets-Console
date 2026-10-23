@@ -37,14 +37,10 @@ import {
 function TerritoryLegendHoverTarget({
   territory,
   title,
-  onMouseEnter,
-  onMouseLeave,
   children,
 }: {
   territory: HoveredTerritory
   title?: string
-  onMouseEnter: () => void
-  onMouseLeave: () => void
   children: ReactNode
 }) {
   return (
@@ -54,8 +50,6 @@ function TerritoryLegendHoverTarget({
       data-territory-hover=""
       data-territory-partition={territory.partition}
       data-territory-id={territory.id}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
     >
       {children}
     </span>
@@ -139,7 +133,7 @@ export function TeamInformationMapTile({
 
   const showTeamLegend = supportsMode && enabled && byTeam && teamRows.length > 0
   const showPlayerLegend = supportsMode && enabled && !byTeam && playerRows.length > 0
-  const { legendRef, legendHover } = useTerritoryLegendHover(showTeamLegend || showPlayerLegend)
+  const legendRef = useTerritoryLegendHover(showTeamLegend || showPlayerLegend)
 
   useEffect(() => {
     movieMountedRef.current = true
@@ -270,7 +264,6 @@ export function TeamInformationMapTile({
                 <TerritoryLegendHoverTarget
                   territory={territory}
                   title={teamInformationLegendHoverTitle(row.usernames)}
-                  {...legendHover(territory)}
                 >
                   <span
                     aria-hidden
@@ -315,7 +308,7 @@ export function TeamInformationMapTile({
                   }}
                   className={cn(analyticDetailCheckboxClassName, 'mt-0.5')}
                 />
-                <TerritoryLegendHoverTarget territory={territory} {...legendHover(territory)}>
+                <TerritoryLegendHoverTarget territory={territory}>
                   <span
                     aria-hidden
                     data-fill-pattern="solid"

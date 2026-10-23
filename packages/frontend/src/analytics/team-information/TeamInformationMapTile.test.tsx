@@ -383,13 +383,26 @@ describe('TeamInformationMapTile', () => {
       partition: 'player',
       id: 1,
     })
-    await user.unhover(swatch)
+    fireEvent.pointerMove(screen.getByText('carol'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 2,
+    })
+    fireEvent.pointerMove(screen.getByText('alice'))
+    const hovered = useTeamInformationHighlightStore.getState().hoveredTerritory
+    expect(hovered).toEqual({
+      partition: 'player',
+      id: 1,
+    })
+    fireEvent.pointerMove(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBe(hovered)
+    fireEvent.pointerMove(screen.getByRole('checkbox', { name: 'Show alice territory' }))
     expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
-    await user.hover(screen.getByRole('checkbox', { name: 'Show alice territory' }))
+    await user.unhover(swatch)
     expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
   })
 
-  it('clears the highlight while the analytics bar scrolls, then restores the name under the pointer', async () => {
+  it('clears the highlight when the analytics bar scrolls until the pointer moves again', async () => {
     renderTile(
       <div style={{ height: 40, overflowY: 'auto' }}>
         <TeamInformationMapTile
@@ -413,32 +426,22 @@ describe('TeamInformationMapTile', () => {
       ancestor = ancestor.parentElement
     }
     expect(ancestor).not.toBeNull()
-    fireEvent.pointerMove(document, { clientX: 12, clientY: 12 })
-    const originalElementFromPoint = document.elementFromPoint?.bind(document)
-    document.elementFromPoint = () => screen.getByText('alice')
-    try {
-      await user.hover(screen.getByText('alice'))
-      expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
-        partition: 'player',
-        id: 1,
-      })
-      fireEvent.scroll(ancestor as HTMLElement)
-      expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
-      fireEvent.mouseEnter(screen.getByText('alice').parentElement as HTMLElement)
-      expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
-      await waitFor(() => {
-        expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
-          partition: 'player',
-          id: 1,
-        })
-      })
-    } finally {
-      if (originalElementFromPoint == null) {
-        Reflect.deleteProperty(document, 'elementFromPoint')
-      } else {
-        document.elementFromPoint = originalElementFromPoint
-      }
-    }
+    const swatch = document.querySelector('[data-fill-pattern="solid"]')
+    expect(swatch).not.toBeNull()
+    await user.hover(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 1,
+    })
+    fireEvent.scroll(ancestor as HTMLElement)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
+    fireEvent.mouseEnter(screen.getByText('alice').closest('[data-territory-hover]') as HTMLElement)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
+    fireEvent.pointerMove(swatch as Element)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 1,
+    })
   })
 
   it('does not write by team when no game is open', async () => {

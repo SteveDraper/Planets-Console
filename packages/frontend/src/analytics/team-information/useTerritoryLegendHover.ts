@@ -1,9 +1,29 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import type { HoveredTerritory, TerritoryPartition } from './kinds'
 import { useTeamInformationHighlightStore } from '../../stores/teamInformationHighlight'
 
-/** Wait until the analytics bar stops moving before applying the legend hover. */
-const SCROLL_SETTLE_MS = 120
+function isTerritoryPartition(value: string | undefined): value is TerritoryPartition {
+  return value === 'player' || value === 'team'
+}
+
+function hoveredTerritoryFromTarget(target: EventTarget | null): HoveredTerritory | null {
+  if (!(target instanceof Element)) return null
+  const hover = target.closest('[data-territory-hover]')
+  if (!(hover instanceof HTMLElement)) return null
+  const partition = hover.dataset.territoryPartition
+  const id = Number(hover.dataset.territoryId)
+  if (!isTerritoryPartition(partition) || !Number.isInteger(id)) return null
+  return { partition, id }
+}
+
+function isSameHoveredTerritory(
+  left: HoveredTerritory | null,
+  right: HoveredTerritory | null
+): boolean {
+  if (left === right) return true
+  if (left == null || right == null) return false
+  return left.partition === right.partition && left.id === right.id
+}
 
 function scrollableAncestor(node: HTMLElement): HTMLElement | null {
   let current = node.parentElement
@@ -15,80 +35,46 @@ function scrollableAncestor(node: HTMLElement): HTMLElement | null {
   return null
 }
 
-function hoveredTerritoryFromPoint(x: number, y: number): HoveredTerritory | null {
-  const hit = document.elementFromPoint(x, y)
-  const target = hit instanceof Element ? hit.closest('[data-territory-hover]') : null
-  if (!(target instanceof HTMLElement)) return null
-  const partition = target.dataset.territoryPartition
-  const id = Number(target.dataset.territoryId)
-  if ((partition !== 'player' && partition !== 'team') || !Number.isInteger(id)) return null
-  return { partition: partition as TerritoryPartition, id }
-}
-
 /**
- * Legend hover for the name and color chip. While the nearest scrollport moves,
- * the highlight stays clear, then matches whatever chip or name is under the pointer.
+ * Pointer movement over a legend name or color chip writes the highlight.
+ * Leaving the list, or scrolling the nearest scrollport, clears it.
+ * After a scroll the highlight stays clear until the pointer moves onto a name or color chip again.
  */
-export function useTerritoryLegendHover(active: boolean) {
+export function useTerritoryLegendHover(
+  active: boolean
+): (legend: HTMLUListElement | null) => void {
+  const [legend, setLegend] = useState<HTMLUListElement | null>(null)
   const setHoveredTerritory = useTeamInformationHighlightStore((s) => s.setHoveredTerritory)
-  const scrollingRef = useRef(false)
-  const pointerRef = useRef<{ x: number; y: number } | null>(null)
-  const setHoveredTerritoryRef = useRef(setHoveredTerritory)
-  const legendRefCleanup = useRef<(() => void) | null>(null)
-  setHoveredTerritoryRef.current = setHoveredTerritory
 
   useEffect(() => {
-    if (!active) return
+    if (!active || legend == null) return
+    const scroller = scrollableAncestor(legend)
+
+    const writeHoveredTerritory = (next: HoveredTerritory | null) => {
+      const current = useTeamInformationHighlightStore.getState().hoveredTerritory
+      if (isSameHoveredTerritory(current, next)) return
+      setHoveredTerritory(next)
+    }
+
     const onPointerMove = (event: PointerEvent) => {
-      pointerRef.current = { x: event.clientX, y: event.clientY }
+      writeHoveredTerritory(hoveredTerritoryFromTarget(event.target))
     }
-    document.addEventListener('pointermove', onPointerMove)
-    return () => document.removeEventListener('pointermove', onPointerMove)
-  }, [active])
-
-  const legendRef = useCallback(
-    (legend: HTMLUListElement | null) => {
-      const previous = legendRefCleanup.current
-      previous?.()
-      legendRefCleanup.current = null
-      if (!active || legend == null) return
-      const scroller = scrollableAncestor(legend)
-      if (scroller == null) return
-      let settleTimer: ReturnType<typeof setTimeout> | undefined
-      const onScroll = () => {
-        scrollingRef.current = true
-        setHoveredTerritoryRef.current(null)
-        if (settleTimer != null) clearTimeout(settleTimer)
-        settleTimer = setTimeout(() => {
-          scrollingRef.current = false
-          const pointer = pointerRef.current
-          setHoveredTerritoryRef.current(
-            pointer == null ? null : hoveredTerritoryFromPoint(pointer.x, pointer.y)
-          )
-        }, SCROLL_SETTLE_MS)
-      }
-      scroller.addEventListener('scroll', onScroll, { passive: true })
-      legendRefCleanup.current = () => {
-        scroller.removeEventListener('scroll', onScroll)
-        if (settleTimer != null) clearTimeout(settleTimer)
-        scrollingRef.current = false
-      }
-    },
-    [active]
-  )
-
-  function legendHover(territory: HoveredTerritory) {
-    return {
-      onMouseEnter: () => {
-        if (scrollingRef.current) return
-        setHoveredTerritory(territory)
-      },
-      onMouseLeave: () => {
-        if (scrollingRef.current) return
-        setHoveredTerritory(null)
-      },
+    const onPointerLeave = () => {
+      writeHoveredTerritory(null)
     }
-  }
+    const onScroll = () => {
+      writeHoveredTerritory(null)
+    }
 
-  return { legendRef, legendHover }
+    legend.addEventListener('pointermove', onPointerMove)
+    legend.addEventListener('pointerleave', onPointerLeave)
+    scroller?.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      legend.removeEventListener('pointermove', onPointerMove)
+      legend.removeEventListener('pointerleave', onPointerLeave)
+      scroller?.removeEventListener('scroll', onScroll)
+    }
+  }, [active, legend, setHoveredTerritory])
+
+  return setLegend
 }

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { HoveredTerritory } from '../analytics/team-information/kinds'
 
 type TeamInformationHighlightState = {
-  /** Territory name or color chip under the pointer. Null when neither is hovered. */
+  /** Legend name or color chip written by pointer movement. Null when unset or cleared. */
   hoveredTerritory: HoveredTerritory | null
   setHoveredTerritory: (hoveredTerritory: HoveredTerritory | null) => void
 }
