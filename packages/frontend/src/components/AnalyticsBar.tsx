@@ -29,7 +29,9 @@ export function AnalyticsBar({
 }: AnalyticsBarProps) {
   const list = selectableAnalytics(analytics)
   return (
-    <aside className="flex w-56 min-w-0 shrink-0 flex-col gap-0.5 border-r border-[#52575d] bg-[#40454a] p-2 text-slate-200">
+    <aside
+      className="flex h-full max-h-full min-h-0 w-full min-w-0 flex-col gap-0.5 overflow-x-clip overflow-y-auto overscroll-contain border-r border-[#52575d] bg-[#40454a] p-2 text-slate-200"
+    >
       <h2 className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
         Analytics
       </h2>

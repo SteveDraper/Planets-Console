@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -181,15 +181,16 @@ describe('TeamInformationMapTile', () => {
       '628580': true,
     })
     expect(await screen.findByText('Blue Squadron')).toBeInTheDocument()
-    expect(screen.getByRole('listitem')).toHaveAttribute('title', 'alice, carol')
+    expect(screen.getByTitle('alice, carol')).toBeInTheDocument()
+    expect(screen.getByRole('listitem')).not.toHaveAttribute('title')
     expect(screen.queryByText('alice, carol')).not.toBeInTheDocument()
     expect(document.querySelector('[data-fill-pattern="forward"]')).not.toBeNull()
-    await user.hover(screen.getByRole('listitem'))
+    await user.hover(screen.getByText('Blue Squadron'))
     expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
       partition: 'team',
       id: 4,
     })
-    await user.unhover(screen.getByRole('listitem'))
+    await user.unhover(screen.getByText('Blue Squadron'))
     expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
     await user.click(screen.getByRole('checkbox', { name: 'Owned planets only' }))
     expect(useTeamInformationPreferencesStore.getState().ownedPlanetsOnly).toBe(true)
@@ -260,12 +261,12 @@ describe('TeamInformationMapTile', () => {
     expect(showTerritory).not.toBeChecked()
     expect(useTeamInformationPreferencesStore.getState().hiddenLeagueTeamIds).toEqual([4])
     expect(fetchTeamInformationMap).toHaveBeenCalledTimes(1)
-    await user.hover(screen.getByRole('listitem'))
+    await user.hover(screen.getByText('Blue Squadron'))
     expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
       partition: 'team',
       id: 4,
     })
-    await user.unhover(screen.getByRole('listitem'))
+    await user.unhover(screen.getByText('Blue Squadron'))
     expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
   })
 
@@ -354,6 +355,93 @@ describe('TeamInformationMapTile', () => {
     })
     unmount()
     expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
+  })
+
+  it('hovers the color chip and the name, and ignores the checkbox', async () => {
+    const user = userEvent.setup()
+    renderTile(
+      <TeamInformationMapTile
+        name="Territory"
+        enabled
+        supportsMode
+        depressed
+        onToggle={() => {}}
+        analyticScope={sampleScope}
+        turnDataReady
+        reportShellError={() => {}}
+      />,
+      seedTurnRoster
+    )
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    const swatch = await waitFor(() => {
+      const chip = document.querySelector('[data-fill-pattern="solid"]')
+      expect(chip).not.toBeNull()
+      return chip as Element
+    })
+    await user.hover(swatch)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 1,
+    })
+    fireEvent.pointerMove(screen.getByText('carol'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 2,
+    })
+    fireEvent.pointerMove(screen.getByText('alice'))
+    const hovered = useTeamInformationHighlightStore.getState().hoveredTerritory
+    expect(hovered).toEqual({
+      partition: 'player',
+      id: 1,
+    })
+    fireEvent.pointerMove(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBe(hovered)
+    fireEvent.pointerMove(screen.getByRole('checkbox', { name: 'Show alice territory' }))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
+    await user.unhover(swatch)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
+  })
+
+  it('clears the highlight when the analytics bar scrolls until the pointer moves again', async () => {
+    renderTile(
+      <div style={{ height: 40, overflowY: 'auto' }}>
+        <TeamInformationMapTile
+          name="Territory"
+          enabled
+          supportsMode
+          depressed
+          onToggle={() => {}}
+          analyticScope={sampleScope}
+          turnDataReady
+          reportShellError={() => {}}
+        />
+      </div>,
+      seedTurnRoster
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Expand Territory options' }))
+    expect(await screen.findByText('alice')).toBeInTheDocument()
+    let ancestor: HTMLElement | null = screen.getByRole('list', { name: 'Players' })
+    while (ancestor != null && getComputedStyle(ancestor).overflowY !== 'auto') {
+      ancestor = ancestor.parentElement
+    }
+    expect(ancestor).not.toBeNull()
+    const swatch = document.querySelector('[data-fill-pattern="solid"]')
+    expect(swatch).not.toBeNull()
+    await user.hover(screen.getByText('alice'))
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 1,
+    })
+    fireEvent.scroll(ancestor as HTMLElement)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
+    fireEvent.mouseEnter(screen.getByText('alice').closest('[data-territory-hover]') as HTMLElement)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toBeNull()
+    fireEvent.pointerMove(swatch as Element)
+    expect(useTeamInformationHighlightStore.getState().hoveredTerritory).toEqual({
+      partition: 'player',
+      id: 1,
+    })
   })
 
   it('does not write by team when no game is open', async () => {

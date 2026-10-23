@@ -86,7 +86,7 @@ function MapShellShowingMap({
   cartography,
 }: MapShellContentProps & { mapShellView: Extract<MapShellView, { phase: 'showing-map' }> }) {
   return (
-    <main className="relative flex min-h-0 flex-1 flex-col bg-black">
+    <main className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-black">
       <MapPaneWithDisplayControls
         controls={
           <PlanetMapInfoControls

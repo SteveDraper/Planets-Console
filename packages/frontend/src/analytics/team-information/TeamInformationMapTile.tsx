@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { AnalyticShellScope } from '../../api/bff'
 import { cn } from '../../lib/utils'
@@ -25,12 +25,36 @@ import { teamInformationMapQuerySpec } from './mapAnalytic'
 import { useLeagueTeamNames } from './useLeagueTeamNames'
 import { useTurnRosterUsernames } from './useTurnRosterUsernames'
 import { FillPatternMarks } from '../../lib/mapRegionFillPatternMarks'
+import type { HoveredTerritory } from './kinds'
+import { useTerritoryLegendHover } from './useTerritoryLegendHover'
 import {
   closeTerritoryMovieWindow,
   prepareTerritoryMovie,
   reserveTerritoryMovieWindow,
   showTerritoryMovieDocument,
 } from './prepareTerritoryMovie'
+
+function TerritoryLegendHoverTarget({
+  territory,
+  title,
+  children,
+}: {
+  territory: HoveredTerritory
+  title?: string
+  children: ReactNode
+}) {
+  return (
+    <span
+      className="flex min-w-0 items-start gap-2"
+      title={title}
+      data-territory-hover=""
+      data-territory-partition={territory.partition}
+      data-territory-id={territory.id}
+    >
+      {children}
+    </span>
+  )
+}
 
 type TeamInformationMapTileProps = {
   name: string
@@ -109,6 +133,7 @@ export function TeamInformationMapTile({
 
   const showTeamLegend = supportsMode && enabled && byTeam && teamRows.length > 0
   const showPlayerLegend = supportsMode && enabled && !byTeam && playerRows.length > 0
+  const legendRef = useTerritoryLegendHover(showTeamLegend || showPlayerLegend)
 
   useEffect(() => {
     movieMountedRef.current = true
@@ -221,19 +246,12 @@ export function TeamInformationMapTile({
         Generate movie
       </button>
       {showTeamLegend ? (
-        <ul aria-label="League teams" className="flex flex-col gap-1">
+        <ul ref={legendRef} aria-label="League teams" className="flex flex-col gap-1">
           {teamRows.map((row) => {
             const legendText = teamInformationLegendText(row)
+            const territory = { partition: 'team' as const, id: row.leagueTeamId }
             return (
-              <li
-                key={row.leagueTeamId}
-                className="flex min-w-0 items-start gap-2"
-                title={teamInformationLegendHoverTitle(row.usernames)}
-                onMouseEnter={() =>
-                  setHoveredTerritory({ partition: 'team', id: row.leagueTeamId })
-                }
-                onMouseLeave={() => setHoveredTerritory(null)}
-              >
+              <li key={row.leagueTeamId} className="flex min-w-0 items-start gap-2">
                 <input
                   type="checkbox"
                   checked={!hiddenLeagueTeamIds.includes(row.leagueTeamId)}
@@ -243,44 +261,43 @@ export function TeamInformationMapTile({
                   }
                   className={cn(analyticDetailCheckboxClassName, 'mt-0.5')}
                 />
-                <span
-                  aria-hidden
-                  data-fill-pattern={row.fillPattern}
-                  className="relative mt-0.5 h-3 w-3 shrink-0 overflow-hidden rounded-sm border border-black/30"
-                  style={{ backgroundColor: row.fillColor }}
+                <TerritoryLegendHoverTarget
+                  territory={territory}
+                  title={teamInformationLegendHoverTitle(row.usernames)}
                 >
-                  {row.fillPattern === 'solid' ? null : (
-                    <svg className="absolute inset-0 h-full w-full" viewBox="0 0 8 8">
-                      <FillPatternMarks pattern={row.fillPattern} />
-                    </svg>
-                  )}
-                </span>
-                <span
-                  className={cn(
-                    'min-w-0 text-xs text-slate-300',
-                    row.name == null && 'font-mono'
-                  )}
-                >
-                  {legendText}
-                </span>
+                  <span
+                    aria-hidden
+                    data-fill-pattern={row.fillPattern}
+                    className="relative mt-0.5 h-3 w-3 shrink-0 overflow-hidden rounded-sm border border-black/30"
+                    style={{ backgroundColor: row.fillColor }}
+                  >
+                    {row.fillPattern === 'solid' ? null : (
+                      <svg className="absolute inset-0 h-full w-full" viewBox="0 0 8 8">
+                        <FillPatternMarks pattern={row.fillPattern} />
+                      </svg>
+                    )}
+                  </span>
+                  <span
+                    className={cn(
+                      'min-w-0 text-xs text-slate-300',
+                      row.name == null && 'font-mono'
+                    )}
+                  >
+                    {legendText}
+                  </span>
+                </TerritoryLegendHoverTarget>
               </li>
             )
           })}
         </ul>
       ) : null}
       {showPlayerLegend ? (
-        <ul aria-label="Players" className="flex flex-col gap-1">
+        <ul ref={legendRef} aria-label="Players" className="flex flex-col gap-1">
           {playerRows.map((row) => {
             const legendText = playerTerritoryLegendLabel(row.playerId, usernamesByPlayerId)
+            const territory = { partition: 'player' as const, id: row.playerId }
             return (
-              <li
-                key={row.playerId}
-                className="flex min-w-0 items-start gap-2"
-                onMouseEnter={() =>
-                  setHoveredTerritory({ partition: 'player', id: row.playerId })
-                }
-                onMouseLeave={() => setHoveredTerritory(null)}
-              >
+              <li key={row.playerId} className="flex min-w-0 items-start gap-2">
                 <input
                   type="checkbox"
                   checked={!hiddenPlayerIds.includes(row.playerId)}
@@ -291,20 +308,22 @@ export function TeamInformationMapTile({
                   }}
                   className={cn(analyticDetailCheckboxClassName, 'mt-0.5')}
                 />
-                <span
-                  aria-hidden
-                  data-fill-pattern="solid"
-                  className="mt-0.5 h-3 w-3 shrink-0 rounded-sm border border-black/30"
-                  style={{ backgroundColor: row.fillColor }}
-                />
-                <span
-                  className={cn(
-                    'min-w-0 truncate text-xs text-slate-300',
-                    row.name == null && 'font-mono'
-                  )}
-                >
-                  {legendText}
-                </span>
+                <TerritoryLegendHoverTarget territory={territory}>
+                  <span
+                    aria-hidden
+                    data-fill-pattern="solid"
+                    className="mt-0.5 h-3 w-3 shrink-0 rounded-sm border border-black/30"
+                    style={{ backgroundColor: row.fillColor }}
+                  />
+                  <span
+                    className={cn(
+                      'min-w-0 truncate text-xs text-slate-300',
+                      row.name == null && 'font-mono'
+                    )}
+                  >
+                    {legendText}
+                  </span>
+                </TerritoryLegendHoverTarget>
               </li>
             )
           })}

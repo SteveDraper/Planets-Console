@@ -69,6 +69,19 @@ describe('AnalyticsBar shell registration', () => {
     expect(mystery?.querySelector('input[type="checkbox"]')).not.toBeNull()
   })
 
+  it('scrolls inside the bar so a tall list stays in the sidebar column', () => {
+    const { container } = renderBar()
+    const aside = container.querySelector('aside')
+    expect(aside).toHaveClass(
+      'h-full',
+      'max-h-full',
+      'min-h-0',
+      'overflow-y-auto',
+      'overflow-x-clip',
+      'overscroll-contain'
+    )
+  })
+
   it('falls back to a generic checkbox when a registered factory returns null', () => {
     renderBar('map', new Set(['scores']))
     expect(screen.getByText('Scores')).toBeInTheDocument()
