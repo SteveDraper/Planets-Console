@@ -381,7 +381,7 @@ Same semantics as former gap-fill coordinator epoch abort ([#233](https://github
 
 **Follow-on ([#280](https://github.com/SteveDraper/Planets-Console/issues/280)):** generalize ancestor-repersist → dependent wipe + `force_fresh` as orchestrator **reverse-ENSURE** routing (derived from catalog edges, including `player_id="all"`). Migrate scores↔fleet off the scores-specific ledger callback onto that path; homeworld ownership ([#269](https://github.com/SteveDraper/Planets-Console/issues/269)) remains DAG-gated for open-turn until then. Does **not** demand-wake `waiting_deps` / parked nodes (ADR 0006).
 
-**Backfill earlier turns:** persists that belong to one player's shell-turn walk stamp **fleet evidence generation** and do not bump it, so the rest of that walk is not discarded. A scoreboard persist outside the walk still bumps. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2 and [ADR 0034](adr/0034-backfill-walk-stamps-without-bumping.md).
+**Backfill earlier turns:** persists that belong to an in-flight on-walk stamp **fleet evidence generation** and do not bump it, so the rest of that walk is not discarded. A scoreboard persist bumps only when it belongs to no in-flight on-walk for that player. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2 and [ADR 0034](adr/0034-backfill-walk-stamps-without-bumping.md).
 
 ---
 
