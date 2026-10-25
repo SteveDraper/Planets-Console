@@ -429,6 +429,8 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 **Two planes.** The compute orchestrator owns DAG scheduling (`continue` / `persist` / `complete` / `park`). The table-stream framework owns NDJSON multiplex drain and row-terminal delivery. Soft provisional / pending-wire upgrade is **stream** policy, not orchestrator DAG state -- adapters translate park/complete snapshots into shared stream-resolution triggers.
 
+**Analytic freshness** is table presentation, not a DAG state. For a player with no stored row, the table shows turn-load only until the orchestrator accepts that player's work. From that accept until the write that stamps the mark, including while a scoreboard node waits on prior fleet, the table shows the existing in-flight chrome. See [design-fleet-analytic.md](design-fleet-analytic.md) §8.4.
+
 **Keep** under `packages/api/api/streaming/table_stream/`:
 
 - Multiplex, connect `finally` teardown, `TableStreamScopeGuard`, `SchedulerOrchestratorAttachment`, controller base, registry attach/detach.

@@ -427,6 +427,29 @@ A **fleet inferred acquisition** not sighted this turn stays off the map. A this
 - Row expander for **fleet build option set** alternates
 - Tile header: **fleet count discrepancy** banner
 
+### 8.4 Analytic freshness on the tables
+
+Resolved on [Analytic freshness on fleet and scoreboard tables](https://github.com/SteveDraper/Planets-Console/issues/595). Map paint stays §7.3. This section is the fleet table and the scoreboard table. One mark per player. The words are the same on both tables. `displayStatus` and `searchStatus` stay as they are.
+
+| State | Visible label | When |
+| --- | --- | --- |
+| Turn-load only | **Turn load**, slate | No stored row for that player, and that player's work is not yet accepted by the orchestrator |
+| First compute in progress | none | The accept has happened and no stored row exists yet. The existing busy chrome is this state |
+| Subject to revision | **Subject to revision**, amber, same family as the fleet count-discrepancy line | Stored row behind **fleet evidence generation**, whether or not a recompute is in flight |
+| Complete | none | Stored generation matches the mark and nothing further is scheduled, including an **approximate fleet** on that mark |
+
+The amber label stays while the busy chrome is also up. Busy chrome is the fleet spinner line **Fleet materialization in progress**, and on the scoreboard the searching solution badge (**Build inference in progress**). Neither string is replaced. **Turn load** is usually a short gap: opening an enabled scoreboard schedules the solve, and waiting on an ensure-final prior fleet is already first compute in progress. The gap stretches only while a missing dependency turn is fetched before the orchestrator accepts the node.
+
+**Fleet tile.** The label sits on the header line, immediately after the player name. The discrepancy line stays beneath the name. The spinner line stays beneath that, and only while materializing. The ship Status column stays possibly-lost and alibi.
+
+Before a ledger file exists, the tile lists this turn's sighted ships, one row per ship, in turn-file order. Scanned fields are filled. Unknown fields use the existing empty-field treatment. The Status column shows the existing empty mark, with no possibly-lost and no alibi. This is not the map's sighting-only **fleet ship military estimate** (unknown slots filled full at minimal tech). Those rows stay through first compute in progress. The **Turn load** label leaves when the schedule is accepted; the spinner line is the freshness signal from then until the ledger save replaces the rows. Zero sightings is a header with an empty body, and the tile does not say "Waiting for fleet records." A stored empty ledger that is complete keeps today's "No active fleet records."
+
+**Scoreboard row.** The label is the leading text inside the Build inference cell, to the left of the inference status control, in the same cluster as the fleet-torpedo indicator and the hull-catalog button. Not a new column. Not on the Race (player) cell.
+
+During the turn-load gap the cell shows **Turn load** and no inference status: no solution badge and no em dash. The hull-catalog button stays when the row has a player id. The fleet-torpedo indicator stays absent until a status exists. When the schedule is accepted, **Turn load** comes off and the existing status chrome takes over, including the fleet-torpedo indicator once a status exists.
+
+A skipped inference cell (the em dash, including a dead player) is **complete**: the dash alone, even when no scoreboard row is stored. A stored skip behind the mark shows **Subject to revision** beside that dash. The same pairing applies to every other inference status: the freshness label sits beside it, and only in the two states that have a label.
+
 ---
 
 ## 9. Architecture

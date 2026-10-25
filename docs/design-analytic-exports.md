@@ -371,6 +371,8 @@ When materializing from the live inference scheduler, ladder state with **`time_
 
 Do **not** warn on **`complete`** even when all solution paths are **`none`**.
 
+**Analytic freshness** (turn-load only, subject to revision, first compute in progress, complete) is the on-screen per-player state of the fleet and scoreboard tables ([design-fleet-analytic.md](design-fleet-analytic.md) §8.4). It is not `searchStatus` and it does not replace this field.
+
 Optional: **`solutionsHeld`**, **`hostTurn`**.
 
 Solver-specific lifecycle must not enter **`searchStatus`**. Scores product `status`, leftover (`unexplainedMilitaryDelta2x` or tagged **unknown-loss leftover**), `placeholders`, and **lattice signature**s live on the functional export tree as siblings of `$.solutions` ([Inference product-status persist and stream contract](https://github.com/SteveDraper/Planets-Console/issues/360) / design §3.8; shipped by [Scores analytic exports](https://github.com/SteveDraper/Planets-Console/issues/97)). Band residual and named compute failures stay under **`$.diagnostics`**. Accelerated segment detail may appear in **`$.diagnostics`** for debugging; functional per-host-turn solutions are exposed only via **`$.solutions`** at the correct scoreboard turn (export normalizes split-row **`hostTurnTargets`** from persistence into scope-local **`$.solutions`**).
