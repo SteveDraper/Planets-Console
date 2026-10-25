@@ -357,6 +357,8 @@ Defer cross-process shared mutable caches; parent and worker heaps stay separate
 2. **Interactive ensure** -- user-confirmed BFF export-ensure job ([#109](https://github.com/SteveDraper/Planets-Console/issues/109)).
 3. **Background** -- export warm, dependency-only materialization.
 
+An accepted **Backfill earlier turns** walk with both the fleet analytic and the scoreboard disabled keeps running. Steps not yet inside expensive execution run at background. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2.
+
 **Within each band:**
 
 | Analytic | Fairness rule |
