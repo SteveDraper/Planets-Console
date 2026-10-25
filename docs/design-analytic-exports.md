@@ -147,7 +147,7 @@ ENSURE_DEPENDENCIES = (
 
 Probe and ensure unwind follow these edges. Cross-turn scopes differ, so unwind is **not** a cycle (see below).
 
-**Fleet ensure-final gate (ADR 0004):** for `fleet@N` + `player_id`, `is_ensure_satisfied` is `true` only when that player's persisted ledger has **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1) = (true, true)`. File existence or partial gap-fill is insufficient. One player final does not imply all players final at the same turn document. An **approximate fleet** fails this gate. While **Backfill earlier turns** is on, an enabled fleet analytic or scoreboard submits the unsatisfied chain for each roster player from the shell turn back to the ensure baseline. The homeworld locator does not submit it. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2.
+**Fleet ensure-final gate (ADR 0004):** for `fleet@N` + `player_id`, `is_ensure_satisfied` is `true` only when that player's persisted ledger has **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1) = (true, true)`. File existence or partial gap-fill is insufficient. One player final does not imply all players final at the same turn document. An **approximate fleet** fails this gate. While **Backfill earlier turns** is on, an enabled fleet analytic or scoreboard submits the unsatisfied chain for each roster player from the shell turn back to the ensure baseline. The homeworld locator does not submit it. See [design-fleet-analytic.md](design-fleet-analytic.md) sections 5.2 and 5.3.
 
 ### Compute graph and execution
 
