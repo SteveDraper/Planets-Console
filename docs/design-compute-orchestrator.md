@@ -357,7 +357,7 @@ Defer cross-process shared mutable caches; parent and worker heaps stay separate
 2. **Interactive ensure** -- user-confirmed BFF export-ensure job ([#109](https://github.com/SteveDraper/Planets-Console/issues/109)).
 3. **Background** -- export warm, dependency-only materialization.
 
-An accepted **Backfill earlier turns** walk with both the fleet analytic and the scoreboard disabled keeps running. Steps not yet inside expensive execution run at background. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2.
+An accepted **Backfill earlier turns** walk with both the fleet analytic and the scoreboard disabled keeps running. Steps not yet inside expensive execution run at background. A shell-turn change while either toggle stays on leaves the walk you left running in that same waiting band. Reopening that turn adopts not-yet-executing steps back to stream-attached. A perspective change uses that same waiting band. On a turn or perspective change an in-flight scoreboard step may persist. A scope the shell you are watching submits may adopt upward when it is not yet inside expensive execution. A game change stops that game's accepted walks: queued hops are dropped, an in-flight scoreboard step does not persist, and an in-flight fleet step may still stamp. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2.
 
 **Within each band:**
 
