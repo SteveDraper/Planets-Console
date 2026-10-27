@@ -142,6 +142,19 @@ Turn-scoped tools do not auto-ensure. Missing stored turn: `unavailable` / `need
 | `refresh_game_info` | Game | -- | `GameService.refresh_game_info` |
 | `ensure_turn` | Full shell context | -- | `TurnLoadService.ensure_turn_loaded`. Returns `{ "status": "already_stored" \| "loaded" }` only -- never the **TurnInfo** body. Synchronous (waits for loadturn). |
 | `list_stored_perspectives` | Game+turn | -- | `TurnLoadService.list_stored_turn_perspectives` |
+| `get_backfill_earlier_turns` | Game | -- | Core read of **Backfill earlier turns**. Result is `{ "backfillEarlierTurns": true \| false }` only. |
+
+### Backfill earlier turns read
+
+[MCP access to Backfill earlier turns](https://github.com/SteveDraper/Planets-Console/issues/620).
+
+`get_backfill_earlier_turns` takes `game_id`. Login is the **MCP login identity** header. Any login that passes credential probe may call it. **Viewpoint eligibility** does not apply.
+
+The result is `{ "backfillEarlierTurns": true }` or `{ "backfillEarlierTurns": false }` and nothing else. Walk progress stays on the export hatch. Core owns the value. The adapter wraps that read. The Settings checkbox is the only writer.
+
+A game id whose stored **GameInfo** is missing is not found, the same failure as `get_game_info`. A stored game with no setting record returns false. The boolean is not a field on `get_game_info` or the **MCP GameInfo view**.
+
+[ADR 0022](adr/0022-mcp-v1-named-tool-catalog.md) records the earlier v1 catalog and does not list this tool.
 
 ### MCP named gameplay tools
 
