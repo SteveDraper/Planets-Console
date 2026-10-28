@@ -109,9 +109,7 @@ def test_scoreboard_slice_runs_observation_leg_without_copying_the_prior(sample_
     _assert_slice_returns_baseline_unchanged(opening_reveal)
 
     player_id = next(score.ownerid for score in normal.scores if score.turn == normal.settings.turn)
-    baseline = ensure_fleet_baseline_for_player(
-        normal.game.id, normal.player.id, normal, player_id
-    )
+    baseline = ensure_fleet_baseline_for_player(normal.game.id, normal.player.id, normal, player_id)
     prior_ledger = FleetAcquisitionLedger(
         player_id=player_id,
         player_name="prior-name",
