@@ -37,9 +37,9 @@ FLEET_FINALIZATION_LEG = "finalization_leg"
 FLEET_MATERIALIZATION_LEG = FLEET_OBSERVATION_LEG
 
 # Two-phase fleet materialization:
-# 1. Observation leg advances the ledger and applies ship observations (non-final).
-# 2. Finalization persist refines inferred acquisitions from scores, re-resolves
-#    provenance, and writes the final ledger.
+# 1. Observation copies the prior and persist matches this turn's sightings
+#    (approximate fleet, never ensure-final).
+# 2. Finalization replaces that file once the same-turn scoreboard is terminal.
 
 FLEET_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
@@ -243,12 +243,11 @@ def build_fleet_finalization_leg_job_wire(
 class FleetPersistencePolicy:
     """Orchestrator persistence hooks for per-player fleet ledger scopes.
 
-    ``persist`` is phase 2 of fleet materialization: when scores inference is
-    wired it refines inferred acquisitions and re-resolves provenance before
-    storing the ledger returned by the interpreter leg. The refined ledger is
-    written back onto ``result_wire["persistedLedgerWire"]`` so node-complete
-    listeners and in-run ``DependencyOutputs`` priors see post-refine state
-    (not the phase-1 interpreter payload).
+    Observation persist writes the approximate fleet. Finalization replaces
+    that file when the same-turn scoreboard is terminal, and leaves it in place
+    when the scoreboard row is not. The stored ledger is written back onto
+    ``result_wire["persistedLedgerWire"]`` so listeners and in-run priors see
+    the file, not the pre-persist interpreter payload.
     """
 
     def is_satisfied(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> bool:
@@ -314,7 +313,9 @@ class FleetPersistencePolicy:
         scope: ComputeScope,
         result_wire: dict[str, object],
     ) -> Callable[[], None] | None:
+        from api.analytics.fleet.approximate_fleet import approximate_fleet_ledger
         from api.analytics.fleet.compute_services import resolve_fleet_services
+        from api.analytics.fleet.fleet_table_stream_scheduler import publish_saved_host_turn_ledger
         from api.analytics.fleet.types import FleetMaterializationProvenance
 
         persisted_wire = result_wire.get("persistedLedgerWire")
@@ -327,8 +328,25 @@ class FleetPersistencePolicy:
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet observation persist requires concrete turn")
 
-        # Observation must never claim ensure-final -- neither turnEvidenceAtN nor
-        # eliminatedAtTurn. Only finalization may set those and satisfy has_final_ledger.
+        turn = ctx.load_turn(scope.turn)
+        eliminated = result_wire.get("eliminatedAtTurn") is True or (
+            turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id)
+        )
+        if not eliminated:
+            if turn is None:
+                raise ValueError(f"stored turn {scope.turn} is required for fleet persist")
+            ledger = approximate_fleet_ledger(
+                persisted.ledger,
+                turn,
+                perspective=scope.perspective,
+            )
+            persisted = PersistedFleetLedger(
+                ledger=ledger,
+                provenance=persisted.provenance,
+            )
+
+        # Observation must never claim ensure-final. Only finalization may set
+        # turnEvidenceAtN or eliminatedAtTurn and satisfy has_final_ledger.
         persisted = PersistedFleetLedger(
             ledger=persisted.ledger,
             provenance=FleetMaterializationProvenance(
@@ -345,9 +363,17 @@ class FleetPersistencePolicy:
             persisted,
             defer_ledger_persisted_notification=True,
         )
-        # Publish what put_ledger stamped (evidence generation + materialization version).
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
-        return put_result.deferred_notification
+        if eliminated:
+            return None
+        publish_saved_host_turn_ledger(
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn_number=scope.turn,
+            player_id=scope.player_id,
+            persisted=put_result.stored,
+        )
+        return self._refresh_following_callback(services, scope)
 
     def _persist_finalization(
         self,
@@ -356,9 +382,6 @@ class FleetPersistencePolicy:
         result_wire: dict[str, object],
     ) -> Callable[[], None] | None:
         from api.analytics.fleet.compute_services import resolve_fleet_services
-        from api.analytics.fleet.inferred_acquisition_refine import (
-            refine_player_inferred_acquisitions_from_scores,
-        )
         from api.analytics.fleet.materialization_provenance import (
             resolve_fleet_materialization_provenance,
         )
@@ -369,12 +392,14 @@ class FleetPersistencePolicy:
         persisted_wire = result_wire.get("persistedLedgerWire")
         if not isinstance(persisted_wire, dict):
             raise TypeError("fleet result wire missing persistedLedgerWire object")
-        persisted = persisted_fleet_ledger_from_json(persisted_wire)
+        wire_ledger = persisted_fleet_ledger_from_json(persisted_wire)
         services = resolve_fleet_services(ctx)
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             raise ValueError("fleet persist requires concrete player_id")
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet persist requires concrete turn")
+        if wire_ledger.ledger.player_id != scope.player_id:
+            raise ValueError("fleet persist ledger player does not match scope")
 
         turn = ctx.load_turn(scope.turn)
         if turn is None:
@@ -382,47 +407,61 @@ class FleetPersistencePolicy:
 
         if fleet_player_eliminated_at_turn(turn, scope.player_id):
             return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
+        turn_context = FleetTurnContext.from_turn(turn)
 
-        if services.inference_materialization is not None:
-            # Phase 2: scores inference may mutate the ledger and provenance.
-            refine_player_inferred_acquisitions_from_scores(
-                persisted.ledger,
-                turn,
-                game_id=scope.game_id,
+        # A caller that already built a final ledger (no scores materialization on
+        # the services) is stored as given. The observation leg never sets
+        # turnEvidenceAtN, so orchestrator finalization always takes the rebuild.
+        if services.inference_materialization is None and wire_ledger.provenance.turn_evidence_at_n:
+            from api.analytics.fleet.observation_ingest import apply_id_bounds_then_observations
+
+            apply_id_bounds_then_observations(
+                wire_ledger.ledger,
+                turn_context,
                 perspective=scope.perspective,
-                inference_materialization=services.inference_materialization,
             )
-            turn_context = FleetTurnContext.from_turn(turn)
-            prior_scope = _fleet_prior_scope(scope, settings=turn.settings)
-            prior_persisted = None
-            if prior_scope is not None:
-                prior_ledger = services.persistence.get_ledger(
+            return self._commit_living_final(
+                services,
+                scope,
+                result_wire,
+                PersistedFleetLedger(
+                    ledger=wire_ledger.ledger,
+                    provenance=wire_ledger.provenance,
+                    materialization_version=FLEET_MATERIALIZATION_VERSION,
+                ),
+            )
+
+        prior_scope = _fleet_prior_scope(scope, settings=turn.settings)
+        prior_on_disk = None
+        prior_is_ensure_final = False
+        if prior_scope is not None:
+            prior_on_disk = services.persistence.get_ledger(
+                scope.game_id,
+                scope.perspective,
+                prior_scope.turn,
+                scope.player_id,
+            )
+            if prior_on_disk is not None:
+                prior_is_ensure_final = services.persistence.ledger_is_ensure_final(
                     scope.game_id,
                     scope.perspective,
                     prior_scope.turn,
                     scope.player_id,
+                    prior_on_disk,
                 )
-                if prior_ledger is not None and services.persistence.ledger_is_ensure_final(
-                    scope.game_id,
-                    scope.perspective,
-                    prior_scope.turn,
-                    scope.player_id,
-                    prior_ledger,
-                ):
-                    prior_persisted = prior_ledger
-            provenance = resolve_fleet_materialization_provenance(
-                materialize_turn=scope.turn,
-                prior_persisted=prior_persisted,
-                turn_context=turn_context,
-                player_id=scope.player_id,
-                game_id=scope.game_id,
-                perspective=scope.perspective,
-                load_turn=services.load_turn,
-                inference_materialization=services.inference_materialization,
-            )
-            persisted = PersistedFleetLedger(ledger=persisted.ledger, provenance=provenance)
+        provenance_prior = prior_on_disk if prior_is_ensure_final else None
+        provenance = resolve_fleet_materialization_provenance(
+            materialize_turn=scope.turn,
+            prior_persisted=provenance_prior,
+            turn_context=turn_context,
+            player_id=scope.player_id,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            load_turn=services.load_turn,
+            inference_materialization=services.inference_materialization,
+        )
 
-        if not persisted.provenance.turn_evidence_at_n:
+        if not provenance.turn_evidence_at_n:
             # Same-turn scores evidence is still open. Persisting and completing the
             # fleet node would unlock dependents and leave a non-final ledger with no
             # automatic rematerialization (empty scores complete hang fingerprint).
@@ -454,26 +493,49 @@ class FleetPersistencePolicy:
                 ),
             )
 
-        # Observations after refine so option sets exist for arbitration. Re-run
-        # id bounds via the canonical helper in case refine created rows
-        # (phase 1 already tightened placeholders).
-        from api.analytics.fleet.observation_ingest import apply_id_bounds_then_observations
+        from api.analytics.fleet.approximate_fleet import terminal_fleet_ledger
+        from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 
-        turn_context = FleetTurnContext.from_turn(turn)
-        apply_id_bounds_then_observations(
-            persisted.ledger,
-            turn_context,
+        if prior_on_disk is not None:
+            prior_ledger = prior_on_disk.ledger
+        else:
+            prior_ledger = ensure_fleet_baseline_for_player(
+                scope.game_id,
+                scope.perspective,
+                turn,
+                scope.player_id,
+            )
+        ledger = terminal_fleet_ledger(
+            prior_ledger,
+            turn,
+            game_id=scope.game_id,
             perspective=scope.perspective,
+            inference_materialization=services.inference_materialization,
+            turn_context=turn_context,
+        )
+        return self._commit_living_final(
+            services,
+            scope,
+            result_wire,
+            PersistedFleetLedger(
+                ledger=ledger,
+                provenance=provenance,
+                materialization_version=FLEET_MATERIALIZATION_VERSION,
+            ),
         )
 
-        # Stamp current materialization version; put_ledger also stamps evidence
-        # generation. Publish the stored ledger so stream listeners and
-        # DependencyOutputs match the file.
-        persisted = PersistedFleetLedger(
-            ledger=persisted.ledger,
-            provenance=persisted.provenance,
-            materialization_version=FLEET_MATERIALIZATION_VERSION,
-        )
+    def _commit_living_final(
+        self,
+        services: object,
+        scope: ComputeScope,
+        result_wire: dict[str, object],
+        persisted: PersistedFleetLedger,
+    ) -> Callable[[], None]:
+        """Store a living final ledger, then wake scores and later approximate files."""
+        from api.analytics.fleet.compute_services import FleetComputeServices
+
+        if not isinstance(services, FleetComputeServices):
+            raise TypeError("fleet finalization persist requires FleetComputeServices")
         put_result = services.persistence.put_ledger(
             scope.game_id,
             scope.perspective,
@@ -483,7 +545,44 @@ class FleetPersistencePolicy:
             defer_ledger_persisted_notification=True,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
-        return put_result.deferred_notification
+        scores_notification = put_result.deferred_notification
+        refresh = self._refresh_following_callback(services, scope)
+
+        def _after_final_save() -> None:
+            if scores_notification is not None:
+                scores_notification()
+            refresh()
+
+        return _after_final_save
+
+    def _refresh_following_callback(
+        self,
+        services: object,
+        scope: ComputeScope,
+    ) -> Callable[[], None]:
+        """Replace later approximate files from the ledger this persist just saved."""
+        from api.analytics.fleet.approximate_fleet import refresh_following_approximate_fleets
+        from api.analytics.fleet.compute_services import FleetComputeServices
+
+        if not isinstance(services, FleetComputeServices):
+            return lambda: None
+        if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
+            return lambda: None
+        player_id = scope.player_id
+        saved_turn = scope.turn
+
+        def _refresh() -> None:
+            refresh_following_approximate_fleets(
+                persistence=services.persistence,
+                game_id=scope.game_id,
+                perspective=scope.perspective,
+                player_id=player_id,
+                saved_turn=saved_turn,
+                load_turn=services.load_turn,
+                inference_materialization=services.inference_materialization,
+            )
+
+        return _refresh
 
     def _persist_eliminated_empty(
         self,

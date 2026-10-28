@@ -1,20 +1,15 @@
 """Pure fleet materialization leg for compute orchestrator interpreter steps.
 
-Phase 1 of two-phase fleet materialization: advance the acquisition ledger one
-turn in the interpreter compute plane without scores inference or observation
-ingest. Phase 2 is ``FleetPersistencePolicy.persist`` in ``compute_orchestration``,
-which applies inference, then id bounds and ship observations, and may refresh
-provenance before storage.
+Copies the prior ledger without scoreboard acquisitions. Sighting match and the
+file write live on observation persist. Finalization replaces the file once
+same-turn scores are terminal.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.fleet.compute_plane.turn_delta import (
-    advance_ledger_to_turn,
-    apply_fleet_turn_delta_for_player,
-)
+from api.analytics.fleet.compute_plane.turn_delta import copy_prior_for_approximate
 from api.analytics.fleet.scoreboard_slice import turn_from_fleet_scoreboard_slice
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_from_json,
@@ -22,7 +17,6 @@ from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
 )
-from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import FleetAcquisitionLedger, PersistedFleetLedger
 from api.compute.wire import StepResult
 
@@ -46,15 +40,7 @@ def run_fleet_materialization_leg(job_wire: dict[str, Any]) -> StepResult:
     else:
         prior_ledger = fleet_acquisition_ledger_from_json(job_wire["baselineLedgerWire"])
 
-    turn_context = FleetTurnContext.from_turn(turn)
-    ledger = advance_ledger_to_turn(prior_ledger, turn)
-    ledger = apply_fleet_turn_delta_for_player(
-        ledger,
-        turn_context,
-        game_id=int(job_wire["gameId"]),
-        perspective=int(job_wire["perspective"]),
-        inference_materialization=None,  # phase 2 persist hook owns scores inference
-    )
+    ledger = copy_prior_for_approximate(prior_ledger, turn)
     provenance = fleet_materialization_provenance_from_json(job_wire["provenanceWire"])
     persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)
     return StepResult(

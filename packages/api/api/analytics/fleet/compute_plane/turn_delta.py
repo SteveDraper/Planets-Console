@@ -29,6 +29,16 @@ def advance_ledger_to_turn(
     return ledger
 
 
+def copy_prior_for_approximate(
+    prior_ledger: FleetAcquisitionLedger,
+    turn: TurnInfo,
+) -> FleetAcquisitionLedger:
+    """Copy every prior ship, disposition, and evidence event. Drop its discrepancy."""
+    ledger = advance_ledger_to_turn(prior_ledger, turn)
+    ledger.discrepancy = None
+    return ledger
+
+
 def apply_fleet_turn_delta_for_player(
     ledger: FleetAcquisitionLedger,
     turn_context: FleetTurnContext,

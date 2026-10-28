@@ -6,16 +6,12 @@ from dataclasses import replace
 
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
-from api.analytics.fleet.compute_plane.turn_delta import (
-    advance_ledger_to_turn,
-    apply_fleet_turn_delta_for_player,
-)
+from api.analytics.fleet.compute_plane.turn_delta import copy_prior_for_approximate
 from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
     persisted_fleet_ledger_from_json,
 )
-from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord
 
 from tests.fixtures.military_score_inference import with_score_owners_in_roster
@@ -63,14 +59,7 @@ def _ledger_from_slice(turn, player_id: int) -> FleetAcquisitionLedger:
 
 def _ledger_from_full_turn(turn, player_id: int) -> FleetAcquisitionLedger:
     baseline = ensure_fleet_baseline_for_player(turn.game.id, turn.player.id, turn, player_id)
-    ledger = advance_ledger_to_turn(baseline, turn)
-    return apply_fleet_turn_delta_for_player(
-        ledger,
-        FleetTurnContext.from_turn(turn),
-        game_id=turn.game.id,
-        perspective=turn.player.id,
-        inference_materialization=None,
-    )
+    return copy_prior_for_approximate(baseline, turn)
 
 
 def _assert_slice_matches_full_turn(turn) -> None:

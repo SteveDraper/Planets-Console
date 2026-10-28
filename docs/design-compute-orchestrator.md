@@ -159,7 +159,7 @@ Every `run_step` result wire carries an explicit **step outcome** the orchestrat
 
 Analytics own **what** `persist` writes and **how readers** gate on terminal quality. Examples:
 
-- **Fleet** -- two-step profile: `observation_leg` writes a non-final ledger (host turn delta / placeholders only; never claims `turnEvidenceAtN`); `finalization_leg` refines from scores then applies ship-observation ingest and persists final provenance. `EnsureDependency.quality` distinguishes observation (`has_ledger`) vs final (`has_final_ledger`). ENSURE catalog lists only prior-turn fleet `quality="final"`; same-turn scores couples on finalization via `PersistDeferredError`, not ENSURE.
+- **Fleet** -- two-step profile: `observation_leg` writes an **approximate fleet** (full prior ledger plus this turn's sightings; `turnEvidenceAtN` stays false; no ensure-final side channel). `finalization_leg` replaces that file once same-turn scores are terminal. A non-terminal scoreboard row leaves the approximate file in place. `EnsureDependency.quality` distinguishes observation (`has_ledger`) vs final (`has_final_ledger`). ENSURE catalog lists only prior-turn fleet `quality="final"`; same-turn scores couples on finalization via `PersistDeferredError`, not ENSURE.
 - **Scores inference** -- `persist` for durable turn-evidence row statuses. Soft / empty non-durable outcomes demote the node to `waiting_deps` and emit soft stream rows from the tier/row path (`TerminalSource.ROW_DEFER` + `SoftTerminalReason`), not orchestrator `park`. Evidence-closed skip may still `complete` without persist.
 
 **Scores soft defer** is keyed by `SoftTerminalReason` at the stream boundary

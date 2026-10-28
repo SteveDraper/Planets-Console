@@ -1,26 +1,21 @@
-"""Fleet observation leg: host materialization without scores inference.
+"""Fleet observation leg: approximate fleet without a same-turn scoreboard solve.
 
-Writes a non-final ledger (placeholders / turn delta only) and continues to
-finalization. Scores refine and ship-observation ingest run in the finalization
-persist hook so option sets exist before observation matching.
+The interpreter copies the prior ledger. Ships stay off that job wire, so the
+observation persist matches this turn's visible ships and writes the file.
+Finalization replaces that file once the same-turn scoreboard result is terminal.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.fleet.compute_plane.turn_delta import (
-    advance_ledger_to_turn,
-    apply_fleet_turn_delta_for_player,
-)
+from api.analytics.fleet.compute_plane.turn_delta import copy_prior_for_approximate
 from api.analytics.fleet.scoreboard_slice import turn_from_fleet_scoreboard_slice
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_from_json,
-    fleet_materialization_provenance_from_json,
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
 )
-from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetMaterializationProvenance,
@@ -46,39 +41,32 @@ def _eliminated_observation_result(job_wire: dict[str, Any]) -> StepResult:
             "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
             "materializeTurn": int(job_wire["materializeTurn"]),
             "fleetPersistLeg": FLEET_PERSIST_LEG_OBSERVATION,
+            "eliminatedAtTurn": True,
         },
     )
 
 
 def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
-    """Materialize one fleet turn observation leg from a serializable job wire."""
+    """Copy the prior ledger for one fleet turn. Persist matches sightings."""
     if job_wire.get("eliminatedAtTurn") is True:
         return _eliminated_observation_result(job_wire)
 
     turn = turn_from_fleet_scoreboard_slice(job_wire["turnWire"])
     prior_ledger_wire = job_wire.get("priorLedgerWire")
-    prior_persisted = (
-        persisted_fleet_ledger_from_json(prior_ledger_wire)
-        if prior_ledger_wire is not None
-        else None
-    )
-    prior_ledger: FleetAcquisitionLedger
-    if prior_persisted is not None:
-        prior_ledger = prior_persisted.ledger
+    if prior_ledger_wire is not None:
+        prior_ledger = persisted_fleet_ledger_from_json(prior_ledger_wire).ledger
     else:
         prior_ledger = fleet_acquisition_ledger_from_json(job_wire["baselineLedgerWire"])
 
-    turn_context = FleetTurnContext.from_turn(turn)
-    ledger = advance_ledger_to_turn(prior_ledger, turn)
-    ledger = apply_fleet_turn_delta_for_player(
-        ledger,
-        turn_context,
-        game_id=int(job_wire["gameId"]),
-        perspective=int(job_wire["perspective"]),
-        inference_materialization=None,
+    ledger = copy_prior_for_approximate(prior_ledger, turn)
+    provenance_wire = job_wire["provenanceWire"]
+    persisted = PersistedFleetLedger(
+        ledger=ledger,
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=False,
+            prior_ledger_at_n_minus_1=bool(provenance_wire["priorLedgerAtNMinus1"]),
+        ),
     )
-    provenance = fleet_materialization_provenance_from_json(job_wire["provenanceWire"])
-    persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)
     return StepResult(
         outcome="persist",
         persist_then_continue=True,

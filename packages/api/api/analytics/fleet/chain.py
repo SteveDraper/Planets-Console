@@ -9,10 +9,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterator
 
-from api.analytics.fleet.compute_plane.turn_delta import (
-    advance_ledger_to_turn,
-    apply_fleet_turn_delta_for_player,
-)
+from api.analytics.fleet.approximate_fleet import fleet_ledger_after_prior
+from api.analytics.fleet.compute_plane.turn_delta import advance_ledger_to_turn
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.eliminated_player import (
     eliminated_empty_fleet_ledger,
@@ -21,11 +19,7 @@ from api.analytics.fleet.eliminated_player import (
 )
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
-from api.analytics.fleet.materialization_provenance import resolve_fleet_materialization_provenance
-from api.analytics.fleet.observation_ingest import (
-    apply_id_bounds_then_observations,
-    ingest_turn_ship_observations,
-)
+from api.analytics.fleet.observation_ingest import ingest_turn_ship_observations
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.turn_context import FleetTurnContext
 from api.analytics.fleet.types import (
@@ -137,7 +131,7 @@ class _GapFillCoherence:
         self,
         turn_number: int,
         persisted: PersistedFleetLedger,
-    ) -> None:
+    ) -> PersistedFleetLedger:
         self._assert_unchanged()
         # Immediate notify (N1'): orchestrator also fires per final persist after
         # complete; leaf must not batch via gap_fill_deferred_notifications.
@@ -149,6 +143,18 @@ class _GapFillCoherence:
             persisted,
         )
         self._assert_unchanged()
+        stored = self.persistence.get_ledger(
+            self.game_id,
+            self.perspective,
+            turn_number,
+            self.player_id,
+        )
+        if stored is None:
+            raise ConflictError(
+                f"fleet snapshot chain for game {self.game_id} perspective {self.perspective} "
+                f"player {self.player_id} turn {turn_number} did not store a ledger"
+            )
+        return stored
 
     def _assert_unchanged(self) -> None:
         if (
@@ -422,8 +428,7 @@ def _materialize_and_persist_player_turn(
             ledger=eliminated_empty_fleet_ledger(turn_info, player_id),
             provenance=eliminated_fleet_provenance(),
         )
-        coherence.put_ledger(materialize_turn, persisted)
-        return persisted
+        return coherence.put_ledger(materialize_turn, persisted)
 
     if prior_ledger is None:
         raise ConflictError(
@@ -431,34 +436,28 @@ def _materialize_and_persist_player_turn(
             f"player {player_id} turn {materialize_turn} has no ledger to advance from"
         )
 
-    ledger = advance_ledger_to_turn(prior_ledger, turn_info)
-    ledger = apply_fleet_turn_delta_for_player(
-        ledger,
-        turn_context,
+    prior_is_ensure_final = False
+    if prior_persisted is not None and materialize_turn > 1:
+        prior_is_ensure_final = coherence.persistence.ledger_is_ensure_final(
+            game_id,
+            perspective,
+            materialize_turn - 1,
+            player_id,
+            prior_persisted,
+        )
+    ledger, provenance = fleet_ledger_after_prior(
+        prior_ledger,
+        turn_info,
+        prior_is_ensure_final=prior_is_ensure_final,
         game_id=game_id,
         perspective=perspective,
-        inference_materialization=inference_materialization,
-    )
-    # Delta owns acquisitions + bounds; observations use the same bounds→observe
-    # helper as orchestrator persist (re-tighten is idempotent).
-    apply_id_bounds_then_observations(
-        ledger,
-        turn_context,
-        perspective=perspective,
-    )
-    provenance = resolve_fleet_materialization_provenance(
-        materialize_turn=materialize_turn,
-        prior_persisted=prior_persisted,
-        turn_context=turn_context,
         player_id=player_id,
-        game_id=game_id,
-        perspective=perspective,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
+        turn_context=turn_context,
     )
     persisted = PersistedFleetLedger(ledger=ledger, provenance=provenance)
-    coherence.put_ledger(materialize_turn, persisted)
-    return persisted
+    return coherence.put_ledger(materialize_turn, persisted)
 
 
 def _materialize_fleet_ledger_chain_for_player(
