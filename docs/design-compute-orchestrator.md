@@ -124,7 +124,7 @@ The orchestrator builds a **DAG of compute scopes** from these edges (same walk 
 
 | Rule | Detail |
 |------|--------|
-| **Cross-player** | Default: no edges; batch callers fan out to N scopes. ``EnsureDependency.player_id="all"`` expands to one scope per roster player at the dependency turn (homeworld ownership → final fleet@N, [#269](https://github.com/SteveDraper/Planets-Console/issues/269)) |
+| **Cross-player** | Default: no edges; batch callers fan out to N scopes. ``EnsureDependency.player_id="all"`` expands to one scope per roster player at the dependency turn. The homeworld locator does not declare a fleet edge; it reads on-disk ledgers and records a **fleet-age input stamp** ([Homeworld locator reading a non-final fleet ledger](https://github.com/SteveDraper/Planets-Console/issues/615)). |
 | **Cross-turn unwind** | Gap turns `M..N` expand to forward-by-turn nodes (not one monolithic job) |
 | **Shared read-only inputs** | e.g. `FleetTurnContext` from RST -- not graph edges; prefetch once per turn in wire builder |
 | **Cycle** | Ensure-graph cycle → `ensure_cycle` (probe); resolution-stack cycle unchanged |
@@ -357,6 +357,8 @@ Defer cross-process shared mutable caches; parent and worker heaps stay separate
 2. **Interactive ensure** -- user-confirmed BFF export-ensure job ([#109](https://github.com/SteveDraper/Planets-Console/issues/109)).
 3. **Background** -- export warm, dependency-only materialization.
 
+An accepted **Backfill earlier turns** walk with both the fleet analytic and the scoreboard disabled keeps running. Steps not yet inside expensive execution run at background. A shell-turn change while either toggle stays on leaves the walk you left running in that same waiting band. Reopening that turn adopts not-yet-executing steps back to stream-attached. A perspective change uses that same waiting band. On a turn or perspective change an in-flight scoreboard step may persist. A scope the shell you are watching submits may adopt upward when it is not yet inside expensive execution. A game change stops that game's accepted walks: queued hops are dropped, an in-flight scoreboard step does not persist, and an in-flight fleet step may still stamp. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2.
+
 **Within each band:**
 
 | Analytic | Fairness rule |
@@ -379,7 +381,9 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 
 Same semantics as former gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233); coordinator deleted in [#204](https://github.com/SteveDraper/Planets-Console/issues/204)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` reads the **turn-scoped** fleet epoch for `fleet@(host_turn - 1)` so in-flight `tier_solve` work is discarded when that prior fleet changes -- not when same-player scores/fleet activity on unrelated turns advances the player-scoped counter used by fleet compute / gap-fill. Fleet final `on_ledger_persisted` may wipe/reschedule ambient scores; **own-DAG elision** (#204) skips wipe and reschedule when `scores@(fleet_turn+1)` is already a non-terminal dependent of that fleet scope on the same DAG.
 
-**Follow-on ([#280](https://github.com/SteveDraper/Planets-Console/issues/280)):** generalize ancestor-repersist → dependent wipe + `force_fresh` as orchestrator **reverse-ENSURE** routing (derived from catalog edges, including `player_id="all"`). Migrate scores↔fleet off the scores-specific ledger callback onto that path; homeworld ownership ([#269](https://github.com/SteveDraper/Planets-Console/issues/269)) remains DAG-gated for open-turn until then. Does **not** demand-wake `waiting_deps` / parked nodes (ADR 0006).
+**Follow-on ([#280](https://github.com/SteveDraper/Planets-Console/issues/280)):** generalize ancestor-repersist → dependent wipe + `force_fresh` as orchestrator **reverse-ENSURE** routing (derived from catalog edges, including `player_id="all"`). Migrate scores↔fleet off the scores-specific ledger callback onto that path. Homeworld ownership does not use that path: it has no fleet `ENSURE` edge, and a changed **fleet-age input stamp** is what reopens it ([Homeworld locator reading a non-final fleet ledger](https://github.com/SteveDraper/Planets-Console/issues/615)). Does **not** demand-wake `waiting_deps` / parked nodes (ADR 0006).
+
+**Backfill earlier turns:** persists that belong to an in-flight on-walk stamp **fleet evidence generation** and do not bump it, so the rest of that walk is not discarded. A scoreboard persist bumps only when it belongs to no in-flight on-walk for that player. The off-screen walk submits no further hop and its discarded scopes are not re-queued by that walk. With the setting on, each live shell and live table stream submits a new walk from that turn back to the baseline for scopes that are not ensure-final. With the setting off, earlier turns are not re-queued. **Compute diagnostic mode** does not exempt that submitted work ([Diagnostics freeze during a stale recompute](https://github.com/SteveDraper/Planets-Console/issues/619)). See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2 and [ADR 0034](adr/0034-backfill-walk-stamps-without-bumping.md).
 
 ---
 
@@ -426,6 +430,8 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 ## Relationship to table streams ([#175](https://github.com/SteveDraper/Planets-Console/issues/175))
 
 **Two planes.** The compute orchestrator owns DAG scheduling (`continue` / `persist` / `complete` / `park`). The table-stream framework owns NDJSON multiplex drain and row-terminal delivery. Soft provisional / pending-wire upgrade is **stream** policy, not orchestrator DAG state -- adapters translate park/complete snapshots into shared stream-resolution triggers.
+
+**Analytic freshness** is table presentation, not a DAG state. For a player with no stored row, the table shows turn-load only until the orchestrator accepts that player's work. From that accept until the write that stamps the mark, including while a scoreboard node waits on prior fleet, the table shows the existing in-flight chrome. See [design-fleet-analytic.md](design-fleet-analytic.md) §8.4.
 
 **Keep** under `packages/api/api/streaming/table_stream/`:
 

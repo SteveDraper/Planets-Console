@@ -147,7 +147,7 @@ ENSURE_DEPENDENCIES = (
 
 Probe and ensure unwind follow these edges. Cross-turn scopes differ, so unwind is **not** a cycle (see below).
 
-**Fleet ensure-final gate (ADR 0004):** for `fleet@N` + `player_id`, `is_ensure_satisfied` is `true` only when that player's persisted ledger has **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1) = (true, true)`. File existence or partial gap-fill is insufficient. One player final does not imply all players final at the same turn document.
+**Fleet ensure-final gate (ADR 0004):** for `fleet@N` + `player_id`, `is_ensure_satisfied` is `true` only when that player's persisted ledger has **fleet materialization provenance** `(turnEvidenceAtN, priorLedgerAtNMinus1) = (true, true)`. File existence or partial gap-fill is insufficient. One player final does not imply all players final at the same turn document. An **approximate fleet** fails this gate. While **Backfill earlier turns** is on, an enabled fleet analytic or scoreboard submits the unsatisfied chain for each roster player from the shell turn back to the ensure baseline. Disabling both leaves an accepted walk running, with the rest of it at background. A shell-turn change while either toggle stays on leaves the walk you left running in that waiting band. A perspective change uses that same band. Reopening that turn brings the not-yet-executing steps back ahead. A game change stops that game's accepted walks. A **fleet evidence generation** bump stops that player's off-screen walk the same way: queued hops are dropped, an in-flight step does not persist, and the walk submits no further hop. With the setting on, a live shell or live table stream submits a new walk from that turn back to the baseline. **Compute diagnostic mode** does not exempt that walk ([Diagnostics freeze during a stale recompute](https://github.com/SteveDraper/Planets-Console/issues/619)). The homeworld locator does not submit it. The locator reads the on-disk ledger, including an **approximate fleet**, and tracks those ages with a **fleet-age input stamp** ([Homeworld locator reading a non-final fleet ledger](https://github.com/SteveDraper/Planets-Console/issues/615)). See [design-fleet-analytic.md](design-fleet-analytic.md) sections 5.2 and 5.3.
 
 ### Compute graph and execution
 
@@ -370,6 +370,8 @@ envelope; **`probe`** uses the same reason strings where applicable.
 When materializing from the live inference scheduler, ladder state with **`time_limited=True`** maps to export **`stopped`**, not **`in_progress`**. The solver may still hold partial top-K solutions, but that outcome is terminal for export lifecycle: consumers should warn and offer refresh rather than wait for further progress on the same run.
 
 Do **not** warn on **`complete`** even when all solution paths are **`none`**.
+
+**Analytic freshness** (turn-load only, subject to revision, first compute in progress, complete) is the on-screen per-player state of the fleet and scoreboard tables ([design-fleet-analytic.md](design-fleet-analytic.md) §8.4). It is not `searchStatus` and it does not replace this field.
 
 Optional: **`solutionsHeld`**, **`hostTurn`**.
 
