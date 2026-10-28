@@ -255,7 +255,8 @@ function BackfillEarlierTurnsSection() {
       <p className="text-xs text-slate-400">
         {hasGame
           ? 'One choice for this game, shared by every perspective.'
-          : 'Select a game to change this setting.'}
+          : 'Select a game to change this setting.'}{' '}
+        This primarily impacts fleet ledgers and scoreboard inference.
       </p>
       {error ? <p className="text-xs text-red-300">{error}</p> : null}
     </div>
@@ -271,7 +272,7 @@ type SettingsSectionDef = {
 const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   {
     id: 'backfill-earlier-turns',
-    title: 'Backfill earlier turns',
+    title: 'Inference',
     Content: BackfillEarlierTurnsSection,
   },
   {

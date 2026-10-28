@@ -115,9 +115,12 @@ describe('SettingsModal backfill earlier turns', () => {
   it('keeps the checkbox off and disabled until a game is selected', async () => {
     const user = userEvent.setup()
     renderModal()
-    await user.click(screen.getByText('Backfill earlier turns', { selector: 'summary' }))
+    await user.click(screen.getByText('Inference', { selector: 'summary' }))
     expect(screen.getByRole('checkbox', { name: 'Backfill earlier turns' })).toBeDisabled()
     expect(screen.getByText(/select a game to change this setting/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/this primarily impacts fleet ledgers and scoreboard inference/i)
+    ).toBeInTheDocument()
     expect(putBackfillEarlierTurns).not.toHaveBeenCalled()
   })
 
@@ -133,7 +136,7 @@ describe('SettingsModal backfill earlier turns', () => {
     }))
 
     renderModal()
-    await user.click(screen.getByText('Backfill earlier turns', { selector: 'summary' }))
+    await user.click(screen.getByText('Inference', { selector: 'summary' }))
     const checkbox = await screen.findByRole('checkbox', { name: 'Backfill earlier turns' })
     await waitFor(() => expect(checkbox).toBeEnabled())
     expect(checkbox).not.toBeChecked()
