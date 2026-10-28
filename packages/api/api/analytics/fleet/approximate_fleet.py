@@ -99,16 +99,15 @@ def fleet_ledger_after_prior(
     resolved_context = (
         turn_context if turn_context is not None else FleetTurnContext.from_turn(turn)
     )
-    provenance = _provenance_for_folded_prior(
-        turn=turn,
-        prior_ledger=prior_ledger,
+    provenance = resolve_fleet_materialization_provenance(
+        materialize_turn=turn.settings.turn,
         prior_is_ensure_final=prior_is_ensure_final,
+        turn_context=resolved_context,
+        player_id=player_id,
         game_id=game_id,
         perspective=perspective,
-        player_id=player_id,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
-        turn_context=resolved_context,
     )
     if provenance.turn_evidence_at_n:
         ledger = terminal_fleet_ledger(
@@ -228,37 +227,3 @@ def refresh_following_approximate_fleets(
             persisted=put_result.stored,
         )
         next_turn += 1
-
-
-def _provenance_for_folded_prior(
-    *,
-    turn: TurnInfo,
-    prior_ledger: FleetAcquisitionLedger,
-    prior_is_ensure_final: bool,
-    game_id: int,
-    perspective: int,
-    player_id: int,
-    load_turn: Callable[[int], TurnInfo | None],
-    inference_materialization: FleetInferenceMaterialization | None,
-    turn_context: FleetTurnContext,
-) -> FleetMaterializationProvenance:
-    """``priorLedgerAtNMinus1`` only for an ensure-final prior or the ensure baseline."""
-    prior_persisted = None
-    if prior_is_ensure_final:
-        prior_persisted = PersistedFleetLedger(
-            ledger=prior_ledger,
-            provenance=FleetMaterializationProvenance(
-                turn_evidence_at_n=True,
-                prior_ledger_at_n_minus_1=True,
-            ),
-        )
-    return resolve_fleet_materialization_provenance(
-        materialize_turn=turn.settings.turn,
-        prior_persisted=prior_persisted,
-        turn_context=turn_context,
-        player_id=player_id,
-        game_id=game_id,
-        perspective=perspective,
-        load_turn=load_turn,
-        inference_materialization=inference_materialization,
-    )

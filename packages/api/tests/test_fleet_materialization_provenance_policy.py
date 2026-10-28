@@ -9,11 +9,6 @@ from api.analytics.fleet.materialization_provenance import (
     resolve_fleet_materialization_provenance,
 )
 from api.analytics.fleet.turn_context import FleetTurnContext
-from api.analytics.fleet.types import (
-    FleetAcquisitionLedger,
-    FleetMaterializationProvenance,
-    PersistedFleetLedger,
-)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -39,7 +34,7 @@ def _turn_context() -> FleetTurnContext:
 def _resolve(**overrides):
     defaults = {
         "materialize_turn": 2,
-        "prior_persisted": None,
+        "prior_is_ensure_final": False,
         "turn_context": _turn_context(),
         "player_id": 8,
         "game_id": 628580,
@@ -51,25 +46,19 @@ def _resolve(**overrides):
     return resolve_fleet_materialization_provenance(**defaults)
 
 
-def test_non_final_prior_ledger_does_not_close_prior_leg():
-    """Non-final provenance at N-1 leaves prior_ledger_at_n_minus_1 false."""
-    prior_persisted = PersistedFleetLedger(
-        ledger=FleetAcquisitionLedger(player_id=8),
-        provenance=FleetMaterializationProvenance(
-            turn_evidence_at_n=False,
-            prior_ledger_at_n_minus_1=True,
-        ),
-    )
-    assert prior_persisted.provenance.is_final is False
-
+def test_prior_leg_follows_caller_ensure_final_boolean():
+    """priorLedgerAtNMinus1 follows the caller's ensure-final boolean."""
     with patch(
         "api.analytics.fleet.materialization_provenance._scores_turn_evidence_closed_for_player",
         return_value=True,
     ):
-        provenance = _resolve(prior_persisted=prior_persisted)
+        closed = _resolve(prior_is_ensure_final=True)
+        open_prior = _resolve(prior_is_ensure_final=False)
 
-    assert provenance.prior_ledger_at_n_minus_1 is False
-    assert provenance.turn_evidence_at_n is True
+    assert closed.prior_ledger_at_n_minus_1 is True
+    assert closed.turn_evidence_at_n is True
+    assert open_prior.prior_ledger_at_n_minus_1 is False
+    assert open_prior.turn_evidence_at_n is True
 
 
 def test_scheduler_row_run_does_not_close_turn_evidence(sample_turn):
@@ -98,7 +87,7 @@ def test_scheduler_row_run_does_not_close_turn_evidence(sample_turn):
 
     provenance = resolve_fleet_materialization_provenance(
         materialize_turn=turn_number,
-        prior_persisted=None,
+        prior_is_ensure_final=False,
         turn_context=turn_context,
         player_id=player_id,
         game_id=GAME_ID,

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization
 from api.analytics.fleet.turn_context import FleetTurnContext
-from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+from api.analytics.fleet.types import FleetMaterializationProvenance
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
     is_scores_export_turn_evidence_closed_from_snapshot,
@@ -27,7 +27,7 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 def resolve_fleet_materialization_provenance(
     *,
     materialize_turn: int,
-    prior_persisted: PersistedFleetLedger | None,
+    prior_is_ensure_final: bool,
     turn_context: FleetTurnContext,
     player_id: int,
     game_id: int,
@@ -36,6 +36,10 @@ def resolve_fleet_materialization_provenance(
     inference_materialization: FleetInferenceMaterialization | None,
 ) -> FleetMaterializationProvenance:
     """Set provenance flags from legs actually closed at write time.
+
+    ``prior_is_ensure_final`` is the caller's ``ledger_is_ensure_final`` result
+    for the folded prior, or false when that prior is absent.
+    ``priorLedgerAtNMinus1`` is that boolean or the fleet ensure baseline.
 
     Caller contract: apply turn-*N* fleet evidence deltas for ``player_id``
     (scoreboard ingest, ship-id bound tightening, ship sightings via
@@ -46,7 +50,8 @@ def resolve_fleet_materialization_provenance(
     """
     prior_ledger_at_n_minus_1 = (
         materialize_turn == accelerated_ensure_floor(turn_context.turn.settings, materialize_turn)
-    ) or (prior_persisted is not None and prior_persisted.provenance.is_final)
+        or prior_is_ensure_final
+    )
     turn_evidence_at_n = _is_turn_evidence_closed(
         materialize_turn=materialize_turn,
         turn_context=turn_context,

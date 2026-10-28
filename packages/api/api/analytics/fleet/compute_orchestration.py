@@ -164,22 +164,18 @@ def build_fleet_materialization_leg_job_wire(
         baseline_ledger_wire = fleet_acquisition_ledger_to_json(prior_persisted.ledger)
 
     turn_context = FleetTurnContext.from_turn(turn)
-    provenance_prior = prior_persisted
-    if (
-        prior_persisted is not None
-        and prior_scope is not None
-        and not services.persistence.ledger_is_ensure_final(
+    prior_is_ensure_final = False
+    if prior_persisted is not None and prior_scope is not None:
+        prior_is_ensure_final = services.persistence.ledger_is_ensure_final(
             scope.game_id,
             scope.perspective,
             prior_scope.turn,
             player_id,
             prior_persisted,
         )
-    ):
-        provenance_prior = None
     provenance = resolve_fleet_materialization_provenance(
         materialize_turn=scope.turn,
-        prior_persisted=provenance_prior,
+        prior_is_ensure_final=prior_is_ensure_final,
         turn_context=turn_context,
         player_id=player_id,
         game_id=scope.game_id,
@@ -427,10 +423,9 @@ class FleetPersistencePolicy:
                     scope.player_id,
                     prior_on_disk,
                 )
-        provenance_prior = prior_on_disk if prior_is_ensure_final else None
         provenance = resolve_fleet_materialization_provenance(
             materialize_turn=scope.turn,
-            prior_persisted=provenance_prior,
+            prior_is_ensure_final=prior_is_ensure_final,
             turn_context=turn_context,
             player_id=scope.player_id,
             game_id=scope.game_id,
