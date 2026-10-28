@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
 import { useShellStore } from '../../stores/shell'
 import { useFleetLocationRingEmphasisStore } from '../../stores/fleetLocationRingEmphasis'
+import { fleetMapPaintSlices } from './fleetMapPaint'
 import { collectFleetLocationRingShips, type FleetLocationRingStack } from './fleetLocationRings'
 import { fleetLocationRingPaintLayers } from './fleetLocationRingEmphasis'
 import { useFleetComponentCatalogQuery } from './useFleetComponentCatalogQuery'
@@ -57,7 +58,7 @@ export function useFleetLocationRingEmphasis(
     }
     const player = players.find((candidate) => candidate.playerId === hiddenPlayerId)
     const ships = collectFleetLocationRingShips(
-      new Map([[hiddenPlayerId, admitted]]),
+      fleetMapPaintSlices(new Map([[hiddenPlayerId, admitted]])),
       [{ playerId: hiddenPlayerId, name: player?.name ?? '' }],
       componentCatalog,
       analyticScope.turn

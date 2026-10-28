@@ -7,10 +7,11 @@ import {
   type FleetHeadingTrail,
 } from './fleetHeadingTrails'
 import { fleetTrailPlanetStopsFromMapNodes } from './fleetTrailPlanetStopsFromMapNodes'
+import { fleetMapPaintSlices } from './fleetMapPaint'
 import { useFleetStreamPlayersById } from './FleetStreamPlayersContext'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 
-/** Project the shared fleet stream into heading trail segments for map paint. */
+/** Project each player's held map picture into heading trail segments. */
 export function useFleetHeadingTrails(
   analyticScope: AnalyticShellScope,
   enabled: boolean,
@@ -18,6 +19,10 @@ export function useFleetHeadingTrails(
   futureTurnOffset: number = 0
 ): readonly FleetHeadingTrail[] {
   const streamPlayersById = useFleetStreamPlayersById()
+  const mapPlayersById = useMemo(
+    () => fleetMapPaintSlices(streamPlayersById),
+    [streamPlayersById]
+  )
   const { players: visiblePlayers } = useOrderedFleetPlayers({ visibleOnly: true })
   const extendTurns = useFleetHeadingTrailExtendStore((state) => state.extendTurns)
   const planets = useMemo(
@@ -31,7 +36,7 @@ export function useFleetHeadingTrails(
       return []
     }
     return collectFleetHeadingTrails(
-      streamPlayersById,
+      mapPlayersById,
       visiblePlayers.map((player) => ({
         playerId: player.playerId,
         name: player.name,
@@ -42,7 +47,7 @@ export function useFleetHeadingTrails(
     )
   }, [
     trailsEnabled,
-    streamPlayersById,
+    mapPlayersById,
     visiblePlayers,
     analyticScope.turn,
     extendTurns,

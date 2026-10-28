@@ -72,6 +72,11 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(sighting.records).toEqual([baseRecord])
     expect(sighting.playerName).toBe('Alice')
     expect(sighting.rosterPaint).toBe('sightings')
+    expect(sighting.mapPaint).toEqual({
+      source: 'sightings',
+      playerName: 'Alice',
+      records: [baseRecord],
+    })
     expect(sighting.discrepancyOverlay).toBe('clear')
 
     const refined = reduceFleetPlayerStreamState(sighting, {
@@ -92,6 +97,7 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(interim.discrepancy).toBeUndefined()
     expect(interim.discrepancyOverlay).toBe('clear')
     expect(interim.rosterPaint).toBe('sightings')
+    expect(interim.mapPaint).toEqual(sighting.mapPaint)
     expect(interim.summary).toBe('Refining fleet records')
     expect(interim.isPending).toBe(true)
 
@@ -108,6 +114,11 @@ describe('reduceFleetPlayerStreamState', () => {
     })
     expect(saved.records).toEqual([refinedRecord])
     expect(saved.rosterPaint).toBeNull()
+    expect(saved.mapPaint).toEqual({
+      source: 'ledger',
+      playerName: 'Alice',
+      records: [refinedRecord],
+    })
     expect(saved.playerName).toBe('Alice')
     expect(saved.discrepancyOverlay).toBe('set')
     expect(saved.discrepancy).toEqual(ledgerPlayer.discrepancy)
@@ -141,7 +152,41 @@ describe('reduceFleetPlayerStreamState', () => {
 
     expect(saved.records).toEqual([refinedRecord])
     expect(saved.rosterPaint).toBeNull()
+    expect(saved.mapPaint?.source).toBe('ledger')
+    expect(saved.mapPaint?.records).toEqual([refinedRecord])
     expect(saved.discrepancy).toEqual(ledgerPlayer.discrepancy)
+  })
+
+  it('keeps map paint when the table refines after a ledger save', () => {
+    const saved = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_updated',
+      playerId: 8,
+      ledger: ledgerPlayer,
+    })
+    const refinedAgain: FleetTableRecord = {
+      ...refinedRecord,
+      fields: {
+        ...refinedRecord.fields,
+        builtTurn: { kind: 'known', value: 99 },
+      },
+    }
+    const refined = reduceFleetPlayerStreamState(saved, {
+      type: 'record_refined',
+      playerId: 8,
+      record: refinedAgain,
+    })
+    const priorTurn = reduceFleetPlayerStreamState(refined, {
+      type: 'ledger_updated',
+      playerId: 8,
+      replacesTurnLoad: false,
+      ledger: { ...ledgerPlayer, playerName: 'Prior', records: [baseRecord] },
+    })
+
+    expect(refined.records).toEqual([refinedAgain])
+    expect(refined.mapPaint).toEqual(saved.mapPaint)
+    expect(priorTurn.records).toEqual([baseRecord])
+    expect(priorTurn.playerName).toBe('Prior')
+    expect(priorTurn.mapPaint).toEqual(saved.mapPaint)
   })
 
   it('writes an unpainted ledger that does not replace the turn load', () => {
@@ -157,6 +202,7 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(next.discrepancyOverlay).toBe('set')
     expect(next.discrepancy).toEqual(ledgerPlayer.discrepancy)
     expect(next.rosterPaint).toBeNull()
+    expect(next.mapPaint).toBeNull()
     expect(next.summary).toBe('Refining fleet records')
     expect(next.isPending).toBe(true)
 
@@ -182,6 +228,11 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(painted.records).toEqual([refinedRecord])
     expect(painted.playerName).toBe('Alice')
     expect(painted.rosterPaint).toBe('ledger')
+    expect(painted.mapPaint).toEqual({
+      source: 'ledger',
+      playerName: 'Alice',
+      records: [refinedRecord],
+    })
     expect(painted.discrepancyOverlay).toBe('set')
     expect(painted.discrepancy).toEqual(ledgerPlayer.discrepancy)
     expect(slice?.rosterPaint).toBe('ledger')
@@ -377,6 +428,11 @@ describe('fleetPlayerStreamSliceFromState', () => {
     expect(fleetPlayerStreamSliceFromState(state)).toEqual({
       playerName: 'Alice',
       records: [refinedRecord],
+      mapPaint: {
+        source: 'ledger',
+        playerName: 'Alice',
+        records: [refinedRecord],
+      },
       discrepancyOverlay: 'set',
       discrepancy: ledgerPlayer.discrepancy,
       isComplete: false,
