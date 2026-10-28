@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
+import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.approximate_fleet import terminal_fleet_ledger
 from api.analytics.fleet.compute_orchestration import (
@@ -36,7 +37,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.analytics.options import TurnAnalyticsOptions
-from api.compute.scope import ComputeScope
+from api.compute.scope import WILDCARD, ComputeScope
 from api.compute.wire import DependencyOutputs
 from api.errors import FleetScoresEvidenceOpenError
 from api.models.enums import PlayerStatus
@@ -536,3 +537,27 @@ def test_saved_approximate_file_replaces_turn_load_rows() -> None:
     assert ledger_events
     assert ledger_events[-1].get("replacesTurnLoad") is not False
     reset_fleet_table_stream_scheduler_for_tests()
+
+
+def test_later_file_refresh_and_final_commit_fail_closed() -> None:
+    turn = _turn(turn_number=5, ship_ids=(7,), capitalships=1, freighters=0)
+    services, _ctx, player_id = _bind(turn)
+    policy = FleetPersistencePolicy()
+    concrete = _scope(services, turn, player_id)
+    wildcard_turn = ComputeScope(
+        analytic_id=_FLEET,
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn=WILDCARD,
+        player_id=player_id,
+    )
+    persisted = _prior(player_id, [])
+
+    with pytest.raises(TypeError, match="FleetComputeServices"):
+        policy._refresh_following_callback(object(), concrete)
+    with pytest.raises(TypeError, match="FleetComputeServices"):
+        policy._commit_living_final(object(), concrete, {}, persisted)
+    with pytest.raises(ValueError, match="concrete turn"):
+        policy._refresh_following_callback(services, wildcard_turn)
+    with pytest.raises(ValueError, match="concrete turn"):
+        policy._commit_living_final(services, wildcard_turn, {}, persisted)

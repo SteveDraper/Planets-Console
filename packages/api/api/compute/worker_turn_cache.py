@@ -1,8 +1,7 @@
 """Process-local TurnInfo LRU fills for compute-plane workers.
 
-Fleet observation and materialization legs hydrate a scoreboard slice locally
-and do not write that slice into this cache. SAT-session children never import
-this module.
+Fleet job wires carry a scoreboard slice and do not write that slice into
+this cache. SAT-session children never import this module.
 """
 
 from __future__ import annotations

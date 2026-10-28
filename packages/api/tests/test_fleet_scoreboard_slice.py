@@ -1,4 +1,4 @@
-"""Scoreboard-slice fleet wires match full-turn observation results."""
+"""A scoreboard slice is enough to run the observation leg."""
 
 from __future__ import annotations
 
@@ -6,70 +6,71 @@ from dataclasses import replace
 
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
-from api.analytics.fleet.compute_plane.turn_delta import copy_prior_for_approximate
 from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
     persisted_fleet_ledger_from_json,
+    persisted_fleet_ledger_to_json,
 )
-from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord
+from api.analytics.fleet.types import (
+    FleetAcquisitionLedger,
+    FleetCountDiscrepancy,
+    FleetMaterializationProvenance,
+    PersistedFleetLedger,
+)
 
 from tests.fixtures.military_score_inference import with_score_owners_in_roster
 
 
-def _observation_signature(ledger: FleetAcquisitionLedger) -> tuple:
-    return (
-        ledger.player_id,
-        ledger.player_name,
-        tuple(_record_signature(record) for record in ledger.records),
-    )
-
-
-def _record_signature(record: FleetShipRecord) -> tuple:
-    return (
-        record.disposition,
-        record.fields,
-        record.build_option_sets,
-        record.display_default_option_set_index,
-        tuple((event.kind, event.turn, event.source, event.payload) for event in record.events),
-    )
-
-
-def _ledger_from_slice(turn, player_id: int) -> FleetAcquisitionLedger:
-    baseline = ensure_fleet_baseline_for_player(turn.game.id, turn.player.id, turn, player_id)
+def _run_observation_leg(
+    turn,
+    player_id: int,
+    *,
+    baseline: FleetAcquisitionLedger,
+    prior: PersistedFleetLedger | None,
+    prior_ledger_at_n_minus_1: bool,
+):
+    slice_wire = fleet_scoreboard_slice_to_json(turn)
+    assert "planets" not in slice_wire
     result = run_fleet_observation_leg(
         {
             "gameId": turn.game.id,
             "perspective": turn.player.id,
             "playerId": player_id,
             "materializeTurn": turn.settings.turn,
-            "turnWire": fleet_scoreboard_slice_to_json(turn),
-            "priorLedgerWire": None,
+            "turnWire": slice_wire,
+            "priorLedgerWire": (
+                persisted_fleet_ledger_to_json(prior) if prior is not None else None
+            ),
             "baselineLedgerWire": fleet_acquisition_ledger_to_json(baseline),
             "provenanceWire": {
-                "turnEvidenceAtN": False,
-                "priorLedgerAtNMinus1": False,
+                "turnEvidenceAtN": True,
+                "priorLedgerAtNMinus1": prior_ledger_at_n_minus_1,
             },
         }
     )
     assert result.payload is not None
-    persisted = persisted_fleet_ledger_from_json(result.payload["persistedLedgerWire"])
-    return persisted.ledger
+    return persisted_fleet_ledger_from_json(result.payload["persistedLedgerWire"])
 
 
-def _ledger_from_full_turn(turn, player_id: int) -> FleetAcquisitionLedger:
-    baseline = ensure_fleet_baseline_for_player(turn.game.id, turn.player.id, turn, player_id)
-    return copy_prior_for_approximate(baseline, turn)
-
-
-def _assert_slice_matches_full_turn(turn) -> None:
+def _assert_slice_returns_baseline_unchanged(turn) -> None:
     player_id = next(score.ownerid for score in turn.scores if score.turn == turn.settings.turn)
-    assert _observation_signature(_ledger_from_slice(turn, player_id)) == _observation_signature(
-        _ledger_from_full_turn(turn, player_id)
+    baseline = ensure_fleet_baseline_for_player(turn.game.id, turn.player.id, turn, player_id)
+    persisted = _run_observation_leg(
+        turn,
+        player_id,
+        baseline=baseline,
+        prior=None,
+        prior_ledger_at_n_minus_1=False,
     )
+    assert fleet_acquisition_ledger_to_json(persisted.ledger) == fleet_acquisition_ledger_to_json(
+        baseline
+    )
+    assert persisted.provenance.turn_evidence_at_n is False
+    assert persisted.provenance.prior_ledger_at_n_minus_1 is False
 
 
-def test_scoreboard_slice_matches_full_turn_on_normal_and_first_reliable(sample_turn) -> None:
+def test_scoreboard_slice_runs_observation_leg_without_copying_the_prior(sample_turn) -> None:
     normal = replace(sample_turn, settings=replace(sample_turn.settings, acceleratedturns=0))
     accelerated_turn = sample_turn.settings.acceleratedturns or 3
     current_scores = [
@@ -91,8 +92,8 @@ def test_scoreboard_slice_matches_full_turn_on_normal_and_first_reliable(sample_
     assert sample_turn.planets
     assert "planets" not in fleet_scoreboard_slice_to_json(sample_turn)
 
-    _assert_slice_matches_full_turn(normal)
-    _assert_slice_matches_full_turn(first_reliable)
+    _assert_slice_returns_baseline_unchanged(normal)
+    _assert_slice_returns_baseline_unchanged(first_reliable)
 
     opening_scores = [
         replace(score, turn=2) if score.turn == sample_turn.settings.turn else score
@@ -105,4 +106,36 @@ def test_scoreboard_slice_matches_full_turn_on_normal_and_first_reliable(sample_
             scores=opening_scores,
         )
     )
-    _assert_slice_matches_full_turn(opening_reveal)
+    _assert_slice_returns_baseline_unchanged(opening_reveal)
+
+    player_id = next(score.ownerid for score in normal.scores if score.turn == normal.settings.turn)
+    baseline = ensure_fleet_baseline_for_player(
+        normal.game.id, normal.player.id, normal, player_id
+    )
+    prior_ledger = FleetAcquisitionLedger(
+        player_id=player_id,
+        player_name="prior-name",
+        discrepancy=FleetCountDiscrepancy(
+            host_turn=4,
+            active_row_count=9,
+            scoreboard_implied_count=1,
+        ),
+    )
+    prior = PersistedFleetLedger(
+        ledger=prior_ledger,
+        provenance=FleetMaterializationProvenance(
+            turn_evidence_at_n=True,
+            prior_ledger_at_n_minus_1=True,
+        ),
+    )
+    persisted = _run_observation_leg(
+        normal,
+        player_id,
+        baseline=baseline,
+        prior=prior,
+        prior_ledger_at_n_minus_1=True,
+    )
+    assert persisted.ledger.player_name == "prior-name"
+    assert persisted.ledger.discrepancy == prior_ledger.discrepancy
+    assert persisted.provenance.turn_evidence_at_n is False
+    assert persisted.provenance.prior_ledger_at_n_minus_1 is True

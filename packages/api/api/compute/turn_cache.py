@@ -1,9 +1,9 @@
 """Process-local read-through LRU for ``TurnInfo``.
 
 One cache per process, keyed by ``(game_id, perspective, turn)``. Scores and
-storage ``TurnInfo`` loads share it. Fleet observation and materialization
-``turnWire`` is a scoreboard slice hydrated in the leg; that slice is not
-stored under this key. Parent orchestrator splice uses this type and key;
+storage ``TurnInfo`` loads share it. A fleet job ``turnWire`` is a scoreboard
+slice and is not stored under this key. Parent orchestrator splice uses this
+type and key;
 worker heaps stay separate. This is not a ``StorageBackend`` document cache.
 
 Module imports stay interpreter-safe (no DAG, FastAPI, or file storage) so

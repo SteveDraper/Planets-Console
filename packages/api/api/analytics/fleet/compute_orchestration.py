@@ -28,6 +28,7 @@ from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 
 if TYPE_CHECKING:
+    from api.analytics.fleet.compute_services import FleetComputeServices
     from api.compute.orchestrator import ComputeOrchestrator
     from api.models.game import TurnInfo
 
@@ -37,8 +38,8 @@ FLEET_FINALIZATION_LEG = "finalization_leg"
 FLEET_MATERIALIZATION_LEG = FLEET_OBSERVATION_LEG
 
 # Two-phase fleet materialization:
-# 1. Observation copies the prior and persist matches this turn's sightings
-#    (approximate fleet, never ensure-final).
+# 1. Observation passes the prior through. Persist copies it, matches this
+#    turn's sightings, and writes the approximate file (never ensure-final).
 # 2. Finalization replaces that file once the same-turn scoreboard is terminal.
 
 FLEET_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
@@ -499,7 +500,7 @@ class FleetPersistencePolicy:
 
     def _commit_living_final(
         self,
-        services: object,
+        services: FleetComputeServices,
         scope: ComputeScope,
         result_wire: dict[str, object],
         persisted: PersistedFleetLedger,
@@ -509,6 +510,10 @@ class FleetPersistencePolicy:
 
         if not isinstance(services, FleetComputeServices):
             raise TypeError("fleet finalization persist requires FleetComputeServices")
+        if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
+            raise ValueError("fleet finalization persist requires concrete player_id")
+        if scope.turn == WILDCARD or not isinstance(scope.turn, int):
+            raise ValueError("fleet finalization persist requires concrete turn")
         put_result = services.persistence.put_ledger(
             scope.game_id,
             scope.perspective,
@@ -530,7 +535,7 @@ class FleetPersistencePolicy:
 
     def _refresh_following_callback(
         self,
-        services: object,
+        services: FleetComputeServices,
         scope: ComputeScope,
     ) -> Callable[[], None]:
         """Replace later approximate files from the ledger this persist just saved."""
@@ -538,9 +543,11 @@ class FleetPersistencePolicy:
         from api.analytics.fleet.compute_services import FleetComputeServices
 
         if not isinstance(services, FleetComputeServices):
-            return lambda: None
-        if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
-            return lambda: None
+            raise TypeError("fleet later-file refresh requires FleetComputeServices")
+        if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
+            raise ValueError("fleet later-file refresh requires concrete player_id")
+        if scope.turn == WILDCARD or not isinstance(scope.turn, int):
+            raise ValueError("fleet later-file refresh requires concrete turn")
         player_id = scope.player_id
         saved_turn = scope.turn
 
