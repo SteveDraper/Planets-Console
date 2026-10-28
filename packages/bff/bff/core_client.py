@@ -26,6 +26,7 @@ from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
 from api.services.viewpoint_eligibility import ViewpointEligibilityService
+from api.transport.backfill_earlier_turns import BackfillEarlierTurnsBody
 from api.transport.concept_stellar_cartography import (
     StellarCartographySampleResponse,
     StellarCartographyTurnSummaryResponse,
@@ -120,6 +121,14 @@ class CoreClient:
 
     def get_stored_game_info(self, game_id: int) -> GameInfo:
         return self._invoke(lambda: self._games.get_game_info(game_id))
+
+    def get_backfill_earlier_turns(self, game_id: int) -> BackfillEarlierTurnsBody:
+        enabled = self._invoke(lambda: self._games.get_backfill_earlier_turns(game_id))
+        return BackfillEarlierTurnsBody(backfillEarlierTurns=enabled)
+
+    def set_backfill_earlier_turns(self, game_id: int, enabled: bool) -> BackfillEarlierTurnsBody:
+        stored = self._invoke(lambda: self._games.set_backfill_earlier_turns(game_id, enabled))
+        return BackfillEarlierTurnsBody(backfillEarlierTurns=stored)
 
     def league_teams_for_game(self, game_id: int) -> LeagueTeamsResponse:
         """Forward the league team directory read. Planets.nu is called inside Core."""

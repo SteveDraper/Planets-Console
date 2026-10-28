@@ -9,6 +9,10 @@ from api.models.enums import GameStatus
 from api.models.game import GameInfo
 from api.models.game_info_operations import GameInfoUpdateOperation
 from api.planets_nu import PlanetsNuClient
+from api.serialization.backfill_earlier_turns import (
+    backfill_earlier_turns_document,
+    backfill_earlier_turns_enabled,
+)
 from api.serialization.codecs import dataclass_deserialization_detail
 from api.serialization.game import game_info_from_json
 from api.services.credential_service import CredentialService
@@ -21,6 +25,12 @@ from api.transport.sector_display import (
 )
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
+
+
+def backfill_earlier_turns_store_key(game_id: int) -> str:
+    """Storage path for the one Backfill earlier turns record of ``game_id``."""
+    return f"games/{game_id}/backfill-earlier-turns"
+
 
 # (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.
 OnGameInfoRefreshed = Callable[[int, GameInfo | None, GameInfo], None]
@@ -184,3 +194,33 @@ class GameService:
                     "Stored game info did not match the expected shape", err
                 )
             ) from err
+
+    def get_backfill_earlier_turns(self, game_id: int) -> bool:
+        """Return the game-wide Backfill earlier turns choice.
+
+        A stored game with no setting record is off. A game id with no stored
+        GameInfo raises the same ``NotFoundError`` as ``get_game_info``. This
+        read does not submit a walk.
+        """
+        self.get_game_info(game_id)
+        try:
+            raw = self._storage.get(backfill_earlier_turns_store_key(game_id))
+        except NotFoundError:
+            return False
+        payload = require_dict(raw, f"backfill earlier turns for game {game_id}")
+        return backfill_earlier_turns_enabled(payload)
+
+    def set_backfill_earlier_turns(self, game_id: int, enabled: bool) -> bool:
+        """Store one Backfill earlier turns choice for ``game_id``.
+
+        The Settings checkbox is the only writer. The value is shared by every
+        perspective of the game.
+        """
+        if not isinstance(enabled, bool):
+            raise ValidationError("backfillEarlierTurns must be a boolean.")
+        self.get_game_info(game_id)
+        self._storage.put(
+            backfill_earlier_turns_store_key(game_id),
+            backfill_earlier_turns_document(enabled),
+        )
+        return enabled

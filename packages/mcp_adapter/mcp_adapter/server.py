@@ -38,6 +38,7 @@ from mcp_adapter.hatch import (
 from mcp_adapter.identity import require_login_identity
 from mcp_adapter.shell import (
     ENSURE_TURN_TOOL,
+    GET_BACKFILL_EARLIER_TURNS_TOOL,
     GET_GAME_INFO_TOOL,
     LIST_STORED_GAMES_TOOL,
     LIST_STORED_PERSPECTIVES_TOOL,
@@ -134,6 +135,7 @@ __all__ = [
     "GAMEPLAY_TOOL_NAMES",
     "GAMEPLAY_TOOL_OPTIONAL_PROPERTIES",
     "GAMEPLAY_TOOL_REQUIRED_PROPERTIES",
+    "GET_BACKFILL_EARLIER_TURNS_TOOL",
     "GET_GAME_INFO_TOOL",
     "GET_ION_STORM_TOOL",
     "GET_MINEFIELD_TOOL",

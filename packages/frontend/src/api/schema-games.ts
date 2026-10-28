@@ -90,6 +90,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/backfill-earlier-turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backfill Earlier Turns
+         * @description Return the game-wide Backfill earlier turns choice. A missing record is false.
+         */
+        get: operations["get_backfill_earlier_turns_games__game_id__backfill_earlier_turns_get"];
+        /**
+         * Put Backfill Earlier Turns
+         * @description Store one Backfill earlier turns choice for this game. The Settings checkbox calls this.
+         */
+        put: operations["put_backfill_earlier_turns_games__game_id__backfill_earlier_turns_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/league-teams": {
         parameters: {
             query?: never;
@@ -274,6 +298,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * BackfillEarlierTurnsBody
+         * @description The only field on a Backfill earlier turns read or write.
+         */
+        BackfillEarlierTurnsBody: {
+            /** Backfill earlier turns */
+            backfillEarlierTurns: boolean;
+        };
         BffGameInfoResponse: unknown;
         BffTurnInfoResponse: unknown;
         /** CoordinateInWarpWellRequest */
@@ -722,6 +754,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BffGameInfoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_backfill_earlier_turns_games__game_id__backfill_earlier_turns_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackfillEarlierTurnsBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_backfill_earlier_turns_games__game_id__backfill_earlier_turns_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackfillEarlierTurnsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackfillEarlierTurnsBody"];
                 };
             };
             /** @description Validation Error */

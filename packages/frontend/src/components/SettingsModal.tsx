@@ -18,6 +18,7 @@ import {
 } from '../stores/displayPreferences'
 import { usePlayerColorsStore } from '../stores/playerColors'
 import { useShellStore } from '../stores/shell'
+import { useBackfillEarlierTurnsSetting } from './useBackfillEarlierTurnsSetting'
 
 type SettingsModalProps = {
   isOpen: boolean
@@ -231,6 +232,36 @@ function PlayerColorsSection() {
   )
 }
 
+function BackfillEarlierTurnsSection() {
+  const gameId = useShellStore((s) => s.selectedGameId)
+  const { isOn, canEdit, error, setOn } = useBackfillEarlierTurnsSetting(gameId)
+  const hasGame = gameId != null && gameId !== ''
+
+  return (
+    <div className="flex flex-col gap-2 pt-2">
+      <label className="flex items-center gap-2 text-xs text-slate-200">
+        <input
+          id="settings-backfill-earlier-turns"
+          type="checkbox"
+          className="rounded border-[#52575d] bg-[#2d3136]"
+          checked={isOn}
+          disabled={!canEdit}
+          onChange={(event) => {
+            setOn(event.target.checked)
+          }}
+        />
+        Backfill earlier turns
+      </label>
+      <p className="text-xs text-slate-400">
+        {hasGame
+          ? 'One choice for this game, shared by every perspective.'
+          : 'Select a game to change this setting.'}
+      </p>
+      {error ? <p className="text-xs text-red-300">{error}</p> : null}
+    </div>
+  )
+}
+
 type SettingsSectionDef = {
   id: string
   title: string
@@ -238,6 +269,11 @@ type SettingsSectionDef = {
 }
 
 const SETTINGS_SECTIONS: SettingsSectionDef[] = [
+  {
+    id: 'backfill-earlier-turns',
+    title: 'Backfill earlier turns',
+    Content: BackfillEarlierTurnsSection,
+  },
   {
     id: 'display-options',
     title: 'Display Options',
