@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ScoresAnalyticTableTile } from './ScoresAnalyticTableTile'
 import { useScoresTablePreferencesStore } from '../../stores/scoresTablePreferences'
-import { BUILD_INFERENCE_COLUMN } from './scoresTableColumns'
+import { BUILD_INFERENCE_COLUMN, SCORES_TABLE_DATA_COLUMNS } from './scoresTableColumns'
 
 vi.mock('../../api/bff', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bff')>()
@@ -84,8 +84,8 @@ describe('ScoresAnalyticTableTile', () => {
     })
     vi.mocked(fetchAnalyticTable).mockResolvedValue({
       analyticId: 'scores',
-      columns: ['Race (player)', BUILD_INFERENCE_COLUMN],
-      rows: [['The Birds (1)']],
+      columns: [...SCORES_TABLE_DATA_COLUMNS, BUILD_INFERENCE_COLUMN],
+      rows: [['The Birds (1)', '12', '1', '44', '17', '9001', '3']],
       includeBuildInference: true,
       buildInferenceAvailable: true,
       inferenceByRow: [{ playerId: 1 }],
@@ -99,7 +99,15 @@ describe('ScoresAnalyticTableTile', () => {
       />
     )
 
-    expect(await screen.findByLabelText('Build inference in progress')).toBeInTheDocument()
+    expect(await screen.findByRole('columnheader', { name: 'Planets' })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: '12' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'War Ships' })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: '44' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Freighters' })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: '17' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Military' })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: '9001' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Build inference in progress')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: /Build inference/ })).toBeInTheDocument()
     await waitFor(() => {
       expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)

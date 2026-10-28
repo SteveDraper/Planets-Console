@@ -5,9 +5,15 @@ export const FLEET_MATERIALIZATION_PENDING_SUMMARY = 'Fleet materialization in p
 
 export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
 
+/** Turn-load roster: a stored ledger, or this turn's sightings when no file exists. */
+export type FleetRosterPaint = 'sightings' | 'ledger'
+
 export type FleetPlayerStreamSlice = {
   playerName?: string
   records?: readonly FleetTableRecord[]
+  rosterPaint?: FleetRosterPaint
+  rosterRecords?: readonly FleetTableRecord[]
+  rosterDiscrepancy?: FleetCountDiscrepancy
   discrepancyOverlay: FleetDiscrepancyOverlay
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
@@ -20,6 +26,9 @@ export type FleetPlayerStreamSlice = {
 export type FleetPlayerStreamState = {
   playerName: string | null
   records: FleetTableRecord[] | null
+  rosterPaint: FleetRosterPaint | null
+  rosterRecords: FleetTableRecord[] | null
+  rosterDiscrepancy?: FleetCountDiscrepancy
   discrepancyOverlay: FleetDiscrepancyOverlay
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
@@ -33,6 +42,8 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
   return {
     playerName: null,
     records: null,
+    rosterPaint: null,
+    rosterRecords: null,
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
@@ -83,13 +94,30 @@ export function reduceFleetPlayerStreamState(
   state: FleetPlayerStreamState,
   event: FleetTableStreamEvent
 ): FleetPlayerStreamState {
-  if (event.type === 'ledger_updated') {
+  if (event.type === 'roster_paint') {
     const ledger = event.ledger
     const hasDiscrepancy = ledger.discrepancy != null
     return {
       ...state,
       playerName: ledger.playerName,
+      rosterPaint: event.paint,
+      rosterRecords: [...ledger.records],
+      rosterDiscrepancy: hasDiscrepancy ? ledger.discrepancy : undefined,
+      error: null,
+    }
+  }
+
+  if (event.type === 'ledger_updated') {
+    const ledger = event.ledger
+    const hasDiscrepancy = ledger.discrepancy != null
+    const replacesTurnLoad = event.replacesTurnLoad !== false
+    return {
+      ...state,
+      playerName: ledger.playerName,
       records: [...ledger.records],
+      rosterPaint: replacesTurnLoad ? null : state.rosterPaint,
+      rosterRecords: replacesTurnLoad ? null : state.rosterRecords,
+      rosterDiscrepancy: replacesTurnLoad ? undefined : state.rosterDiscrepancy,
       discrepancyOverlay: hasDiscrepancy ? 'set' : 'clear',
       discrepancy: ledger.discrepancy,
       isPending: !state.isComplete,
@@ -174,6 +202,13 @@ export function fleetPlayerStreamSliceFromState(
   if (state.records != null) {
     slice.records = state.records
   }
+  if (state.rosterPaint != null && state.rosterRecords != null) {
+    slice.rosterPaint = state.rosterPaint
+    slice.rosterRecords = state.rosterRecords
+    if (state.rosterDiscrepancy != null) {
+      slice.rosterDiscrepancy = state.rosterDiscrepancy
+    }
+  }
   if (state.discrepancyOverlay === 'set' && state.discrepancy != null) {
     slice.discrepancy = state.discrepancy
   }
@@ -214,5 +249,34 @@ export function fleetPlayerFromStreamSlice(
     ...(discrepancy != null ? { discrepancy } : {}),
     streamError: streamSlice?.error ?? null,
     streamSlice,
+  }
+}
+
+export function fleetTableTileModel(
+  streamSlice: FleetPlayerStreamSlice | undefined,
+  fallbackPlayerName: string
+): {
+  playerName: string
+  records: readonly FleetTableRecord[]
+  discrepancy?: FleetCountDiscrepancy
+  streamError: string | null
+  streamSlice: FleetPlayerStreamSlice | undefined
+  rosterPaint?: FleetRosterPaint
+} {
+  const merged = fleetPlayerFromStreamSlice(streamSlice, fallbackPlayerName)
+  if (streamSlice?.rosterPaint != null && streamSlice.rosterRecords != null) {
+    return {
+      playerName: merged.playerName,
+      records: streamSlice.rosterRecords,
+      ...(streamSlice.rosterDiscrepancy != null
+        ? { discrepancy: streamSlice.rosterDiscrepancy }
+        : {}),
+      streamError: merged.streamError,
+      streamSlice: merged.streamSlice,
+      rosterPaint: streamSlice.rosterPaint,
+    }
+  }
+  return {
+    ...merged,
   }
 }

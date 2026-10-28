@@ -122,7 +122,76 @@ describe('FleetPlayerTableTile', () => {
     )
 
     expect(screen.getByText('Fleet materialization in progress')).toBeInTheDocument()
-    expect(screen.getByText('Waiting for fleet records.')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
+    expect(screen.queryByText('No active fleet records.')).not.toBeInTheDocument()
+  })
+
+  it('shows an empty body for a player with zero sightings', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[]}
+        rosterPaint="sightings"
+        streamSlice={pendingFleetPlayerStreamSlice()}
+      />
+    )
+
+    expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
+    expect(screen.queryByText('No active fleet records.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('keeps the empty-ledger line for a stored complete ledger', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[]}
+        streamSlice={{
+          discrepancyOverlay: 'inherit',
+          isComplete: true,
+          isFinal: true,
+          isPending: false,
+          summary: 'Fleet ledger loaded from cache.',
+          error: null,
+        }}
+      />
+    )
+
+    expect(screen.getByText('No active fleet records.')).toBeInTheDocument()
+  })
+
+  it('shows the empty-ledger line for a stored ledger that is still open', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[]}
+        rosterPaint="ledger"
+        streamSlice={pendingFleetPlayerStreamSlice()}
+      />
+    )
+
+    expect(screen.getByText('No active fleet records.')).toBeInTheDocument()
+  })
+
+  it('uses the empty status mark on sighting rows', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[
+          {
+            ...activeRecord,
+            qualifiers: {},
+            buildOptionSets: [],
+          },
+        ]}
+        rosterPaint="sightings"
+        componentCatalog={testComponentCatalog}
+      />
+    )
+
+    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Possibly lost/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Alibi/)).not.toBeInTheDocument()
   })
 
   it('expands alternate build option sets from the row expander', async () => {

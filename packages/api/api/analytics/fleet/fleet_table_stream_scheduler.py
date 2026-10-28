@@ -444,7 +444,7 @@ def _node_complete_stream_events(
     if scope_turn < host_turn_number:
         if cancelled:
             return ()
-        return tracker.leg_progress_events(persisted)
+        return tracker.leg_progress_events(persisted, replaces_turn_load=False)
 
     if scope_turn != host_turn_number:
         return ()

@@ -11,6 +11,14 @@ class FleetTableStreamLedgerUpdatedEvent(BaseModel):
     type: Literal["ledger_updated"]
     playerId: int | None = None
     ledger: dict[str, Any]
+    replacesTurnLoad: bool | None = None
+
+
+class FleetTableStreamRosterPaintEvent(BaseModel):
+    type: Literal["roster_paint"]
+    playerId: int | None = None
+    paint: Literal["sightings", "ledger"]
+    ledger: dict[str, Any]
 
 
 class FleetTableStreamRecordRefinedEvent(BaseModel):
@@ -46,4 +54,5 @@ __all__ = [
     "FleetTableStreamLedgerUpdatedEvent",
     "FleetTableStreamProvenanceEvent",
     "FleetTableStreamRecordRefinedEvent",
+    "FleetTableStreamRosterPaintEvent",
 ]

@@ -113,6 +113,7 @@ def wire_ledger_progress_events(
     before: FleetAcquisitionLedger | None,
     persisted: PersistedFleetLedger,
     host_turn: TurnInfo,
+    replaces_turn_load: bool = True,
 ) -> tuple[dict[str, object], ...]:
     """Build incremental stream events after one gap-fill leg toward host turn N."""
     host_shaped = _host_turn_shaped_ledger(persisted, host_turn)
@@ -129,7 +130,8 @@ def wire_ledger_progress_events(
             )
     events.append(
         fleet_ledger_updated_event(
-            ledger=fleet_acquisition_ledger_to_table_wire(host_shaped, turn=host_turn)
+            ledger=fleet_acquisition_ledger_to_table_wire(host_shaped, turn=host_turn),
+            replaces_turn_load=replaces_turn_load,
         )
     )
     events.append(_wire_provenance(persisted))
@@ -196,11 +198,14 @@ class FleetLedgerWireProgressTracker:
     def leg_progress_events(
         self,
         persisted: PersistedFleetLedger,
+        *,
+        replaces_turn_load: bool = True,
     ) -> tuple[dict[str, object], ...]:
         events = wire_ledger_progress_events(
             before=self.wire_before,
             persisted=persisted,
             host_turn=self.host_turn,
+            replaces_turn_load=replaces_turn_load,
         )
         self.wire_before = _host_turn_shaped_ledger(persisted, self.host_turn)
         self.emitted_progress = True

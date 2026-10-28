@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Iterator
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 from api.errors import PlanetsConsoleError
 
@@ -14,8 +14,24 @@ logger = logging.getLogger(__name__)
 _FLEET_TABLE_STREAM_UNEXPECTED_ERROR_DETAIL = "Internal server error"
 
 
-def fleet_ledger_updated_event(*, ledger: dict[str, object]) -> dict[str, object]:
-    return {"type": "ledger_updated", "ledger": ledger}
+def fleet_ledger_updated_event(
+    *,
+    ledger: dict[str, object],
+    replaces_turn_load: bool = True,
+) -> dict[str, object]:
+    event: dict[str, object] = {"type": "ledger_updated", "ledger": ledger}
+    if not replaces_turn_load:
+        event["replacesTurnLoad"] = False
+    return event
+
+
+def fleet_roster_paint_event(
+    *,
+    paint: Literal["sightings", "ledger"],
+    ledger: dict[str, object],
+) -> dict[str, object]:
+    """Turn-load roster. The table shows it until a host-turn ledger save."""
+    return {"type": "roster_paint", "paint": paint, "ledger": ledger}
 
 
 def fleet_record_refined_event(*, record: dict[str, object]) -> dict[str, object]:

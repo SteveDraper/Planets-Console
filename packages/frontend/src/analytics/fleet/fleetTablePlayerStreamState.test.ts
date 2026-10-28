@@ -3,6 +3,7 @@ import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchem
 import {
   fleetPlayerFromStreamSlice,
   fleetPlayerStreamSliceFromState,
+  fleetTableTileModel,
   initialFleetPlayerStreamState,
   reduceFleetPlayerStreamState,
 } from './fleetTablePlayerStreamState'
@@ -58,6 +59,64 @@ const ledgerPlayer: FleetTablePlayer = {
 }
 
 describe('reduceFleetPlayerStreamState', () => {
+  it('keeps sighting rows until a ledger save replaces them', () => {
+    const sighting = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'sightings',
+      ledger: {
+        playerId: 8,
+        playerName: 'Alice',
+        records: [baseRecord],
+      },
+    })
+
+    const refined = reduceFleetPlayerStreamState(sighting, {
+      type: 'record_refined',
+      playerId: 8,
+      record: refinedRecord,
+    })
+    const interim = reduceFleetPlayerStreamState(refined, {
+      type: 'ledger_updated',
+      playerId: 8,
+      replacesTurnLoad: false,
+      ledger: ledgerPlayer,
+    })
+
+    expect(fleetTableTileModel(fleetPlayerStreamSliceFromState(interim) ?? undefined, 'Alice').records).toEqual([
+      baseRecord,
+    ])
+    expect(interim.records).toEqual([refinedRecord])
+
+    const saved = reduceFleetPlayerStreamState(interim, {
+      type: 'ledger_updated',
+      playerId: 8,
+      ledger: ledgerPlayer,
+    })
+    expect(fleetTableTileModel(fleetPlayerStreamSliceFromState(saved) ?? undefined, 'Alice').records).toEqual([
+      refinedRecord,
+    ])
+    expect(saved.rosterPaint).toBeNull()
+  })
+
+  it('shows a stored ledger, including one that is still open', () => {
+    const painted = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'ledger',
+      ledger: ledgerPlayer,
+    })
+    const tile = fleetTableTileModel(
+      fleetPlayerStreamSliceFromState(painted) ?? undefined,
+      'fallback'
+    )
+
+    expect(tile.rosterPaint).toBe('ledger')
+    expect(tile.records).toEqual([refinedRecord])
+    expect(tile.discrepancy).toEqual(ledgerPlayer.discrepancy)
+    expect(painted.records).toBeNull()
+  })
+
   it('replaces records from ledger_updated', () => {
     const event: FleetTableStreamEvent = {
       type: 'ledger_updated',

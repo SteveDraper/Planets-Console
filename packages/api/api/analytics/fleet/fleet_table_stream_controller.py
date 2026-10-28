@@ -13,6 +13,7 @@ from api.analytics.fleet.fleet_table_stream_registry import (
 from api.analytics.fleet.fleet_table_stream_rows import (
     CachedCompletePlayerAdmission,
     PlayerStreamAdmission,
+    RosterThenScheduleAdmission,
     resolve_player_stream_admission,
     schedule_fleet_player_run,
     tag_fleet_table_stream_event,
@@ -50,6 +51,13 @@ class FleetTableStreamController(
     def register_scheduled_player(self, player_id: int, row: ScheduledFleetPlayer) -> None:
         self.register_scheduled_row(player_id, row)
 
+    def _tagged_events(
+        self,
+        events: tuple[dict[str, object], ...],
+        player_id: int,
+    ) -> tuple[dict[str, object], ...]:
+        return tuple(tag_fleet_table_stream_event(event, player_id=player_id) for event in events)
+
     def dispatch_admission(
         self,
         player_id: int,
@@ -57,10 +65,7 @@ class FleetTableStreamController(
     ) -> AdmissionDispatch[ScheduledFleetPlayer]:
         if isinstance(admission, CachedCompletePlayerAdmission):
             return AdmissionDispatch(
-                wire_events=tuple(
-                    tag_fleet_table_stream_event(event, player_id=player_id)
-                    for event in admission.events
-                ),
+                wire_events=self._tagged_events(admission.events, player_id),
             )
         scheduled = schedule_fleet_player_run(
             self.scheduler,
@@ -84,7 +89,10 @@ class FleetTableStreamController(
                     ),
                 ),
             )
-        return AdmissionDispatch(scheduled=scheduled)
+        prelude: tuple[dict[str, object], ...] = ()
+        if isinstance(admission, RosterThenScheduleAdmission):
+            prelude = self._tagged_events(admission.events, player_id)
+        return AdmissionDispatch(wire_events=prelude, scheduled=scheduled)
 
     def _active_run_id_for_player(self, player_id: int) -> str | None:
         active = self.scheduler.row_run_for_player(self.scope, player_id)
