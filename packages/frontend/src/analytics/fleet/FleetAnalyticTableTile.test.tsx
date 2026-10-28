@@ -93,7 +93,8 @@ describe('FleetAnalyticTableTile', () => {
     expect(screen.getByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Bob fleet table' })).toBeInTheDocument()
     expect(screen.getAllByText('Fleet materialization in progress')).toHaveLength(2)
-    expect(screen.getAllByText('Waiting for fleet records.')).toHaveLength(2)
+    expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
+    expect(screen.queryByText('No active fleet records.')).not.toBeInTheDocument()
   })
 
   it('loads component catalog without owning the fleet stream connect', async () => {

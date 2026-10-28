@@ -58,6 +58,139 @@ const ledgerPlayer: FleetTablePlayer = {
 }
 
 describe('reduceFleetPlayerStreamState', () => {
+  it('keeps sighting rows until a ledger save replaces them', () => {
+    const sighting = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'sightings',
+      ledger: {
+        playerId: 8,
+        playerName: 'Alice',
+        records: [baseRecord],
+      },
+    })
+    expect(sighting.records).toEqual([baseRecord])
+    expect(sighting.playerName).toBe('Alice')
+    expect(sighting.rosterPaint).toBe('sightings')
+    expect(sighting.discrepancyOverlay).toBe('clear')
+
+    const refined = reduceFleetPlayerStreamState(sighting, {
+      type: 'record_refined',
+      playerId: 8,
+      record: refinedRecord,
+    })
+    expect(refined).toBe(sighting)
+
+    const interim = reduceFleetPlayerStreamState(refined, {
+      type: 'ledger_updated',
+      playerId: 8,
+      replacesTurnLoad: false,
+      ledger: { ...ledgerPlayer, playerName: 'Interim' },
+    })
+    expect(interim.records).toEqual([baseRecord])
+    expect(interim.playerName).toBe('Alice')
+    expect(interim.discrepancy).toBeUndefined()
+    expect(interim.discrepancyOverlay).toBe('clear')
+    expect(interim.rosterPaint).toBe('sightings')
+    expect(interim.summary).toBe('Refining fleet records')
+    expect(interim.isPending).toBe(true)
+
+    const interimSlice = fleetPlayerStreamSliceFromState(interim)
+    expect(interimSlice?.rosterPaint).toBe('sightings')
+    expect(fleetPlayerFromStreamSlice(interimSlice ?? undefined, 'fallback').records).toEqual([
+      baseRecord,
+    ])
+
+    const saved = reduceFleetPlayerStreamState(interim, {
+      type: 'ledger_updated',
+      playerId: 8,
+      ledger: ledgerPlayer,
+    })
+    expect(saved.records).toEqual([refinedRecord])
+    expect(saved.rosterPaint).toBeNull()
+    expect(saved.playerName).toBe('Alice')
+    expect(saved.discrepancyOverlay).toBe('set')
+    expect(saved.discrepancy).toEqual(ledgerPlayer.discrepancy)
+    const savedSlice = fleetPlayerStreamSliceFromState(saved)
+    expect(savedSlice?.rosterPaint).toBeUndefined()
+    expect(fleetPlayerFromStreamSlice(savedSlice ?? undefined, 'fallback').records).toEqual([
+      refinedRecord,
+    ])
+    expect(fleetPlayerFromStreamSlice(savedSlice ?? undefined, 'fallback').discrepancy).toEqual(
+      ledgerPlayer.discrepancy
+    )
+  })
+
+  it('replaces a painted roster when replacesTurnLoad is true', () => {
+    const painted = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'sightings',
+      ledger: {
+        playerId: 8,
+        playerName: 'Alice',
+        records: [baseRecord],
+      },
+    })
+    const saved = reduceFleetPlayerStreamState(painted, {
+      type: 'ledger_updated',
+      playerId: 8,
+      replacesTurnLoad: true,
+      ledger: ledgerPlayer,
+    })
+
+    expect(saved.records).toEqual([refinedRecord])
+    expect(saved.rosterPaint).toBeNull()
+    expect(saved.discrepancy).toEqual(ledgerPlayer.discrepancy)
+  })
+
+  it('writes an unpainted ledger that does not replace the turn load', () => {
+    const next = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_updated',
+      playerId: 8,
+      replacesTurnLoad: false,
+      ledger: { ...ledgerPlayer, records: [baseRecord] },
+    })
+
+    expect(next.records).toEqual([baseRecord])
+    expect(next.playerName).toBe('Alice')
+    expect(next.discrepancyOverlay).toBe('set')
+    expect(next.discrepancy).toEqual(ledgerPlayer.discrepancy)
+    expect(next.rosterPaint).toBeNull()
+    expect(next.summary).toBe('Refining fleet records')
+    expect(next.isPending).toBe(true)
+
+    const refined = reduceFleetPlayerStreamState(next, {
+      type: 'record_refined',
+      playerId: 8,
+      record: refinedRecord,
+    })
+    expect(refined.records).toEqual([refinedRecord])
+    expect(refined.rosterPaint).toBeNull()
+  })
+
+  it('shows a stored ledger, including one that is still open', () => {
+    const painted = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'ledger',
+      ledger: ledgerPlayer,
+    })
+    const slice = fleetPlayerStreamSliceFromState(painted)
+    const merged = fleetPlayerFromStreamSlice(slice ?? undefined, 'fallback')
+
+    expect(painted.records).toEqual([refinedRecord])
+    expect(painted.playerName).toBe('Alice')
+    expect(painted.rosterPaint).toBe('ledger')
+    expect(painted.discrepancyOverlay).toBe('set')
+    expect(painted.discrepancy).toEqual(ledgerPlayer.discrepancy)
+    expect(slice?.rosterPaint).toBe('ledger')
+    expect(slice?.records).toEqual([refinedRecord])
+    expect(merged.records).toEqual([refinedRecord])
+    expect(merged.discrepancy).toEqual(ledgerPlayer.discrepancy)
+    expect(merged.playerName).toBe('Alice')
+  })
+
   it('replaces records from ledger_updated', () => {
     const event: FleetTableStreamEvent = {
       type: 'ledger_updated',

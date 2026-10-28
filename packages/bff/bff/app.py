@@ -24,6 +24,7 @@ from bff.transport.fleet_table_stream_responses import (
     FleetTableStreamLedgerUpdatedEvent,
     FleetTableStreamProvenanceEvent,
     FleetTableStreamRecordRefinedEvent,
+    FleetTableStreamRosterPaintEvent,
 )
 from bff.transport.game_responses import (
     LoadAllProgressUpdate,
@@ -76,6 +77,7 @@ def build_openapi_schema() -> dict:
         FleetTableStreamLedgerUpdatedEvent,
         FleetTableStreamRecordRefinedEvent,
         FleetTableStreamProvenanceEvent,
+        FleetTableStreamRosterPaintEvent,
         FleetTableStreamCompleteEvent,
         FleetTableStreamErrorEvent,
     ):

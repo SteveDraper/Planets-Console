@@ -16,6 +16,14 @@ export const fleetTableStreamLedgerUpdatedEventSchema =
   fleetTableStreamPlayerScopeSchema.extend({
     type: z.literal('ledger_updated'),
     ledger: fleetTablePlayerSchema,
+    replacesTurnLoad: z.boolean().optional(),
+  })
+
+export const fleetTableStreamRosterPaintEventSchema =
+  fleetTableStreamPlayerScopeSchema.extend({
+    type: z.literal('roster_paint'),
+    paint: z.enum(['sightings', 'ledger']),
+    ledger: fleetTablePlayerSchema,
   })
 
 export const fleetTableStreamRecordRefinedEventSchema =
@@ -45,6 +53,7 @@ export const fleetTableStreamErrorEventSchema = fleetTableStreamPlayerScopeSchem
 
 export const fleetTableStreamEventSchema = z.discriminatedUnion('type', [
   fleetTableStreamLedgerUpdatedEventSchema,
+  fleetTableStreamRosterPaintEventSchema,
   fleetTableStreamRecordRefinedEventSchema,
   fleetTableStreamProvenanceEventSchema,
   fleetTableStreamCompleteEventSchema,

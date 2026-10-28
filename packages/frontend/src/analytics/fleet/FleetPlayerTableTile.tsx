@@ -29,7 +29,7 @@ import {
 } from './fleetRecordComponentDisplay'
 import { FleetRecordHullCell } from './FleetRecordHullCell'
 import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
-import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
+import type { FleetPlayerStreamSlice, FleetRosterPaint } from './fleetTablePlayerStreamState'
 import { fleetTileProgressSummary, isFleetTileMaterializing } from './fleetTileStatus'
 
 type FleetPlayerTableTileProps = {
@@ -39,6 +39,7 @@ type FleetPlayerTableTileProps = {
   componentCatalog?: FleetComponentCatalog
   streamError?: string | null
   streamSlice?: FleetPlayerStreamSlice
+  rosterPaint?: FleetRosterPaint
 }
 
 const columnHelper = createColumnHelper<FleetTableRecord>()
@@ -75,6 +76,19 @@ function FleetStatusIcons({ record }: { record: FleetTableRecord }) {
   )
 }
 
+function emptyFleetRosterMessage(
+  rosterPaint: FleetRosterPaint | undefined,
+  materializing: boolean
+): string | null {
+  if (rosterPaint === 'sightings') {
+    return null
+  }
+  if (rosterPaint === 'ledger' || !materializing) {
+    return 'No active fleet records.'
+  }
+  return null
+}
+
 function FleetTileProgressIndicator({
   streamSlice,
 }: {
@@ -101,9 +115,14 @@ export function FleetPlayerTableTile({
   componentCatalog = EMPTY_FLEET_COMPONENT_CATALOG,
   streamError = null,
   streamSlice,
+  rosterPaint,
 }: FleetPlayerTableTileProps) {
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const activeRecords = useMemo(() => activeFleetRecords(records), [records])
+  const emptyMessage = emptyFleetRosterMessage(
+    rosterPaint,
+    isFleetTileMaterializing(streamSlice)
+  )
 
   const columns = useMemo(
     () => [
@@ -229,11 +248,9 @@ export function FleetPlayerTableTile({
         ) : null}
       </header>
       {activeRecords.length === 0 ? (
-        <p className="px-4 py-3 text-sm text-slate-400">
-          {isFleetTileMaterializing(streamSlice)
-            ? 'Waiting for fleet records.'
-            : 'No active fleet records.'}
-        </p>
+        emptyMessage == null ? null : (
+          <p className="px-4 py-3 text-sm text-slate-400">{emptyMessage}</p>
+        )
       ) : (
         <div className="overflow-auto">
           <table className="min-w-full border-collapse text-sm">

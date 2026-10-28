@@ -18,7 +18,9 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.injected_services import FleetComputeServices
+from api.analytics.fleet.observation_ingest import turn_load_sighting_ledger
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.table_wire import fleet_acquisition_ledger_to_table_wire
 from api.models.game import TurnInfo
 from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
 from api.streaming.table_stream.multiplex import (
@@ -27,6 +29,7 @@ from api.streaming.table_stream.multiplex import (
 from api.streaming.table_stream.multiplex import (
     iter_multiplexed_stream_events,
 )
+from api.transport.fleet_table_stream import fleet_roster_paint_event
 
 _TERMINAL_EVENT_TYPES = frozenset({"complete", "error"})
 
@@ -42,7 +45,17 @@ class SchedulePlayerAdmission:
     kind: Literal["schedule"] = "schedule"
 
 
-PlayerStreamAdmission = CachedCompletePlayerAdmission | SchedulePlayerAdmission
+@dataclass(frozen=True)
+class RosterThenScheduleAdmission:
+    """Show a stored ledger or this turn's sightings, then keep computing."""
+
+    kind: Literal["roster_then_schedule"] = "roster_then_schedule"
+    events: tuple[dict[str, object], ...] = ()
+
+
+PlayerStreamAdmission = (
+    CachedCompletePlayerAdmission | SchedulePlayerAdmission | RosterThenScheduleAdmission
+)
 
 
 def tag_fleet_table_stream_event(
@@ -65,20 +78,37 @@ def resolve_player_stream_admission(
     turn: TurnInfo,
     force_schedule: bool = False,
 ) -> PlayerStreamAdmission:
-    """Decide whether a fleet table player is cached-complete or needs scheduling."""
-    if not force_schedule:
-        persisted = persistence.get_ledger(game_id, perspective, turn_number, player_id)
-        if persisted is not None and persistence.ledger_is_ensure_final(
-            game_id,
-            perspective,
-            turn_number,
-            player_id,
-            persisted,
-        ):
-            return CachedCompletePlayerAdmission(
-                events=wire_cached_player_events(persisted, turn=turn)
-            )
-    return SchedulePlayerAdmission()
+    """Decide whether a fleet table player is cached-complete or needs scheduling.
+
+    A stored ledger is painted immediately, including one behind fleet evidence
+    generation. A missing ledger paints this turn's sighted ships. Ensure-final
+    ledgers still short-circuit. ``force_schedule`` skips that paint and recomputes.
+    """
+    if force_schedule:
+        return SchedulePlayerAdmission()
+    persisted = persistence.get_ledger(game_id, perspective, turn_number, player_id)
+    if persisted is not None and persistence.ledger_is_ensure_final(
+        game_id,
+        perspective,
+        turn_number,
+        player_id,
+        persisted,
+    ):
+        return CachedCompletePlayerAdmission(events=wire_cached_player_events(persisted, turn=turn))
+    if persisted is not None:
+        ledger = fleet_acquisition_ledger_to_table_wire(persisted.ledger, turn=turn)
+        return RosterThenScheduleAdmission(
+            events=(fleet_roster_paint_event(paint="ledger", ledger=ledger),)
+        )
+    sightings = turn_load_sighting_ledger(turn, player_id, perspective=perspective)
+    return RosterThenScheduleAdmission(
+        events=(
+            fleet_roster_paint_event(
+                paint="sightings",
+                ledger=fleet_acquisition_ledger_to_table_wire(sightings, turn=turn),
+            ),
+        )
+    )
 
 
 def schedule_fleet_player_run(

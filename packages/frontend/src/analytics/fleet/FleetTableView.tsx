@@ -39,6 +39,7 @@ export function FleetTableView({
             playerName={playerLabel}
             records={merged.records}
             discrepancy={merged.discrepancy}
+            rosterPaint={streamSlice?.rosterPaint}
             componentCatalog={componentCatalog}
             streamError={merged.streamError}
             streamSlice={merged.streamSlice}

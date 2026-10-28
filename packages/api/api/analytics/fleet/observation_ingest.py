@@ -36,6 +36,7 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     FleetTurnSnapshot,
 )
+from api.analytics.turn_roster import iter_turn_players
 from api.concepts.hulls import hull_is_freighter, is_generic_freighter_sentinel_hull_id
 from api.concepts.races import is_solar_federation
 from api.models.components import Hull
@@ -497,6 +498,54 @@ def _race_id_for_player(turn: TurnInfo, player_id: int) -> int | None:
     if turn.player.id == player_id:
         return turn.player.raceid
     return None
+
+
+def turn_load_sighting_ledger(
+    turn: TurnInfo,
+    player_id: int,
+    *,
+    perspective: int,
+) -> FleetAcquisitionLedger:
+    """This turn's sighted ships for one player, in turn-file order.
+
+    Scanned axes use the same known/unknown split as observation ingest.
+    The roster does not invent possibly-lost or alibi, and it does not fill
+    unknown weapon slots. Killed ships are omitted, matching sighting ingest.
+    """
+    player_name = ""
+    for player in iter_turn_players(turn):
+        if player.id == player_id:
+            player_name = player.username
+            break
+    full_information = player_id == perspective
+    turn_number = turn.settings.turn
+    records: list[FleetShipRecord] = []
+    for ship in turn.ships:
+        if ship.turnkilled != 0 or ship.ownerid != player_id:
+            continue
+        option_set = _observed_build_option_set_from_ship(
+            ship,
+            full_information=full_information,
+        )
+        records.append(
+            FleetShipRecord(
+                record_id=f"turn-load-{ship.id}",
+                fields=_observed_fields_from_ship(ship, full_information=full_information),
+                build_option_sets=[option_set],
+                display_default_option_set_index=0,
+                last_seen=FleetLastSeen(
+                    turn=turn_number,
+                    x=ship.x,
+                    y=ship.y,
+                    planet_id=_planet_id_at_coordinates(turn, ship.x, ship.y),
+                ),
+            )
+        )
+    return FleetAcquisitionLedger(
+        player_id=player_id,
+        player_name=player_name,
+        records=records,
+    )
 
 
 def _observed_fields_from_ship(

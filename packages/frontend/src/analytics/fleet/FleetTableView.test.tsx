@@ -122,7 +122,76 @@ describe('FleetPlayerTableTile', () => {
     )
 
     expect(screen.getByText('Fleet materialization in progress')).toBeInTheDocument()
-    expect(screen.getByText('Waiting for fleet records.')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
+    expect(screen.queryByText('No active fleet records.')).not.toBeInTheDocument()
+  })
+
+  it('shows an empty body for a player with zero sightings', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[]}
+        rosterPaint="sightings"
+        streamSlice={pendingFleetPlayerStreamSlice()}
+      />
+    )
+
+    expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
+    expect(screen.queryByText('No active fleet records.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('keeps the empty-ledger line for a stored complete ledger', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[]}
+        streamSlice={{
+          discrepancyOverlay: 'inherit',
+          isComplete: true,
+          isFinal: true,
+          isPending: false,
+          summary: 'Fleet ledger loaded from cache.',
+          error: null,
+        }}
+      />
+    )
+
+    expect(screen.getByText('No active fleet records.')).toBeInTheDocument()
+  })
+
+  it('shows the empty-ledger line for a stored ledger that is still open', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[]}
+        rosterPaint="ledger"
+        streamSlice={pendingFleetPlayerStreamSlice()}
+      />
+    )
+
+    expect(screen.getByText('No active fleet records.')).toBeInTheDocument()
+  })
+
+  it('uses the empty status mark on sighting rows', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[
+          {
+            ...activeRecord,
+            qualifiers: {},
+            buildOptionSets: [],
+          },
+        ]}
+        rosterPaint="sightings"
+        componentCatalog={testComponentCatalog}
+      />
+    )
+
+    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Possibly lost/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Alibi/)).not.toBeInTheDocument()
   })
 
   it('expands alternate build option sets from the row expander', async () => {
@@ -274,6 +343,83 @@ describe('FleetTableView', () => {
 
     expect(screen.getByRole('region', { name: 'The Evil Empire (Bob) fleet table' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'The Feds (Alice) fleet table' })).toBeInTheDocument()
+  })
+
+  it('renders painted roster rows from the stream slice', () => {
+    seedShellViewpoint(1)
+    const streamPlayersById = new Map([
+      [
+        8,
+        {
+          ...pendingFleetPlayerStreamSlice(),
+          playerName: 'Alice',
+          records: [activeRecord],
+          rosterPaint: 'sightings' as const,
+        },
+      ],
+    ])
+
+    renderTable(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
+      />
+    )
+
+    const alice = screen.getByRole('region', { name: 'Alice fleet table' })
+    expect(within(alice).getByText('Cruiser A')).toBeInTheDocument()
+  })
+
+  it('keeps a blank body for an empty sighting roster on the slice', () => {
+    seedShellViewpoint(1)
+    const streamPlayersById = new Map([
+      [
+        8,
+        {
+          ...pendingFleetPlayerStreamSlice(),
+          records: [],
+          rosterPaint: 'sightings' as const,
+        },
+      ],
+    ])
+
+    renderTable(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
+      />
+    )
+
+    const alice = screen.getByRole('region', { name: 'Alice fleet table' })
+    expect(within(alice).queryByText('No active fleet records.')).not.toBeInTheDocument()
+    expect(within(alice).queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('shows the empty-ledger line when the slice roster paint is a ledger', () => {
+    seedShellViewpoint(1)
+    const streamPlayersById = new Map([
+      [
+        8,
+        {
+          ...pendingFleetPlayerStreamSlice(),
+          records: [],
+          rosterPaint: 'ledger' as const,
+        },
+      ],
+    ])
+
+    renderTable(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
+      />
+    )
+
+    const alice = screen.getByRole('region', { name: 'Alice fleet table' })
+    expect(within(alice).getByText('No active fleet records.')).toBeInTheDocument()
   })
 
   it('hides tiles for players turned off in fleet visibility', () => {
