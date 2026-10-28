@@ -409,28 +409,6 @@ class FleetPersistencePolicy:
             return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
         turn_context = FleetTurnContext.from_turn(turn)
 
-        # A caller that already built a final ledger (no scores materialization on
-        # the services) is stored as given. The observation leg never sets
-        # turnEvidenceAtN, so orchestrator finalization always takes the rebuild.
-        if services.inference_materialization is None and wire_ledger.provenance.turn_evidence_at_n:
-            from api.analytics.fleet.observation_ingest import apply_id_bounds_then_observations
-
-            apply_id_bounds_then_observations(
-                wire_ledger.ledger,
-                turn_context,
-                perspective=scope.perspective,
-            )
-            return self._commit_living_final(
-                services,
-                scope,
-                result_wire,
-                PersistedFleetLedger(
-                    ledger=wire_ledger.ledger,
-                    provenance=wire_ledger.provenance,
-                    materialization_version=FLEET_MATERIALIZATION_VERSION,
-                ),
-            )
-
         prior_scope = _fleet_prior_scope(scope, settings=turn.settings)
         prior_on_disk = None
         prior_is_ensure_final = False

@@ -805,13 +805,33 @@ def test_orchestrator_fleet_persist_notifies_scores_invalidation(
 ):
     from api.analytics.turn_roster import iter_turn_players
 
-    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    inference_persistence, inference_materialization = _inference_materialization_for_fleet(
+        memory_backend,
+        load_turn,
+    )
     turn_112 = load_turn(112)
     assert turn_112 is not None
+    turn_111 = load_turn(111)
+    assert turn_111 is not None
     players = list(iter_turn_players(turn_112))
     player_p = players[0].id
     player_q = players[1].id
     _seed_scores_rows_for_all_players(inference_persistence, turn_112)
+    # Ensure-final fleet@110 and closed scores@111 let living finalization rebuild.
+    _seed_scores_rows_for_all_players(inference_persistence, turn_111)
+    persistence.put_ledger(
+        628580,
+        1,
+        110,
+        player_p,
+        PersistedFleetLedger(
+            ledger=FleetAcquisitionLedger(player_id=player_p),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+    )
 
     rescheduled_players: list[int] = []
     monkeypatch.setattr(
@@ -825,8 +845,6 @@ def test_orchestrator_fleet_persist_notifies_scores_invalidation(
     )
     invalidation.wire_scores_invalidation_to_fleet_persistence()
 
-    turn_111 = load_turn(111)
-    assert turn_111 is not None
     ctx = make_analytic_query_context(
         turn_111,
         TurnAnalyticsOptions(),
@@ -839,15 +857,12 @@ def test_orchestrator_fleet_persist_notifies_scores_invalidation(
                 game_id=628580,
                 perspective=1,
                 load_turn=load_turn,
+                inference_materialization=inference_materialization,
             ),
         },
     )
     persisted = PersistedFleetLedger(
         ledger=FleetAcquisitionLedger(player_id=player_p),
-        provenance=FleetMaterializationProvenance(
-            turn_evidence_at_n=True,
-            prior_ledger_at_n_minus_1=True,
-        ),
     )
 
     notification = FleetPersistencePolicy().persist(
