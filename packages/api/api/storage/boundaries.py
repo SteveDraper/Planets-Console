@@ -36,9 +36,18 @@ SCORES_INFERENCE_ROW_PATTERN: tuple[str, ...] = (
     "*",
 )
 
+# One Backfill earlier turns record per game. Sibling of ``games/*/info`` so a
+# GameInfo refresh does not replace it. Not a split of an existing document.
+BACKFILL_EARLIER_TURNS_PATTERN: tuple[str, ...] = (
+    "games",
+    "*",
+    "backfill-earlier-turns",
+)
+
 # V1 patterns aligned with service store paths (ADR 0001).
 BREAKPOINT_PATTERNS: tuple[tuple[str, ...], ...] = (
     ("games", "*", "info"),
+    BACKFILL_EARLIER_TURNS_PATTERN,
     ("games", "*", "analytics", "*"),
     ("games", "*", "*", "analytics", "*"),
     ("games", "*", "*", "analytics", "fleet-evidence", "*"),

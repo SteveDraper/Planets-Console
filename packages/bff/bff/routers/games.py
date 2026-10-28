@@ -12,7 +12,9 @@ optional ``sectorName`` from in-process memo or ``games/{id}/info`` (empty list 
 
 **GET /games/{game_id}/league-teams** forwards the Core league team directory. Profile fetches
 stay in Core. **GET /games/{game_id}/{perspective}/territory-movie** forwards the packed
-Territory movie; Core packs it. **POST /games/{game_id}/info** refreshes game info from Planets.nu.
+Territory movie; Core packs it. **GET/PUT /games/{game_id}/backfill-earlier-turns** reads and
+stores the game-wide Backfill earlier turns choice. The Settings checkbox is the writer.
+**POST /games/{game_id}/info** refreshes game info from Planets.nu.
 **POST .../turns/ensure** loads a turn when missing. **GET .../viewpoint-eligibility** returns the
 Core allowed **perspective** set for a login (username query required). Warp-well and Stellar
 Cartography routes use shared Core handlers.
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from api.transport.backfill_earlier_turns import BackfillEarlierTurnsBody
 from api.transport.concept_stellar_cartography import StellarCartographySampleResponse
 from api.transport.concept_warp_well import (
     CoordinateInWarpWellRequest,
@@ -153,6 +156,27 @@ def get_stored_game_info(
         lambda: core.get_stored_game_info(game_id),
     )
     return finish_response(result, root)
+
+
+@router.get("/{game_id}/backfill-earlier-turns", response_model=BackfillEarlierTurnsBody)
+def get_backfill_earlier_turns(
+    game_id: int,
+    *,
+    core: CoreClientDep,
+) -> BackfillEarlierTurnsBody:
+    """Return the game-wide Backfill earlier turns choice. A missing record is false."""
+    return core.get_backfill_earlier_turns(game_id)
+
+
+@router.put("/{game_id}/backfill-earlier-turns", response_model=BackfillEarlierTurnsBody)
+def put_backfill_earlier_turns(
+    game_id: int,
+    body: BackfillEarlierTurnsBody,
+    *,
+    core: CoreClientDep,
+) -> BackfillEarlierTurnsBody:
+    """Store one Backfill earlier turns choice for this game. The Settings checkbox calls this."""
+    return core.set_backfill_earlier_turns(game_id, body.backfill_earlier_turns)
 
 
 @router.get("/{game_id}/league-teams", response_model=LeagueTeamsResponse)

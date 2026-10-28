@@ -357,6 +357,43 @@ export async function fetchStoredGameInfo(gameId: string): Promise<GameInfoRespo
   return r.json()
 }
 
+export type BackfillEarlierTurnsBody = components['schemas']['BackfillEarlierTurnsBody']
+
+/** Game-wide Backfill earlier turns choice. A missing record is false. */
+export async function fetchBackfillEarlierTurns(
+  gameId: string
+): Promise<BackfillEarlierTurnsBody> {
+  const path = `/bff/games/${encodeURIComponent(gameId)}/backfill-earlier-turns`
+  const endpointLabel = `GET ${path}`
+  const r = await bffRequest(path, undefined, endpointLabel)
+  if (!r.ok) {
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
+  }
+  return r.json()
+}
+
+/** Settings checkbox writer. One value per game id. */
+export async function putBackfillEarlierTurns(
+  gameId: string,
+  backfillEarlierTurns: boolean
+): Promise<BackfillEarlierTurnsBody> {
+  const path = `/bff/games/${encodeURIComponent(gameId)}/backfill-earlier-turns`
+  const endpointLabel = `PUT ${path}`
+  const r = await bffRequest(
+    path,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backfillEarlierTurns }),
+    },
+    endpointLabel
+  )
+  if (!r.ok) {
+    await throwBffHttpErrorFromResponse(r, endpointLabel)
+  }
+  return r.json()
+}
+
 export type StoredTurnPerspectivesResponse = {
   perspectives: number[]
 }

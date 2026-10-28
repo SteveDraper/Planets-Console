@@ -1436,6 +1436,7 @@ _Avoid_: per-row schema version, persistence_version (row content)
 
 **V1 breakpoint patterns**:
 - `games/*/info` -- **GameInfo** document
+- `games/*/backfill-earlier-turns` -- one **Backfill earlier turns** record per game (absent record reads as off)
 - `games/*/*/turns/*` -- **TurnInfo** document per **perspective** and turn
 - `games/*/analytics/*` -- game-global **analytic persistence** document per analytic id
 - `games/*/*/analytics/*` -- per-**perspective** **analytic persistence** document per analytic id (nested keys such as `evidence` live inside the document)

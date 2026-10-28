@@ -21,6 +21,7 @@ from api.services.load_all_turns import LoadAllTurnsService
 from api.services.territory_movie import TerritoryMovieService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_load_service import TurnLoadService
+from api.transport.backfill_earlier_turns import BackfillEarlierTurnsBody
 from api.transport.connections_options import (
     DEFAULT_FLARE_DEPTH,
     FLARE_DEPTH_DESCRIPTION,
@@ -70,6 +71,29 @@ def post_game_info(
 ) -> GameInfo:
     """Apply an update operation (e.g. refresh from Planets.nu) and return stored game info."""
     return svc.update_game_info(game_id, body, planets)
+
+
+@router.get("/{game_id}/backfill-earlier-turns", response_model=BackfillEarlierTurnsBody)
+def get_backfill_earlier_turns(
+    game_id: int,
+    svc: GameService = Depends(get_game_service),
+) -> BackfillEarlierTurnsBody:
+    """Return the game-wide Backfill earlier turns choice.
+
+    A stored game with no setting record is false. This read does not submit a walk.
+    """
+    return BackfillEarlierTurnsBody(backfillEarlierTurns=svc.get_backfill_earlier_turns(game_id))
+
+
+@router.put("/{game_id}/backfill-earlier-turns", response_model=BackfillEarlierTurnsBody)
+def put_backfill_earlier_turns(
+    game_id: int,
+    body: BackfillEarlierTurnsBody,
+    svc: GameService = Depends(get_game_service),
+) -> BackfillEarlierTurnsBody:
+    """Store one Backfill earlier turns choice for this game id."""
+    enabled = svc.set_backfill_earlier_turns(game_id, body.backfill_earlier_turns)
+    return BackfillEarlierTurnsBody(backfillEarlierTurns=enabled)
 
 
 @router.get("/{game_id}/league-teams", response_model=LeagueTeamsResponse)

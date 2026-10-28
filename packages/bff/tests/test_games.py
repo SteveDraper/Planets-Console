@@ -163,6 +163,26 @@ def test_post_turns_ensure_uses_loadturn_when_missing(mock_pc_class):
     storage.get("games/628580/1/turns/111")
 
 
+def test_backfill_earlier_turns_matches_core():
+    """The Settings checkbox path stores one boolean the Core read returns."""
+    storage = get_storage()
+    with open(ASSETS_DIR / "game_info_sample.json") as handle:
+        storage.put("games/628580/info", json.load(handle))
+    from api.app import app as api_app
+
+    core = TestClient(api_app, raise_server_exceptions=False)
+    path = "/games/628580/backfill-earlier-turns"
+    core_path = "/v1/games/628580/backfill-earlier-turns"
+
+    assert client.get(path).json() == {"backfillEarlierTurns": False}
+    saved = client.put(path, json={"backfillEarlierTurns": True})
+    assert saved.status_code == 200
+    assert saved.json() == {"backfillEarlierTurns": True}
+    assert client.get(path).json() == core.get(core_path).json()
+    info = client.get("/games/628580/info")
+    assert "backfillEarlierTurns" not in info.text
+
+
 def test_get_stored_game_info():
     """GET /games/{id}/info returns game info from storage without Planets.nu."""
     storage = get_storage()

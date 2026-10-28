@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from api.errors import ValidationError
 from api.storage.boundaries import (
+    BACKFILL_EARLIER_TURNS_PATTERN,
     BREAKPOINT_PATTERNS,
     FLEET_LEDGER_PATTERN,
     SCORES_INFERENCE_ROW_PATTERN,
@@ -21,6 +22,13 @@ def test_resolve_breakpoint_game_info():
     bp, suffix = resolve_breakpoint("games/628580/info")
     assert bp == "games/628580/info"
     assert suffix is None
+
+
+def test_backfill_earlier_turns_is_its_own_document():
+    bp, suffix = resolve_breakpoint("games/628580/backfill-earlier-turns")
+    assert bp == "games/628580/backfill-earlier-turns"
+    assert suffix is None
+    assert rehome_source_patterns(BACKFILL_EARLIER_TURNS_PATTERN, BREAKPOINT_PATTERNS) == ()
 
 
 def test_resolve_breakpoint_nested_in_document():

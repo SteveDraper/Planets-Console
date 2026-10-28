@@ -1,4 +1,4 @@
-"""MCP shell tools: stored games, GameInfo, turn-ensure, stored perspectives."""
+"""MCP shell tools: stored games, GameInfo, turn-ensure, stored perspectives, backfill read."""
 
 from collections.abc import Callable
 from typing import Annotated, Any, Literal, TypedDict
@@ -21,6 +21,7 @@ GET_GAME_INFO_TOOL = "get_game_info"
 REFRESH_GAME_INFO_TOOL = "refresh_game_info"
 ENSURE_TURN_TOOL = "ensure_turn"
 LIST_STORED_PERSPECTIVES_TOOL = "list_stored_perspectives"
+GET_BACKFILL_EARLIER_TURNS_TOOL = "get_backfill_earlier_turns"
 
 SHELL_TOOL_NAMES = (
     LIST_STORED_GAMES_TOOL,
@@ -28,6 +29,7 @@ SHELL_TOOL_NAMES = (
     REFRESH_GAME_INFO_TOOL,
     ENSURE_TURN_TOOL,
     LIST_STORED_PERSPECTIVES_TOOL,
+    GET_BACKFILL_EARLIER_TURNS_TOOL,
 )
 
 SHELL_TOOL_REQUIRED_PROPERTIES: dict[str, frozenset[str]] = {
@@ -36,6 +38,7 @@ SHELL_TOOL_REQUIRED_PROPERTIES: dict[str, frozenset[str]] = {
     REFRESH_GAME_INFO_TOOL: frozenset({"game_id"}),
     ENSURE_TURN_TOOL: frozenset({"game_id", "turn", "perspective"}),
     LIST_STORED_PERSPECTIVES_TOOL: frozenset({"game_id", "turn"}),
+    GET_BACKFILL_EARLIER_TURNS_TOOL: frozenset({"game_id"}),
 }
 
 
@@ -54,6 +57,10 @@ class ListStoredPerspectivesResult(TypedDict):
 
 class EnsureTurnResult(TypedDict):
     status: Literal["already_stored", "loaded"]
+
+
+class BackfillEarlierTurnsResult(TypedDict):
+    backfillEarlierTurns: bool
 
 
 def register_shell_tools(
@@ -76,6 +83,7 @@ def register_shell_tools(
         planets_client_factory,
     )
     _register_list_stored_perspectives(mcp, game_service, turn_load_service, resolve_login)
+    _register_get_backfill_earlier_turns(mcp, game_service, resolve_login)
 
 
 def _login_params(login_identity: str) -> RefreshGameInfoParams:
@@ -200,3 +208,27 @@ def _register_list_stored_perspectives(
         )
         stored = turn_load_service.list_stored_turn_perspectives(game_id, turn)
         return {"perspectives": [slot for slot in stored if slot in allowed]}
+
+
+def _register_get_backfill_earlier_turns(
+    mcp: MCPServer,
+    game_service: GameService,
+    resolve_login: Callable[[Context], str],
+) -> None:
+    @mcp.tool(name=GET_BACKFILL_EARLIER_TURNS_TOOL)
+    def get_backfill_earlier_turns(
+        game_id: int,
+        login: Annotated[str, Resolve(resolve_login)],
+    ) -> BackfillEarlierTurnsResult:
+        """Read whether Backfill earlier turns is on for this game.
+
+        Returns only backfillEarlierTurns. Does not change the setting and does not
+        start a walk. Login identity is the HTTP header X-Planets-Nu-Login, not a
+        tool argument. Any login that passes the credential probe may call this.
+        A stored game with no setting record is false. A game with no stored
+        GameInfo is not found.
+        """
+        _ = login
+        return {
+            "backfillEarlierTurns": game_service.get_backfill_earlier_turns(game_id),
+        }
