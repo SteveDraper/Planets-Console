@@ -1,5 +1,5 @@
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
-import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
+import type { FleetCountDiscrepancy, FleetTablePlayer, FleetTableRecord } from './fleetTableWireSchema'
 
 export const FLEET_MATERIALIZATION_PENDING_SUMMARY = 'Fleet materialization in progress'
 
@@ -12,8 +12,6 @@ export type FleetPlayerStreamSlice = {
   playerName?: string
   records?: readonly FleetTableRecord[]
   rosterPaint?: FleetRosterPaint
-  rosterRecords?: readonly FleetTableRecord[]
-  rosterDiscrepancy?: FleetCountDiscrepancy
   discrepancyOverlay: FleetDiscrepancyOverlay
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
@@ -27,8 +25,6 @@ export type FleetPlayerStreamState = {
   playerName: string | null
   records: FleetTableRecord[] | null
   rosterPaint: FleetRosterPaint | null
-  rosterRecords: FleetTableRecord[] | null
-  rosterDiscrepancy?: FleetCountDiscrepancy
   discrepancyOverlay: FleetDiscrepancyOverlay
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
@@ -43,7 +39,6 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
     playerName: null,
     records: null,
     rosterPaint: null,
-    rosterRecords: null,
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
@@ -77,6 +72,18 @@ function upsertRecord(
   return next
 }
 
+function ledgerDisplayState(
+  ledger: FleetTablePlayer
+): Pick<FleetPlayerStreamState, 'playerName' | 'records' | 'discrepancyOverlay' | 'discrepancy'> {
+  const hasDiscrepancy = ledger.discrepancy != null
+  return {
+    playerName: ledger.playerName,
+    records: [...ledger.records],
+    discrepancyOverlay: hasDiscrepancy ? 'set' : 'clear',
+    discrepancy: ledger.discrepancy,
+  }
+}
+
 function provenanceSummary(event: Extract<FleetTableStreamEvent, { type: 'provenance' }>): string {
   if (!event.turnEvidenceAtN) {
     return 'Collecting turn evidence'
@@ -95,38 +102,40 @@ export function reduceFleetPlayerStreamState(
   event: FleetTableStreamEvent
 ): FleetPlayerStreamState {
   if (event.type === 'roster_paint') {
-    const ledger = event.ledger
-    const hasDiscrepancy = ledger.discrepancy != null
     return {
       ...state,
-      playerName: ledger.playerName,
+      ...ledgerDisplayState(event.ledger),
       rosterPaint: event.paint,
-      rosterRecords: [...ledger.records],
-      rosterDiscrepancy: hasDiscrepancy ? ledger.discrepancy : undefined,
       error: null,
     }
   }
 
   if (event.type === 'ledger_updated') {
-    const ledger = event.ledger
-    const hasDiscrepancy = ledger.discrepancy != null
-    const replacesTurnLoad = event.replacesTurnLoad !== false
-    return {
-      ...state,
-      playerName: ledger.playerName,
-      records: [...ledger.records],
-      rosterPaint: replacesTurnLoad ? null : state.rosterPaint,
-      rosterRecords: replacesTurnLoad ? null : state.rosterRecords,
-      rosterDiscrepancy: replacesTurnLoad ? undefined : state.rosterDiscrepancy,
-      discrepancyOverlay: hasDiscrepancy ? 'set' : 'clear',
-      discrepancy: ledger.discrepancy,
+    const progress = {
       isPending: !state.isComplete,
       summary: state.isComplete ? state.summary : 'Refining fleet records',
+    }
+    // Hold the painted roster. An unpainted stream still shows this ledger.
+    if (state.rosterPaint != null && event.replacesTurnLoad === false) {
+      return {
+        ...state,
+        ...progress,
+      }
+    }
+    return {
+      ...state,
+      ...ledgerDisplayState(event.ledger),
+      ...progress,
+      rosterPaint: null,
       error: null,
     }
   }
 
   if (event.type === 'record_refined') {
+    // A painted roster stays until a replacing ledger writes records.
+    if (state.rosterPaint != null) {
+      return state
+    }
     const baseRecords = state.records ?? []
     return {
       ...state,
@@ -202,12 +211,8 @@ export function fleetPlayerStreamSliceFromState(
   if (state.records != null) {
     slice.records = state.records
   }
-  if (state.rosterPaint != null && state.rosterRecords != null) {
+  if (state.rosterPaint != null) {
     slice.rosterPaint = state.rosterPaint
-    slice.rosterRecords = state.rosterRecords
-    if (state.rosterDiscrepancy != null) {
-      slice.rosterDiscrepancy = state.rosterDiscrepancy
-    }
   }
   if (state.discrepancyOverlay === 'set' && state.discrepancy != null) {
     slice.discrepancy = state.discrepancy
@@ -249,34 +254,5 @@ export function fleetPlayerFromStreamSlice(
     ...(discrepancy != null ? { discrepancy } : {}),
     streamError: streamSlice?.error ?? null,
     streamSlice,
-  }
-}
-
-export function fleetTableTileModel(
-  streamSlice: FleetPlayerStreamSlice | undefined,
-  fallbackPlayerName: string
-): {
-  playerName: string
-  records: readonly FleetTableRecord[]
-  discrepancy?: FleetCountDiscrepancy
-  streamError: string | null
-  streamSlice: FleetPlayerStreamSlice | undefined
-  rosterPaint?: FleetRosterPaint
-} {
-  const merged = fleetPlayerFromStreamSlice(streamSlice, fallbackPlayerName)
-  if (streamSlice?.rosterPaint != null && streamSlice.rosterRecords != null) {
-    return {
-      playerName: merged.playerName,
-      records: streamSlice.rosterRecords,
-      ...(streamSlice.rosterDiscrepancy != null
-        ? { discrepancy: streamSlice.rosterDiscrepancy }
-        : {}),
-      streamError: merged.streamError,
-      streamSlice: merged.streamSlice,
-      rosterPaint: streamSlice.rosterPaint,
-    }
-  }
-  return {
-    ...merged,
   }
 }

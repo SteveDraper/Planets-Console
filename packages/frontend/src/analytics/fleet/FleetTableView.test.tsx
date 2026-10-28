@@ -345,6 +345,83 @@ describe('FleetTableView', () => {
     expect(screen.getByRole('region', { name: 'The Feds (Alice) fleet table' })).toBeInTheDocument()
   })
 
+  it('renders painted roster rows from the stream slice', () => {
+    seedShellViewpoint(1)
+    const streamPlayersById = new Map([
+      [
+        8,
+        {
+          ...pendingFleetPlayerStreamSlice(),
+          playerName: 'Alice',
+          records: [activeRecord],
+          rosterPaint: 'sightings' as const,
+        },
+      ],
+    ])
+
+    renderTable(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
+      />
+    )
+
+    const alice = screen.getByRole('region', { name: 'Alice fleet table' })
+    expect(within(alice).getByText('Cruiser A')).toBeInTheDocument()
+  })
+
+  it('keeps a blank body for an empty sighting roster on the slice', () => {
+    seedShellViewpoint(1)
+    const streamPlayersById = new Map([
+      [
+        8,
+        {
+          ...pendingFleetPlayerStreamSlice(),
+          records: [],
+          rosterPaint: 'sightings' as const,
+        },
+      ],
+    ])
+
+    renderTable(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
+      />
+    )
+
+    const alice = screen.getByRole('region', { name: 'Alice fleet table' })
+    expect(within(alice).queryByText('No active fleet records.')).not.toBeInTheDocument()
+    expect(within(alice).queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('shows the empty-ledger line when the slice roster paint is a ledger', () => {
+    seedShellViewpoint(1)
+    const streamPlayersById = new Map([
+      [
+        8,
+        {
+          ...pendingFleetPlayerStreamSlice(),
+          records: [],
+          rosterPaint: 'ledger' as const,
+        },
+      ],
+    ])
+
+    renderTable(
+      <FleetTableView
+        componentCatalog={testComponentCatalog}
+        streamPlayersById={streamPlayersById}
+        racePlayerLabels={new Map()}
+      />
+    )
+
+    const alice = screen.getByRole('region', { name: 'Alice fleet table' })
+    expect(within(alice).getByText('No active fleet records.')).toBeInTheDocument()
+  })
+
   it('hides tiles for players turned off in fleet visibility', () => {
     seedShellViewpoint(1)
     useFleetPlayerVisibilityStore.getState().setFleetPlayerVisible(9, false)

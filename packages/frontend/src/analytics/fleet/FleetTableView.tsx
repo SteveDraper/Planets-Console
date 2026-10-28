@@ -3,7 +3,7 @@ import type { FleetComponentCatalog } from './fleetComponentCatalog'
 import { EMPTY_FLEET_COMPONENT_CATALOG } from './fleetComponentCatalog'
 import { fleetPlayerDisplayLabel } from './fleetPlayerDisplayLabel'
 import type { FleetPlayerStreamSlice } from './fleetTablePlayerStreamState'
-import { fleetTableTileModel } from './fleetTablePlayerStreamState'
+import { fleetPlayerFromStreamSlice } from './fleetTablePlayerStreamState'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 
 type FleetTableViewProps = {
@@ -31,18 +31,18 @@ export function FleetTableView({
     <div className="flex flex-col gap-3 p-4">
       {visiblePlayers.map((player) => {
         const streamSlice = streamPlayersById.get(player.playerId)
-        const tile = fleetTableTileModel(streamSlice, player.name)
+        const merged = fleetPlayerFromStreamSlice(streamSlice, player.name)
         const playerLabel = fleetPlayerDisplayLabel(player, racePlayerLabels, streamSlice)
         return (
           <FleetPlayerTableTile
             key={player.playerId}
             playerName={playerLabel}
-            records={tile.records}
-            discrepancy={tile.discrepancy}
-            rosterPaint={tile.rosterPaint}
+            records={merged.records}
+            discrepancy={merged.discrepancy}
+            rosterPaint={streamSlice?.rosterPaint}
             componentCatalog={componentCatalog}
-            streamError={tile.streamError}
-            streamSlice={tile.streamSlice}
+            streamError={merged.streamError}
+            streamSlice={merged.streamSlice}
           />
         )
       })}
