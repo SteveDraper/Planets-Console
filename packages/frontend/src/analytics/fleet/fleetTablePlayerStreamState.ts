@@ -8,10 +8,23 @@ export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
 /** Turn-load roster: a stored ledger, or this turn's sightings when no file exists. */
 export type FleetRosterPaint = 'sightings' | 'ledger'
 
+/**
+ * Map picture for one player. A stored ledger is the paint, including an
+ * approximate fleet and a ledger subject to revision. Sightings are the paint
+ * only while this turn has no ledger. A host-turn ledger save replaces it.
+ * Stream updates that do not save a ledger leave this picture in place.
+ */
+export type FleetMapPaint = {
+  source: FleetRosterPaint
+  playerName: string
+  records: readonly FleetTableRecord[]
+}
+
 export type FleetPlayerStreamSlice = {
   playerName?: string
   records?: readonly FleetTableRecord[]
   rosterPaint?: FleetRosterPaint
+  mapPaint?: FleetMapPaint
   discrepancyOverlay: FleetDiscrepancyOverlay
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
@@ -25,6 +38,7 @@ export type FleetPlayerStreamState = {
   playerName: string | null
   records: FleetTableRecord[] | null
   rosterPaint: FleetRosterPaint | null
+  mapPaint: FleetMapPaint | null
   discrepancyOverlay: FleetDiscrepancyOverlay
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
@@ -39,6 +53,7 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
     playerName: null,
     records: null,
     rosterPaint: null,
+    mapPaint: null,
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
@@ -84,6 +99,17 @@ function ledgerDisplayState(
   }
 }
 
+function mapPaintFromLedger(
+  source: FleetRosterPaint,
+  ledger: FleetTablePlayer
+): FleetMapPaint {
+  return {
+    source,
+    playerName: ledger.playerName,
+    records: [...ledger.records],
+  }
+}
+
 function provenanceSummary(event: Extract<FleetTableStreamEvent, { type: 'provenance' }>): string {
   if (!event.turnEvidenceAtN) {
     return 'Collecting turn evidence'
@@ -106,6 +132,7 @@ export function reduceFleetPlayerStreamState(
       ...state,
       ...ledgerDisplayState(event.ledger),
       rosterPaint: event.paint,
+      mapPaint: mapPaintFromLedger(event.paint, event.ledger),
       error: null,
     }
   }
@@ -116,17 +143,22 @@ export function reduceFleetPlayerStreamState(
       summary: state.isComplete ? state.summary : 'Refining fleet records',
     }
     // Hold the painted roster. An unpainted stream still shows this ledger.
+    // Map paint changes only when this event saves the host-turn ledger.
     if (state.rosterPaint != null && event.replacesTurnLoad === false) {
       return {
         ...state,
         ...progress,
       }
     }
+    const savesHostTurnLedger = event.replacesTurnLoad !== false
     return {
       ...state,
       ...ledgerDisplayState(event.ledger),
       ...progress,
       rosterPaint: null,
+      mapPaint: savesHostTurnLedger
+        ? mapPaintFromLedger('ledger', event.ledger)
+        : state.mapPaint,
       error: null,
     }
   }
@@ -213,6 +245,9 @@ export function fleetPlayerStreamSliceFromState(
   }
   if (state.rosterPaint != null) {
     slice.rosterPaint = state.rosterPaint
+  }
+  if (state.mapPaint != null) {
+    slice.mapPaint = state.mapPaint
   }
   if (state.discrepancyOverlay === 'set' && state.discrepancy != null) {
     slice.discrepancy = state.discrepancy

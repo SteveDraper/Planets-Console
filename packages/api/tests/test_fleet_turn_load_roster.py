@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.fleet_table_player_run import (
     FleetLedgerWireProgressTracker,
@@ -20,6 +22,9 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
     _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
+from api.analytics.fleet.military_estimate import fleet_ship_military_estimate_2x
+from api.analytics.fleet.motion_wire import fleet_ship_motion_wire
+from api.analytics.fleet.observation_ingest import turn_load_sighting_ledger
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetFieldKnown,
@@ -299,3 +304,103 @@ def test_earlier_turn_progress_does_not_replace_the_turn_load_roster(sample_turn
     host_updated = [event for event in host_events if event.get("type") == "ledger_updated"]
     assert host_updated
     assert "replacesTurnLoad" not in host_updated[0]
+
+
+def test_turn_load_paint_does_not_read_a_previous_turn_ledger(sample_turn):
+    services = _services(sample_turn)
+    player_id = next(
+        player_id
+        for player_id in {ship.ownerid for ship in sample_turn.ships}
+        if _living_ships(sample_turn, player_id)
+    )
+    turn_number = sample_turn.settings.turn
+    services.persistence.put_ledger(
+        sample_turn.game.id,
+        sample_turn.player.id,
+        turn_number - 1,
+        player_id,
+        _stored_ship_ledger(sample_turn, player_id),
+    )
+
+    admission = resolve_player_stream_admission(
+        services.persistence,
+        game_id=sample_turn.game.id,
+        perspective=sample_turn.player.id,
+        turn_number=turn_number,
+        player_id=player_id,
+        turn=sample_turn,
+    )
+
+    ledger = _paint_ledger(admission)
+    assert admission.events[0]["paint"] == "sightings"
+    records = ledger["records"]
+    assert isinstance(records, list)
+    assert [record["recordId"] for record in records] == [
+        f"turn-load-{ship.id}" for ship in _living_ships(sample_turn, player_id)
+    ]
+    assert "stored-ship" not in {record["recordId"] for record in records}
+
+
+def test_sighting_paint_attaches_map_estimate_and_motion_without_filling_fields(sample_turn):
+    source = next(ship for ship in sample_turn.ships if ship.turnkilled == 0)
+    hull = next(hull for hull in sample_turn.hulls if hull.id > 0 and hull.beams > 0)
+    other_id = next(
+        (player.id for player in sample_turn.players if player.id != sample_turn.player.id),
+        sample_turn.player.id + 1,
+    )
+    underway = replace(
+        source,
+        ownerid=other_id,
+        hullid=hull.id,
+        engineid=0,
+        beamid=0,
+        beams=0,
+        torpedoid=0,
+        torps=0,
+        warp=4,
+        targetx=source.x + 40,
+        targety=source.y,
+        heading=-1,
+    )
+    turn = replace(
+        sample_turn,
+        ships=[underway if ship.id == source.id else ship for ship in sample_turn.ships],
+    )
+    services = _services(turn)
+    admission = resolve_player_stream_admission(
+        services.persistence,
+        game_id=turn.game.id,
+        perspective=turn.player.id,
+        turn_number=turn.settings.turn,
+        player_id=other_id,
+        turn=turn,
+    )
+
+    ledger_wire = _paint_ledger(admission)
+    assert admission.events[0]["paint"] == "sightings"
+    records = ledger_wire["records"]
+    assert isinstance(records, list)
+    painted = next(
+        record for record in records if record["fields"]["shipId"]["value"] == underway.id
+    )
+    domain = next(
+        record
+        for record in turn_load_sighting_ledger(turn, other_id, perspective=turn.player.id).records
+        if record.record_id == f"turn-load-{underway.id}"
+    )
+    assert painted["fields"]["engine"] == {"kind": "unknown"}
+    assert painted["fields"]["beams"] == {"kind": "unknown"}
+    assert painted["fields"]["launchers"] == {"kind": "unknown"}
+    assert painted["fields"]["hull"] == {"kind": "known", "value": underway.hullid}
+    estimate = fleet_ship_military_estimate_2x(domain, turn=turn)
+    assert estimate is not None
+    assert painted["militaryEstimate2x"] == estimate
+    motion = fleet_ship_motion_wire(domain, turn=turn)
+    assert motion is not None
+    assert painted["motion"] == motion
+    assert motion["warp"] == 4
+    last_seen = painted["lastSeen"]
+    assert isinstance(last_seen, dict)
+    assert last_seen["turn"] == turn.settings.turn
+    assert last_seen["x"] == underway.x
+    assert last_seen["y"] == underway.y

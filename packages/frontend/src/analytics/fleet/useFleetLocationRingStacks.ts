@@ -6,16 +6,21 @@ import {
   FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE,
   type FleetLocationRingStack,
 } from './fleetLocationRings'
+import { fleetMapPaintSlices } from './fleetMapPaint'
 import { useFleetStreamPlayersById } from './FleetStreamPlayersContext'
 import { useFleetComponentCatalogQuery } from './useFleetComponentCatalogQuery'
 import { useOrderedFleetPlayers } from './useOrderedFleetPlayers'
 
-/** Project the shared fleet stream into location-ring stacks for map paint/hover. */
+/** Project each player's held map picture into location-ring stacks. */
 export function useFleetLocationRingStacks(
   analyticScope: AnalyticShellScope,
   enabled: boolean
 ): readonly FleetLocationRingStack[] {
   const streamPlayersById = useFleetStreamPlayersById()
+  const mapPlayersById = useMemo(
+    () => fleetMapPaintSlices(streamPlayersById),
+    [streamPlayersById]
+  )
   const { players: visiblePlayers } = useOrderedFleetPlayers({ visibleOnly: true })
   const componentCatalog = useFleetComponentCatalogQuery(analyticScope, enabled)
 
@@ -24,7 +29,7 @@ export function useFleetLocationRingStacks(
       return []
     }
     const ships = collectFleetLocationRingShips(
-      streamPlayersById,
+      mapPlayersById,
       visiblePlayers.map((player) => ({
         playerId: player.playerId,
         name: player.name,
@@ -35,7 +40,7 @@ export function useFleetLocationRingStacks(
     return buildFleetLocationRingStacks(ships, FLEET_LOCATION_RING_DEFAULT_STRENGTH_SCALE)
   }, [
     enabled,
-    streamPlayersById,
+    mapPlayersById,
     visiblePlayers,
     componentCatalog,
     analyticScope.turn,
