@@ -470,12 +470,14 @@ def _refresh_later_files_after_living_save(
     perspective: int,
     player_id: int,
     saved_turn: int,
+    player_invalidation_generation: int,
     saved: PersistedFleetLedger,
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None,
 ) -> None:
     """Replace later approximate files from a living ledger just stored at ``saved_turn``.
 
+    ``player_invalidation_generation`` is the epoch captured for that save.
     An eliminated empty ledger is not a prior for that replacement. Callers
     that returned a cache hit without writing must not call this.
     """
@@ -487,6 +489,7 @@ def _refresh_later_files_after_living_save(
         perspective=perspective,
         player_id=player_id,
         saved_turn=saved_turn,
+        player_invalidation_generation=player_invalidation_generation,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
     )
@@ -691,6 +694,7 @@ def _materialize_fleet_ledger_chain_for_player(
             perspective=perspective,
             player_id=player_id,
             saved_turn=turn_number,
+            player_invalidation_generation=coherence.generation,
             saved=current_persisted,
             load_turn=cached_load,
             inference_materialization=resolved_inference_materialization,
@@ -876,6 +880,7 @@ def get_or_materialize_fleet_ledger_for_player(
         perspective=perspective,
         player_id=player_id,
         saved_turn=turn_number,
+        player_invalidation_generation=coherence.generation,
         saved=saved,
         load_turn=load_turn,
         inference_materialization=inference_materialization,

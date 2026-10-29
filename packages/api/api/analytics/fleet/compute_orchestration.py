@@ -277,6 +277,12 @@ class FleetPersistencePolicy:
             raise ValueError("fleet observation persist requires concrete player_id")
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet observation persist requires concrete turn")
+        # Epoch for the following-file walk. Read before the ledger put.
+        player_invalidation_generation = services.persistence.player_invalidation_generation(
+            scope.game_id,
+            scope.perspective,
+            scope.player_id,
+        )
 
         turn = ctx.load_turn(scope.turn)
         eliminated = result_wire.get("eliminatedAtTurn") is True or (
@@ -334,7 +340,11 @@ class FleetPersistencePolicy:
             player_id=scope.player_id,
             persisted=put_result.stored,
         )
-        return self._refresh_following_callback(services, scope)
+        return self._refresh_following_callback(
+            services,
+            scope,
+            player_invalidation_generation,
+        )
 
     def _persist_finalization(
         self,
@@ -361,6 +371,12 @@ class FleetPersistencePolicy:
             raise ValueError("fleet persist requires concrete turn")
         if wire_ledger.ledger.player_id != scope.player_id:
             raise ValueError("fleet persist ledger player does not match scope")
+        # Epoch for the following-file walk. Read before the ledger put.
+        player_invalidation_generation = services.persistence.player_invalidation_generation(
+            scope.game_id,
+            scope.perspective,
+            scope.player_id,
+        )
 
         turn = ctx.load_turn(scope.turn)
         if turn is None:
@@ -443,6 +459,7 @@ class FleetPersistencePolicy:
                 provenance=provenance,
                 materialization_version=FLEET_MATERIALIZATION_VERSION,
             ),
+            player_invalidation_generation=player_invalidation_generation,
         )
 
     def _commit_living_final(
@@ -451,6 +468,8 @@ class FleetPersistencePolicy:
         scope: ComputeScope,
         result_wire: dict[str, object],
         persisted: PersistedFleetLedger,
+        *,
+        player_invalidation_generation: int,
     ) -> Callable[[], None]:
         """Store a living final ledger, then wake scores and later approximate files."""
         from api.analytics.fleet.compute_services import FleetComputeServices
@@ -471,7 +490,11 @@ class FleetPersistencePolicy:
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         scores_notification = put_result.deferred_notification
-        refresh = self._refresh_following_callback(services, scope)
+        refresh = self._refresh_following_callback(
+            services,
+            scope,
+            player_invalidation_generation,
+        )
 
         def _after_final_save() -> None:
             if scores_notification is not None:
@@ -484,8 +507,13 @@ class FleetPersistencePolicy:
         self,
         services: FleetComputeServices,
         scope: ComputeScope,
+        player_invalidation_generation: int,
     ) -> Callable[[], None]:
-        """Replace later approximate files from the ledger this persist just saved."""
+        """Replace later approximate files from the ledger this persist just saved.
+
+        ``player_invalidation_generation`` is the epoch captured at the start of
+        that persist, before the ledger put.
+        """
         from api.analytics.fleet.approximate_fleet import refresh_following_approximate_fleets
         from api.analytics.fleet.compute_services import FleetComputeServices
 
@@ -497,6 +525,7 @@ class FleetPersistencePolicy:
             raise ValueError("fleet later-file refresh requires concrete turn")
         player_id = scope.player_id
         saved_turn = scope.turn
+        generation = player_invalidation_generation
 
         def _refresh() -> None:
             refresh_following_approximate_fleets(
@@ -505,6 +534,7 @@ class FleetPersistencePolicy:
                 perspective=scope.perspective,
                 player_id=player_id,
                 saved_turn=saved_turn,
+                player_invalidation_generation=generation,
                 load_turn=services.load_turn,
                 inference_materialization=services.inference_materialization,
             )

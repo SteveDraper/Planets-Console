@@ -590,6 +590,38 @@ def _eliminate(turn, player_id: int):
     )
 
 
+def _invalidate_player_after_put(services, player_id: int, turn_number: int) -> None:
+    original = services.persistence.put_ledger
+
+    def wrapped(
+        game_id,
+        perspective,
+        stored_turn,
+        stored_player_id,
+        persisted,
+        *,
+        defer_ledger_persisted_notification=False,
+    ):
+        result = original(
+            game_id,
+            perspective,
+            stored_turn,
+            stored_player_id,
+            persisted,
+            defer_ledger_persisted_notification=defer_ledger_persisted_notification,
+        )
+        if stored_turn == turn_number and stored_player_id == player_id:
+            services.persistence.invalidate_player_ledgers_from_turn(
+                game_id,
+                perspective,
+                stored_turn,
+                stored_player_id,
+            )
+        return result
+
+    services.persistence.put_ledger = wrapped
+
+
 def _assert_later_file_recopied(services, player_id: int, *, stop_ship_id: int, later_ship_id: int):
     stop = _stored(services, player_id, 5)
     later = _stored(services, player_id, 6)
@@ -642,6 +674,124 @@ def test_leaf_save_replaces_later_approximate_file() -> None:
     )
 
     _assert_later_file_recopied(services, player_id, stop_ship_id=21, later_ship_id=30)
+
+
+def test_leaf_save_stops_later_refresh_when_epoch_already_changed(monkeypatch) -> None:
+    import api.analytics.fleet.chain as fleet_chain
+
+    turn4 = _turn(turn_number=4, ship_ids=(8,), capitalships=3, freighters=0)
+    turn5 = _turn(turn_number=5, ship_ids=(21,), capitalships=3, freighters=0)
+    turn6 = _turn(turn_number=6, ship_ids=(30,), capitalships=3, freighters=0)
+    services, _ctx, player_id = _bind(turn5, turn4, turn6)
+    _put(services, player_id, 4, _prior(player_id, [_record("kept-ship", ship_id=11)], final=True))
+    _put(services, player_id, 6, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+    before = persisted_fleet_ledger_to_json(_stored(services, player_id, 6))
+    real_refresh = fleet_chain.refresh_following_approximate_fleets
+
+    def bump_before_walk(**kwargs):
+        generation = services.persistence.player_invalidation_generation(
+            services.game_id,
+            services.perspective,
+            player_id,
+        )
+        assert kwargs["player_invalidation_generation"] == generation
+        services.persistence.invalidate_player_ledgers_from_turn(
+            services.game_id,
+            services.perspective,
+            5,
+            player_id,
+        )
+        return real_refresh(**kwargs)
+
+    monkeypatch.setattr(fleet_chain, "refresh_following_approximate_fleets", bump_before_walk)
+
+    saved = get_or_materialize_fleet_ledger_for_player(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        player_id,
+        turn5,
+        load_turn=services.load_turn,
+    )
+
+    assert 21 in _known_ship_ids(saved)
+    assert persisted_fleet_ledger_to_json(_stored(services, player_id, 6)) == before
+
+
+def test_chain_save_stops_later_refresh_after_first_rewritten_file() -> None:
+    turn3 = _turn(turn_number=3, ship_ids=(8,), capitalships=3, freighters=0)
+    turn4 = _turn(turn_number=4, ship_ids=(20,), capitalships=3, freighters=0)
+    turn5 = _turn(turn_number=5, ship_ids=(21,), capitalships=3, freighters=0)
+    turn6 = _turn(turn_number=6, ship_ids=(30,), capitalships=3, freighters=0)
+    turn7 = _turn(turn_number=7, ship_ids=(40,), capitalships=3, freighters=0)
+    services, _ctx, player_id = _bind(turn5, turn3, turn4, turn6, turn7)
+    _put(services, player_id, 3, _prior(player_id, [_record("kept-ship", ship_id=11)], final=True))
+    _put(services, player_id, 6, _prior(player_id, [_record("stale-six", ship_id=99)]))
+    _put(services, player_id, 7, _prior(player_id, [_record("stale-seven", ship_id=98)]))
+    before_seven = persisted_fleet_ledger_to_json(_stored(services, player_id, 7))
+    _invalidate_player_after_put(services, player_id, 6)
+
+    saved = _run_player_chain(services, player_id, turn5)
+
+    assert 21 in _known_ship_ids(saved)
+    rewritten = _stored(services, player_id, 6)
+    assert "stale-six" not in {record.record_id for record in rewritten.ledger.records}
+    assert 30 in _known_ship_ids(rewritten)
+    assert persisted_fleet_ledger_to_json(_stored(services, player_id, 7)) == before_seven
+
+
+def test_observation_refresh_keeps_generation_from_before_the_put() -> None:
+    turn5 = _turn(turn_number=5, ship_ids=(21,), capitalships=3, freighters=0)
+    turn6 = _turn(turn_number=6, ship_ids=(30,), capitalships=3, freighters=0)
+    services, ctx, player_id = _bind(turn5, turn6)
+    _put(services, player_id, 6, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+    before = persisted_fleet_ledger_to_json(_stored(services, player_id, 6))
+    _invalidate_player_after_put(services, player_id, 5)
+
+    stored, callback = _write_observation(services, ctx, turn5, player_id)
+
+    assert callback is not None
+    callback()
+    assert stored.provenance.turn_evidence_at_n is False
+    assert persisted_fleet_ledger_to_json(_stored(services, player_id, 6)) == before
+
+
+def test_finalization_refresh_keeps_generation_from_before_the_put() -> None:
+    turn1 = _turn(
+        turn_number=1,
+        ship_ids=(7,),
+        capitalships=2,
+        freighters=0,
+        shipchange=1,
+    )
+    turn2 = _turn(turn_number=2, ship_ids=(30,), capitalships=3, freighters=0)
+    services, ctx, player_id = _bind(turn1, turn2)
+    _put(services, player_id, 2, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+    before = persisted_fleet_ledger_to_json(_stored(services, player_id, 2))
+    _write_observation(services, ctx, turn1, player_id)
+    _invalidate_player_after_put(services, player_id, 1)
+    approximate = services.persistence.get_ledger(
+        services.game_id,
+        services.perspective,
+        1,
+        player_id,
+    )
+    assert approximate is not None
+    callback = FleetPersistencePolicy().persist(
+        ctx,
+        _scope(services, turn1, player_id),
+        {
+            "persistedLedgerWire": persisted_fleet_ledger_to_json(approximate),
+            "materializeTurn": 1,
+            "fleetPersistLeg": "finalization",
+        },
+    )
+
+    assert callback is not None
+    callback()
+    replaced = _stored(services, player_id, 1)
+    assert replaced.provenance.turn_evidence_at_n is True
+    assert persisted_fleet_ledger_to_json(_stored(services, player_id, 2)) == before
 
 
 def test_cache_hit_does_not_replace_later_approximate_file() -> None:
@@ -790,10 +940,22 @@ def test_later_file_refresh_and_final_commit_fail_closed() -> None:
     persisted = _prior(player_id, [])
 
     with pytest.raises(TypeError, match="FleetComputeServices"):
-        policy._refresh_following_callback(object(), concrete)
+        policy._refresh_following_callback(object(), concrete, 0)
     with pytest.raises(TypeError, match="FleetComputeServices"):
-        policy._commit_living_final(object(), concrete, {}, persisted)
+        policy._commit_living_final(
+            object(),
+            concrete,
+            {},
+            persisted,
+            player_invalidation_generation=0,
+        )
     with pytest.raises(ValueError, match="concrete turn"):
-        policy._refresh_following_callback(services, wildcard_turn)
+        policy._refresh_following_callback(services, wildcard_turn, 0)
     with pytest.raises(ValueError, match="concrete turn"):
-        policy._commit_living_final(services, wildcard_turn, {}, persisted)
+        policy._commit_living_final(
+            services,
+            wildcard_turn,
+            {},
+            persisted,
+            player_invalidation_generation=0,
+        )

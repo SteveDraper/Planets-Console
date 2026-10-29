@@ -164,12 +164,16 @@ def refresh_following_approximate_fleets(
     perspective: int,
     player_id: int,
     saved_turn: int,
+    player_invalidation_generation: int,
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None,
 ) -> None:
     """Replace each later approximate file from the ledger just saved.
 
-    Stops at a missing file, an ensure-final ledger, or an eliminated player.
+    ``player_invalidation_generation`` is the epoch captured for the save that
+    started this walk. The walk stops when that epoch no longer matches, and
+    when it hits a missing file, an ensure-final ledger, or an eliminated
+    player. A stop does not raise and does not roll back puts already stored.
     Does not create the missing turn. A terminal same-turn scoreboard writes
     the replacement; otherwise the copy stays approximate.
     """
@@ -178,6 +182,11 @@ def refresh_following_approximate_fleets(
 
     next_turn = saved_turn + 1
     while True:
+        if (
+            persistence.player_invalidation_generation(game_id, perspective, player_id)
+            != player_invalidation_generation
+        ):
+            return
         existing = persistence.get_ledger(game_id, perspective, next_turn, player_id)
         if existing is None or existing.provenance.eliminated_at_turn:
             return
