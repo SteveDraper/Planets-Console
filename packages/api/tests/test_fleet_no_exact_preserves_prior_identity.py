@@ -25,10 +25,7 @@ from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observat
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
-from api.analytics.fleet.serialization import (
-    persisted_fleet_ledger_from_json,
-    persisted_fleet_ledger_to_json,
-)
+from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
     FleetMaterializationProvenance,
     PersistedFleetLedger,
@@ -146,9 +143,8 @@ def _materialize_final_ledger(
     game_perspective: int,
     fleet_services,
     inference: FleetInferenceSupport,
-    prior: PersistedFleetLedger | None,
 ) -> PersistedFleetLedger:
-    """Observation leg + finalization persist for one turn."""
+    """Observation persist, then finalization. The prior is the file on disk."""
     ctx = make_analytic_query_context(
         turn,
         TurnAnalyticsOptions(),
@@ -160,25 +156,22 @@ def _materialize_final_ledger(
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
     )
-    dependency_outputs = DependencyOutputs()
-    if prior is not None:
-        prior_scope = _scope(turn.settings.turn - 1, player_id, game_perspective)
-        dependency_outputs.put(
-            prior_scope,
-            {"persistedLedgerWire": persisted_fleet_ledger_to_json(prior)},
-        )
+    scope = _scope(turn.settings.turn, player_id, game_perspective)
     job_wire = build_fleet_materialization_leg_job_wire(
-        _scope(turn.settings.turn, player_id, game_perspective),
-        dependency_outputs=dependency_outputs,
+        scope,
+        dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
     observation = run_fleet_observation_leg(job_wire)
     assert observation.payload is not None
+    observation_callback = FleetPersistencePolicy().persist(ctx, scope, observation.payload)
+    if observation_callback is not None:
+        observation_callback()
     result_wire = dict(observation.payload)
     result_wire["fleetPersistLeg"] = "finalization"
     notification = FleetPersistencePolicy().persist(
         ctx,
-        _scope(turn.settings.turn, player_id, game_perspective),
+        scope,
         result_wire,
     )
     if notification is not None:
@@ -301,13 +294,12 @@ def test_no_exact_scores_turn_preserves_prior_record_ids_and_option_sets(sample_
         inference=inference,
     )
 
-    floor = _materialize_final_ledger(
+    _materialize_final_ledger(
         turn=turn_floor,
         player_id=player_id,
         game_perspective=game_perspective,
         fleet_services=fleet_services,
         inference=inference,
-        prior=None,
     )
     prior = _materialize_final_ledger(
         turn=turn_n,
@@ -315,7 +307,6 @@ def test_no_exact_scores_turn_preserves_prior_record_ids_and_option_sets(sample_
         game_perspective=game_perspective,
         fleet_services=fleet_services,
         inference=inference,
-        prior=floor,
     )
     prior_ids = {record.record_id for record in prior.ledger.records}
     prior_with_options = [
@@ -330,7 +321,6 @@ def test_no_exact_scores_turn_preserves_prior_record_ids_and_option_sets(sample_
         game_perspective=game_perspective,
         fleet_services=fleet_services,
         inference=inference,
-        prior=prior,
     )
 
     advanced_ids = {record.record_id for record in advanced.ledger.records}
@@ -346,11 +336,10 @@ def test_no_exact_scores_turn_preserves_prior_record_ids_and_option_sets(sample_
 
 
 def test_stale_dependency_prior_must_not_override_final_disk_ledger(sample_turn):
-    """DepOutputs prior wire must not beat a newer final ledger on disk.
+    """A stale DependencyOutputs prior must not beat the final ledger on disk.
 
-    If job-wire build prefers a stale/empty DependencyOutputs ``persistedLedgerWire``
-    over ``get_ledger(N-1)``, rematerialization rebuilds identity (new recordIds)
-    even though disk still holds the refined prior -- matching the Cyborg t4/t5 split.
+    Observation persist loads the prior at write time. A ledger captured earlier
+    on the dependency wire is not folded -- matching the Cyborg t4/t5 split.
     """
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
@@ -455,13 +444,12 @@ def test_stale_dependency_prior_must_not_override_final_disk_ledger(sample_turn)
         stored_turns={3: turn_floor, 4: turn_n, 5: turn_n1},
         inference=inference,
     )
-    floor = _materialize_final_ledger(
+    _materialize_final_ledger(
         turn=turn_floor,
         player_id=player_id,
         game_perspective=game_perspective,
         fleet_services=fleet_services,
         inference=inference,
-        prior=None,
     )
     disk_prior = _materialize_final_ledger(
         turn=turn_n,
@@ -469,7 +457,6 @@ def test_stale_dependency_prior_must_not_override_final_disk_ledger(sample_turn)
         game_perspective=game_perspective,
         fleet_services=fleet_services,
         inference=inference,
-        prior=floor,
     )
     disk_ids = {record.record_id for record in disk_prior.ledger.records}
     assert disk_ids
@@ -504,15 +491,26 @@ def test_stale_dependency_prior_must_not_override_final_disk_ledger(sample_turn)
         _scope(4, player_id, game_perspective),
         {"persistedLedgerWire": persisted_fleet_ledger_to_json(stale_prior)},
     )
+    scope = _scope(5, player_id, game_perspective)
     job_wire = build_fleet_materialization_leg_job_wire(
-        _scope(5, player_id, game_perspective),
+        scope,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
     )
-    wired_prior = persisted_fleet_ledger_from_json(job_wire["priorLedgerWire"])
-    wired_ids = {record.record_id for record in wired_prior.ledger.records}
-    assert wired_ids == disk_ids, (
-        "job wire preferred stale DependencyOutputs prior over final disk ledger "
-        f"(wired={sorted(wired_ids)} disk={sorted(disk_ids)}); "
+    assert "priorLedgerWire" not in job_wire
+    stale_ids = {record.record_id for record in stale_prior.ledger.records}
+    observed = run_fleet_observation_leg(job_wire)
+    assert observed.payload is not None
+    FleetPersistencePolicy().persist(ctx, scope, observed.payload)
+    stored = fleet_services.persistence.get_ledger(628580, game_perspective, 5, player_id)
+    assert stored is not None
+    stored_ids = {record.record_id for record in stored.ledger.records}
+    assert disk_ids <= stored_ids, (
+        "observation persist dropped the final disk prior "
+        f"(lost={sorted(disk_ids - stored_ids)}); "
         "680224 Cyborg turn-5 identity-loss fingerprint"
+    )
+    assert stale_ids.isdisjoint(stored_ids), (
+        "observation persist folded the stale DependencyOutputs prior "
+        f"(overlap={sorted(stale_ids & stored_ids)})"
     )

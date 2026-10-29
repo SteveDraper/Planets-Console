@@ -16,6 +16,7 @@ from api.analytics.fleet.compute_orchestration import (
     FleetPersistencePolicy,
     build_fleet_materialization_leg_job_wire,
 )
+from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.held_solutions import FleetInferenceSupport
 from api.analytics.fleet.inferred_acquisition_ingest import ingest_turn_inferred_acquisitions
@@ -361,8 +362,8 @@ def test_persist_publishes_non_zero_evidence_generation_on_result_wire(sample_tu
     assert persisted_fleet_ledger_to_json(stored) == published
 
 
-def test_next_leg_prior_from_dependency_outputs_keeps_refined_option_sets(sample_turn):
-    """Same-run chaining: prior DependencyOutputs wire must carry option sets (#220)."""
+def test_observation_persist_keeps_option_sets_from_the_stored_prior(sample_turn):
+    """Observation persist folds the stored prior, including its option sets (#220)."""
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     turn_n, player_id = _turn_with_warship_delta(sample_turn, shipchange=1, turn_number=5)
@@ -454,22 +455,31 @@ def test_next_leg_prior_from_dependency_outputs_keeps_refined_option_sets(sample
     dependency_outputs = DependencyOutputs()
     dependency_outputs.put(scope_n, result_wire_n)
 
+    scope_n1 = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=game_perspective,
+        turn=6,
+        player_id=player_id,
+    )
     job_wire = build_fleet_materialization_leg_job_wire(
-        ComputeScope(
-            analytic_id=_FLEET_ANALYTIC_ID,
-            game_id=628580,
-            perspective=game_perspective,
-            turn=6,
-            player_id=player_id,
-        ),
+        scope_n1,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
     )
-    prior = persisted_fleet_ledger_from_json(job_wire["priorLedgerWire"])
+    assert "priorLedgerWire" not in job_wire
+    assert "baselineLedgerWire" not in job_wire
+    assert "provenanceWire" not in job_wire
+    observed = run_fleet_observation_leg(job_wire)
+    assert observed.payload is not None
+    FleetPersistencePolicy().persist(ctx, scope_n1, observed.payload)
+    stored = fleet_services.persistence.get_ledger(628580, game_perspective, 6, player_id)
+    assert stored is not None
     assert any(
         any(option.combo_id == "combo-prior" for option in record.build_option_sets)
-        for record in prior.ledger.records
+        for record in stored.ledger.records
     )
+    assert stored.provenance.turn_evidence_at_n is False
 
 
 def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
@@ -521,18 +531,26 @@ def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
     dependency_outputs = DependencyOutputs()
     dependency_outputs.put(prior_scope, {})
 
+    scope_n1 = ComputeScope(
+        analytic_id=_FLEET_ANALYTIC_ID,
+        game_id=628580,
+        perspective=game_perspective,
+        turn=6,
+        player_id=player_id,
+    )
     job_wire = build_fleet_materialization_leg_job_wire(
-        ComputeScope(
-            analytic_id=_FLEET_ANALYTIC_ID,
-            game_id=628580,
-            perspective=game_perspective,
-            turn=6,
-            player_id=player_id,
-        ),
+        scope_n1,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
     )
-    assert job_wire["priorLedgerWire"] is not None
+    assert "priorLedgerWire" not in job_wire
+    observed = run_fleet_observation_leg(job_wire)
+    assert observed.payload is not None
+    FleetPersistencePolicy().persist(ctx, scope_n1, observed.payload)
+    folded = fleet_services.persistence.get_ledger(628580, game_perspective, 6, player_id)
+    assert folded is not None
+    assert folded.provenance.prior_ledger_at_n_minus_1 is True
+    assert folded.provenance.turn_evidence_at_n is False
     stored = fleet_services.persistence.get_ledger(628580, game_perspective, 5, player_id)
     assert stored is not None
     assert FleetPersistencePolicy().satisfied_result_wire(ctx, prior_scope) == {

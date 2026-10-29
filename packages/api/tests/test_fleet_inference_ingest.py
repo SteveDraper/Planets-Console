@@ -1037,6 +1037,33 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
         persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         scheduler=scheduler,
     )
+    assert scores_services.persistence is not None
+    scores_services.persistence.put_row(
+        turn.game.id,
+        perspective(turn),
+        turn.settings.turn,
+        player_id,
+        PersistedInferenceRow(
+            status=STATUS_EXACT,
+            summary="one cruiser",
+            solution_count=1,
+            is_complete=True,
+            solutions=[
+                {
+                    "objectiveValue": 40,
+                    "actions": [],
+                    "shipBuilds": [
+                        ship_build_wire(
+                            combo_id="combo-13",
+                            label="Cruiser",
+                            hull_id=13,
+                            engine_id=9,
+                        )
+                    ],
+                }
+            ],
+        ),
+    )
     services = build_ephemeral_fleet_compute_services(
         turn,
         perspective=perspective(turn),

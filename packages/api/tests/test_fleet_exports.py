@@ -108,7 +108,7 @@ def test_materialized_tree_composition_omits_unknown_placeholder_launchers(
     )
     tree, _scope = materialize_fleet_tree(ctx, player_id, turn=5)
     ledger = tree["players"][0]
-    assert len(ledger["records"]) == 2
+    assert len(ledger["records"]) == 1
     known_launcher_records = [
         record
         for record in ledger["records"]
@@ -120,7 +120,7 @@ def test_materialized_tree_composition_omits_unknown_placeholder_launchers(
         if record["fields"]["launchers"].get("kind") == "unknown"
     ]
     assert len(known_launcher_records) == 1
-    assert len(unknown_launcher_records) == 1
+    assert len(unknown_launcher_records) == 0
     assert tree["composition"]["hullTypes"] == {"13": 1}
     assert tree["composition"]["beamTypes"] == {"3": 1}
     assert tree["composition"]["launcherTypes"] == {"6": 1}
@@ -253,9 +253,7 @@ def test_materialized_tree_surfaces_in_progress_scores_status(sample_turn, persi
     assert tree["meta"]["searchStatus"] == "in_progress"
 
 
-def test_materialized_tree_includes_placeholder_records_with_incomplete_search(
-    sample_turn, persistence
-):
+def test_materialized_tree_omits_placeholders_while_search_is_incomplete(sample_turn, persistence):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
 
@@ -284,8 +282,7 @@ def test_materialized_tree_includes_placeholder_records_with_incomplete_search(
     )
     tree, _scope = materialize_fleet_tree(ctx, player_id, turn=5)
     ledger = tree["players"][0]
-    assert len(ledger["records"]) == 2
-    assert all(record["fields"]["hull"]["kind"] == "unknown" for record in ledger["records"])
+    assert ledger["records"] == []
     assert tree["meta"]["searchStatus"] == "in_progress"
 
 

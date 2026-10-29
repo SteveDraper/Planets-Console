@@ -216,7 +216,7 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
 
     assert snapshot.turn == 112
     seeded = next(player for player in snapshot.players if player.player_id == seeded_player_id)
-    assert len(seeded.records) == 6
+    assert len(seeded.records) == 5
     assert seeded.records[0].record_id == "gap-rec"
     intermediate = persistence.get_snapshot(628580, 1, 111)
     assert intermediate is not None
@@ -224,7 +224,7 @@ def test_chain_gap_fill_persists_intermediate_turn(persistence, load_turn, memor
     seeded_intermediate = next(
         player for player in intermediate.players if player.player_id == seeded_player_id
     )
-    assert len(seeded_intermediate.records) == 6
+    assert len(seeded_intermediate.records) == 5
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
 
 
@@ -291,7 +291,7 @@ def test_seed_chain_implicit_turn_one_baseline_without_persisting_turn_one(
     assert snapshot.turn == 111
     assert len(snapshot.players) == 4
     seeded = next(player for player in snapshot.players if player.player_id == 8)
-    assert len(seeded.records) == 5
+    assert len(seeded.records) == 4
     assert persistence.get_snapshot(628580, 1, 1) is None
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -350,7 +350,7 @@ def test_leaf_materializes_turn_from_final_prior(persistence, load_turn, sample_
     )
     assert snapshot.turn == 111
     player_ledger = next(p for p in snapshot.players if p.player_id == first_player_id)
-    assert len(player_ledger.records) == 6
+    assert len(player_ledger.records) == 5
     assert player_ledger.records[0].record_id == "rec-1"
     assert persistence.get_snapshot(628580, 1, 111) == snapshot
 
@@ -738,12 +738,9 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
         inference_materialization=inference_materialization,
     )
     koshling = next(ledger for ledger in snapshot.players if ledger.player_id == 8)
-    placeholder = next(
-        record
-        for record in koshling.records
-        if any(event.kind == "scoreboard_delta" for event in record.events)
+    assert not any(
+        event.kind == "scoreboard_delta" for record in koshling.records for event in record.events
     )
-    assert placeholder.build_option_sets == []
     assert fleet_persistence.get_snapshot(628580, 1, 111) is not None
 
     inference_persistence.put_row(
@@ -919,7 +916,7 @@ def test_gap_fill_aborts_on_concurrent_invalidation(persistence, load_turn, memo
     assert snapshot.turn == 112
     assert persistence.get_snapshot(628580, 1, 112) == snapshot
     seeded = next(player for player in snapshot.players if player.player_id == 8)
-    assert len(seeded.records) == 6
+    assert len(seeded.records) == 5
     assert seeded.records[0].record_id == "gap-rec"
 
 

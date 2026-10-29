@@ -35,6 +35,7 @@ from api.transport.fleet_table_stream import fleet_error_event
 __all__ = [
     "FleetTableStreamScheduler",
     "get_fleet_table_stream_scheduler",
+    "publish_saved_host_turn_ledger",
     "reset_fleet_table_stream_scheduler_for_tests",
 ]
 
@@ -276,6 +277,33 @@ class FleetTableStreamScheduler:
                 self._runs.pop(session.run_id, None)
             self._stream_bindings.pop(stream_token, None)
 
+    def publish_saved_host_turn_ledger(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        persisted: PersistedFleetLedger,
+    ) -> None:
+        """Emit a host-turn ledger save so the roster leaves turn-load rows."""
+        with self._lock:
+            runs = [
+                run
+                for run in self._runs.values()
+                if run.session.player_id == player_id
+                and run.session.game_id == game_id
+                and run.session.perspective == perspective
+                and run.host_turn_number == turn_number
+                and not run.session.cancel_token.is_cancelled()
+            ]
+        for run in runs:
+            events = run.progress_tracker.leg_progress_events(persisted)
+            for event in events:
+                run.session.event_queue.put(event)
+            if events:
+                _wake_multiplex_for_session(run.session)
+
     def _binding_for_stream_locked(
         self,
         stream_token: str,
@@ -462,6 +490,27 @@ def _node_complete_stream_events(
         before=tracker.wire_before,
         persisted=persisted,
         host_turn=session_turn,
+    )
+
+
+def publish_saved_host_turn_ledger(
+    *,
+    game_id: int,
+    perspective: int,
+    turn_number: int,
+    player_id: int,
+    persisted: PersistedFleetLedger,
+) -> None:
+    """Tell an open roster that this turn's ledger file replaced turn-load rows."""
+    scheduler = _process_scheduler
+    if scheduler is None:
+        return
+    scheduler.publish_saved_host_turn_ledger(
+        game_id=game_id,
+        perspective=perspective,
+        turn_number=turn_number,
+        player_id=player_id,
+        persisted=persisted,
     )
 
 

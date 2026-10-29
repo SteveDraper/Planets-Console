@@ -13,7 +13,6 @@ from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observat
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.options import TurnAnalyticsOptions
 from api.compute.scope import ComputeScope
@@ -64,10 +63,12 @@ def time_observation_persist_jobs(
 ) -> ObservationPersistTiming:
     """Run observation_leg then persist against a synthetic fleet document.
 
-    ``document`` (default ``synthetic_large_fleet_document``) is the in-memory
-    prior ledger for player 1. The store receives the probe game info and turn
-    only. Times ``run_fleet_observation_leg`` then ``FleetPersistencePolicy.persist``.
-    Does not use the OS console data directory.
+    ``document`` (default ``synthetic_large_fleet_document``) is the prior
+    ledger for player 1. That prior is stored at the previous turn so
+    observation persist can load it. The observation job does not carry a
+    ledger. Times ``run_fleet_observation_leg`` then
+    ``FleetPersistencePolicy.persist``. Does not use the OS console data
+    directory.
     """
     payload = document if document is not None else synthetic_large_fleet_document()
     encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -88,19 +89,20 @@ def time_observation_persist_jobs(
         "perspective": PROBE_PERSPECTIVE,
         "playerId": 1,
         "materializeTurn": PROBE_TURN_NUMBER,
-        "turnWire": fleet_scoreboard_slice_to_json(turn),
-        "priorLedgerWire": player_one,
-        "baselineLedgerWire": player_one["ledger"],
-        "provenanceWire": {
-            "turnEvidenceAtN": False,
-            "priorLedgerAtNMinus1": True,
-        },
     }
 
     storage.put(f"games/{PROBE_GAME_ID}/info", {"name": "probe"})
     storage.put(PROBE_TURN_KEY, {"turn": PROBE_TURN_NUMBER})
 
     persistence = FleetSnapshotPersistenceService(storage)
+    # The probe turn is above the fleet ensure floor, so persist loads the previous turn.
+    persistence.put_ledger(
+        PROBE_GAME_ID,
+        PROBE_PERSPECTIVE,
+        PROBE_TURN_NUMBER - 1,
+        1,
+        prior,
+    )
 
     def load_turn(turn_number: int):
         return turn if turn_number == PROBE_TURN_NUMBER else None
