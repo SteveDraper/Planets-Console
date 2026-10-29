@@ -171,11 +171,12 @@ def refresh_following_approximate_fleets(
     """Replace each later approximate file from the ledger just saved.
 
     ``player_invalidation_generation`` is the epoch captured for the save that
-    started this walk. The walk reads it again after each rebuild and stops
-    before the put when it no longer matches. It also stops on a missing file,
-    an ensure-final ledger, or an eliminated player. A stop does not raise and
-    does not roll back puts already stored. Does not create the missing turn.
-    A terminal same-turn scoreboard writes the replacement; otherwise the copy
+    started this walk. After each rebuild the walk reads that epoch again and
+    re-reads the target, then stops before the put when the epoch no longer
+    matches or the target is missing, eliminated, or ensure-final. The same
+    file stop applies before the rebuild. A stop does not raise and does not
+    roll back puts already stored. Does not create the missing turn. A
+    terminal same-turn scoreboard writes the replacement; otherwise the copy
     stays approximate.
     """
     from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
@@ -188,19 +189,21 @@ def refresh_following_approximate_fleets(
         )
 
     next_turn = saved_turn + 1
-    while True:
-        if not epoch_matches():
-            return
-        existing = persistence.get_ledger(game_id, perspective, next_turn, player_id)
-        if existing is None or existing.provenance.eliminated_at_turn:
-            return
-        if persistence.ledger_is_ensure_final(
+
+    def target_stops_the_walk() -> bool:
+        stored = persistence.get_ledger(game_id, perspective, next_turn, player_id)
+        if stored is None or stored.provenance.eliminated_at_turn:
+            return True
+        return persistence.ledger_is_ensure_final(
             game_id,
             perspective,
             next_turn,
             player_id,
-            existing,
-        ):
+            stored,
+        )
+
+    while True:
+        if not epoch_matches() or target_stops_the_walk():
             return
         turn = load_turn(next_turn)
         if turn is None or fleet_player_eliminated_at_turn(turn, player_id):
@@ -225,7 +228,7 @@ def refresh_following_approximate_fleets(
             load_turn=load_turn,
             inference_materialization=inference_materialization,
         )
-        if not epoch_matches():
+        if not epoch_matches() or target_stops_the_walk():
             return
         put_result = persistence.put_ledger(
             game_id,
