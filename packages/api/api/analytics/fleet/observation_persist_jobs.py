@@ -13,7 +13,6 @@ from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observat
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.options import TurnAnalyticsOptions
 from api.compute.scope import ComputeScope
@@ -88,7 +87,6 @@ def time_observation_persist_jobs(
         "perspective": PROBE_PERSPECTIVE,
         "playerId": 1,
         "materializeTurn": PROBE_TURN_NUMBER,
-        "turnWire": fleet_scoreboard_slice_to_json(turn),
         "priorLedgerWire": player_one,
         "baselineLedgerWire": player_one["ledger"],
         "provenanceWire": {

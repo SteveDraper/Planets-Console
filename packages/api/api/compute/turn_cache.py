@@ -1,10 +1,9 @@
 """Process-local read-through LRU for ``TurnInfo``.
 
 One cache per process, keyed by ``(game_id, perspective, turn)``. Scores and
-storage ``TurnInfo`` loads share it. A fleet job ``turnWire`` is a scoreboard
-slice and is not stored under this key. Parent orchestrator splice uses this
-type and key;
-worker heaps stay separate. This is not a ``StorageBackend`` document cache.
+storage ``TurnInfo`` loads share it. The fleet observation job does not carry
+a turn. Parent orchestrator splice uses this type and key; worker heaps stay
+separate. This is not a ``StorageBackend`` document cache.
 
 Module imports stay interpreter-safe (no DAG, FastAPI, or file storage) so
 interpreter workers can initialize this cache.
@@ -36,7 +35,7 @@ class TurnInfoCache:
     """Read-through LRU for ``TurnInfo``, keyed by shell + turn.
 
     Callers supply a fill ``load_turn`` on miss; hits never invoke it.
-    Fill functions load a stored turn. The fleet scoreboard slice is not a fill.
+    Fill functions load a stored turn. Fleet observation legs do not fill this cache.
     """
 
     maxsize: int = _DEFAULT_MAXSIZE

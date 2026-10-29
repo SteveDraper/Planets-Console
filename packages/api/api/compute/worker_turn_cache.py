@@ -1,7 +1,7 @@
 """Process-local TurnInfo LRU fills for compute-plane workers.
 
-Fleet job wires carry a scoreboard slice and do not write that slice into
-this cache. SAT-session children never import this module.
+The fleet observation job does not carry a turn, so fleet legs do not fill
+this cache from the job wire. SAT-session children never import this module.
 """
 
 from __future__ import annotations

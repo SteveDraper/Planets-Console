@@ -765,16 +765,15 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
 
     def build_job_wire(scope, *, dependency_outputs, ctx=None, **_kwargs):
         del dependency_outputs, _kwargs
-        from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
         from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
         from api.analytics.fleet.types import FleetAcquisitionLedger
+        from api.analytics.turn_roster import iter_turn_players
 
         if ctx is None:
             raise RuntimeError("fleet leg test job wire requires AnalyticQueryContext")
         turn = ctx.load_turn(scope.turn)
         if turn is None:
             raise RuntimeError(f"turn {scope.turn} required for fleet leg test job wire")
-        from api.analytics.turn_roster import iter_turn_players
 
         player_name = next(
             (player.username for player in iter_turn_players(turn) if player.id == scope.player_id),
@@ -789,7 +788,6 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
             "perspective": scope.perspective,
             "playerId": scope.player_id,
             "materializeTurn": scope.turn,
-            "turnWire": fleet_scoreboard_slice_to_json(turn),
             "priorLedgerWire": None,
             "baselineLedgerWire": fleet_acquisition_ledger_to_json(baseline),
             "provenanceWire": {

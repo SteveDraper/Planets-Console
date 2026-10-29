@@ -17,7 +17,6 @@ from api.analytics.fleet.compute_orchestration import (
 from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
 from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.scoreboard_slice import fleet_scoreboard_slice_to_json
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
     persisted_fleet_ledger_to_json,
@@ -119,7 +118,6 @@ def _observation_job_wire(sample_turn, player_id: int) -> dict[str, object]:
         "perspective": PERSPECTIVE,
         "playerId": player_id,
         "materializeTurn": TURN_NUMBER,
-        "turnWire": fleet_scoreboard_slice_to_json(sample_turn),
         "priorLedgerWire": None,
         "baselineLedgerWire": fleet_acquisition_ledger_to_json(baseline),
         "provenanceWire": {
