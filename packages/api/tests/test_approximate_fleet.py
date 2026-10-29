@@ -8,6 +8,11 @@ from dataclasses import replace
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.approximate_fleet import terminal_fleet_ledger
+from api.analytics.fleet.chain import (
+    _GapFillCoherence,
+    _materialize_fleet_ledger_chain_for_player,
+    get_or_materialize_fleet_ledger_for_player,
+)
 from api.analytics.fleet.compute_orchestration import (
     FleetPersistencePolicy,
     build_fleet_materialization_leg_job_wire,
@@ -465,6 +470,191 @@ def test_later_prior_save_replaces_the_approximate_file() -> None:
     assert "new-ship" in ids
     assert "old-ship" not in ids
     assert refreshed.provenance.turn_evidence_at_n is False
+
+
+def _known_ship_ids(persisted: PersistedFleetLedger) -> set[int]:
+    ids: set[int] = set()
+    for record in persisted.ledger.records:
+        ship_id = record.fields.ship_id
+        if isinstance(ship_id, FleetFieldKnown) and isinstance(ship_id.value, int):
+            ids.add(ship_id.value)
+    return ids
+
+
+def _put(services, player_id: int, turn_number: int, persisted: PersistedFleetLedger) -> None:
+    services.persistence.put_ledger(
+        services.game_id,
+        services.perspective,
+        turn_number,
+        player_id,
+        persisted,
+    )
+
+
+def _stored(services, player_id: int, turn_number: int) -> PersistedFleetLedger:
+    stored = services.persistence.get_ledger(
+        services.game_id,
+        services.perspective,
+        turn_number,
+        player_id,
+    )
+    assert stored is not None
+    return stored
+
+
+def _run_player_chain(services, player_id: int, turn):
+    coherence = _GapFillCoherence(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        player_id,
+        services.persistence.player_invalidation_generation(
+            services.game_id,
+            services.perspective,
+            player_id,
+        ),
+    )
+    return _materialize_fleet_ledger_chain_for_player(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        player_id,
+        turn,
+        load_turn=services.load_turn,
+        inference_materialization=None,
+        coherence=coherence,
+        turn_context_cache={},
+    )
+
+
+def _eliminate(turn, player_id: int):
+    def stamp(player):
+        if player.id != player_id:
+            return player
+        return replace(
+            player,
+            status=PlayerStatus.ELIMINATED,
+            statusturn=turn.settings.turn,
+        )
+
+    return replace(
+        turn,
+        players=[stamp(player) for player in turn.players],
+        player=stamp(turn.player),
+    )
+
+
+def _assert_later_file_recopied(services, player_id: int, *, stop_ship_id: int, later_ship_id: int):
+    stop = _stored(services, player_id, 5)
+    later = _stored(services, player_id, 6)
+    assert "kept-ship" in {record.record_id for record in later.ledger.records}
+    assert "stale-ship" not in {record.record_id for record in later.ledger.records}
+    later_ship_ids = _known_ship_ids(later)
+    assert stop_ship_id in later_ship_ids
+    assert stop_ship_id in _known_ship_ids(stop)
+    assert later_ship_id in later_ship_ids
+    assert later_ship_id not in _known_ship_ids(stop)
+    assert any(
+        event.kind == "sighting" and event.turn == 6
+        for record in later.ledger.records
+        if isinstance(record.fields.ship_id, FleetFieldKnown)
+        and record.fields.ship_id.value == later_ship_id
+        for event in record.events
+    )
+    assert later.provenance.turn_evidence_at_n is False
+
+
+def test_chain_save_replaces_later_approximate_file() -> None:
+    turn3 = _turn(turn_number=3, ship_ids=(8,), capitalships=3, freighters=0)
+    turn4 = _turn(turn_number=4, ship_ids=(20,), capitalships=3, freighters=0)
+    turn5 = _turn(turn_number=5, ship_ids=(21,), capitalships=3, freighters=0)
+    turn6 = _turn(turn_number=6, ship_ids=(30,), capitalships=3, freighters=0)
+    services, _ctx, player_id = _bind(turn5, turn3, turn4, turn6)
+    _put(services, player_id, 3, _prior(player_id, [_record("kept-ship", ship_id=11)], final=True))
+    _put(services, player_id, 6, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+
+    _run_player_chain(services, player_id, turn5)
+
+    _assert_later_file_recopied(services, player_id, stop_ship_id=21, later_ship_id=30)
+
+
+def test_leaf_save_replaces_later_approximate_file() -> None:
+    turn4 = _turn(turn_number=4, ship_ids=(8,), capitalships=3, freighters=0)
+    turn5 = _turn(turn_number=5, ship_ids=(21,), capitalships=3, freighters=0)
+    turn6 = _turn(turn_number=6, ship_ids=(30,), capitalships=3, freighters=0)
+    services, _ctx, player_id = _bind(turn5, turn4, turn6)
+    _put(services, player_id, 4, _prior(player_id, [_record("kept-ship", ship_id=11)], final=True))
+    _put(services, player_id, 6, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+
+    get_or_materialize_fleet_ledger_for_player(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        player_id,
+        turn5,
+        load_turn=services.load_turn,
+    )
+
+    _assert_later_file_recopied(services, player_id, stop_ship_id=21, later_ship_id=30)
+
+
+def test_cache_hit_does_not_replace_later_approximate_file() -> None:
+    turn5 = _turn(turn_number=5, ship_ids=(21,), capitalships=3, freighters=0)
+    turn6 = _turn(turn_number=6, ship_ids=(30,), capitalships=3, freighters=0)
+    services, _ctx, player_id = _bind(turn5, turn6)
+    _put(services, player_id, 5, _prior(player_id, [_record("kept-ship", ship_id=11)], final=True))
+    _put(services, player_id, 6, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+    before = persisted_fleet_ledger_to_json(_stored(services, player_id, 6))
+
+    get_or_materialize_fleet_ledger_for_player(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        player_id,
+        turn5,
+        load_turn=services.load_turn,
+    )
+    _run_player_chain(services, player_id, turn5)
+
+    assert persisted_fleet_ledger_to_json(_stored(services, player_id, 6)) == before
+
+
+def test_eliminated_chain_save_does_not_replace_later_approximate_file() -> None:
+    turn3 = _turn(turn_number=3, ship_ids=(8,), capitalships=3, freighters=0)
+    turn4 = _turn(turn_number=4, ship_ids=(20,), capitalships=3, freighters=0)
+    turn5 = _turn(turn_number=5, ship_ids=(21,), capitalships=3, freighters=0)
+    turn6 = _turn(turn_number=6, ship_ids=(30,), capitalships=3, freighters=0)
+    turn5 = _eliminate(turn5, _score_owner(turn5))
+    services, _ctx, player_id = _bind(turn5, turn3, turn4, turn6)
+    _put(services, player_id, 3, _prior(player_id, [_record("kept-ship", ship_id=11)], final=True))
+    _put(services, player_id, 6, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+    before = persisted_fleet_ledger_to_json(_stored(services, player_id, 6))
+
+    saved = _run_player_chain(services, player_id, turn5)
+
+    assert saved.provenance.eliminated_at_turn is True
+    assert persisted_fleet_ledger_to_json(_stored(services, player_id, 6)) == before
+
+
+def test_eliminated_leaf_save_does_not_replace_later_approximate_file() -> None:
+    turn7 = _turn(turn_number=7, ship_ids=(22,), capitalships=3, freighters=0)
+    turn7 = _eliminate(turn7, _score_owner(turn7))
+    turn8 = _turn(turn_number=8, ship_ids=(31,), capitalships=3, freighters=0)
+    services, _ctx, player_id = _bind(turn7, turn8)
+    _put(services, player_id, 8, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+    before = persisted_fleet_ledger_to_json(_stored(services, player_id, 8))
+
+    saved = get_or_materialize_fleet_ledger_for_player(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        player_id,
+        turn7,
+        load_turn=services.load_turn,
+    )
+
+    assert saved.provenance.eliminated_at_turn is True
+    assert persisted_fleet_ledger_to_json(_stored(services, player_id, 8)) == before
 
 
 def test_eliminated_player_is_not_an_approximate_fleet(sample_turn) -> None:

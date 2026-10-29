@@ -9,7 +9,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterator
 
-from api.analytics.fleet.approximate_fleet import fleet_ledger_after_prior
+from api.analytics.fleet.approximate_fleet import (
+    fleet_ledger_after_prior,
+    refresh_following_approximate_fleets,
+)
 from api.analytics.fleet.compute_plane.turn_delta import advance_ledger_to_turn
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.eliminated_player import (
@@ -460,6 +463,35 @@ def _materialize_and_persist_player_turn(
     return coherence.put_ledger(materialize_turn, persisted)
 
 
+def _refresh_later_files_after_living_save(
+    persistence: FleetSnapshotPersistenceService,
+    *,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+    saved_turn: int,
+    saved: PersistedFleetLedger,
+    load_turn: Callable[[int], TurnInfo | None],
+    inference_materialization: FleetInferenceMaterialization | None,
+) -> None:
+    """Replace later approximate files from a living ledger just stored at ``saved_turn``.
+
+    An eliminated empty ledger is not a prior for that replacement. Callers
+    that returned a cache hit without writing must not call this.
+    """
+    if saved.provenance.eliminated_at_turn:
+        return
+    refresh_following_approximate_fleets(
+        persistence=persistence,
+        game_id=game_id,
+        perspective=perspective,
+        player_id=player_id,
+        saved_turn=saved_turn,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+
+
 def _materialize_fleet_ledger_chain_for_player(
     persistence: FleetSnapshotPersistenceService,
     game_id: int,
@@ -477,7 +509,9 @@ def _materialize_fleet_ledger_chain_for_player(
     Used by roster snapshot/compute multi-turn unwind and fixture seeding.
     Player-scoped leaf ``get_or_materialize_fleet_ledger_for_player`` remains
     single-turn (export materialize after ensure); orchestrator ensure is the
-    durable multi-turn path for that leaf.
+    durable multi-turn path for that leaf. A living ledger written for the
+    turn this call stops on replaces later approximate files. An eliminated
+    empty save and an ensure-final cache hit do not.
     """
     turn_number = turn.settings.turn
 
@@ -556,6 +590,7 @@ def _materialize_fleet_ledger_chain_for_player(
     start_turn = gap_start if anchor_turn >= chain_floor else chain_floor
     current_ledger = anchor_persisted.ledger if anchor_persisted is not None else None
     current_persisted = anchor_persisted
+    wrote_stop_turn = False
 
     def emit_leg_progress(
         persisted_leg: PersistedFleetLedger,
@@ -611,8 +646,7 @@ def _materialize_fleet_ledger_chain_for_player(
             inference_materialization=resolved_inference_materialization,
         )
         emit_leg_progress(current_persisted, chain_floor)
-        if turn_number == chain_floor:
-            return current_persisted
+        wrote_stop_turn = turn_number == chain_floor
         start_turn = chain_floor + 1
 
     for materialize_turn in range(start_turn, turn_number + 1):
@@ -642,11 +676,24 @@ def _materialize_fleet_ledger_chain_for_player(
             inference_materialization=resolved_inference_materialization,
         )
         emit_leg_progress(current_persisted, materialize_turn)
+        if materialize_turn == turn_number:
+            wrote_stop_turn = True
 
     if current_persisted is None:
         raise ConflictError(
             f"fleet snapshot chain for game {game_id} perspective {perspective} "
             f"player {player_id} turn {turn_number} produced no persisted ledger"
+        )
+    if wrote_stop_turn:
+        _refresh_later_files_after_living_save(
+            persistence,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            saved_turn=turn_number,
+            saved=current_persisted,
+            load_turn=cached_load,
+            inference_materialization=resolved_inference_materialization,
         )
     return current_persisted
 
@@ -764,8 +811,10 @@ def get_or_materialize_fleet_ledger_for_player(
 
     Cold multi-turn gap-fill belongs on ``ensure_fleet_export`` / orchestrator
     submit+wait. This leaf is cache-hit or one turn when prior is final (or
-    baseline at the accelerated ensure floor). ``query_context`` is retained for
-    call-site compatibility but does not nest ensure.
+    baseline at the accelerated ensure floor). A living save replaces later
+    approximate files from this turn. An eliminated empty save and an
+    ensure-final cache hit do not. ``query_context`` is retained for call-site
+    compatibility but does not nest ensure.
     """
     del query_context, on_progress
     from api.errors import FleetGapFillEpochInvalidated
@@ -802,7 +851,7 @@ def get_or_materialize_fleet_ledger_for_player(
     )
     try:
         with gap_fill_coherence_scope(coherence):
-            return _materialize_and_persist_player_turn(
+            saved = _materialize_and_persist_player_turn(
                 coherence,
                 materialize_turn=turn_number,
                 player_id=player_id,
@@ -821,6 +870,17 @@ def get_or_materialize_fleet_ledger_for_player(
             f"player {player_id} turn {turn_number} aborted: invalidation "
             "generation bumped mid-put"
         ) from exc
+    _refresh_later_files_after_living_save(
+        persistence,
+        game_id=game_id,
+        perspective=perspective,
+        player_id=player_id,
+        saved_turn=turn_number,
+        saved=saved,
+        load_turn=load_turn,
+        inference_materialization=inference_materialization,
+    )
+    return saved
 
 
 def require_fleet_snapshot(
