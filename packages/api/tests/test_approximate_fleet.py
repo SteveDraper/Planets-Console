@@ -304,6 +304,54 @@ def test_baseline_turn_marks_prior_leg_without_a_file() -> None:
     )
 
 
+def test_observation_persist_folds_the_prior_stored_at_write_time() -> None:
+    """A prior saved after the job is built replaces the ledger frozen earlier."""
+    turn = _turn(turn_number=5, ship_ids=(7,), capitalships=1, freighters=0)
+    services, ctx, player_id = _bind(turn)
+    services.persistence.put_ledger(
+        services.game_id,
+        services.perspective,
+        4,
+        player_id,
+        _prior(player_id, [_record("early-ship", ship_id=11)]),
+    )
+    job_wire = build_fleet_materialization_leg_job_wire(
+        _scope(services, turn, player_id),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert "priorLedgerWire" not in job_wire
+    assert "baselineLedgerWire" not in job_wire
+    assert "provenanceWire" not in job_wire
+    services.persistence.put_ledger(
+        services.game_id,
+        services.perspective,
+        4,
+        player_id,
+        _prior(player_id, [_record("later-ship", ship_id=12)]),
+    )
+    observed = run_fleet_observation_leg(job_wire)
+    assert observed.payload is not None
+    assert "persistedLedgerWire" not in observed.payload
+    FleetPersistencePolicy().persist(ctx, _scope(services, turn, player_id), observed.payload)
+    stored = services.persistence.get_ledger(
+        services.game_id,
+        services.perspective,
+        5,
+        player_id,
+    )
+    assert stored is not None
+    ids = {record.record_id for record in stored.ledger.records}
+    assert "later-ship" in ids
+    assert "early-ship" not in ids
+    assert stored.provenance.turn_evidence_at_n is False
+    assert stored.provenance.prior_ledger_at_n_minus_1 is False
+    assert observed.payload["persistedLedgerWire"] == persisted_fleet_ledger_to_json(stored)
+    prior = services.persistence.get_ledger(services.game_id, services.perspective, 4, player_id)
+    assert prior is not None
+    assert {record.record_id for record in prior.ledger.records} == {"later-ship"}
+
+
 def test_ensure_final_prior_sets_prior_leg() -> None:
     turn = _turn(turn_number=5, ship_ids=(7,), capitalships=1, freighters=0)
     services, ctx, player_id = _bind(turn)

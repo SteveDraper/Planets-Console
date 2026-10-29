@@ -20,8 +20,26 @@ from api.analytics.scores.export_snapshot import (
     gather_scores_materialization_probe_snapshot,
 )
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-from api.models.game import TurnInfo
+from api.models.game import GameSettings, TurnInfo
 from api.serialization.inference_row_persistence import PersistedInferenceRow
+
+
+def fleet_prior_ledger_at_n_minus_1(
+    *,
+    materialize_turn: int,
+    settings: GameSettings,
+    prior_is_ensure_final: bool,
+) -> bool:
+    """True for the fleet ensure baseline or an ensure-final folded prior.
+
+    ``prior_is_ensure_final`` is the caller's ``ledger_is_ensure_final`` result
+    for the folded prior, or false when that prior is absent. This does not
+    probe whether same-turn scores are closed.
+    """
+    return (
+        materialize_turn == accelerated_ensure_floor(settings, materialize_turn)
+        or prior_is_ensure_final
+    )
 
 
 def resolve_fleet_materialization_provenance(
@@ -48,9 +66,10 @@ def resolve_fleet_materialization_provenance(
     terminal ``scores@N`` evidence for this player (not merely an ensure-admitted
     in-progress ``RowRun``); ingest and sightings are not re-verified here.
     """
-    prior_ledger_at_n_minus_1 = (
-        materialize_turn == accelerated_ensure_floor(turn_context.turn.settings, materialize_turn)
-        or prior_is_ensure_final
+    prior_ledger_at_n_minus_1 = fleet_prior_ledger_at_n_minus_1(
+        materialize_turn=materialize_turn,
+        settings=turn_context.turn.settings,
+        prior_is_ensure_final=prior_is_ensure_final,
     )
     turn_evidence_at_n = _is_turn_evidence_closed(
         materialize_turn=materialize_turn,

@@ -11,10 +11,6 @@ from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.fleet.compute_orchestration import build_fleet_materialization_leg_job_wire
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.registration import REGISTRATION as FLEET_REGISTRATION
-from api.analytics.fleet.serialization import (
-    persisted_fleet_ledger_from_json,
-    persisted_fleet_ledger_to_json,
-)
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
@@ -124,7 +120,7 @@ def test_fleet_observation_job_wire_omits_turn(sample_turn) -> None:
     assert job_wire["materializeTurn"] == 2
 
 
-def test_fleet_job_wire_prefetches_prior_ledger_from_persistence(sample_turn) -> None:
+def test_observation_job_wire_does_not_embed_the_stored_prior(sample_turn) -> None:
     from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
@@ -174,17 +170,11 @@ def test_fleet_job_wire_prefetches_prior_ledger_from_persistence(sample_turn) ->
         ctx=ctx,
     )
 
-    assert job_wire["priorLedgerWire"] is not None
-    loaded_prior = persisted_fleet_ledger_from_json(job_wire["priorLedgerWire"])
-    assert loaded_prior.ledger.player_id == player_id
-    expected_prior = fleet_services.persistence.get_ledger(628580, 1, 1, player_id)
-    assert expected_prior is not None
-    assert persisted_fleet_ledger_to_json(loaded_prior) == persisted_fleet_ledger_to_json(
-        expected_prior
-    )
-    assert (
-        job_wire["baselineLedgerWire"] == persisted_fleet_ledger_to_json(expected_prior)["ledger"]
-    )
+    assert fleet_services.persistence.get_ledger(628580, 1, 1, player_id) is not None
+    assert "priorLedgerWire" not in job_wire
+    assert "baselineLedgerWire" not in job_wire
+    assert "provenanceWire" not in job_wire
+    assert job_wire["materializeTurn"] == 2
 
 
 def test_orchestrator_exposes_cached_load_turn(sample_turn) -> None:

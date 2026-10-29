@@ -17,10 +17,7 @@ from api.analytics.fleet.compute_orchestration import (
 from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
 from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.serialization import (
-    fleet_acquisition_ledger_to_json,
-    persisted_fleet_ledger_to_json,
-)
+from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
     FleetMaterializationProvenance,
     PersistedFleetLedger,
@@ -106,24 +103,12 @@ def _fleet_ctx(sample_turn, persistence: FleetSnapshotPersistenceService):
     )
 
 
-def _observation_job_wire(sample_turn, player_id: int) -> dict[str, object]:
-    baseline = ensure_fleet_baseline_for_player(
-        GAME_ID,
-        PERSPECTIVE,
-        sample_turn,
-        player_id,
-    )
+def _observation_job_wire(_sample_turn, player_id: int) -> dict[str, object]:
     return {
         "gameId": GAME_ID,
         "perspective": PERSPECTIVE,
         "playerId": player_id,
         "materializeTurn": TURN_NUMBER,
-        "priorLedgerWire": None,
-        "baselineLedgerWire": fleet_acquisition_ledger_to_json(baseline),
-        "provenanceWire": {
-            "turnEvidenceAtN": False,
-            "priorLedgerAtNMinus1": False,
-        },
     }
 
 
@@ -194,17 +179,18 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
     with count_file_backend_syscalls(counts):
         FleetPersistencePolicy().persist(ctx, scope, result.payload)
 
+    prior_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER - 1, player_id)
     ledger_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
     mark_key = persistence.evidence_mark_key(GAME_ID, PERSPECTIVE, player_id)
-    assert counts.protocol_counts() == {"get": 2, "put": 1, "list": 0, "delete": 0}, (
+    assert counts.protocol_counts() == {"get": 3, "put": 1, "list": 0, "delete": 0}, (
         counts.protocol_counts(),
         counts.get_keys,
         counts.list_prefixes,
     )
-    assert counts.get_keys == [ledger_key, mark_key]
+    assert counts.get_keys == [prior_key, ledger_key, mark_key]
     assert counts.json_load_calls == 0
     assert counts.json_dump_calls == 1
-    assert counts.open_read_calls == 2
+    assert counts.open_read_calls == 3
     assert counts.open_write_calls == 1
     assert counts.list_calls == 0
 
@@ -282,8 +268,8 @@ def test_list_turns_and_analytics_prefix_call_counts(tmp_path):
     assert counts.is_file_calls == 3
 
 
-def test_job_wire_build_skips_disk_when_dependency_outputs_has_final_prior(tmp_path, sample_turn):
-    """Final prior on DependencyOutputs is enough; do not re-get the fleet document."""
+def test_observation_job_wire_does_not_read_a_stored_prior(tmp_path, sample_turn):
+    """The observation job does not carry a ledger or read fleet storage."""
     counting, counts = _counting_seeded_backend(tmp_path)
     persistence = FleetSnapshotPersistenceService(counting)
     player_id = first_player_id(sample_turn)
@@ -334,7 +320,10 @@ def test_job_wire_build_skips_disk_when_dependency_outputs_has_final_prior(tmp_p
             ctx=ctx,
         )
 
-    assert wire["priorLedgerWire"] is not None
+    assert "priorLedgerWire" not in wire
+    assert "baselineLedgerWire" not in wire
+    assert "provenanceWire" not in wire
+    assert wire["materializeTurn"] == TURN_NUMBER
     assert counts.list_calls == 0
     assert counts.put_calls == 0
     assert counts.get_calls == 0

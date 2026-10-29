@@ -140,19 +140,18 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
         )
-    assert job_wire["priorLedgerWire"] is None
-    assert job_wire["baselineLedgerWire"] is None
+    assert "priorLedgerWire" not in job_wire
+    assert "baselineLedgerWire" not in job_wire
     assert job_wire["eliminatedAtTurn"] is True
     assert "emptyLedgerWire" not in job_wire
     assert "provenanceWire" not in job_wire
     assert "turnWire" not in job_wire
 
     observed = run_fleet_observation_leg(job_wire)
-    assert observed.payload["persistedLedgerWire"]["ledger"]["records"] == []
-    observed_provenance = observed.payload["persistedLedgerWire"]["provenance"]
-    assert observed_provenance["turnEvidenceAtN"] is False
-    assert observed_provenance["priorLedgerAtNMinus1"] is False
-    assert observed_provenance["eliminatedAtTurn"] is False
+    assert observed.payload is not None
+    assert "persistedLedgerWire" not in observed.payload
+    assert observed.payload["eliminatedAtTurn"] is True
+    assert observed.payload["fleetPersistLeg"] == "observation"
 
     compute_scope = ComputeScope(
         analytic_id=_FLEET,
@@ -171,11 +170,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         player_id,
     )
 
-    observation_wire = {
-        "persistedLedgerWire": observed.payload["persistedLedgerWire"],
-        "materializeTurn": turn_number,
-        "fleetPersistLeg": "observation",
-    }
+    observation_wire = dict(observed.payload)
     observation_deferred = FleetPersistencePolicy().persist(ctx, compute_scope, observation_wire)
     assert observation_deferred is None
     assert ledger_persisted_events == []
@@ -200,6 +195,9 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
     assert after_observation.provenance.prior_ledger_at_n_minus_1 is False
     assert after_observation.provenance.eliminated_at_turn is False
     assert after_observation.provenance.is_final is False
+    assert observation_wire["persistedLedgerWire"] == persisted_fleet_ledger_to_json(
+        after_observation
+    )
     assert (
         fleet_services.persistence.evidence_mark(
             GAME_ID,

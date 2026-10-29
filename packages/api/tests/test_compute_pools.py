@@ -765,35 +765,15 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
 
     def build_job_wire(scope, *, dependency_outputs, ctx=None, **_kwargs):
         del dependency_outputs, _kwargs
-        from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
-        from api.analytics.fleet.types import FleetAcquisitionLedger
-        from api.analytics.turn_roster import iter_turn_players
-
         if ctx is None:
             raise RuntimeError("fleet leg test job wire requires AnalyticQueryContext")
-        turn = ctx.load_turn(scope.turn)
-        if turn is None:
+        if ctx.load_turn(scope.turn) is None:
             raise RuntimeError(f"turn {scope.turn} required for fleet leg test job wire")
-
-        player_name = next(
-            (player.username for player in iter_turn_players(turn) if player.id == scope.player_id),
-            f"player-{scope.player_id}",
-        )
-        baseline = FleetAcquisitionLedger(
-            player_id=scope.player_id,
-            player_name=player_name,
-        )
         return {
             "gameId": scope.game_id,
             "perspective": scope.perspective,
             "playerId": scope.player_id,
             "materializeTurn": scope.turn,
-            "priorLedgerWire": None,
-            "baselineLedgerWire": fleet_acquisition_ledger_to_json(baseline),
-            "provenanceWire": {
-                "turnEvidenceAtN": False,
-                "priorLedgerAtNMinus1": False,
-            },
         }
 
     def build_finalization_wire(
@@ -857,7 +837,8 @@ def test_pool_dispatches_fleet_materialization_leg_interpreter(sample_turn):
     pool.shutdown()
     assert handle.state == "complete", handle.error
     assert isinstance(handle.result_wire, dict)
-    assert "persistedLedgerWire" in handle.result_wire
+    assert "persistedLedgerWire" not in handle.result_wire
+    assert handle.result_wire["fleetPersistLeg"] == "finalization"
     assert handle.result_wire["materializeTurn"] == scope.turn
     assert pool.metrics.interpreter_executions == 1
 
