@@ -228,7 +228,10 @@ def test_approximate_write_folds_prior_and_sightings_without_a_solve() -> None:
         player_id,
         prior,
     )
+    side_channel: list[object] = []
+    services.persistence.on_ledger_persisted = side_channel.append
     stored, callback = _write_observation(services, ctx, turn, player_id)
+    assert side_channel == []
     if callback is not None:
         callback()
 
@@ -268,11 +271,6 @@ def test_approximate_write_folds_prior_and_sightings_without_a_solve() -> None:
         )
         is False
     )
-    side_channel: list[object] = []
-    services.persistence.on_ledger_persisted = side_channel.append
-    if callback is not None:
-        callback()
-    assert side_channel == []
 
 
 def test_missing_prior_is_not_created() -> None:
