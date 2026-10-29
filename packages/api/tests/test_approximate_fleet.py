@@ -718,6 +718,42 @@ def test_leaf_save_stops_later_refresh_when_epoch_already_changed(monkeypatch) -
     assert persisted_fleet_ledger_to_json(_stored(services, player_id, 6)) == before
 
 
+def test_later_refresh_skips_put_when_epoch_changes_during_rebuild(monkeypatch) -> None:
+    import api.analytics.fleet.approximate_fleet as approximate_fleet
+
+    turn4 = _turn(turn_number=4, ship_ids=(8,), capitalships=3, freighters=0)
+    turn5 = _turn(turn_number=5, ship_ids=(21,), capitalships=3, freighters=0)
+    turn6 = _turn(turn_number=6, ship_ids=(30,), capitalships=3, freighters=0)
+    services, _ctx, player_id = _bind(turn5, turn4, turn6)
+    _put(services, player_id, 4, _prior(player_id, [_record("kept-ship", ship_id=11)], final=True))
+    _put(services, player_id, 6, _prior(player_id, [_record("stale-ship", ship_id=99)]))
+    before = persisted_fleet_ledger_to_json(_stored(services, player_id, 6))
+    real_after_prior = approximate_fleet.fleet_ledger_after_prior
+
+    def bump_during_rebuild(*args, **kwargs):
+        services.persistence.invalidate_player_ledgers_from_turn(
+            services.game_id,
+            services.perspective,
+            6,
+            player_id,
+        )
+        return real_after_prior(*args, **kwargs)
+
+    monkeypatch.setattr(approximate_fleet, "fleet_ledger_after_prior", bump_during_rebuild)
+
+    saved = get_or_materialize_fleet_ledger_for_player(
+        services.persistence,
+        services.game_id,
+        services.perspective,
+        player_id,
+        turn5,
+        load_turn=services.load_turn,
+    )
+
+    assert 21 in _known_ship_ids(saved)
+    assert persisted_fleet_ledger_to_json(_stored(services, player_id, 6)) == before
+
+
 def test_chain_save_stops_later_refresh_after_first_rewritten_file() -> None:
     turn3 = _turn(turn_number=3, ship_ids=(8,), capitalships=3, freighters=0)
     turn4 = _turn(turn_number=4, ship_ids=(20,), capitalships=3, freighters=0)

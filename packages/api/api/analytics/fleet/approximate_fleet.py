@@ -171,21 +171,25 @@ def refresh_following_approximate_fleets(
     """Replace each later approximate file from the ledger just saved.
 
     ``player_invalidation_generation`` is the epoch captured for the save that
-    started this walk. The walk stops when that epoch no longer matches, and
-    when it hits a missing file, an ensure-final ledger, or an eliminated
-    player. A stop does not raise and does not roll back puts already stored.
-    Does not create the missing turn. A terminal same-turn scoreboard writes
-    the replacement; otherwise the copy stays approximate.
+    started this walk. The walk reads it again after each rebuild and stops
+    before the put when it no longer matches. It also stops on a missing file,
+    an ensure-final ledger, or an eliminated player. A stop does not raise and
+    does not roll back puts already stored. Does not create the missing turn.
+    A terminal same-turn scoreboard writes the replacement; otherwise the copy
+    stays approximate.
     """
     from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
     from api.analytics.fleet.fleet_table_stream_scheduler import publish_saved_host_turn_ledger
 
+    def epoch_matches() -> bool:
+        return (
+            persistence.player_invalidation_generation(game_id, perspective, player_id)
+            == player_invalidation_generation
+        )
+
     next_turn = saved_turn + 1
     while True:
-        if (
-            persistence.player_invalidation_generation(game_id, perspective, player_id)
-            != player_invalidation_generation
-        ):
+        if not epoch_matches():
             return
         existing = persistence.get_ledger(game_id, perspective, next_turn, player_id)
         if existing is None or existing.provenance.eliminated_at_turn:
@@ -221,6 +225,8 @@ def refresh_following_approximate_fleets(
             load_turn=load_turn,
             inference_materialization=inference_materialization,
         )
+        if not epoch_matches():
+            return
         put_result = persistence.put_ledger(
             game_id,
             perspective,
