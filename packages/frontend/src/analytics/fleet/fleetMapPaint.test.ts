@@ -13,6 +13,7 @@ import {
   initialFleetPlayerStreamState,
   reduceFleetPlayerStreamState,
   type FleetPlayerStreamSlice,
+  type FleetPlayerStreamState,
 } from './fleetTablePlayerStreamState'
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
 import type { FleetTableRecord } from './fleetTableWireSchema'
@@ -310,7 +311,7 @@ function reducePlayerFrom(
   slice: FleetPlayerStreamSlice,
   event: FleetTableStreamEvent
 ): FleetPlayerStreamSlice {
-  const state = {
+  const state: FleetPlayerStreamState = {
     ...initialFleetPlayerStreamState(),
     playerName: slice.playerName ?? null,
     records: slice.records == null ? null : [...slice.records],
