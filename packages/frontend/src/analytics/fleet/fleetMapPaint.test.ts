@@ -311,6 +311,7 @@ function reducePlayerFrom(
   event: FleetTableStreamEvent
 ): FleetPlayerStreamSlice {
   const state = {
+    ...initialFleetPlayerStreamState(),
     playerName: slice.playerName ?? null,
     records: slice.records == null ? null : [...slice.records],
     rosterPaint: slice.rosterPaint ?? null,
@@ -322,6 +323,9 @@ function reducePlayerFrom(
     isPending: slice.isPending,
     summary: slice.summary,
     error: slice.error,
+    ledgerWriting: slice.ledgerWriting ?? false,
+    hasStoredRow: slice.freshness === 'subject-to-revision' || slice.rosterPaint === 'ledger',
+    workAccepted: slice.freshness !== 'turn-load',
   }
   const next = fleetPlayerStreamSliceFromState(reduceFleetPlayerStreamState(state, event))
   if (next == null) {

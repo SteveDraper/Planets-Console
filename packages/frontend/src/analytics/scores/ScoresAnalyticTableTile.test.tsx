@@ -107,7 +107,8 @@ describe('ScoresAnalyticTableTile', () => {
     expect(screen.getByRole('cell', { name: '17' })).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Military' })).toBeInTheDocument()
     expect(screen.getByRole('cell', { name: '9001' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Build inference in progress')).toBeInTheDocument()
+    expect(screen.getByText('Turn load')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Build inference in progress')).toBeNull()
     expect(screen.getByRole('columnheader', { name: /Build inference/ })).toBeInTheDocument()
     await waitFor(() => {
       expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)

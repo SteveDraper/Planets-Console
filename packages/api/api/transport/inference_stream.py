@@ -119,12 +119,34 @@ def inference_complete_event(
     return payload
 
 
+def stamp_inference_evidence_fields(
+    event: dict[str, object],
+    *,
+    evidence_generation: int | None,
+    evidence_mark: int | None,
+) -> dict[str, object]:
+    """Copy stored generation and the current mark onto a complete event."""
+    if event.get("type") != "complete":
+        return event
+    stamped = dict(event)
+    if evidence_generation is not None:
+        stamped["evidenceGeneration"] = evidence_generation
+    if evidence_mark is not None:
+        stamped["evidenceMark"] = evidence_mark
+    return stamped
+
+
 def inference_error_event(detail: str) -> dict[str, object]:
     return {"type": "error", "detail": detail}
 
 
 def inference_global_pause_event(*, paused: bool) -> dict[str, object]:
     return {"type": "globalPause", "paused": paused}
+
+
+def inference_work_accepted_event() -> dict[str, object]:
+    """The orchestrator has accepted this player's scores work."""
+    return {"type": "work_accepted"}
 
 
 InferenceStreamItem: TypeAlias = dict[str, object]

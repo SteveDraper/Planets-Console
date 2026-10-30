@@ -29,6 +29,12 @@ import {
 } from './fleetRecordComponentDisplay'
 import { FleetRecordHullCell } from './FleetRecordHullCell'
 import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
+import {
+  analyticFreshnessClassName,
+  analyticFreshnessLabel,
+  analyticFreshnessTitle,
+  type AnalyticFreshness,
+} from '../analyticFreshness'
 import type { FleetPlayerStreamSlice, FleetRosterPaint } from './fleetTablePlayerStreamState'
 import { fleetTileProgressSummary, isFleetTileMaterializing } from './fleetTileStatus'
 
@@ -78,15 +84,23 @@ function FleetStatusIcons({ record }: { record: FleetTableRecord }) {
 
 function emptyFleetRosterMessage(
   rosterPaint: FleetRosterPaint | undefined,
-  materializing: boolean
+  materializing: boolean,
+  freshness: AnalyticFreshness
 ): string | null {
-  if (rosterPaint === 'sightings') {
+  if (rosterPaint === 'sightings' || freshness === 'turn-load') {
     return null
   }
   if (rosterPaint === 'ledger' || !materializing) {
     return 'No active fleet records.'
   }
   return null
+}
+
+function fleetTileFreshness(streamSlice: FleetPlayerStreamSlice | undefined): AnalyticFreshness {
+  if (streamSlice == null) {
+    return 'turn-load'
+  }
+  return streamSlice.freshness ?? 'none'
 }
 
 function FleetTileProgressIndicator({
@@ -119,9 +133,14 @@ export function FleetPlayerTableTile({
 }: FleetPlayerTableTileProps) {
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const activeRecords = useMemo(() => activeFleetRecords(records), [records])
+  const freshness = fleetTileFreshness(streamSlice)
+  const freshnessLabel = analyticFreshnessLabel(freshness)
+  const freshnessClassName = analyticFreshnessClassName(freshness)
+  const freshnessTitle = analyticFreshnessTitle(freshness)
   const emptyMessage = emptyFleetRosterMessage(
     rosterPaint,
-    isFleetTileMaterializing(streamSlice)
+    isFleetTileMaterializing(streamSlice),
+    freshness
   )
 
   const columns = useMemo(
@@ -222,7 +241,17 @@ export function FleetPlayerTableTile({
       aria-label={`${playerName} fleet table`}
     >
       <header className="border-b border-[#52575d]/70 px-4 py-2">
-        <h3 className="text-sm font-medium text-slate-200">{playerName}</h3>
+        <h3 className="text-sm font-medium text-slate-200">
+          {playerName}
+          {freshnessLabel != null ? (
+            <span
+              className={cn('ml-2 text-xs font-normal', freshnessClassName)}
+              title={freshnessTitle ?? undefined}
+            >
+              {freshnessLabel}
+            </span>
+          ) : null}
+        </h3>
         {discrepancy != null ? (
           <p
             role="status"

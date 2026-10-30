@@ -471,6 +471,7 @@ class ScoresPersistencePolicy:
             host_turn=export_scope.turn,
             player_id=export_scope.player_id,
             fleet_torp_input_status=_fleet_torp_input_status_for_persist(run_id),
+            query_context=ctx,
         )
         if decision.retire_after_write:
             apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run_id)

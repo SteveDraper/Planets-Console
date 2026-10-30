@@ -7,6 +7,11 @@ import type {
   LatticeSignature,
   UnknownLossLeftover,
 } from '../../api/inferenceStreamEventSchema'
+import {
+  isBehindEvidenceMark,
+  resolveAnalyticFreshness,
+  type AnalyticFreshness,
+} from '../analyticFreshness'
 import { readMilitaryScoreArithmetic } from './inferenceConstraints'
 
 function omitNull<T>(value: T | null | undefined): T | undefined {
@@ -65,6 +70,10 @@ export type RowStreamState = {
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
+  workAccepted: boolean
+  hasStoredRow: boolean
+  evidenceGeneration: number | null
+  evidenceMark: number | null
 }
 
 export function initialRowStreamState(): RowStreamState {
@@ -75,6 +84,19 @@ export function initialRowStreamState(): RowStreamState {
     isComplete: false,
     diagnostics: {},
     placeholders: [],
+    workAccepted: true,
+    hasStoredRow: false,
+    evidenceGeneration: null,
+    evidenceMark: null,
+  }
+}
+
+export function turnLoadRowStreamState(): RowStreamState {
+  return {
+    ...initialRowStreamState(),
+    status: 'turn_load',
+    summary: '',
+    workAccepted: false,
   }
 }
 
@@ -95,6 +117,24 @@ function inFlightDisplayStatus(state: RowStreamState): InferenceDisplayStatus {
     return 'pending'
   }
   return 'failure'
+}
+
+function freshnessForRow(state: RowStreamState): AnalyticFreshness {
+  const skippedWithoutStoredRow =
+    state.displayStatus === 'skipped' && !state.hasStoredRow && state.isComplete
+  return resolveAnalyticFreshness({
+    hasStoredRow: state.hasStoredRow,
+    workAccepted: state.workAccepted,
+    behindEvidenceMark: isBehindEvidenceMark(state.evidenceGeneration, state.evidenceMark),
+    skippedWithoutStoredRow,
+  })
+}
+
+function freshnessField(freshness: AnalyticFreshness): Pick<ScoresInferenceRowDetail, 'freshness'> {
+  if (freshness === 'none') {
+    return {}
+  }
+  return { freshness }
 }
 
 export function rowDetailFromStreamState(
@@ -125,6 +165,7 @@ export function rowDetailFromStreamState(
     ...(state.fleetTorpOverlayBeliefSetTorpIds != null
       ? { fleetTorpOverlayBeliefSetTorpIds: state.fleetTorpOverlayBeliefSetTorpIds }
       : {}),
+    ...freshnessField(freshnessForRow(state)),
   }
 }
 
@@ -136,6 +177,10 @@ export function pendingDetail(
     ...initialRowStreamState(),
     heldSolutions: [...solutions],
   })
+}
+
+export function turnLoadDetail(playerId: number): ScoresInferenceRowDetail {
+  return rowDetailFromStreamState(playerId, turnLoadRowStreamState())
 }
 
 export function failureDetail(playerId: number, summary: string): ScoresInferenceRowDetail {
@@ -188,6 +233,23 @@ export function reduceRowStreamState(
     return state
   }
 
+  if (event.type === 'work_accepted') {
+    if (state.hasStoredRow) {
+      return {
+        ...state,
+        workAccepted: true,
+        isComplete: false,
+        status: 'pending',
+        summary: 'Build inference in progress',
+        displayStatus: 'pending',
+      }
+    }
+    return {
+      ...initialRowStreamState(),
+      heldSolutions: state.heldSolutions,
+    }
+  }
+
   if (event.type === 'progress') {
     if (state.isComplete) {
       return {
@@ -199,6 +261,7 @@ export function reduceRowStreamState(
     }
     return {
       ...state,
+      workAccepted: true,
       summary: event.policyStepId
         ? `Searching (${event.policyStepId.replace(/_/g, ' ')})`
         : 'Build inference in progress',
@@ -219,14 +282,21 @@ export function reduceRowStreamState(
     }
     return {
       ...state,
+      workAccepted: true,
       heldSolutions: streamSolutionsToRowSolutions(event.solutions),
       ...fleetTorpInputStatus,
     }
   }
 
   if (event.type === 'complete') {
+    const hasStoredRow = event.evidenceGeneration != null || state.hasStoredRow
     return {
       ...state,
+      workAccepted: state.workAccepted || event.displayStatus !== 'skipped' || hasStoredRow,
+      hasStoredRow,
+      evidenceGeneration:
+        event.evidenceGeneration != null ? event.evidenceGeneration : state.evidenceGeneration,
+      evidenceMark: event.evidenceMark != null ? event.evidenceMark : state.evidenceMark,
       status: event.status,
       displayStatus: event.displayStatus,
       summary: event.summary,

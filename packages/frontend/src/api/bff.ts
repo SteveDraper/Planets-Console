@@ -265,6 +265,8 @@ export type ScoresInferenceRowDetail = {
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
+  /** Absent on a complete row. Turn load hides inference status. */
+  freshness?: 'turn-load' | 'subject-to-revision'
 }
 
 /** Scores table after per-row inference queries have been merged for display. */

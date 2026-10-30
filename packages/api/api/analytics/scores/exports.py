@@ -513,7 +513,7 @@ def _store_admission_skip(
     ):
         return True
 
-    _persist_immediate_row_admission(services, scope, admission)
+    _persist_immediate_row_admission(services, scope, admission, query_context=ctx)
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
     _wake_deferred_scores_after_evidence_close(ctx, scope)
     return True
@@ -523,6 +523,8 @@ def _persist_immediate_row_admission(
     services: ScoresExportContext,
     scope: ExportScope,
     admission: ImmediateRowAdmission,
+    *,
+    query_context: AnalyticQueryContext,
 ) -> None:
     """Write ImmediateRowAdmission to inference-row storage when missing.
 
@@ -543,12 +545,25 @@ def _persist_immediate_row_admission(
     ):
         return
     wire_event = wire_complete_event_from_terminal_admission(admission)
+    row = persisted_inference_row_from_wire_complete(wire_event)
+    from dataclasses import replace
+
+    from api.analytics.fleet.injected_services import fleet_evidence_generation_for_player
+
+    generation = fleet_evidence_generation_for_player(
+        query_context,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        player_id=scope.player_id,
+    )
+    if generation is not None:
+        row = replace(row, evidence_generation=generation)
     services.persistence.put_row(
         scope.game_id,
         scope.perspective,
         scope.turn,
         scope.player_id,
-        persisted_inference_row_from_wire_complete(wire_event),
+        row,
         # Establishing cheap terminal disk evidence must not fire fleet
         # invalidation: on_row_persisted would bump generation mid gap-fill
         # (FleetGapFillEpochInvalidated → 409 on sync table/map). Fleet sees

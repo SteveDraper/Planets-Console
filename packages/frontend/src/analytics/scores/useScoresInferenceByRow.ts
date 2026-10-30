@@ -8,10 +8,10 @@ import {
 import { stablePlayerIdsKey } from '../../lib/stablePlayerIdsKey'
 import {
   failureDetail,
-  initialRowStreamState,
-  pendingDetail,
   reduceRowStreamState,
   rowDetailFromStreamState,
+  turnLoadDetail,
+  turnLoadRowStreamState,
   type RowStreamState,
 } from './inferenceRowStreamState'
 import { connectTableInferenceStreamUntilComplete } from './tableInferenceStreamConnect'
@@ -32,14 +32,14 @@ function createScoresInferenceStreamPolicy(
   ScoresInferenceRowDetail
 > {
   return {
-    initialRefState: () => initialRowStreamState(),
+    initialRefState: () => turnLoadRowStreamState(),
     reduceRefState: (current, event) => reduceRowStreamState(current, event),
     isRefStateComplete: (state) => state.isComplete,
     publishedFromRefState: (playerId, state) => rowDetailFromStreamState(playerId, state),
     seedPublishedOnNewConnection: (playerIds) => {
       const initialDetails = new Map<number, ScoresInferenceRowDetail>()
       for (const playerId of playerIds) {
-        initialDetails.set(playerId, pendingDetail(playerId))
+        initialDetails.set(playerId, turnLoadDetail(playerId))
       }
       return initialDetails
     },
@@ -117,7 +117,7 @@ export function useScoresInferenceByRow(
     if (typeof playerId !== 'number') {
       return failureDetail(-(rowIndex + 1), 'Missing player id for build inference')
     }
-    return detailsByPlayerId.get(playerId) ?? pendingDetail(playerId)
+    return detailsByPlayerId.get(playerId) ?? turnLoadDetail(playerId)
   })
 
   return { inferenceByRow }

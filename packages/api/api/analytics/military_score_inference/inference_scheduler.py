@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
     HeldSolutionsUpdated,
     RowComplete,
     TierProgress,
+    WorkAccepted,
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
@@ -93,6 +94,9 @@ class InferenceRowScheduler(
         self._stream_bindings: dict[str, InferenceStreamOrchestratorBinding] = {}
         self._globally_paused = False
         self._held_initial_submissions: list[HeldTierSubmission] = []
+        self._deferred_submits: dict[
+            str, tuple[InferenceStreamOrchestratorBinding, ComputeScope]
+        ] = {}
         # Listener and pause gate are scheduler-lifetime. Do not register here:
         # ``get_inference_row_scheduler`` holds ``_scheduler_lock`` across
         # construction, and ``ensure_registered`` takes the orchestrator
@@ -403,6 +407,7 @@ class InferenceRowScheduler(
         *,
         orchestration: InferenceStreamOrchestration | None = None,
         stream_token: str | None = None,
+        submit: bool = True,
     ) -> None:
         submit_binding: InferenceStreamOrchestratorBinding | None = None
         submit_scope: ComputeScope | None = None
@@ -441,6 +446,11 @@ class InferenceRowScheduler(
                         HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
                     )
                     return
+                if not submit:
+                    # Connect yields every player's paint before the first accept.
+                    # The accept can block while a missing dependency turn is fetched.
+                    self._deferred_submits[session.run_id] = (binding, root_scope)
+                    return
                 # Submit outside the scheduler lock: ``orchestrator.submit`` drains
                 # diagnostics listeners that must not nest scheduler <-> orchestrator
                 # locks.
@@ -454,7 +464,22 @@ class InferenceRowScheduler(
 
     def cancel_row_run(self, run_id: str) -> None:
         """Cancel one row run."""
+        with self._lock:
+            self._deferred_submits.pop(run_id, None)
         self.cancel_run(run_id)
+
+    def perform_deferred_tier_submit(self, run_id: str) -> None:
+        """Accept a run that ``enqueue_tier_ladder(..., submit=False)`` prepared."""
+        with self._lock:
+            pending = self._deferred_submits.pop(run_id, None)
+            if pending is None:
+                return
+            row_run = self._adapter_row_run(run_id)
+            if row_run is None or row_run.session.cancel_token.is_cancelled():
+                return
+            binding, root_scope = pending
+        self._orchestrator_attachment.ensure_registered()
+        self._submit_tier_solve_locked(binding, root_scope)
 
     def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
         with self._lock:
@@ -620,6 +645,7 @@ class InferenceRowScheduler(
             root_scope,
             orchestrator=binding.orchestrator,
         )
+        self._emit_work_accepted(root_scope)
 
     def _remember_execution_generation_for_scope(
         self,
@@ -674,6 +700,20 @@ class InferenceRowScheduler(
         if isinstance(row_complete, RowComplete):
             return row_complete
         return None
+
+    def _emit_work_accepted(self, root_scope: ComputeScope) -> None:
+        with self._lock:
+            sessions = []
+            for run_id, scope in self._runs.items():
+                if scope != root_scope:
+                    continue
+                row_run = self._adapter_row_run(run_id)
+                if row_run is None or row_run.session.cancel_token.is_cancelled():
+                    continue
+                sessions.append(row_run.session)
+        for session in sessions:
+            session.event_queue.put(WorkAccepted())
+            self._wake_multiplex_for_session(session)
 
     @staticmethod
     def _wake_multiplex_for_session(session: InferenceRowStreamSession) -> None:

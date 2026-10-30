@@ -12,6 +12,7 @@ import { InferenceDetailModal } from './InferenceDetailModal'
 import { InferenceSolutionCountBadge } from './InferenceSolutionCountBadge'
 import { FleetTorpInputStatusAnnouncer } from './FleetTorpInputStatusAnnouncer'
 import { InferenceCellChrome } from './InferenceCellChrome'
+import type { AnalyticFreshness } from '../analyticFreshness'
 import {
   countFleetTorpPendingRows,
   fleetTorpInputScopeBannerText,
@@ -72,9 +73,14 @@ function InferenceStatusCell({
       </button>
     ) : null
 
+  const freshness: AnalyticFreshness =
+    detail.freshness === 'turn-load' || detail.freshness === 'subject-to-revision'
+      ? detail.freshness
+      : 'none'
   const chromeProps = {
-    fleetTorpStatus,
+    fleetTorpStatus: freshness === 'turn-load' ? null : fleetTorpStatus,
     hullCatalogButton,
+    freshness,
   }
 
   if (isIncompleteInferenceRow(detail)) {

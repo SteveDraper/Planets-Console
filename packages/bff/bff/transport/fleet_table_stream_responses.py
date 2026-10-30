@@ -12,6 +12,8 @@ class FleetTableStreamLedgerUpdatedEvent(BaseModel):
     playerId: int | None = None
     ledger: dict[str, Any]
     replacesTurnLoad: bool | None = None
+    evidenceGeneration: int | None = None
+    evidenceMark: int | None = None
 
 
 class FleetTableStreamRosterPaintEvent(BaseModel):
@@ -19,6 +21,19 @@ class FleetTableStreamRosterPaintEvent(BaseModel):
     playerId: int | None = None
     paint: Literal["sightings", "ledger"]
     ledger: dict[str, Any]
+    evidenceGeneration: int | None = None
+    evidenceMark: int | None = None
+
+
+class FleetTableStreamWorkAcceptedEvent(BaseModel):
+    type: Literal["work_accepted"]
+    playerId: int | None = None
+
+
+class FleetTableStreamLedgerWriteEvent(BaseModel):
+    type: Literal["ledger_write"]
+    playerId: int | None = None
+    writing: bool
 
 
 class FleetTableStreamRecordRefinedEvent(BaseModel):
@@ -52,7 +67,9 @@ __all__ = [
     "FleetTableStreamCompleteEvent",
     "FleetTableStreamErrorEvent",
     "FleetTableStreamLedgerUpdatedEvent",
+    "FleetTableStreamLedgerWriteEvent",
     "FleetTableStreamProvenanceEvent",
     "FleetTableStreamRecordRefinedEvent",
     "FleetTableStreamRosterPaintEvent",
+    "FleetTableStreamWorkAcceptedEvent",
 ]

@@ -31,3 +31,22 @@ class FleetComputeServices:
 def lookup_fleet_compute_services(ctx: AnalyticQueryContext) -> FleetComputeServices | None:
     """Return fleet compute services when this query context has them."""
     return export_service_for(ctx, ANALYTIC_ID, FleetComputeServices)
+
+
+def fleet_evidence_generation_for_player(
+    ctx: AnalyticQueryContext | None,
+    *,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+) -> int | None:
+    """Current fleet evidence mark, or None when fleet is not on this context.
+
+    None means the caller should omit freshness fields. Zero is a real mark.
+    """
+    if ctx is None:
+        return None
+    services = lookup_fleet_compute_services(ctx)
+    if services is None:
+        return None
+    return services.persistence.evidence_mark(game_id, perspective, player_id).evidence_generation

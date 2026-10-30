@@ -60,6 +60,16 @@ class GlobalPauseChanged:
     paused: bool
 
 
+@dataclass(frozen=True)
+class WorkAccepted:
+    """The orchestrator has accepted this player's scores work."""
+
+
 InferenceStreamDomainEvent = (
-    HeldSolutionsUpdated | TierProgress | RowComplete | RowFailed | GlobalPauseChanged
+    HeldSolutionsUpdated
+    | TierProgress
+    | RowComplete
+    | RowFailed
+    | GlobalPauseChanged
+    | WorkAccepted
 )

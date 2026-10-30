@@ -17,11 +17,8 @@ export function fleetTileProgressSummary(streamSlice: FleetPlayerStreamSlice | u
 }
 
 export function isFleetTileMaterializing(streamSlice: FleetPlayerStreamSlice | undefined): boolean {
-  if (streamSlice == null) {
-    return true
-  }
-  if (streamSlice.error != null || streamSlice.isComplete) {
+  if (streamSlice == null || streamSlice.error != null || streamSlice.isComplete) {
     return false
   }
-  return true
+  return streamSlice.ledgerWriting === true
 }

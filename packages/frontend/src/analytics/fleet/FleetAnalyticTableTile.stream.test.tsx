@@ -134,7 +134,8 @@ describe('FleetAnalyticTableTile stream integration', () => {
 
     expect(await screen.findByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Bob fleet table' })).toBeInTheDocument()
-    expect(screen.getAllByText('Fleet materialization in progress')).toHaveLength(2)
+    expect(screen.getAllByText('Turn load')).toHaveLength(2)
+    expect(screen.queryByText('Fleet materialization in progress')).not.toBeInTheDocument()
   })
 
   it('updates only the targeted player tile from stream events without REST refetch', async () => {
@@ -202,7 +203,8 @@ describe('FleetAnalyticTableTile stream integration', () => {
     })
 
     const bobTile = screen.getByRole('region', { name: 'Bob fleet table' })
-    expect(within(bobTile).getByText('Fleet materialization in progress')).toBeInTheDocument()
+    expect(within(bobTile).getByText('Turn load')).toBeInTheDocument()
+    expect(within(bobTile).queryByText('Fleet materialization in progress')).not.toBeInTheDocument()
   })
 
   it('shows error on one tile without hiding others', async () => {

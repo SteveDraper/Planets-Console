@@ -22,6 +22,9 @@ class AdmissionDispatch(Generic[ScheduledT]):
     wire_events: tuple[dict[str, object], ...] = ()
     scheduled: ScheduledT | None = None
     schedule_failed: bool = False
+    # Runs after this player's paint is yielded, and after every player's paint
+    # when connect defers it. Orchestrator accept can block on a missing turn.
+    defer_submit: Callable[[], None] | None = None
 
 
 class TableStreamConnectPolicy(Protocol[ScheduledT, AdmissionT, EventT]):
@@ -90,6 +93,7 @@ def iter_table_stream_connect(
         yield from policy.preamble_events()
 
         admitted_player_count = 0
+        deferred_submits: list[Callable[[], None]] = []
         for player_id in player_ids:
             if not policy.owns_table_stream():
                 return
@@ -116,6 +120,10 @@ def iter_table_stream_connect(
             admitted_player_count += 1
             yield from dispatch.wire_events
 
+            if dispatch.defer_submit is not None:
+                deferred_submits.append(dispatch.defer_submit)
+                continue
+
             if scheduled is not None and _scheduled_row_is_current(policy, player_id, scheduled):
                 yield from drain_available_multiplex_events(
                     policy.current_scheduled_rows(),
@@ -124,6 +132,18 @@ def iter_table_stream_connect(
                     tag_event=policy.tag_event,
                     terminal_types=policy.terminal_types(),
                 )
+
+        for submit in deferred_submits:
+            if not policy.owns_table_stream():
+                return
+            submit()
+            yield from drain_available_multiplex_events(
+                policy.current_scheduled_rows(),
+                tag_player_id=True,
+                event_to_wire_events=policy.multiplex_event_to_wire_events,
+                tag_event=policy.tag_event,
+                terminal_types=policy.terminal_types(),
+            )
 
         if admitted_player_count > 0 and policy.owns_table_stream():
             yield from iter_multiplexed_stream_events(

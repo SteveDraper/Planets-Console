@@ -30,7 +30,11 @@ from api.streaming.table_stream.scheduler_orchestrator_attachment import (
     SchedulerOrchestratorAttachment,
 )
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
-from api.transport.fleet_table_stream import fleet_error_event
+from api.transport.fleet_table_stream import (
+    fleet_error_event,
+    fleet_ledger_write_event,
+    fleet_work_accepted_event,
+)
 
 __all__ = [
     "FleetTableStreamScheduler",
@@ -58,6 +62,7 @@ class _FleetPlayerOrchestratorRun:
     host_turn_number: int
     progress_tracker: FleetLedgerWireProgressTracker
     root_scope: ComputeScope
+    pending_submit: tuple[_FleetStreamOrchestratorBinding, ComputeScope] | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,7 @@ class FleetTableStreamScheduler:
         persistence: FleetSnapshotPersistenceService,
         query_context: AnalyticQueryContext,
         stream_token: str | None = None,
+        submit: bool = True,
     ) -> FleetPlayerStreamSession | None:
         """Admit one fleet player run and submit ``force_fresh``.
 
@@ -202,6 +208,7 @@ class FleetTableStreamScheduler:
                 host_turn_number=host_turn_number,
                 progress_tracker=progress_tracker,
                 root_scope=root_scope,
+                pending_submit=None if submit else (binding, root_scope),
             )
             self._runs[session.run_id] = run
             # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
@@ -215,16 +222,38 @@ class FleetTableStreamScheduler:
             submit_scope = root_scope
 
         self._orchestrator_attachment.ensure_registered()
-        if submit_binding is not None and submit_scope is not None:
-            submit_binding.orchestrator.submit(
-                ComputeRequest(
-                    scope=submit_scope,
-                    priority_band="stream_attached",
-                    force_fresh=True,
-                    ctx=submit_binding.query_context,
-                )
-            )
+        if submit and submit_binding is not None and submit_scope is not None:
+            self._submit_accepted_player_run(submit_binding, submit_scope, session)
         return session
+
+    def submit_prepared_player_run(self, run_id: str) -> None:
+        """Accept a run that ``enqueue_player_run(..., submit=False)`` prepared."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run is None or run.pending_submit is None:
+                return
+            binding, scope = run.pending_submit
+            run.pending_submit = None
+            session = run.session
+        self._orchestrator_attachment.ensure_registered()
+        self._submit_accepted_player_run(binding, scope, session)
+
+    def _submit_accepted_player_run(
+        self,
+        binding: _FleetStreamOrchestratorBinding,
+        scope: ComputeScope,
+        session: FleetPlayerStreamSession,
+    ) -> None:
+        binding.orchestrator.submit(
+            ComputeRequest(
+                scope=scope,
+                priority_band="stream_attached",
+                force_fresh=True,
+                ctx=binding.query_context,
+            )
+        )
+        session.event_queue.put(fleet_work_accepted_event())
+        _wake_multiplex_for_session(session)
 
     def _enqueue_admission_early_return_locked(
         self,
@@ -491,6 +520,32 @@ def _node_complete_stream_events(
         persisted=persisted,
         host_turn=session_turn,
     )
+
+
+def publish_host_turn_ledger_write(scope: ComputeScope, *, writing: bool) -> None:
+    """Tell a live shell that this turn's ledger file is being written.
+
+    Earlier hops of the walk write a different turn than the shell's host turn,
+    so they do not change the tile spinner.
+    """
+    if not isinstance(scope.turn, int):
+        return
+    scheduler = get_fleet_table_stream_scheduler()
+    with scheduler._lock:
+        runs = [
+            run
+            for run in scheduler._runs.values()
+            if run.root_scope.game_id == scope.game_id
+            and run.root_scope.perspective == scope.perspective
+            and run.root_scope.player_id == scope.player_id
+            and run.host_turn_number == scope.turn
+        ]
+    if not runs:
+        return
+    event = fleet_ledger_write_event(writing=writing)
+    for run in runs:
+        run.session.event_queue.put(event)
+        _wake_multiplex_for_session(run.session)
 
 
 def publish_saved_host_turn_ledger(

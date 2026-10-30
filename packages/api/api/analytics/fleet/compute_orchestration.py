@@ -29,6 +29,26 @@ if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
     from api.models.game import TurnInfo
 
+
+def _put_ledger_signaled(scope: ComputeScope, persistence: Any, persisted: PersistedFleetLedger):
+    """Write the ledger and tell a live shell before the write blocks."""
+    from api.analytics.fleet.fleet_table_stream_scheduler import publish_host_turn_ledger_write
+
+    publish_host_turn_ledger_write(scope, writing=True)
+    try:
+        return persistence.put_ledger(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+            persisted,
+            defer_ledger_persisted_notification=True,
+        )
+    except Exception:
+        publish_host_turn_ledger_write(scope, writing=False)
+        raise
+
+
 FLEET_OBSERVATION_LEG = "observation_leg"
 FLEET_FINALIZATION_LEG = "finalization_leg"
 # Legacy alias for tests and diagnostics that still name the interpreter leg.
@@ -322,13 +342,10 @@ class FleetPersistencePolicy:
                     ),
                 ),
             )
-        put_result = services.persistence.put_ledger(
-            scope.game_id,
-            scope.perspective,
-            scope.turn,
-            scope.player_id,
+        put_result = _put_ledger_signaled(
+            scope,
+            services.persistence,
             persisted,
-            defer_ledger_persisted_notification=True,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         if eliminated:
@@ -480,13 +497,10 @@ class FleetPersistencePolicy:
             raise ValueError("fleet finalization persist requires concrete player_id")
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet finalization persist requires concrete turn")
-        put_result = services.persistence.put_ledger(
-            scope.game_id,
-            scope.perspective,
-            scope.turn,
-            scope.player_id,
+        put_result = _put_ledger_signaled(
+            scope,
+            services.persistence,
             persisted,
-            defer_ledger_persisted_notification=True,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         scores_notification = put_result.deferred_notification
@@ -565,13 +579,10 @@ class FleetPersistencePolicy:
             provenance=eliminated_fleet_provenance(),
             materialization_version=FLEET_MATERIALIZATION_VERSION,
         )
-        put_result = services.persistence.put_ledger(
-            scope.game_id,
-            scope.perspective,
-            scope.turn,
-            scope.player_id,
+        put_result = _put_ledger_signaled(
+            scope,
+            services.persistence,
             persisted,
-            defer_ledger_persisted_notification=True,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         return put_result.deferred_notification

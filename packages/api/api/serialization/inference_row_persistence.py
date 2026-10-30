@@ -60,6 +60,7 @@ class PersistedInferenceRow:
     lattice_signatures: list[dict[str, object]] | None = None
     departure_pins: list[dict[str, object]] | None = None
     persistence_version: int | None = None
+    evidence_generation: int | None = None
 
 
 def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
@@ -87,6 +88,10 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
         "departurePins",
         payload.pop("departure_pins", None),
     )
+    raw_evidence_generation = payload.pop(
+        "evidenceGeneration",
+        payload.pop("evidence_generation", None),
+    )
     row = from_dict(
         data_class=PersistedInferenceRow,
         data=payload,
@@ -94,6 +99,8 @@ def persisted_inference_row_from_json(data: dict) -> PersistedInferenceRow:
     )
     if isinstance(fleet_torp_input_status, str):
         row = replace(row, fleet_torp_input_status=fleet_torp_input_status)  # type: ignore[arg-type]
+    if isinstance(raw_evidence_generation, int):
+        row = replace(row, evidence_generation=raw_evidence_generation)
     if isinstance(raw_tier_emissions, list):
         compact = compact_tier_emissions_from_step_diagnostics(raw_tier_emissions)
         row = replace(row, tier_emissions=compact or None)
@@ -142,6 +149,9 @@ def persisted_inference_row_to_json(row: PersistedInferenceRow) -> dict:
     payload.pop("unexplained_military_delta_2x", None)
     payload.pop("lattice_signatures", None)
     payload.pop("departure_pins", None)
+    payload.pop("evidence_generation", None)
+    if row.evidence_generation is not None:
+        payload["evidenceGeneration"] = row.evidence_generation
     if row.fleet_torp_input_status is not None:
         payload["fleetTorpInputStatus"] = row.fleet_torp_input_status
     if row.tier_emissions is not None:
@@ -279,6 +289,8 @@ def wire_complete_from_persisted_row(row: PersistedInferenceRow) -> dict[str, ob
     departure_pins = _durable_departure_pins(row.departure_pins)
     if departure_pins is not None:
         payload["departurePins"] = departure_pins
+    if row.evidence_generation is not None:
+        payload["evidenceGeneration"] = row.evidence_generation
     return payload
 
 

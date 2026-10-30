@@ -55,12 +55,55 @@ def row_domain_event_to_wire_events(
     row: ScheduledInferenceRow,
     event: InferenceStreamDomainEvent,
 ) -> list[dict[str, object]]:
-    return domain_event_to_wire_events(
+    return session_domain_event_to_wire_events(row.session, event)
+
+
+def session_domain_event_to_wire_events(
+    session: InferenceRowStreamSession,
+    event: InferenceStreamDomainEvent,
+) -> list[dict[str, object]]:
+    events = domain_event_to_wire_events(
         event,
-        observation=row.session.observation,
-        turn=row.session.turn,
-        fleet_torp_input_status=row.session.fleet_torp_input_status,
+        observation=session.observation,
+        turn=session.turn,
+        fleet_torp_input_status=session.fleet_torp_input_status,
     )
+    return _stamp_live_complete_evidence(session, events)
+
+
+def _stamp_live_complete_evidence(
+    session: InferenceRowStreamSession,
+    events: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """A durable complete is stored at the current fleet mark."""
+    from api.analytics.fleet.injected_services import fleet_evidence_generation_for_player
+    from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
+    from api.transport.inference_stream import stamp_inference_evidence_fields
+
+    mark = fleet_evidence_generation_for_player(
+        session.query_context,
+        game_id=session.game_id,
+        perspective=session.perspective,
+        player_id=session.player_id,
+    )
+    if mark is None:
+        return events
+    stamped: list[dict[str, object]] = []
+    for item in events:
+        status = item.get("status")
+        if item.get("type") == "complete" and is_durable_turn_evidence_row_status(
+            status if isinstance(status, str) else ""
+        ):
+            stamped.append(
+                stamp_inference_evidence_fields(
+                    item,
+                    evidence_generation=mark,
+                    evidence_mark=mark,
+                )
+            )
+        else:
+            stamped.append(item)
+    return stamped
 
 
 @dataclass(frozen=True)
@@ -177,6 +220,7 @@ def schedule_inference_row(
     stream_token: str | None = None,
     query_context: AnalyticQueryContext | None = None,
     persistence: InferenceRowPersistenceService | None = None,
+    submit: bool = True,
 ) -> ScheduledInferenceRow | None:
     observation = build_inference_observation(
         score,
@@ -217,6 +261,7 @@ def schedule_inference_row(
         session,
         orchestration=orchestration,
         stream_token=stream_token,
+        submit=submit,
     )
     if stream_token is not None and not scheduler.owns_table_stream(stream_token):
         return None

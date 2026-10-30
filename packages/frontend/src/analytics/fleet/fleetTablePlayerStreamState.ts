@@ -1,4 +1,9 @@
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
+import {
+  isBehindEvidenceMark,
+  resolveAnalyticFreshness,
+  type AnalyticFreshness,
+} from '../analyticFreshness'
 import type { FleetCountDiscrepancy, FleetTablePlayer, FleetTableRecord } from './fleetTableWireSchema'
 
 export const FLEET_MATERIALIZATION_PENDING_SUMMARY = 'Fleet materialization in progress'
@@ -30,6 +35,8 @@ export type FleetPlayerStreamSlice = {
   isComplete: boolean
   isFinal: boolean
   isPending: boolean
+  ledgerWriting?: boolean
+  freshness?: AnalyticFreshness
   summary: string
   error: string | null
 }
@@ -44,6 +51,11 @@ export type FleetPlayerStreamState = {
   isComplete: boolean
   isFinal: boolean
   isPending: boolean
+  ledgerWriting: boolean
+  workAccepted: boolean
+  hasStoredRow: boolean
+  evidenceGeneration: number | null
+  evidenceMark: number | null
   summary: string
   error: string | null
 }
@@ -57,19 +69,26 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
-    isPending: true,
-    summary: FLEET_MATERIALIZATION_PENDING_SUMMARY,
+    isPending: false,
+    ledgerWriting: false,
+    workAccepted: false,
+    hasStoredRow: false,
+    evidenceGeneration: null,
+    evidenceMark: null,
+    summary: '',
     error: null,
   }
 }
 
 export function pendingFleetPlayerStreamSlice(): FleetPlayerStreamSlice {
-  return {
+  return fleetPlayerStreamSliceFromState(initialFleetPlayerStreamState()) ?? {
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
-    isPending: true,
-    summary: FLEET_MATERIALIZATION_PENDING_SUMMARY,
+    isPending: false,
+    ledgerWriting: false,
+    freshness: 'turn-load',
+    summary: '',
     error: null,
   }
 }
@@ -96,6 +115,27 @@ function ledgerDisplayState(
     records: [...ledger.records],
     discrepancyOverlay: hasDiscrepancy ? 'set' : 'clear',
     discrepancy: ledger.discrepancy,
+  }
+}
+
+function freshnessForState(state: FleetPlayerStreamState): AnalyticFreshness {
+  return resolveAnalyticFreshness({
+    hasStoredRow: state.hasStoredRow,
+    workAccepted: state.workAccepted,
+    behindEvidenceMark: isBehindEvidenceMark(state.evidenceGeneration, state.evidenceMark),
+  })
+}
+
+function evidenceFromEvent(
+  state: FleetPlayerStreamState,
+  event: { evidenceGeneration?: number; evidenceMark?: number },
+  hasStoredRow: boolean
+): Pick<FleetPlayerStreamState, 'hasStoredRow' | 'evidenceGeneration' | 'evidenceMark'> {
+  return {
+    hasStoredRow,
+    evidenceGeneration:
+      event.evidenceGeneration != null ? event.evidenceGeneration : state.evidenceGeneration,
+    evidenceMark: event.evidenceMark != null ? event.evidenceMark : state.evidenceMark,
   }
 }
 
@@ -128,12 +168,30 @@ export function reduceFleetPlayerStreamState(
   event: FleetTableStreamEvent
 ): FleetPlayerStreamState {
   if (event.type === 'roster_paint') {
+    const hasStoredRow = event.paint === 'ledger'
     return {
       ...state,
       ...ledgerDisplayState(event.ledger),
+      ...evidenceFromEvent(state, event, hasStoredRow),
       rosterPaint: event.paint,
       mapPaint: mapPaintFromLedger(event.paint, event.ledger),
       error: null,
+    }
+  }
+
+  if (event.type === 'work_accepted') {
+    return {
+      ...state,
+      workAccepted: true,
+    }
+  }
+
+  if (event.type === 'ledger_write') {
+    return {
+      ...state,
+      ledgerWriting: event.writing,
+      isPending: event.writing && !state.isComplete,
+      summary: event.writing ? FLEET_MATERIALIZATION_PENDING_SUMMARY : state.summary,
     }
   }
 
@@ -155,7 +213,11 @@ export function reduceFleetPlayerStreamState(
       ...state,
       ...ledgerDisplayState(event.ledger),
       ...progress,
+      ...(savesHostTurnLedger
+        ? evidenceFromEvent(state, event, true)
+        : {}),
       rosterPaint: null,
+      ledgerWriting: savesHostTurnLedger ? false : state.ledgerWriting,
       mapPaint: savesHostTurnLedger
         ? mapPaintFromLedger('ledger', event.ledger)
         : state.mapPaint,
@@ -192,6 +254,7 @@ export function reduceFleetPlayerStreamState(
       isComplete: true,
       isFinal: event.isFinal,
       isPending: false,
+      ledgerWriting: false,
       summary: event.summary,
       error: null,
     }
@@ -202,6 +265,7 @@ export function reduceFleetPlayerStreamState(
       ...state,
       isComplete: true,
       isPending: false,
+      ledgerWriting: false,
       error: event.detail,
       summary: event.detail,
     }
@@ -215,6 +279,11 @@ export function fleetPlayerStreamSliceFromState(
 ): FleetPlayerStreamSlice | null {
   const hasProgressMetadata =
     state.summary !== FLEET_MATERIALIZATION_PENDING_SUMMARY || state.isFinal
+  const publishesFreshness =
+    state.workAccepted ||
+    state.ledgerWriting ||
+    state.hasStoredRow ||
+    freshnessForState(state) === 'turn-load'
 
   if (
     !state.isPending &&
@@ -223,7 +292,8 @@ export function fleetPlayerStreamSliceFromState(
     state.discrepancyOverlay === 'inherit' &&
     state.error == null &&
     !state.isComplete &&
-    !hasProgressMetadata
+    !hasProgressMetadata &&
+    !publishesFreshness
   ) {
     return null
   }
@@ -233,6 +303,8 @@ export function fleetPlayerStreamSliceFromState(
     isComplete: state.isComplete,
     isFinal: state.isFinal,
     isPending: state.isPending,
+    ledgerWriting: state.ledgerWriting,
+    freshness: freshnessForState(state),
     summary: state.summary,
     error: state.error,
   }

@@ -112,7 +112,7 @@ describe('FleetPlayerTableTile', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows pending progress while materializing', () => {
+  it('shows turn load before the orchestrator accepts the player', () => {
     render(
       <FleetPlayerTableTile
         playerName="Alice"
@@ -121,9 +121,29 @@ describe('FleetPlayerTableTile', () => {
       />
     )
 
-    expect(screen.getByText('Fleet materialization in progress')).toBeInTheDocument()
+    expect(screen.getByText('Turn load')).toBeInTheDocument()
+    expect(screen.queryByText('Fleet materialization in progress')).not.toBeInTheDocument()
     expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
     expect(screen.queryByText('No active fleet records.')).not.toBeInTheDocument()
+  })
+
+  it('shows the materialization spinner only while this turn ledger is being written', () => {
+    render(
+      <FleetPlayerTableTile
+        playerName="Alice"
+        records={[]}
+        streamSlice={{
+          ...pendingFleetPlayerStreamSlice(),
+          freshness: 'none',
+          ledgerWriting: true,
+          isPending: true,
+          summary: 'Fleet materialization in progress',
+        }}
+      />
+    )
+
+    expect(screen.getByText('Fleet materialization in progress')).toBeInTheDocument()
+    expect(screen.queryByText('Turn load')).not.toBeInTheDocument()
   })
 
   it('shows an empty body for a player with zero sightings', () => {
@@ -166,7 +186,7 @@ describe('FleetPlayerTableTile', () => {
         playerName="Alice"
         records={[]}
         rosterPaint="ledger"
-        streamSlice={pendingFleetPlayerStreamSlice()}
+        streamSlice={{ ...pendingFleetPlayerStreamSlice(), freshness: 'none' }}
       />
     )
 
@@ -404,6 +424,7 @@ describe('FleetTableView', () => {
         8,
         {
           ...pendingFleetPlayerStreamSlice(),
+          freshness: 'none' as const,
           records: [],
           rosterPaint: 'ledger' as const,
         },

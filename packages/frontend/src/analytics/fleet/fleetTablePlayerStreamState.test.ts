@@ -402,18 +402,15 @@ describe('fleetPlayerFromStreamSlice', () => {
 })
 
 describe('fleetPlayerStreamSliceFromState', () => {
-  it('returns null for untouched initial state without pending flag', () => {
-    const state = initialFleetPlayerStreamState()
-    expect(fleetPlayerStreamSliceFromState({ ...state, isPending: false })).toBeNull()
-  })
-
-  it('publishes pending slice from initial state', () => {
+  it('publishes turn load before the orchestrator accepts the player', () => {
     expect(fleetPlayerStreamSliceFromState(initialFleetPlayerStreamState())).toEqual({
       discrepancyOverlay: 'inherit',
       isComplete: false,
       isFinal: false,
-      isPending: true,
-      summary: 'Fleet materialization in progress',
+      isPending: false,
+      ledgerWriting: false,
+      freshness: 'turn-load',
+      summary: '',
       error: null,
     })
   })
@@ -438,6 +435,8 @@ describe('fleetPlayerStreamSliceFromState', () => {
       isComplete: false,
       isFinal: false,
       isPending: true,
+      ledgerWriting: false,
+      freshness: 'none',
       summary: 'Refining fleet records',
       error: null,
     })
@@ -457,6 +456,8 @@ describe('fleetPlayerStreamSliceFromState', () => {
       isComplete: false,
       isFinal: false,
       isPending: true,
+      ledgerWriting: false,
+      freshness: 'turn-load',
       summary: 'Collecting turn evidence',
       error: null,
     })

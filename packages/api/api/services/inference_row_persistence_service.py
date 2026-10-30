@@ -205,6 +205,7 @@ class InferenceRowPersistenceService:
         host_turn: int,
         player_id: int,
         fleet_torp_input_status: str | None = None,
+        query_context: object | None = None,
     ) -> None:
         """Write durable turn evidence from a RowComplete payload alone."""
         status = event.wire_payload.status
@@ -217,6 +218,13 @@ class InferenceRowPersistenceService:
         row = persisted_inference_row_from_wire_complete(
             wire_event,
             fleet_torp_input_status=fleet_torp_input_status,  # type: ignore[arg-type]
+        )
+        row = _with_fleet_evidence_generation(
+            row,
+            query_context=query_context,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
         )
         self.put_row(game_id, perspective, host_turn, player_id, row)
 
@@ -233,4 +241,31 @@ class InferenceRowPersistenceService:
             perspective=session.perspective,
             host_turn=session.turn_number,
             player_id=session.player_id,
+            query_context=session.query_context,
         )
+
+
+def _with_fleet_evidence_generation(
+    row: PersistedInferenceRow,
+    *,
+    query_context: object | None,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+) -> PersistedInferenceRow:
+    """Stamp the fleet mark that this write is current for."""
+    from dataclasses import replace
+
+    from api.analytics.export_context import AnalyticQueryContext
+    from api.analytics.fleet.injected_services import fleet_evidence_generation_for_player
+
+    ctx = query_context if isinstance(query_context, AnalyticQueryContext) else None
+    generation = fleet_evidence_generation_for_player(
+        ctx,
+        game_id=game_id,
+        perspective=perspective,
+        player_id=player_id,
+    )
+    if generation is None:
+        return row
+    return replace(row, evidence_generation=generation)

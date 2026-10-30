@@ -4,6 +4,8 @@ import {
   pointUnexplainedMilitaryDelta2x,
   reduceRowStreamState,
   rowDetailFromStreamState,
+  turnLoadDetail,
+  turnLoadRowStreamState,
 } from './inferenceRowStreamState'
 
 describe('reduceRowStreamState', () => {
@@ -390,6 +392,72 @@ describe('reduceRowStreamState', () => {
     })
     expect(detail.leftover).toEqual({ kind: 'unknown_loss_bound', lowerBound2x: 800 })
     expect(detail.unexplainedMilitaryDelta2x).toBeUndefined()
+  })
+
+  it('shows turn load until work is accepted, then no freshness words', () => {
+    expect(turnLoadDetail(3).freshness).toBe('turn-load')
+    const accepted = reduceRowStreamState(turnLoadRowStreamState(), { type: 'work_accepted' })
+    expect(rowDetailFromStreamState(3, accepted).freshness).toBeUndefined()
+    expect(rowDetailFromStreamState(3, accepted).displayStatus).toBe('pending')
+  })
+
+  it('keeps subject to revision beside a stored row that is behind the mark', () => {
+    const stored = reduceRowStreamState(turnLoadRowStreamState(), {
+      type: 'complete',
+      status: 'exact',
+      displayStatus: 'success',
+      summary: 'Best build',
+      solutionCount: 1,
+      isComplete: true,
+      evidenceGeneration: 1,
+      evidenceMark: 2,
+    })
+    expect(rowDetailFromStreamState(4, stored).freshness).toBe('subject-to-revision')
+
+    const recomputing = reduceRowStreamState(stored, { type: 'work_accepted' })
+    const detail = rowDetailFromStreamState(4, recomputing)
+    expect(detail.freshness).toBe('subject-to-revision')
+    expect(detail.displayStatus).toBe('pending')
+  })
+
+  it('shows subject to revision beside a stored skip and nothing beside an unmarked skip', () => {
+    const storedSkip = reduceRowStreamState(turnLoadRowStreamState(), {
+      type: 'complete',
+      status: 'dead',
+      displayStatus: 'skipped',
+      summary: 'Player is dead',
+      solutionCount: 0,
+      isComplete: true,
+      evidenceGeneration: 0,
+      evidenceMark: 1,
+    })
+    expect(rowDetailFromStreamState(4, storedSkip).freshness).toBe('subject-to-revision')
+    expect(rowDetailFromStreamState(4, storedSkip).displayStatus).toBe('skipped')
+
+    const unmarkedSkip = reduceRowStreamState(turnLoadRowStreamState(), {
+      type: 'complete',
+      status: 'dead',
+      displayStatus: 'skipped',
+      summary: 'Player is dead',
+      solutionCount: 0,
+      isComplete: true,
+    })
+    expect(rowDetailFromStreamState(4, unmarkedSkip).freshness).toBeUndefined()
+    expect(rowDetailFromStreamState(4, unmarkedSkip).displayStatus).toBe('skipped')
+  })
+
+  it('treats a stored row on the current mark as complete, including an approximate fleet', () => {
+    const onMark = reduceRowStreamState(turnLoadRowStreamState(), {
+      type: 'complete',
+      status: 'exact',
+      displayStatus: 'success',
+      summary: 'Best build',
+      solutionCount: 1,
+      isComplete: true,
+      evidenceGeneration: 3,
+      evidenceMark: 3,
+    })
+    expect(rowDetailFromStreamState(4, onMark).freshness).toBeUndefined()
   })
 })
 

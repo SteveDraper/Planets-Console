@@ -49,6 +49,13 @@ class InferenceStreamCompleteEvent(BaseModel):
     diagnostics: dict[str, Any] | None = None
     fleetTorpInputStatus: str | None = None
     fleetTorpOverlayBeliefSetTorpIds: list[int] | None = None
+    evidenceGeneration: int | None = None
+    evidenceMark: int | None = None
+
+
+class InferenceStreamWorkAcceptedEvent(BaseModel):
+    type: Literal["work_accepted"]
+    playerId: int | None = None
 
 
 class InferenceStreamErrorEvent(BaseModel):
@@ -61,4 +68,5 @@ __all__ = [
     "InferenceStreamErrorEvent",
     "InferenceStreamProgressEvent",
     "InferenceStreamSolutionEvent",
+    "InferenceStreamWorkAcceptedEvent",
 ]

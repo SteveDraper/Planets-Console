@@ -104,6 +104,8 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
             self.pending_wire_events.extend(dispatch.wire_events)
         if dispatch.scheduled is not None:
             self.scheduled_rows[player_id] = dispatch.scheduled
+        if dispatch.defer_submit is not None:
+            dispatch.defer_submit()
         return True
 
     def install_admission_dispatch(
@@ -126,6 +128,8 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
                     self.scheduled_rows[player_id] = dispatch.scheduled
         if raced_run_id is not None:
             cancel_run_id(raced_run_id)
+        elif dispatch.defer_submit is not None:
+            dispatch.defer_submit()
         self.wake_multiplex.set()
         return True
 
