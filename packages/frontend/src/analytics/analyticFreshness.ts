@@ -3,7 +3,7 @@
 export const TURN_LOAD_LABEL = 'Turn load'
 export const PROVISIONAL_LABEL = 'Provisional'
 export const PROVISIONAL_TITLE =
-  'Some prior fleet information is missing. Turning on Backfill earlier turns would allow a more exact inference.'
+  'This is a saved answer from before a newer result for this player. It may change once that result is included. Backfill earlier turns updates turns you are not viewing. Otherwise a turn updates when you open it.'
 
 export type AnalyticFreshness = 'turn-load' | 'subject-to-revision' | 'none'
 

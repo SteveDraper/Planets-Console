@@ -626,7 +626,7 @@ describe('ScoresTableView', () => {
     expect(screen.getByText('Provisional').className).toContain('text-amber-300')
     expect(screen.getByText('Provisional')).toHaveAttribute(
       'title',
-      'Some prior fleet information is missing. Turning on Backfill earlier turns would allow a more exact inference.'
+      'This is a saved answer from before a newer result for this player. It may change once that result is included. Backfill earlier turns updates turns you are not viewing. Otherwise a turn updates when you open it.'
     )
     expect(screen.getByLabelText('Player is dead')).toBeInTheDocument()
 

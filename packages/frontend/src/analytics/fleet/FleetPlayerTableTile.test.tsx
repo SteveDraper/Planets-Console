@@ -67,7 +67,7 @@ describe('FleetPlayerTableTile provenance progress', () => {
     expect(within(tile).getByText('<= 318')).toBeInTheDocument()
     expect(within(tile).getByText('Provisional')).toHaveAttribute(
       'title',
-      'Some prior fleet information is missing. Turning on Backfill earlier turns would allow a more exact inference.'
+      'This is a saved answer from before a newer result for this player. It may change once that result is included. Backfill earlier turns updates turns you are not viewing. Otherwise a turn updates when you open it.'
     )
     expect(within(tile).getByRole('status')).toHaveTextContent('Fleet materialization in progress')
     expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
