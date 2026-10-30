@@ -39,7 +39,10 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
-from api.transport.inference_stream import stamp_inference_evidence_fields
+from api.transport.inference_stream import (
+    inference_no_stored_row_event,
+    stamp_inference_evidence_fields,
+)
 
 
 @dataclass(kw_only=True)
@@ -121,12 +124,26 @@ class InferenceTableStreamController(
         self,
         scheduled: ScheduledInferenceRow,
     ) -> AdmissionDispatch[ScheduledInferenceRow]:
+        """Schedule without submitting, and say that no scoreboard row is stored.
+
+        Connect yields ``wire_events`` before ``defer_submit``, so this prelude
+        is on the stream before accept can block on a missing turn.
+        """
         run_id = scheduled.session.run_id
 
         def defer_submit() -> None:
             self.scheduler.perform_deferred_tier_submit(run_id)
 
-        return AdmissionDispatch(scheduled=scheduled, defer_submit=defer_submit)
+        return AdmissionDispatch(
+            wire_events=(
+                tag_inference_stream_event(
+                    inference_no_stored_row_event(),
+                    player_id=scheduled.player_id,
+                ),
+            ),
+            scheduled=scheduled,
+            defer_submit=defer_submit,
+        )
 
     def _annotate_stored_complete(
         self,

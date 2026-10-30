@@ -1,8 +1,10 @@
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
 import {
-  isBehindEvidenceMark,
-  resolveAnalyticFreshness,
+  analyticFreshnessForPhase,
+  freshnessPhaseAfterAccept,
+  phaseForStoredEvidence,
   type AnalyticFreshness,
+  type AnalyticFreshnessPhase,
 } from '../analyticFreshness'
 import type { FleetCountDiscrepancy, FleetTablePlayer, FleetTableRecord } from './fleetTableWireSchema'
 
@@ -10,7 +12,7 @@ export const FLEET_MATERIALIZATION_PENDING_SUMMARY = 'Fleet materialization in p
 
 export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
 
-/** Turn-load roster: a stored ledger, or this turn's sightings when no file exists. */
+/** Painted roster: this turn's sightings, or a stored ledger. */
 export type FleetRosterPaint = 'sightings' | 'ledger'
 
 /**
@@ -52,7 +54,7 @@ export type FleetPlayerStreamState = {
   isFinal: boolean
   isPending: boolean
   ledgerWriting: boolean
-  workAccepted: boolean
+  freshnessPhase: AnalyticFreshnessPhase
   hasStoredRow: boolean
   evidenceGeneration: number | null
   evidenceMark: number | null
@@ -71,7 +73,7 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
     isFinal: false,
     isPending: false,
     ledgerWriting: false,
-    workAccepted: false,
+    freshnessPhase: 'unlabeled',
     hasStoredRow: false,
     evidenceGeneration: null,
     evidenceMark: null,
@@ -80,14 +82,15 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
   }
 }
 
+/** Connection seed. No freshness word until an admission paint arrives. */
 export function pendingFleetPlayerStreamSlice(): FleetPlayerStreamSlice {
-  return fleetPlayerStreamSliceFromState(initialFleetPlayerStreamState()) ?? {
+  return {
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
     isPending: false,
     ledgerWriting: false,
-    freshness: 'turn-load',
+    freshness: 'none',
     summary: '',
     error: null,
   }
@@ -119,11 +122,14 @@ function ledgerDisplayState(
 }
 
 function freshnessForState(state: FleetPlayerStreamState): AnalyticFreshness {
-  return resolveAnalyticFreshness({
-    hasStoredRow: state.hasStoredRow,
-    workAccepted: state.workAccepted,
-    behindEvidenceMark: isBehindEvidenceMark(state.evidenceGeneration, state.evidenceMark),
-  })
+  return analyticFreshnessForPhase(state.freshnessPhase)
+}
+
+function phaseAfterSightings(phase: AnalyticFreshnessPhase): AnalyticFreshnessPhase {
+  if (phase === 'current') {
+    return phase
+  }
+  return 'turn-load'
 }
 
 function evidenceFromEvent(
@@ -169,10 +175,14 @@ export function reduceFleetPlayerStreamState(
 ): FleetPlayerStreamState {
   if (event.type === 'roster_paint') {
     const hasStoredRow = event.paint === 'ledger'
+    const evidence = evidenceFromEvent(state, event, hasStoredRow)
     return {
       ...state,
       ...ledgerDisplayState(event.ledger),
-      ...evidenceFromEvent(state, event, hasStoredRow),
+      ...evidence,
+      freshnessPhase: hasStoredRow
+        ? phaseForStoredEvidence(evidence.evidenceGeneration, evidence.evidenceMark)
+        : phaseAfterSightings(state.freshnessPhase),
       rosterPaint: event.paint,
       mapPaint: mapPaintFromLedger(event.paint, event.ledger),
       error: null,
@@ -182,7 +192,7 @@ export function reduceFleetPlayerStreamState(
   if (event.type === 'work_accepted') {
     return {
       ...state,
-      workAccepted: true,
+      freshnessPhase: freshnessPhaseAfterAccept(state.freshnessPhase, state.hasStoredRow),
     }
   }
 
@@ -209,13 +219,15 @@ export function reduceFleetPlayerStreamState(
       }
     }
     const savesHostTurnLedger = event.replacesTurnLoad !== false
+    const evidence = savesHostTurnLedger ? evidenceFromEvent(state, event, true) : null
     return {
       ...state,
       ...ledgerDisplayState(event.ledger),
       ...progress,
-      ...(savesHostTurnLedger
-        ? evidenceFromEvent(state, event, true)
-        : {}),
+      ...(evidence ?? {}),
+      freshnessPhase: evidence
+        ? phaseForStoredEvidence(evidence.evidenceGeneration, evidence.evidenceMark)
+        : state.freshnessPhase,
       rosterPaint: null,
       ledgerWriting: savesHostTurnLedger ? false : state.ledgerWriting,
       mapPaint: savesHostTurnLedger
@@ -280,10 +292,7 @@ export function fleetPlayerStreamSliceFromState(
   const hasProgressMetadata =
     state.summary !== FLEET_MATERIALIZATION_PENDING_SUMMARY || state.isFinal
   const publishesFreshness =
-    state.workAccepted ||
-    state.ledgerWriting ||
-    state.hasStoredRow ||
-    freshnessForState(state) === 'turn-load'
+    state.freshnessPhase === 'turn-load' || state.freshnessPhase === 'behind-mark'
 
   if (
     !state.isPending &&

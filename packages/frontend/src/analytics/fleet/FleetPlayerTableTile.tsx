@@ -84,23 +84,26 @@ function FleetStatusIcons({ record }: { record: FleetTableRecord }) {
 
 function emptyFleetRosterMessage(
   rosterPaint: FleetRosterPaint | undefined,
-  materializing: boolean,
+  streamSlice: FleetPlayerStreamSlice | undefined,
   freshness: AnalyticFreshness
 ): string | null {
   if (rosterPaint === 'sightings' || freshness === 'turn-load') {
     return null
   }
-  if (rosterPaint === 'ledger' || !materializing) {
+  if (rosterPaint === 'ledger') {
+    return 'No active fleet records.'
+  }
+  if (isFleetTileMaterializing(streamSlice)) {
+    return null
+  }
+  if (streamSlice?.isComplete === true || streamSlice?.mapPaint?.source === 'ledger') {
     return 'No active fleet records.'
   }
   return null
 }
 
 function fleetTileFreshness(streamSlice: FleetPlayerStreamSlice | undefined): AnalyticFreshness {
-  if (streamSlice == null) {
-    return 'turn-load'
-  }
-  return streamSlice.freshness ?? 'none'
+  return streamSlice?.freshness ?? 'none'
 }
 
 function FleetTileProgressIndicator({
@@ -137,11 +140,7 @@ export function FleetPlayerTableTile({
   const freshnessLabel = analyticFreshnessLabel(freshness)
   const freshnessClassName = analyticFreshnessClassName(freshness)
   const freshnessTitle = analyticFreshnessTitle(freshness)
-  const emptyMessage = emptyFleetRosterMessage(
-    rosterPaint,
-    isFleetTileMaterializing(streamSlice),
-    freshness
-  )
+  const emptyMessage = emptyFleetRosterMessage(rosterPaint, streamSlice, freshness)
 
   const columns = useMemo(
     () => [

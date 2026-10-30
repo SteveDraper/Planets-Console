@@ -58,6 +58,11 @@ class InferenceStreamWorkAcceptedEvent(BaseModel):
     playerId: int | None = None
 
 
+class InferenceStreamNoStoredRowEvent(BaseModel):
+    type: Literal["no_stored_row"]
+    playerId: int | None = None
+
+
 class InferenceStreamErrorEvent(BaseModel):
     type: Literal["error"]
     detail: str
@@ -66,6 +71,7 @@ class InferenceStreamErrorEvent(BaseModel):
 __all__ = [
     "InferenceStreamCompleteEvent",
     "InferenceStreamErrorEvent",
+    "InferenceStreamNoStoredRowEvent",
     "InferenceStreamProgressEvent",
     "InferenceStreamSolutionEvent",
     "InferenceStreamWorkAcceptedEvent",

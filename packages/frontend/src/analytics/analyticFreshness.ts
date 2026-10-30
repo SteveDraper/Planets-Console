@@ -7,6 +7,13 @@ export const PROVISIONAL_TITLE =
 
 export type AnalyticFreshness = 'turn-load' | 'subject-to-revision' | 'none'
 
+/**
+ * Set by stream events. Unlabeled is the gap before any admission signal.
+ * Turn load is only the gap before accept when no row is stored.
+ * Current has no word. Behind-mark is Provisional, including while busy.
+ */
+export type AnalyticFreshnessPhase = 'unlabeled' | 'turn-load' | 'current' | 'behind-mark'
+
 export function isBehindEvidenceMark(
   evidenceGeneration: number | null | undefined,
   evidenceMark: number | null | undefined
@@ -17,28 +24,33 @@ export function isBehindEvidenceMark(
   return evidenceGeneration !== evidenceMark
 }
 
-/**
- * Turn load is only the gap before accept when no row is stored.
- * A stored row behind the mark is subject to revision, including an idle row.
- * A matching generation is complete, including an approximate fleet on that mark.
- * A skip with no stored row is complete.
- */
-export function resolveAnalyticFreshness(input: {
-  hasStoredRow: boolean
-  workAccepted: boolean
-  behindEvidenceMark: boolean
-  skippedWithoutStoredRow?: boolean
-}): AnalyticFreshness {
-  if (input.skippedWithoutStoredRow) {
-    return 'none'
+export function analyticFreshnessForPhase(phase: AnalyticFreshnessPhase): AnalyticFreshness {
+  if (phase === 'turn-load') {
+    return 'turn-load'
   }
-  if (!input.hasStoredRow) {
-    return input.workAccepted ? 'none' : 'turn-load'
-  }
-  if (input.behindEvidenceMark) {
+  if (phase === 'behind-mark') {
     return 'subject-to-revision'
   }
   return 'none'
+}
+
+/** A stored row is current or behind the mark. It is never turn load. */
+export function phaseForStoredEvidence(
+  evidenceGeneration: number | null | undefined,
+  evidenceMark: number | null | undefined
+): 'current' | 'behind-mark' {
+  return isBehindEvidenceMark(evidenceGeneration, evidenceMark) ? 'behind-mark' : 'current'
+}
+
+/** Accept ends turn load when nothing is stored. A stored row keeps its phase. */
+export function freshnessPhaseAfterAccept(
+  phase: AnalyticFreshnessPhase,
+  hasStoredRow: boolean
+): AnalyticFreshnessPhase {
+  if (hasStoredRow) {
+    return phase
+  }
+  return 'current'
 }
 
 export function analyticFreshnessLabel(freshness: AnalyticFreshness): string | null {

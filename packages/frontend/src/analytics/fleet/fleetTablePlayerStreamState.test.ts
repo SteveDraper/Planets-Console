@@ -78,6 +78,11 @@ describe('reduceFleetPlayerStreamState', () => {
       records: [baseRecord],
     })
     expect(sighting.discrepancyOverlay).toBe('clear')
+    expect(fleetPlayerStreamSliceFromState(sighting)?.freshness).toBe('turn-load')
+
+    const accepted = reduceFleetPlayerStreamState(sighting, { type: 'work_accepted' })
+    expect(fleetPlayerStreamSliceFromState(accepted)?.freshness).toBe('none')
+    expect(accepted.records).toEqual([baseRecord])
 
     const refined = reduceFleetPlayerStreamState(sighting, {
       type: 'record_refined',
@@ -102,6 +107,7 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(interim.isPending).toBe(true)
 
     const interimSlice = fleetPlayerStreamSliceFromState(interim)
+    expect(interimSlice?.freshness).toBe('turn-load')
     expect(interimSlice?.rosterPaint).toBe('sightings')
     expect(fleetPlayerFromStreamSlice(interimSlice ?? undefined, 'fallback').records).toEqual([
       baseRecord,
@@ -122,6 +128,7 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(saved.playerName).toBe('Alice')
     expect(saved.discrepancyOverlay).toBe('set')
     expect(saved.discrepancy).toEqual(ledgerPlayer.discrepancy)
+    expect(fleetPlayerStreamSliceFromState(saved)?.freshness).toBe('none')
     const savedSlice = fleetPlayerStreamSliceFromState(saved)
     expect(savedSlice?.rosterPaint).toBeUndefined()
     expect(fleetPlayerFromStreamSlice(savedSlice ?? undefined, 'fallback').records).toEqual([
@@ -236,10 +243,78 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(painted.discrepancyOverlay).toBe('set')
     expect(painted.discrepancy).toEqual(ledgerPlayer.discrepancy)
     expect(slice?.rosterPaint).toBe('ledger')
+    expect(slice?.freshness).toBe('none')
     expect(slice?.records).toEqual([refinedRecord])
     expect(merged.records).toEqual([refinedRecord])
     expect(merged.discrepancy).toEqual(ledgerPlayer.discrepancy)
     expect(merged.playerName).toBe('Alice')
+  })
+
+  it('paints a stored ledger behind the mark as provisional and keeps that beside busy chrome', () => {
+    const painted = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'ledger',
+      evidenceGeneration: 1,
+      evidenceMark: 4,
+      ledger: ledgerPlayer,
+    })
+    expect(fleetPlayerStreamSliceFromState(painted)?.freshness).toBe('subject-to-revision')
+
+    const writing = reduceFleetPlayerStreamState(painted, {
+      type: 'ledger_write',
+      playerId: 8,
+      writing: true,
+    })
+    const accepted = reduceFleetPlayerStreamState(writing, { type: 'work_accepted' })
+    expect(accepted.ledgerWriting).toBe(true)
+    expect(accepted.hasStoredRow).toBe(true)
+    expect(fleetPlayerStreamSliceFromState(accepted)?.freshness).toBe('subject-to-revision')
+  })
+
+  it('a host-turn ledger save is never turn load', () => {
+    const onMark = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_updated',
+      playerId: 8,
+      evidenceGeneration: 2,
+      evidenceMark: 2,
+      ledger: ledgerPlayer,
+    })
+    expect(fleetPlayerStreamSliceFromState(onMark)?.freshness).toBe('none')
+
+    const behind = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_updated',
+      playerId: 8,
+      evidenceGeneration: 1,
+      evidenceMark: 3,
+      ledger: ledgerPlayer,
+    })
+    expect(fleetPlayerStreamSliceFromState(behind)?.freshness).toBe('subject-to-revision')
+  })
+
+  it('does not restore turn load when sightings arrive after accept', () => {
+    const sighting = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'sightings',
+      ledger: {
+        playerId: 8,
+        playerName: 'Alice',
+        records: [baseRecord],
+      },
+    })
+    const accepted = reduceFleetPlayerStreamState(sighting, { type: 'work_accepted' })
+    const again = reduceFleetPlayerStreamState(accepted, {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'sightings',
+      ledger: {
+        playerId: 8,
+        playerName: 'Alice',
+        records: [baseRecord],
+      },
+    })
+    expect(fleetPlayerStreamSliceFromState(again)?.freshness).toBe('none')
   })
 
   it('replaces records from ledger_updated', () => {
@@ -402,14 +477,14 @@ describe('fleetPlayerFromStreamSlice', () => {
 })
 
 describe('fleetPlayerStreamSliceFromState', () => {
-  it('publishes turn load before the orchestrator accepts the player', () => {
+  it('publishes no freshness word before an admission event', () => {
     expect(fleetPlayerStreamSliceFromState(initialFleetPlayerStreamState())).toEqual({
       discrepancyOverlay: 'inherit',
       isComplete: false,
       isFinal: false,
       isPending: false,
       ledgerWriting: false,
-      freshness: 'turn-load',
+      freshness: 'none',
       summary: '',
       error: null,
     })
@@ -457,7 +532,7 @@ describe('fleetPlayerStreamSliceFromState', () => {
       isFinal: false,
       isPending: true,
       ledgerWriting: false,
-      freshness: 'turn-load',
+      freshness: 'none',
       summary: 'Collecting turn evidence',
       error: null,
     })

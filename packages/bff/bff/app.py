@@ -37,6 +37,7 @@ from bff.transport.game_responses import (
 from bff.transport.inference_stream_responses import (
     InferenceStreamCompleteEvent,
     InferenceStreamErrorEvent,
+    InferenceStreamNoStoredRowEvent,
     InferenceStreamProgressEvent,
     InferenceStreamSolutionEvent,
     InferenceStreamWorkAcceptedEvent,
@@ -74,6 +75,7 @@ def build_openapi_schema() -> dict:
         LoadAllStreamCompleteEvent,
         LoadAllStreamErrorEvent,
         InferenceStreamSolutionEvent,
+        InferenceStreamNoStoredRowEvent,
         InferenceStreamWorkAcceptedEvent,
         InferenceStreamProgressEvent,
         InferenceStreamCompleteEvent,

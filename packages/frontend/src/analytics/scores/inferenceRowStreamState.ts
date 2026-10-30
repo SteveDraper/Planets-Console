@@ -8,9 +8,11 @@ import type {
   UnknownLossLeftover,
 } from '../../api/inferenceStreamEventSchema'
 import {
-  isBehindEvidenceMark,
-  resolveAnalyticFreshness,
+  analyticFreshnessForPhase,
+  freshnessPhaseAfterAccept,
+  phaseForStoredEvidence,
   type AnalyticFreshness,
+  type AnalyticFreshnessPhase,
 } from '../analyticFreshness'
 import { readMilitaryScoreArithmetic } from './inferenceConstraints'
 
@@ -70,7 +72,7 @@ export type RowStreamState = {
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
-  workAccepted: boolean
+  freshnessPhase: AnalyticFreshnessPhase
   hasStoredRow: boolean
   evidenceGeneration: number | null
   evidenceMark: number | null
@@ -84,19 +86,10 @@ export function initialRowStreamState(): RowStreamState {
     isComplete: false,
     diagnostics: {},
     placeholders: [],
-    workAccepted: true,
+    freshnessPhase: 'unlabeled',
     hasStoredRow: false,
     evidenceGeneration: null,
     evidenceMark: null,
-  }
-}
-
-export function turnLoadRowStreamState(): RowStreamState {
-  return {
-    ...initialRowStreamState(),
-    status: 'turn_load',
-    summary: '',
-    workAccepted: false,
   }
 }
 
@@ -120,14 +113,28 @@ function inFlightDisplayStatus(state: RowStreamState): InferenceDisplayStatus {
 }
 
 function freshnessForRow(state: RowStreamState): AnalyticFreshness {
-  const skippedWithoutStoredRow =
-    state.displayStatus === 'skipped' && !state.hasStoredRow && state.isComplete
-  return resolveAnalyticFreshness({
-    hasStoredRow: state.hasStoredRow,
-    workAccepted: state.workAccepted,
-    behindEvidenceMark: isBehindEvidenceMark(state.evidenceGeneration, state.evidenceMark),
-    skippedWithoutStoredRow,
-  })
+  return analyticFreshnessForPhase(state.freshnessPhase)
+}
+
+function searchingSummary(policyStepId: string | undefined): string {
+  return policyStepId
+    ? `Searching (${policyStepId.replace(/_/g, ' ')})`
+    : 'Build inference in progress'
+}
+
+function busyStoredRow(
+  state: RowStreamState,
+  summary: string,
+  patch: Partial<RowStreamState> = {}
+): RowStreamState {
+  return {
+    ...state,
+    ...patch,
+    isComplete: false,
+    status: 'pending',
+    summary,
+    displayStatus: 'pending',
+  }
 }
 
 function freshnessField(freshness: AnalyticFreshness): Pick<ScoresInferenceRowDetail, 'freshness'> {
@@ -177,10 +184,6 @@ export function pendingDetail(
     ...initialRowStreamState(),
     heldSolutions: [...solutions],
   })
-}
-
-export function turnLoadDetail(playerId: number): ScoresInferenceRowDetail {
-  return rowDetailFromStreamState(playerId, turnLoadRowStreamState())
 }
 
 export function failureDetail(playerId: number, summary: string): ScoresInferenceRowDetail {
@@ -233,38 +236,42 @@ export function reduceRowStreamState(
     return state
   }
 
+  if (event.type === 'no_stored_row') {
+    if (state.hasStoredRow) {
+      return state
+    }
+    return {
+      ...state,
+      freshnessPhase: 'turn-load',
+    }
+  }
+
   if (event.type === 'work_accepted') {
     if (state.hasStoredRow) {
-      return {
-        ...state,
-        workAccepted: true,
-        isComplete: false,
-        status: 'pending',
-        summary: 'Build inference in progress',
-        displayStatus: 'pending',
-      }
+      return busyStoredRow(state, 'Build inference in progress')
     }
     return {
       ...initialRowStreamState(),
+      freshnessPhase: freshnessPhaseAfterAccept(state.freshnessPhase, false),
       heldSolutions: state.heldSolutions,
     }
   }
 
   if (event.type === 'progress') {
+    const summary = searchingSummary(event.policyStepId)
+    if (state.isComplete && state.hasStoredRow) {
+      return busyStoredRow(state, summary)
+    }
     if (state.isComplete) {
       return {
         ...initialRowStreamState(),
-        summary: event.policyStepId
-          ? `Searching (${event.policyStepId.replace(/_/g, ' ')})`
-          : 'Build inference in progress',
+        freshnessPhase: 'current',
+        summary,
       }
     }
     return {
       ...state,
-      workAccepted: true,
-      summary: event.policyStepId
-        ? `Searching (${event.policyStepId.replace(/_/g, ' ')})`
-        : 'Build inference in progress',
+      summary,
     }
   }
 
@@ -273,30 +280,41 @@ export function reduceRowStreamState(
       event.fleetTorpInputStatus != null
         ? { fleetTorpInputStatus: event.fleetTorpInputStatus }
         : {}
+    const heldSolutions = streamSolutionsToRowSolutions(event.solutions)
+    if (state.isComplete && state.hasStoredRow) {
+      return busyStoredRow(state, 'Build inference in progress', {
+        heldSolutions,
+        ...fleetTorpInputStatus,
+      })
+    }
     if (state.isComplete) {
       return {
         ...initialRowStreamState(),
-        heldSolutions: streamSolutionsToRowSolutions(event.solutions),
+        freshnessPhase: 'current',
+        heldSolutions,
         ...fleetTorpInputStatus,
       }
     }
     return {
       ...state,
-      workAccepted: true,
-      heldSolutions: streamSolutionsToRowSolutions(event.solutions),
+      heldSolutions,
       ...fleetTorpInputStatus,
     }
   }
 
   if (event.type === 'complete') {
     const hasStoredRow = event.evidenceGeneration != null || state.hasStoredRow
+    const evidenceGeneration =
+      event.evidenceGeneration != null ? event.evidenceGeneration : state.evidenceGeneration
+    const evidenceMark = event.evidenceMark != null ? event.evidenceMark : state.evidenceMark
     return {
       ...state,
-      workAccepted: state.workAccepted || event.displayStatus !== 'skipped' || hasStoredRow,
+      freshnessPhase: hasStoredRow
+        ? phaseForStoredEvidence(evidenceGeneration, evidenceMark)
+        : 'current',
       hasStoredRow,
-      evidenceGeneration:
-        event.evidenceGeneration != null ? event.evidenceGeneration : state.evidenceGeneration,
-      evidenceMark: event.evidenceMark != null ? event.evidenceMark : state.evidenceMark,
+      evidenceGeneration,
+      evidenceMark,
       status: event.status,
       displayStatus: event.displayStatus,
       summary: event.summary,

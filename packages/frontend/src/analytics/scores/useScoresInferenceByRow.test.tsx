@@ -113,10 +113,28 @@ describe('useScoresInferenceByRow', () => {
       playerId: 8,
       displayStatus: 'pending',
     })
+    expect(result.current.inferenceByRow?.[0]?.freshness).toBeUndefined()
     expect(result.current.inferenceByRow?.[1]).toMatchObject({
       playerId: 9,
       displayStatus: 'pending',
     })
+    expect(result.current.inferenceByRow?.[1]?.freshness).toBeUndefined()
+  })
+
+  it('shows turn load only for the player that receives the no-stored prelude', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({ type: 'no_stored_row', playerId: 8 })
+        await new Promise(() => {})
+      }
+    )
+
+    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.freshness).toBe('turn-load')
+    })
+    expect(result.current.inferenceByRow?.[1]?.freshness).toBeUndefined()
   })
 
   it('merges settled inference independently per player from the table stream', async () => {

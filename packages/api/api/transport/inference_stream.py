@@ -149,6 +149,11 @@ def inference_work_accepted_event() -> dict[str, object]:
     return {"type": "work_accepted"}
 
 
+def inference_no_stored_row_event() -> dict[str, object]:
+    """Admission prelude: this schedule has no stored scoreboard row yet."""
+    return {"type": "no_stored_row"}
+
+
 InferenceStreamItem: TypeAlias = dict[str, object]
 
 

@@ -65,7 +65,7 @@ describe('useFleetTableStream', () => {
     seedShellViewpoint(1)
   })
 
-  it('seeds turn load for all players on stream connect', async () => {
+  it('seeds no freshness word for players on stream connect', async () => {
     vi.spyOn(bff, 'fetchFleetTableStream').mockImplementation(
       async () => new Promise(() => {})
     )
@@ -75,8 +75,8 @@ describe('useFleetTableStream', () => {
     })
 
     await waitFor(() => {
-      expect(result.current.streamPlayersById.get(8)?.freshness).toBe('turn-load')
-      expect(result.current.streamPlayersById.get(9)?.freshness).toBe('turn-load')
+      expect(result.current.streamPlayersById.get(8)?.freshness).toBe('none')
+      expect(result.current.streamPlayersById.get(9)?.freshness).toBe('none')
     })
     expect(result.current.streamPlayersById.get(8)?.isPending).toBe(false)
     expect(result.current.streamPlayersById.get(9)?.isPending).toBe(false)

@@ -325,7 +325,12 @@ function reducePlayerFrom(
     error: slice.error,
     ledgerWriting: slice.ledgerWriting ?? false,
     hasStoredRow: slice.freshness === 'subject-to-revision' || slice.rosterPaint === 'ledger',
-    workAccepted: slice.freshness !== 'turn-load',
+    freshnessPhase:
+      slice.freshness === 'turn-load'
+        ? 'turn-load'
+        : slice.freshness === 'subject-to-revision'
+          ? 'behind-mark'
+          : 'current',
   }
   const next = fleetPlayerStreamSliceFromState(reduceFleetPlayerStreamState(state, event))
   if (next == null) {

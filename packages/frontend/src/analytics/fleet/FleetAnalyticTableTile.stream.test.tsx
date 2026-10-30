@@ -134,7 +134,7 @@ describe('FleetAnalyticTableTile stream integration', () => {
 
     expect(await screen.findByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Bob fleet table' })).toBeInTheDocument()
-    expect(screen.getAllByText('Turn load')).toHaveLength(2)
+    expect(screen.queryByText('Turn load')).not.toBeInTheDocument()
     expect(screen.queryByText('Fleet materialization in progress')).not.toBeInTheDocument()
   })
 
@@ -203,7 +203,7 @@ describe('FleetAnalyticTableTile stream integration', () => {
     })
 
     const bobTile = screen.getByRole('region', { name: 'Bob fleet table' })
-    expect(within(bobTile).getByText('Turn load')).toBeInTheDocument()
+    expect(within(bobTile).queryByText('Turn load')).not.toBeInTheDocument()
     expect(within(bobTile).queryByText('Fleet materialization in progress')).not.toBeInTheDocument()
   })
 

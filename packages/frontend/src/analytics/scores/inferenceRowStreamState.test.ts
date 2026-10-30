@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { inferenceStreamEventSchema } from '../../api/inferenceStreamEventSchema'
 import {
   initialRowStreamState,
   pointUnexplainedMilitaryDelta2x,
   reduceRowStreamState,
   rowDetailFromStreamState,
-  turnLoadDetail,
-  turnLoadRowStreamState,
 } from './inferenceRowStreamState'
 
 describe('reduceRowStreamState', () => {
@@ -394,15 +393,75 @@ describe('reduceRowStreamState', () => {
     expect(detail.unexplainedMilitaryDelta2x).toBeUndefined()
   })
 
-  it('shows turn load until work is accepted, then no freshness words', () => {
-    expect(turnLoadDetail(3).freshness).toBe('turn-load')
-    const accepted = reduceRowStreamState(turnLoadRowStreamState(), { type: 'work_accepted' })
+  it('shows no freshness word before the no-stored prelude, then turn load until accept', () => {
+    expect(rowDetailFromStreamState(3, initialRowStreamState()).freshness).toBeUndefined()
+    expect(inferenceStreamEventSchema.safeParse({ type: 'no_stored_row', playerId: 3 }).success).toBe(
+      true
+    )
+    const loading = reduceRowStreamState(initialRowStreamState(), { type: 'no_stored_row' })
+    expect(rowDetailFromStreamState(3, loading).freshness).toBe('turn-load')
+    const accepted = reduceRowStreamState(loading, { type: 'work_accepted' })
     expect(rowDetailFromStreamState(3, accepted).freshness).toBeUndefined()
     expect(rowDetailFromStreamState(3, accepted).displayStatus).toBe('pending')
   })
 
+  it('ignores the no-stored prelude once a row is stored', () => {
+    const stored = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'exact',
+      displayStatus: 'success',
+      summary: 'Best build',
+      solutionCount: 1,
+      isComplete: true,
+      evidenceGeneration: 1,
+      evidenceMark: 2,
+    })
+    const again = reduceRowStreamState(stored, { type: 'no_stored_row' })
+    expect(again).toBe(stored)
+    expect(rowDetailFromStreamState(4, again).freshness).toBe('subject-to-revision')
+  })
+
+  it('keeps provisional and stored evidence when progress reopens a complete row', () => {
+    const stored = reduceRowStreamState(initialRowStreamState(), {
+      type: 'complete',
+      status: 'exact',
+      displayStatus: 'success',
+      summary: 'Best build',
+      solutionCount: 1,
+      isComplete: true,
+      evidenceGeneration: 1,
+      evidenceMark: 2,
+    })
+    const searching = reduceRowStreamState(stored, {
+      type: 'progress',
+      policyStepId: 'tier_1',
+    })
+    expect(searching.hasStoredRow).toBe(true)
+    expect(searching.evidenceGeneration).toBe(1)
+    expect(searching.evidenceMark).toBe(2)
+    expect(searching.isComplete).toBe(false)
+    expect(searching.displayStatus).toBe('pending')
+    const detail = rowDetailFromStreamState(4, searching)
+    expect(detail.freshness).toBe('subject-to-revision')
+
+    const withSolution = reduceRowStreamState(stored, {
+      type: 'solution',
+      solutions: [
+        {
+          objectiveValue: 10,
+          actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+        },
+      ],
+    })
+    expect(withSolution.hasStoredRow).toBe(true)
+    expect(withSolution.evidenceGeneration).toBe(1)
+    expect(withSolution.evidenceMark).toBe(2)
+    expect(rowDetailFromStreamState(4, withSolution).freshness).toBe('subject-to-revision')
+    expect(rowDetailFromStreamState(4, withSolution).displayStatus).toBe('pending')
+  })
+
   it('keeps subject to revision beside a stored row that is behind the mark', () => {
-    const stored = reduceRowStreamState(turnLoadRowStreamState(), {
+    const stored = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'exact',
       displayStatus: 'success',
@@ -421,7 +480,7 @@ describe('reduceRowStreamState', () => {
   })
 
   it('shows subject to revision beside a stored skip and nothing beside an unmarked skip', () => {
-    const storedSkip = reduceRowStreamState(turnLoadRowStreamState(), {
+    const storedSkip = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'dead',
       displayStatus: 'skipped',
@@ -434,7 +493,7 @@ describe('reduceRowStreamState', () => {
     expect(rowDetailFromStreamState(4, storedSkip).freshness).toBe('subject-to-revision')
     expect(rowDetailFromStreamState(4, storedSkip).displayStatus).toBe('skipped')
 
-    const unmarkedSkip = reduceRowStreamState(turnLoadRowStreamState(), {
+    const unmarkedSkip = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'dead',
       displayStatus: 'skipped',
@@ -447,7 +506,7 @@ describe('reduceRowStreamState', () => {
   })
 
   it('treats a stored row on the current mark as complete, including an approximate fleet', () => {
-    const onMark = reduceRowStreamState(turnLoadRowStreamState(), {
+    const onMark = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'exact',
       displayStatus: 'success',

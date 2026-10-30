@@ -4,80 +4,34 @@ import {
   PROVISIONAL_TITLE,
   TURN_LOAD_LABEL,
   analyticFreshnessClassName,
+  analyticFreshnessForPhase,
   analyticFreshnessLabel,
   analyticFreshnessTitle,
+  freshnessPhaseAfterAccept,
   isBehindEvidenceMark,
-  resolveAnalyticFreshness,
+  phaseForStoredEvidence,
 } from './analyticFreshness'
 
-describe('resolveAnalyticFreshness', () => {
-  it('shows turn load only before accept when nothing is stored', () => {
-    expect(
-      resolveAnalyticFreshness({
-        hasStoredRow: false,
-        workAccepted: false,
-        behindEvidenceMark: false,
-      })
-    ).toBe('turn-load')
+describe('analytic freshness phase', () => {
+  it('shows no word before any admission signal and after accept with nothing stored', () => {
+    expect(analyticFreshnessForPhase('unlabeled')).toBe('none')
+    expect(analyticFreshnessForPhase('current')).toBe('none')
+    expect(freshnessPhaseAfterAccept('turn-load', false)).toBe('current')
+    expect(freshnessPhaseAfterAccept('unlabeled', false)).toBe('current')
   })
 
-  it('drops freshness words after accept when the first compute has no stored row', () => {
-    expect(
-      resolveAnalyticFreshness({
-        hasStoredRow: false,
-        workAccepted: true,
-        behindEvidenceMark: false,
-      })
-    ).toBe('none')
+  it('shows turn load only from the turn-load phase', () => {
+    expect(analyticFreshnessForPhase('turn-load')).toBe('turn-load')
   })
 
-  it('never shows turn load for a stored row', () => {
-    expect(
-      resolveAnalyticFreshness({
-        hasStoredRow: true,
-        workAccepted: false,
-        behindEvidenceMark: false,
-      })
-    ).toBe('none')
-    expect(
-      resolveAnalyticFreshness({
-        hasStoredRow: true,
-        workAccepted: false,
-        behindEvidenceMark: true,
-      })
-    ).toBe('subject-to-revision')
-  })
-
-  it('keeps subject to revision while a recompute is accepted', () => {
-    expect(
-      resolveAnalyticFreshness({
-        hasStoredRow: true,
-        workAccepted: true,
-        behindEvidenceMark: true,
-      })
-    ).toBe('subject-to-revision')
-  })
-
-  it('treats a matching generation as complete, including an approximate fleet', () => {
+  it('maps a stored row to current or behind-mark, never turn load', () => {
+    expect(phaseForStoredEvidence(3, 3)).toBe('current')
+    expect(phaseForStoredEvidence(1, 2)).toBe('behind-mark')
+    expect(phaseForStoredEvidence(null, 2)).toBe('current')
+    expect(analyticFreshnessForPhase('behind-mark')).toBe('subject-to-revision')
+    expect(freshnessPhaseAfterAccept('behind-mark', true)).toBe('behind-mark')
     expect(isBehindEvidenceMark(3, 3)).toBe(false)
-    expect(
-      resolveAnalyticFreshness({
-        hasStoredRow: true,
-        workAccepted: true,
-        behindEvidenceMark: isBehindEvidenceMark(3, 3),
-      })
-    ).toBe('none')
-  })
-
-  it('treats a skip with no stored row as complete', () => {
-    expect(
-      resolveAnalyticFreshness({
-        hasStoredRow: false,
-        workAccepted: false,
-        behindEvidenceMark: false,
-        skippedWithoutStoredRow: true,
-      })
-    ).toBe('none')
+    expect(isBehindEvidenceMark(1, 2)).toBe(true)
   })
 })
 

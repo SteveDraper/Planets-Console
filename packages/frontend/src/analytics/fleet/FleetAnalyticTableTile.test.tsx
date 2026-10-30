@@ -92,7 +92,7 @@ describe('FleetAnalyticTableTile', () => {
 
     expect(screen.getByRole('region', { name: 'Alice fleet table' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Bob fleet table' })).toBeInTheDocument()
-    expect(screen.getAllByText('Turn load')).toHaveLength(2)
+    expect(screen.queryByText('Turn load')).not.toBeInTheDocument()
     expect(screen.queryByText('Fleet materialization in progress')).not.toBeInTheDocument()
     expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
     expect(screen.queryByText('No active fleet records.')).not.toBeInTheDocument()

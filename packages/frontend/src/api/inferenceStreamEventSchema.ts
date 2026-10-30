@@ -141,6 +141,10 @@ export const inferenceStreamWorkAcceptedEventSchema = inferenceStreamPlayerScope
   type: z.literal('work_accepted'),
 })
 
+export const inferenceStreamNoStoredRowEventSchema = inferenceStreamPlayerScopeSchema.extend({
+  type: z.literal('no_stored_row'),
+})
+
 export const inferenceStreamErrorEventSchema = inferenceStreamPlayerScopeSchema.extend({
   type: z.literal('error'),
   detail: z.string(),
@@ -158,6 +162,7 @@ export const inferenceStreamEventSchema = z.discriminatedUnion('type', [
   inferenceStreamErrorEventSchema,
   inferenceStreamGlobalPauseEventSchema,
   inferenceStreamWorkAcceptedEventSchema,
+  inferenceStreamNoStoredRowEventSchema,
 ])
 
 export type FleetTorpInputStatus = z.infer<typeof fleetTorpInputStatusSchema>
