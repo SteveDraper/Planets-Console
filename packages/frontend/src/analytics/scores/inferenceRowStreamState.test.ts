@@ -405,6 +405,14 @@ describe('reduceRowStreamState', () => {
     expect(rowDetailFromStreamState(3, accepted).displayStatus).toBe('pending')
   })
 
+  it('keeps no freshness word when no_stored_row arrives again after accept', () => {
+    const loading = reduceRowStreamState(initialRowStreamState(), { type: 'no_stored_row' })
+    const accepted = reduceRowStreamState(loading, { type: 'work_accepted' })
+    const again = reduceRowStreamState(accepted, { type: 'no_stored_row' })
+    expect(again).toBe(accepted)
+    expect(rowDetailFromStreamState(3, again).freshness).toBeUndefined()
+  })
+
   it('ignores the no-stored prelude once a row is stored', () => {
     const stored = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',

@@ -237,7 +237,7 @@ export function reduceRowStreamState(
   }
 
   if (event.type === 'no_stored_row') {
-    if (state.hasStoredRow) {
+    if (state.hasStoredRow || state.freshnessPhase !== 'unlabeled') {
       return state
     }
     return {
