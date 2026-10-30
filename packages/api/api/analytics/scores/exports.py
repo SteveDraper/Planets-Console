@@ -25,6 +25,7 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
     compact_tier_emissions_from_step_diagnostics,
     tier_emissions_from_wire_complete,
 )
+from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
     ScoresExportResolved,
@@ -546,18 +547,13 @@ def _persist_immediate_row_admission(
         return
     wire_event = wire_complete_event_from_terminal_admission(admission)
     row = persisted_inference_row_from_wire_complete(wire_event)
-    from dataclasses import replace
-
-    from api.analytics.fleet.injected_services import fleet_evidence_generation_for_player
-
-    generation = fleet_evidence_generation_for_player(
+    row = stamp_scoreboard_row_for_context(
+        row,
         query_context,
         game_id=scope.game_id,
         perspective=scope.perspective,
         player_id=scope.player_id,
     )
-    if generation is not None:
-        row = replace(row, evidence_generation=generation)
     services.persistence.put_row(
         scope.game_id,
         scope.perspective,

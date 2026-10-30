@@ -37,6 +37,10 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     FleetTorpInputStatus,
     PriorTurnFleetTorpResolution,
 )
+from api.analytics.scoreboard_evidence import (
+    annotate_stored_scoreboard_complete,
+    evidence_mark_for_player,
+)
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
@@ -75,35 +79,43 @@ def _stamp_live_complete_evidence(
     session: InferenceRowStreamSession,
     events: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """A durable complete is stored at the current fleet mark."""
-    from api.analytics.fleet.injected_services import fleet_evidence_generation_for_player
-    from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
-    from api.transport.inference_stream import stamp_inference_evidence_fields
+    """Report the generation just stored and the current mark.
 
-    mark = fleet_evidence_generation_for_player(
+    Orchestrator persist writes the row before this complete is delivered, so
+    the stored generation is the one this write stamped. Annotation compares
+    that integer to the mark read for the wire event. The same moment matches,
+    and the row is current.
+    """
+    from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
+
+    def is_durable_complete(item: dict[str, object]) -> bool:
+        status = item.get("status")
+        return item.get("type") == "complete" and is_durable_turn_evidence_row_status(
+            status if isinstance(status, str) else ""
+        )
+
+    if not any(is_durable_complete(item) for item in events):
+        return events
+    stored = None
+    if session.persistence is not None:
+        stored = session.persistence.get_row(
+            session.game_id,
+            session.perspective,
+            session.turn_number,
+            session.player_id,
+        )
+    mark = evidence_mark_for_player(
         session.query_context,
         game_id=session.game_id,
         perspective=session.perspective,
         player_id=session.player_id,
     )
-    if mark is None:
-        return events
-    stamped: list[dict[str, object]] = []
-    for item in events:
-        status = item.get("status")
-        if item.get("type") == "complete" and is_durable_turn_evidence_row_status(
-            status if isinstance(status, str) else ""
-        ):
-            stamped.append(
-                stamp_inference_evidence_fields(
-                    item,
-                    evidence_generation=mark,
-                    evidence_mark=mark,
-                )
-            )
-        else:
-            stamped.append(item)
-    return stamped
+    return [
+        annotate_stored_scoreboard_complete(item, stored=stored, evidence_mark=mark)
+        if is_durable_complete(item)
+        else item
+        for item in events
+    ]
 
 
 @dataclass(frozen=True)

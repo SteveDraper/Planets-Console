@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.errors import NotFoundError, ValidationError
 from api.serialization.inference_row_persistence import (
@@ -205,7 +207,7 @@ class InferenceRowPersistenceService:
         host_turn: int,
         player_id: int,
         fleet_torp_input_status: str | None = None,
-        query_context: object | None = None,
+        query_context: AnalyticQueryContext | None = None,
     ) -> None:
         """Write durable turn evidence from a RowComplete payload alone."""
         status = event.wire_payload.status
@@ -219,9 +221,9 @@ class InferenceRowPersistenceService:
             wire_event,
             fleet_torp_input_status=fleet_torp_input_status,  # type: ignore[arg-type]
         )
-        row = _with_fleet_evidence_generation(
+        row = stamp_scoreboard_row_for_context(
             row,
-            query_context=query_context,
+            query_context,
             game_id=game_id,
             perspective=perspective,
             player_id=player_id,
@@ -243,29 +245,3 @@ class InferenceRowPersistenceService:
             player_id=session.player_id,
             query_context=session.query_context,
         )
-
-
-def _with_fleet_evidence_generation(
-    row: PersistedInferenceRow,
-    *,
-    query_context: object | None,
-    game_id: int,
-    perspective: int,
-    player_id: int,
-) -> PersistedInferenceRow:
-    """Stamp the fleet mark that this write is current for."""
-    from dataclasses import replace
-
-    from api.analytics.export_context import AnalyticQueryContext
-    from api.analytics.fleet.injected_services import fleet_evidence_generation_for_player
-
-    ctx = query_context if isinstance(query_context, AnalyticQueryContext) else None
-    generation = fleet_evidence_generation_for_player(
-        ctx,
-        game_id=game_id,
-        perspective=perspective,
-        player_id=player_id,
-    )
-    if generation is None:
-        return row
-    return replace(row, evidence_generation=generation)

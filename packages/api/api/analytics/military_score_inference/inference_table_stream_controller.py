@@ -34,15 +34,16 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
 )
+from api.analytics.scoreboard_evidence import (
+    annotate_stored_scoreboard_complete,
+    evidence_mark_for_player,
+)
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
-from api.transport.inference_stream import (
-    inference_no_stored_row_event,
-    stamp_inference_evidence_fields,
-)
+from api.transport.inference_stream import inference_no_stored_row_event
 
 
 @dataclass(kw_only=True)
@@ -156,27 +157,21 @@ class InferenceTableStreamController(
         """
         if event.get("type") != "complete" or self.persistence is None:
             return event
-        from api.analytics.fleet.injected_services import fleet_evidence_generation_for_player
-
         stored = self.persistence.get_row(
             self.game_id,
             self.perspective,
             self.turn.settings.turn,
             player_id,
         )
-        generation = stored.evidence_generation if stored is not None else None
-        if not isinstance(generation, int):
-            return event
-        mark = fleet_evidence_generation_for_player(
-            self.query_context,
-            game_id=self.game_id,
-            perspective=self.perspective,
-            player_id=player_id,
-        )
-        return stamp_inference_evidence_fields(
+        return annotate_stored_scoreboard_complete(
             event,
-            evidence_generation=generation,
-            evidence_mark=mark,
+            stored=stored,
+            evidence_mark=evidence_mark_for_player(
+                self.query_context,
+                game_id=self.game_id,
+                perspective=self.perspective,
+                player_id=player_id,
+            ),
         )
 
     def cancel_player_row(self, player_id: int) -> None:
