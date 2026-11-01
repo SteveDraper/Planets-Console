@@ -598,7 +598,7 @@ describe('ScoresTableView', () => {
     expect(screen.queryByLabelText(/fleet torpedo/i)).toBeNull()
   })
 
-  it('shows subject to revision beside a stored skip and the searching badge', () => {
+  it('shows Provisional beside a stored skip and the searching badge', () => {
     const { rerender } = render(
       <ScoresTableView
         analyticScope={testScope}

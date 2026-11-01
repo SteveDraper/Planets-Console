@@ -468,7 +468,7 @@ describe('reduceRowStreamState', () => {
     expect(rowDetailFromStreamState(4, withSolution).displayStatus).toBe('pending')
   })
 
-  it('keeps subject to revision beside a stored row that is behind the mark', () => {
+  it('keeps Provisional beside a stored row that is behind the mark', () => {
     const stored = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'exact',
@@ -487,7 +487,7 @@ describe('reduceRowStreamState', () => {
     expect(detail.displayStatus).toBe('pending')
   })
 
-  it('shows subject to revision beside a stored skip and nothing beside an unmarked skip', () => {
+  it('shows Provisional beside a stored skip and nothing beside an unmarked skip', () => {
     const storedSkip = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'dead',

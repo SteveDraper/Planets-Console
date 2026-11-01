@@ -371,7 +371,7 @@ When materializing from the live inference scheduler, ladder state with **`time_
 
 Do **not** warn on **`complete`** even when all solution paths are **`none`**.
 
-**Analytic freshness** (turn-load only, subject to revision, first compute in progress, complete) is the on-screen per-player state of the fleet and scoreboard tables ([design-fleet-analytic.md](design-fleet-analytic.md) §8.4). It is not `searchStatus` and it does not replace this field.
+**Analytic freshness** (turn-load only, Provisional, first compute in progress, complete) is the on-screen per-player state of the fleet and scoreboard tables ([design-fleet-analytic.md](design-fleet-analytic.md) §8.4). It is not `searchStatus` and it does not replace this field.
 
 Optional: **`solutionsHeld`**, **`hostTurn`**.
 

@@ -17,7 +17,7 @@ export type FleetRosterPaint = 'sightings' | 'ledger'
 
 /**
  * Map picture for one player. A stored ledger is the paint, including an
- * approximate fleet and a ledger subject to revision. Sightings are the paint
+ * approximate fleet and a Provisional ledger. Sightings are the paint
  * only while this turn has no ledger. A host-turn ledger save replaces it.
  * Stream updates that do not save a ledger leave this picture in place.
  */

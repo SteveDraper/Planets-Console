@@ -11,6 +11,7 @@ import { formatFleetRecordField } from './fleetRecordDisplay'
 import {
   fleetPlayerStreamSliceFromState,
   initialFleetPlayerStreamState,
+  pendingFleetPlayerStreamSlice,
   reduceFleetPlayerStreamState,
   type FleetPlayerStreamSlice,
   type FleetPlayerStreamState,
@@ -305,7 +306,60 @@ describe('fleet map paint', () => {
       'ledger-seen',
     ])
   })
+
+  it('reconstructs a freshness-none slice with no stored roster as unlabeled', () => {
+    const painted = reducePlayerFrom(pendingFleetPlayerStreamSlice(), {
+      type: 'roster_paint',
+      playerId: 5,
+      paint: 'sightings',
+      ledger: {
+        playerId: 5,
+        playerName: 'Bob',
+        records: [sightingSeen],
+      },
+    })
+
+    expect(painted.freshness).toBe('turn-load')
+    expect(painted.mapPaint?.source).toBe('sightings')
+  })
+
+  it('keeps a stored ledger current when freshness has no word', () => {
+    const again = reducePlayerFrom(ledgerPlayer, {
+      type: 'roster_paint',
+      playerId: 3,
+      paint: 'sightings',
+      ledger: {
+        playerId: 3,
+        playerName: 'Cara',
+        records: [sightingSeen],
+      },
+    })
+
+    expect(ledgerPlayer.freshness).toBe('none')
+    expect(again.freshness).toBe('none')
+  })
 })
+
+function hasStoredRoster(slice: FleetPlayerStreamSlice): boolean {
+  return slice.rosterPaint === 'ledger' || slice.mapPaint?.source === 'ledger'
+}
+
+function freshnessPhaseFromSlice(
+  slice: FleetPlayerStreamSlice
+): FleetPlayerStreamState['freshnessPhase'] {
+  if (slice.freshness === 'turn-load') {
+    return 'turn-load'
+  }
+  if (slice.freshness === 'subject-to-revision') {
+    return 'behind-mark'
+  }
+  // Freshness none covers unlabeled and current. A stored ledger is current.
+  // Anything else is still the pre-admission gap, so a sightings paint can enter turn load.
+  if (!hasStoredRoster(slice)) {
+    return 'unlabeled'
+  }
+  return 'current'
+}
 
 function reducePlayerFrom(
   slice: FleetPlayerStreamSlice,
@@ -325,13 +379,8 @@ function reducePlayerFrom(
     summary: slice.summary,
     error: slice.error,
     ledgerWriting: slice.ledgerWriting ?? false,
-    hasStoredRow: slice.freshness === 'subject-to-revision' || slice.rosterPaint === 'ledger',
-    freshnessPhase:
-      slice.freshness === 'turn-load'
-        ? 'turn-load'
-        : slice.freshness === 'subject-to-revision'
-          ? 'behind-mark'
-          : 'current',
+    hasStoredRow: slice.freshness === 'subject-to-revision' || hasStoredRoster(slice),
+    freshnessPhase: freshnessPhaseFromSlice(slice),
   }
   const next = fleetPlayerStreamSliceFromState(reduceFleetPlayerStreamState(state, event))
   if (next == null) {
