@@ -68,7 +68,7 @@ def test_schedule_admission_yields_no_stored_row_before_deferred_submit(
     def _record_submit(run_id: str) -> None:
         submitted.append(run_id)
 
-    monkeypatch.setattr(scheduler, "perform_deferred_tier_submit", _record_submit)
+    monkeypatch.setattr(scheduler, "accept_pending_run", _record_submit)
 
     player_id = sample_turn.scores[0].ownerid
     scope = InferenceStreamScope(
@@ -183,7 +183,7 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
     submitted: list[str] = []
     monkeypatch.setattr(
         scheduler,
-        "perform_deferred_tier_submit",
+        "accept_pending_run",
         lambda run_id: submitted.append(run_id),
     )
 

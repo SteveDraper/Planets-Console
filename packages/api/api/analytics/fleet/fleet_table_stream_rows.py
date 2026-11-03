@@ -158,8 +158,11 @@ def schedule_fleet_player_run(
     persistence: FleetSnapshotPersistenceService,
     query_context: AnalyticQueryContext,
     stream_token: str | None = None,
-    submit: bool = True,
 ) -> ScheduledFleetPlayer | None:
+    """Admit one player run and register its orchestrator accept.
+
+    Does not submit. The caller runs ``scheduler.accept_pending_run``.
+    """
     session = FleetPlayerStreamSession(
         player_id=player_id,
         turn=turn,
@@ -173,7 +176,6 @@ def schedule_fleet_player_run(
         persistence=persistence,
         query_context=query_context,
         stream_token=stream_token,
-        submit=submit,
     )
     if stream_token is not None and not scheduler.owns_table_stream(stream_token):
         return None

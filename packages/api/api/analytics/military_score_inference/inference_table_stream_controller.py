@@ -84,12 +84,7 @@ class InferenceTableStreamController(
             force_schedule=force_schedule,
         )
 
-    def schedule_player_row(
-        self,
-        player_id: int,
-        *,
-        submit: bool = True,
-    ) -> ScheduledInferenceRow | None:
+    def schedule_player_row(self, player_id: int) -> ScheduledInferenceRow | None:
         score = next((row for row in self.turn.scores if row.ownerid == player_id), None)
         if score is None:
             return None
@@ -120,14 +115,13 @@ class InferenceTableStreamController(
             stream_token=self.stream_token,
             query_context=self.query_context,
             persistence=self.persistence,
-            submit=submit,
         )
 
     def _deferred_schedule_dispatch(
         self,
         scheduled: ScheduledInferenceRow,
     ) -> AdmissionDispatch[ScheduledInferenceRow]:
-        """Schedule without submitting, and paint whether a scoreboard row is stored.
+        """Paint whether a scoreboard row is stored, and defer the orchestrator accept.
 
         Connect yields ``wire_events`` before ``defer_submit``. No stored row is
         the absent signal. A stored row is a non-terminal paint, then the run
@@ -136,7 +130,7 @@ class InferenceTableStreamController(
         run_id = scheduled.session.run_id
 
         def defer_submit() -> None:
-            self.scheduler.perform_deferred_tier_submit(run_id)
+            self.scheduler.accept_pending_run(run_id)
 
         return AdmissionDispatch(
             wire_events=(
@@ -228,7 +222,7 @@ class InferenceTableStreamController(
                     ),
                 )
             return AdmissionDispatch()
-        scheduled = self.schedule_player_row(player_id, submit=False)
+        scheduled = self.schedule_player_row(player_id)
         if scheduled is None:
             return AdmissionDispatch(schedule_failed=True)
         existing = self.scheduled_rows.get(player_id)
@@ -244,7 +238,7 @@ class InferenceTableStreamController(
             # Fleet persist (or other invalidation) cancelled this run before adopt and did
             # not leave a live replacement in scheduled_rows. Schedule again so connect does
             # not enter multiplex with only globalPause.
-            replacement = self.schedule_player_row(player_id, submit=False)
+            replacement = self.schedule_player_row(player_id)
             if replacement is None or replacement.session.cancel_token.is_cancelled():
                 return AdmissionDispatch(schedule_failed=True)
             return self._deferred_schedule_dispatch(replacement)

@@ -232,8 +232,11 @@ def schedule_inference_row(
     stream_token: str | None = None,
     query_context: AnalyticQueryContext | None = None,
     persistence: InferenceRowPersistenceService | None = None,
-    submit: bool = True,
 ) -> ScheduledInferenceRow | None:
+    """Admit one inference row and register its orchestrator accept.
+
+    Does not submit. The caller runs ``scheduler.accept_pending_run``.
+    """
     observation = build_inference_observation(
         score,
         turn,
@@ -273,7 +276,6 @@ def schedule_inference_row(
         session,
         orchestration=orchestration,
         stream_token=stream_token,
-        submit=submit,
     )
     if stream_token is not None and not scheduler.owns_table_stream(stream_token):
         return None

@@ -105,6 +105,7 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
         turn_number = sample_turn.settings.turn
 
         scheduler.enqueue_tier_ladder(session)
+        scheduler.accept_pending_run(session.run_id)
         row_run = get_row_run(session.run_id)
         assert row_run is not None
         row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)
@@ -414,6 +415,7 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
         turn_number = sample_turn.settings.turn
 
         scheduler.enqueue_tier_ladder(session)
+        scheduler.accept_pending_run(session.run_id)
         row_run = get_row_run(session.run_id)
         assert row_run is not None
         row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)

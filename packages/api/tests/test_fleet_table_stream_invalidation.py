@@ -687,9 +687,8 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
         persistence,
         stream_token: str | None = None,
         query_context=None,
-        submit: bool = True,
     ) -> ScheduledFleetPlayer:
-        del _scheduler, fleet_services, persistence, stream_token, query_context, submit
+        del _scheduler, fleet_services, persistence, stream_token, query_context
         nest_depth["n"] += 1
         if nest_depth["n"] == 1:
             # Same-thread re-entry fingerprint: scores persist invalidation while

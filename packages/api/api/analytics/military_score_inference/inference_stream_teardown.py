@@ -214,6 +214,7 @@ class InferenceStreamTeardownMixin:
         if op is RowLifecycleOp.CANCEL:
             # Admission + seal + token before dropping scheduler maps.
             apply_scores_row_lifecycle(op, run_id)
+            self._pending_accepts.discard(run_id)
 
         root_scope = self._runs.pop(run_id, None)
         self._execution_generation_by_run_id.pop(run_id, None)

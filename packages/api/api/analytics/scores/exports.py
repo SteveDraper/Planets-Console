@@ -372,7 +372,7 @@ def _ensure_admit_inference_row(
         turn=turn,
         overlay_ensure=overlay_ensure,
     )
-    schedule_inference_row(
+    scheduled = schedule_inference_row(
         services.scheduler,
         score=score,
         turn=turn,
@@ -390,6 +390,8 @@ def _ensure_admit_inference_row(
         query_context=ctx,
         persistence=services.persistence,
     )
+    if scheduled is not None:
+        services.scheduler.accept_pending_run(scheduled.session.run_id)
     return True
 
 

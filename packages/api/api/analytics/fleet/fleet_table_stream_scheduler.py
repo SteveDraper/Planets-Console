@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
@@ -26,6 +27,7 @@ from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
+from api.streaming.table_stream.pending_accepts import PendingAccepts
 from api.streaming.table_stream.scheduler_orchestrator_attachment import (
     SchedulerOrchestratorAttachment,
 )
@@ -62,7 +64,6 @@ class _FleetPlayerOrchestratorRun:
     host_turn_number: int
     progress_tracker: FleetLedgerWireProgressTracker
     root_scope: ComputeScope
-    pending_submit: tuple[_FleetStreamOrchestratorBinding, ComputeScope] | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class FleetTableStreamScheduler:
 
     def __init__(self) -> None:
         self._runs: dict[str, _FleetPlayerOrchestratorRun] = {}
+        self._pending_accepts = PendingAccepts()
         self._lock = threading.Lock()
         self._scope_guard = TableStreamScopeGuard[FleetTableStreamScope]()
         self._stream_bindings: dict[str, _FleetStreamOrchestratorBinding] = {}
@@ -140,18 +142,18 @@ class FleetTableStreamScheduler:
         persistence: FleetSnapshotPersistenceService,
         query_context: AnalyticQueryContext,
         stream_token: str | None = None,
-        submit: bool = True,
     ) -> FleetPlayerStreamSession | None:
-        """Admit one fleet player run and submit ``force_fresh``.
+        """Admit one fleet player run and register its orchestrator accept.
 
         Persistence reads (``get_ledger`` / chain-anchor walk / deep-copy) and
         ``orchestrator.submit`` must run **outside** ``self._lock``. Scores
         ``tier_solve`` admits call ``reschedule_fleet_table_player`` on the pool
         worker; holding this lock across storage deep-copy wedged all workers and
-        the fleet multiplex ``owns_table_stream`` poll (game 680224 turn 13→14).
+        the fleet multiplex ``owns_table_stream`` poll (game 680224 turn 13 to 14).
+
+        The caller runs ``accept_pending_run`` after admission. Connect holds
+        that accept until every player's paint has been yielded.
         """
-        submit_binding: _FleetStreamOrchestratorBinding | None = None
-        submit_scope: ComputeScope | None = None
         host_turn = session.turn
         host_turn_number = host_turn.settings.turn
         player_id = session.player_id
@@ -208,35 +210,36 @@ class FleetTableStreamScheduler:
                 host_turn_number=host_turn_number,
                 progress_tracker=progress_tracker,
                 root_scope=root_scope,
-                pending_submit=None if submit else (binding, root_scope),
             )
             self._runs[session.run_id] = run
-            # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
-            # listeners and may re-enter scores persist / fleet reschedule paths that need
-            # this lock (ABBA with pool workers finishing ``tier_solve`` persist).
-            # force_fresh: scores evidence invalidation reschedules while a prior fleet@N
-            # node may still be ``complete`` on this orchestrator (hollow after ledger
-            # wipe). Closed-stream wakes use the same primitive via ``wake_fleet_scope``.
-            # Without force_fresh, submit attaches to that terminal and never rematerializes.
-            submit_binding = binding
-            submit_scope = root_scope
+            self._pending_accepts.register(
+                session.run_id,
+                self._player_accept(binding, root_scope, session.run_id),
+            )
 
         self._orchestrator_attachment.ensure_registered()
-        if submit and submit_binding is not None and submit_scope is not None:
-            self._submit_accepted_player_run(submit_binding, submit_scope, session)
         return session
 
-    def submit_prepared_player_run(self, run_id: str) -> None:
-        """Accept a run that ``enqueue_player_run(..., submit=False)`` prepared."""
-        with self._lock:
-            run = self._runs.get(run_id)
-            if run is None or run.pending_submit is None:
-                return
-            binding, scope = run.pending_submit
-            run.pending_submit = None
-            session = run.session
-        self._orchestrator_attachment.ensure_registered()
-        self._submit_accepted_player_run(binding, scope, session)
+    def accept_pending_run(self, run_id: str) -> None:
+        """Submit a run whose accept is still pending. A second call is a no-op."""
+        self._pending_accepts.accept(run_id)
+
+    def _player_accept(
+        self,
+        binding: _FleetStreamOrchestratorBinding,
+        scope: ComputeScope,
+        run_id: str,
+    ) -> Callable[[], None]:
+        def accept() -> None:
+            with self._lock:
+                run = self._runs.get(run_id)
+                if run is None:
+                    return
+                session = run.session
+            self._orchestrator_attachment.ensure_registered()
+            self._submit_accepted_player_run(binding, scope, session)
+
+        return accept
 
     def _submit_accepted_player_run(
         self,
@@ -244,6 +247,13 @@ class FleetTableStreamScheduler:
         scope: ComputeScope,
         session: FleetPlayerStreamSession,
     ) -> None:
+        # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
+        # listeners and may re-enter scores persist / fleet reschedule paths that need
+        # this lock (ABBA with pool workers finishing ``tier_solve`` persist).
+        # force_fresh: scores evidence invalidation reschedules while a prior fleet@N
+        # node may still be ``complete`` on this orchestrator (hollow after ledger
+        # wipe). Closed-stream wakes use the same primitive via ``wake_fleet_scope``.
+        # Without force_fresh, submit attaches to that terminal and never rematerializes.
         binding.orchestrator.submit(
             ComputeRequest(
                 scope=scope,
@@ -286,6 +296,7 @@ class FleetTableStreamScheduler:
             if run is not None:
                 run.session.cancel_token.cancel()
             self._runs.pop(run_id, None)
+            self._pending_accepts.discard(run_id)
 
     def end_fleet_table_stream(
         self,
@@ -304,6 +315,7 @@ class FleetTableStreamScheduler:
             for session in sessions:
                 session.cancel_token.cancel()
                 self._runs.pop(session.run_id, None)
+                self._pending_accepts.discard(session.run_id)
             self._stream_bindings.pop(stream_token, None)
 
     def publish_saved_host_turn_ledger(
@@ -419,10 +431,12 @@ class FleetTableStreamScheduler:
                 _wake_multiplex_for_session(session)
 
     def _preempt_active_table_stream_locked(self) -> None:
+        run_ids = tuple(self._runs)
         for run in self._runs.values():
             run.session.cancel_token.cancel()
         self._runs.clear()
         self._stream_bindings.clear()
+        self._pending_accepts.discard_all(run_ids)
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()

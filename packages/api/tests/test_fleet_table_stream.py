@@ -638,6 +638,62 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
         )
 
 
+def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch):
+    from api.analytics.fleet.fleet_table_player_run import FleetPlayerStreamSession
+
+    reset_fleet_table_stream_scheduler_for_tests()
+    scheduler = FleetTableStreamScheduler()
+    services = build_ephemeral_fleet_compute_services(
+        sample_turn,
+        game_id=628580,
+        perspective=1,
+    )
+    player_id = sample_turn.scores[0].ownerid
+    scope = FleetTableStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
+    submitted: list[str] = []
+
+    def record_submit(_binding, _scope, session) -> None:
+        submitted.append(session.run_id)
+
+    monkeypatch.setattr(scheduler, "_submit_accepted_player_run", record_submit)
+    query_context = _query_context_for_services(services, host_turn=sample_turn)
+
+    def open_run() -> FleetPlayerStreamSession:
+        session = FleetPlayerStreamSession(
+            player_id=player_id,
+            turn=sample_turn,
+            game_id=628580,
+            perspective=1,
+        )
+        admitted = scheduler.enqueue_player_run(
+            session,
+            fleet_services=services,
+            persistence=services.persistence,
+            query_context=query_context,
+            stream_token=stream_token,
+        )
+        assert admitted is session
+        return session
+
+    try:
+        cancelled = open_run()
+        assert submitted == []
+        scheduler.cancel_player_run(cancelled.run_id)
+        scheduler.accept_pending_run(cancelled.run_id)
+        assert submitted == []
+
+        live = open_run()
+        scheduler.accept_pending_run(live.run_id)
+        assert submitted == [live.run_id]
+    finally:
+        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+
+
 def test_enqueue_player_run_requires_query_context_to_submit(sample_turn):
     from api.analytics.fleet.fleet_table_player_run import FleetPlayerStreamSession
     from api.compute.pools import reset_compute_worker_pool_for_tests

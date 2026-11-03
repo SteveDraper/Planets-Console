@@ -77,7 +77,6 @@ class FleetTableStreamController(
             persistence=self.persistence,
             stream_token=self.stream_token,
             query_context=self.query_context,
-            submit=False,
         )
         if scheduled is None:
             return AdmissionDispatch(
@@ -96,7 +95,7 @@ class FleetTableStreamController(
         run_id = scheduled.session.run_id
 
         def defer_submit() -> None:
-            self.scheduler.submit_prepared_player_run(run_id)
+            self.scheduler.accept_pending_run(run_id)
 
         return AdmissionDispatch(
             wire_events=prelude,

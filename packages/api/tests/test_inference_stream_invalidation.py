@@ -110,6 +110,7 @@ def _schedule_player_row(
         query_context=minimal_stream_query_context(sample_turn),
     )
     assert scheduled is not None
+    scheduler.accept_pending_run(scheduled.session.run_id)
     return scheduled
 
 
