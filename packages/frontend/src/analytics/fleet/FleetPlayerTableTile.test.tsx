@@ -56,7 +56,7 @@ describe('FleetPlayerTableTile provenance progress', () => {
           isComplete: false,
           isFinal: false,
           ledgerWriting: true,
-          freshness: 'subject-to-revision',
+          freshness: 'provisional',
           summary: 'Fleet materialization in progress',
           error: null,
         }}

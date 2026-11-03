@@ -616,7 +616,7 @@ describe('ScoresTableView', () => {
               solutions: [],
               diagnostics: {},
               placeholders: [],
-              freshness: 'subject-to-revision',
+              freshness: 'provisional',
             },
           ],
         })}
@@ -646,7 +646,7 @@ describe('ScoresTableView', () => {
               isComplete: false,
               solutions: [],
               diagnostics: {},
-              freshness: 'subject-to-revision',
+              freshness: 'provisional',
             },
           ],
         })}

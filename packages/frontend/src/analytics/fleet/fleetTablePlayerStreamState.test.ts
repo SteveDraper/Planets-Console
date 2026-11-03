@@ -258,7 +258,7 @@ describe('reduceFleetPlayerStreamState', () => {
       evidenceMark: 4,
       ledger: ledgerPlayer,
     })
-    expect(fleetPlayerStreamSliceFromState(painted)?.freshness).toBe('subject-to-revision')
+    expect(fleetPlayerStreamSliceFromState(painted)?.freshness).toBe('provisional')
 
     const writing = reduceFleetPlayerStreamState(painted, {
       type: 'ledger_write',
@@ -268,7 +268,7 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(writing.ledgerWriting).toBe(true)
     expect(writing.freshness.hasStoredRow).toBe(true)
     const writingSlice = fleetPlayerStreamSliceFromState(writing)
-    expect(writingSlice?.freshness).toBe('subject-to-revision')
+    expect(writingSlice?.freshness).toBe('provisional')
     expect(isFleetTileMaterializing(writingSlice ?? undefined)).toBe(true)
   })
 
@@ -322,7 +322,7 @@ describe('reduceFleetPlayerStreamState', () => {
     const accepted = reduceFleetPlayerStreamState(writing, { type: 'work_accepted' })
 
     expect(painted.ledgerWriting).toBe(false)
-    expect(fleetPlayerStreamSliceFromState(painted)?.freshness).toBe('subject-to-revision')
+    expect(fleetPlayerStreamSliceFromState(painted)?.freshness).toBe('provisional')
     expect(isFleetTileMaterializing(fleetPlayerStreamSliceFromState(painted) ?? undefined)).toBe(
       false
     )
@@ -349,7 +349,7 @@ describe('reduceFleetPlayerStreamState', () => {
       evidenceMark: 3,
       ledger: ledgerPlayer,
     })
-    expect(fleetPlayerStreamSliceFromState(behind)?.freshness).toBe('subject-to-revision')
+    expect(fleetPlayerStreamSliceFromState(behind)?.freshness).toBe('provisional')
   })
 
   it('records the evidence mark on sightings without treating them as a stored row', () => {
@@ -392,7 +392,7 @@ describe('reduceFleetPlayerStreamState', () => {
         records: [baseRecord],
       },
     })
-    expect(fleetPlayerStreamSliceFromState(sightings)?.freshness).toBe('subject-to-revision')
+    expect(fleetPlayerStreamSliceFromState(sightings)?.freshness).toBe('provisional')
   })
 
   it('does not restore turn load when sightings arrive after accept', () => {

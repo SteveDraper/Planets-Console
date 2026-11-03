@@ -1,6 +1,6 @@
 /** Freshness phase shared by fleet and scoreboard rows. */
 
-export type AnalyticFreshness = 'turn-load' | 'subject-to-revision' | 'none'
+export type AnalyticFreshness = 'turn-load' | 'provisional' | 'none'
 
 /**
  * Set by stream events. Unlabeled is the gap before any admission signal.
@@ -136,7 +136,7 @@ export function analyticFreshnessForPhase(phase: AnalyticFreshnessPhase): Analyt
     return 'turn-load'
   }
   if (phase === 'behind-mark') {
-    return 'subject-to-revision'
+    return 'provisional'
   }
   return 'none'
 }

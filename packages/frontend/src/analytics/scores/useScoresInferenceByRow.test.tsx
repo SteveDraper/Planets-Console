@@ -582,9 +582,9 @@ describe('useScoresInferenceByRow', () => {
       })
       expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('success')
       expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(true)
-      expect(result.current.inferenceByRow?.[0]?.freshness).toBe('subject-to-revision')
+      expect(result.current.inferenceByRow?.[0]?.freshness).toBe('provisional')
       expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('skipped')
-      expect(result.current.inferenceByRow?.[1]?.freshness).toBe('subject-to-revision')
+      expect(result.current.inferenceByRow?.[1]?.freshness).toBe('provisional')
       expect(streamGeneration).toBe(1)
 
       await waitFor(() => {

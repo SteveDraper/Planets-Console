@@ -427,7 +427,7 @@ describe('reduceRowStreamState', () => {
     })
     const again = reduceRowStreamState(stored, { type: 'no_stored_row' })
     expect(again).toBe(stored)
-    expect(rowDetailFromStreamState(4, again).freshness).toBe('subject-to-revision')
+    expect(rowDetailFromStreamState(4, again).freshness).toBe('provisional')
   })
 
   it('keeps provisional and stored evidence when progress reopens a complete row', () => {
@@ -451,7 +451,7 @@ describe('reduceRowStreamState', () => {
     expect(searching.isComplete).toBe(false)
     expect(searching.displayStatus).toBe('pending')
     const detail = rowDetailFromStreamState(4, searching)
-    expect(detail.freshness).toBe('subject-to-revision')
+    expect(detail.freshness).toBe('provisional')
 
     const withSolution = reduceRowStreamState(stored, {
       type: 'solution',
@@ -465,7 +465,7 @@ describe('reduceRowStreamState', () => {
     expect(withSolution.freshness.hasStoredRow).toBe(true)
     expect(withSolution.freshness.evidenceGeneration).toBe(1)
     expect(withSolution.freshness.evidenceMark).toBe(2)
-    expect(rowDetailFromStreamState(4, withSolution).freshness).toBe('subject-to-revision')
+    expect(rowDetailFromStreamState(4, withSolution).freshness).toBe('provisional')
     expect(rowDetailFromStreamState(4, withSolution).displayStatus).toBe('pending')
   })
 
@@ -486,7 +486,7 @@ describe('reduceRowStreamState', () => {
       solutions: [solution],
     })
     const paintedDetail = rowDetailFromStreamState(4, painted)
-    expect(paintedDetail.freshness).toBe('subject-to-revision')
+    expect(paintedDetail.freshness).toBe('provisional')
     expect(paintedDetail.displayStatus).toBe('success')
     expect(paintedDetail.solutionCount).toBe(1)
     expect(paintedDetail.isComplete).toBe(true)
@@ -494,7 +494,7 @@ describe('reduceRowStreamState', () => {
 
     const accepted = reduceRowStreamState(painted, { type: 'work_accepted' })
     const busy = rowDetailFromStreamState(4, accepted)
-    expect(busy.freshness).toBe('subject-to-revision')
+    expect(busy.freshness).toBe('provisional')
     expect(busy.displayStatus).toBe('pending')
     expect(busy.isComplete).toBe(false)
     expect(accepted.isStreamSettled).toBe(false)
@@ -530,7 +530,7 @@ describe('reduceRowStreamState', () => {
     })
     const skipDetail = rowDetailFromStreamState(4, skip)
     expect(skipDetail.displayStatus).toBe('skipped')
-    expect(skipDetail.freshness).toBe('subject-to-revision')
+    expect(skipDetail.freshness).toBe('provisional')
     expect(skipDetail.isComplete).toBe(true)
     expect(skip.isStreamSettled).toBe(false)
 
@@ -560,11 +560,11 @@ describe('reduceRowStreamState', () => {
       evidenceGeneration: 1,
       evidenceMark: 2,
     })
-    expect(rowDetailFromStreamState(4, stored).freshness).toBe('subject-to-revision')
+    expect(rowDetailFromStreamState(4, stored).freshness).toBe('provisional')
 
     const recomputing = reduceRowStreamState(stored, { type: 'work_accepted' })
     const detail = rowDetailFromStreamState(4, recomputing)
-    expect(detail.freshness).toBe('subject-to-revision')
+    expect(detail.freshness).toBe('provisional')
     expect(detail.displayStatus).toBe('pending')
   })
 
@@ -579,7 +579,7 @@ describe('reduceRowStreamState', () => {
       evidenceGeneration: 0,
       evidenceMark: 1,
     })
-    expect(rowDetailFromStreamState(4, storedSkip).freshness).toBe('subject-to-revision')
+    expect(rowDetailFromStreamState(4, storedSkip).freshness).toBe('provisional')
     expect(rowDetailFromStreamState(4, storedSkip).displayStatus).toBe('skipped')
 
     const unmarkedSkip = reduceRowStreamState(initialRowStreamState(), {

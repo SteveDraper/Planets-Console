@@ -13,7 +13,7 @@ const FRESHNESS_LABEL: Record<Exclude<AnalyticFreshness, 'none'>, FreshnessLabel
     label: 'Turn load',
     className: 'text-slate-400',
   },
-  'subject-to-revision': {
+  'provisional': {
     label: 'Provisional',
     title:
       'This is a saved answer from before a newer result for this player. It may change once that result is included. Backfill earlier turns updates turns you are not viewing. Otherwise a turn updates when you open it.',

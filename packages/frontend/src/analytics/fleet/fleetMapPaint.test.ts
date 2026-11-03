@@ -350,7 +350,7 @@ function phaseFromSlice(
   if (slice.freshness === 'turn-load') {
     return 'turn-load'
   }
-  if (slice.freshness === 'subject-to-revision') {
+  if (slice.freshness === 'provisional') {
     return 'behind-mark'
   }
   // Freshness none covers unlabeled and current. A stored ledger is current.
@@ -380,7 +380,7 @@ function reducePlayerFrom(
     ledgerWriting: slice.ledgerWriting,
     freshness: {
       ...initialFleetPlayerStreamState().freshness,
-      hasStoredRow: slice.freshness === 'subject-to-revision' || hasStoredRoster(slice),
+      hasStoredRow: slice.freshness === 'provisional' || hasStoredRoster(slice),
       phase: phaseFromSlice(slice),
     },
   }

@@ -65,7 +65,7 @@ describe('analytic freshness phase', () => {
         evidenceMark: 1,
       })
     ).toMatchObject({ phase: 'behind-mark', hasStoredRow: true, evidenceGeneration: 0 })
-    expect(analyticFreshnessForPhase('behind-mark')).toBe('subject-to-revision')
+    expect(analyticFreshnessForPhase('behind-mark')).toBe('provisional')
 
     const behind = freshnessAfterStoredPaint(initialFreshnessState(), {
       evidenceGeneration: 1,

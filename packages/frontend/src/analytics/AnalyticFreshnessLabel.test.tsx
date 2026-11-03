@@ -16,7 +16,7 @@ describe('AnalyticFreshnessLabel', () => {
   })
 
   it('shows Provisional in amber with a title', () => {
-    render(<AnalyticFreshnessLabel freshness="subject-to-revision" />)
+    render(<AnalyticFreshnessLabel freshness="provisional" />)
 
     const label = screen.getByText('Provisional')
     expect(label.className).toContain('text-amber-300')
