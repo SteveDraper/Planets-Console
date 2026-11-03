@@ -344,9 +344,9 @@ function hasStoredRoster(slice: FleetPlayerStreamSlice): boolean {
   return slice.rosterPaint === 'ledger' || slice.mapPaint?.source === 'ledger'
 }
 
-function freshnessPhaseFromSlice(
+function phaseFromSlice(
   slice: FleetPlayerStreamSlice
-): FleetPlayerStreamState['freshnessPhase'] {
+): FleetPlayerStreamState['freshness']['phase'] {
   if (slice.freshness === 'turn-load') {
     return 'turn-load'
   }
@@ -379,8 +379,11 @@ function reducePlayerFrom(
     summary: slice.summary,
     error: slice.error,
     ledgerWriting: slice.ledgerWriting ?? false,
-    hasStoredRow: slice.freshness === 'subject-to-revision' || hasStoredRoster(slice),
-    freshnessPhase: freshnessPhaseFromSlice(slice),
+    freshness: {
+      ...initialFleetPlayerStreamState().freshness,
+      hasStoredRow: slice.freshness === 'subject-to-revision' || hasStoredRoster(slice),
+      phase: phaseFromSlice(slice),
+    },
   }
   const next = fleetPlayerStreamSliceFromState(reduceFleetPlayerStreamState(state, event))
   if (next == null) {

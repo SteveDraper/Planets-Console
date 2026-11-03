@@ -268,7 +268,7 @@ describe('reduceFleetPlayerStreamState', () => {
       writing: true,
     })
     expect(writing.ledgerWriting).toBe(true)
-    expect(writing.hasStoredRow).toBe(true)
+    expect(writing.freshness.hasStoredRow).toBe(true)
     const writingSlice = fleetPlayerStreamSliceFromState(writing)
     expect(writingSlice?.freshness).toBe('subject-to-revision')
     expect(isFleetTileMaterializing(writingSlice ?? undefined)).toBe(true)
@@ -348,6 +348,27 @@ describe('reduceFleetPlayerStreamState', () => {
       ledger: ledgerPlayer,
     })
     expect(fleetPlayerStreamSliceFromState(behind)?.freshness).toBe('subject-to-revision')
+  })
+
+  it('records the evidence mark on sightings without treating them as a stored row', () => {
+    const sighting = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'sightings',
+      evidenceMark: 4,
+      ledger: {
+        playerId: 8,
+        playerName: 'Alice',
+        records: [baseRecord],
+      },
+    })
+    expect(sighting.freshness).toEqual({
+      phase: 'turn-load',
+      hasStoredRow: false,
+      evidenceGeneration: null,
+      evidenceMark: 4,
+    })
+    expect(fleetPlayerStreamSliceFromState(sighting)?.freshness).toBe('turn-load')
   })
 
   it('does not return a provisional ledger to turn load when sightings arrive', () => {

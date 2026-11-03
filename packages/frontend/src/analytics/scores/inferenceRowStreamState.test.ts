@@ -446,9 +446,9 @@ describe('reduceRowStreamState', () => {
       type: 'progress',
       policyStepId: 'tier_1',
     })
-    expect(searching.hasStoredRow).toBe(true)
-    expect(searching.evidenceGeneration).toBe(1)
-    expect(searching.evidenceMark).toBe(2)
+    expect(searching.freshness.hasStoredRow).toBe(true)
+    expect(searching.freshness.evidenceGeneration).toBe(1)
+    expect(searching.freshness.evidenceMark).toBe(2)
     expect(searching.isComplete).toBe(false)
     expect(searching.displayStatus).toBe('pending')
     const detail = rowDetailFromStreamState(4, searching)
@@ -463,9 +463,9 @@ describe('reduceRowStreamState', () => {
         },
       ],
     })
-    expect(withSolution.hasStoredRow).toBe(true)
-    expect(withSolution.evidenceGeneration).toBe(1)
-    expect(withSolution.evidenceMark).toBe(2)
+    expect(withSolution.freshness.hasStoredRow).toBe(true)
+    expect(withSolution.freshness.evidenceGeneration).toBe(1)
+    expect(withSolution.freshness.evidenceMark).toBe(2)
     expect(rowDetailFromStreamState(4, withSolution).freshness).toBe('subject-to-revision')
     expect(rowDetailFromStreamState(4, withSolution).displayStatus).toBe('pending')
   })

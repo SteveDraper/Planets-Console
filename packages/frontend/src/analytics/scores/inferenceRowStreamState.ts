@@ -9,11 +9,13 @@ import type {
 } from '../../api/inferenceStreamEventSchema'
 import {
   analyticFreshnessForPhase,
-  freshnessPhaseAfterAbsentSignal,
-  freshnessPhaseAfterAccept,
-  phaseForStoredEvidence,
+  freshnessAfterAbsent,
+  freshnessAfterAccept,
+  freshnessAfterCurrentPaint,
+  freshnessAfterStoredPaint,
+  initialFreshnessState,
   type AnalyticFreshness,
-  type AnalyticFreshnessPhase,
+  type FreshnessState,
 } from '../analyticFreshness'
 import { readMilitaryScoreArithmetic } from './inferenceConstraints'
 
@@ -73,26 +75,22 @@ export type RowStreamState = {
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
-  freshnessPhase: AnalyticFreshnessPhase
-  hasStoredRow: boolean
-  evidenceGeneration: number | null
-  evidenceMark: number | null
+  freshness: FreshnessState
   /** Real complete or error. A stored paint does not settle the run. */
   isStreamSettled: boolean
 }
+
+const BUILD_INFERENCE_IN_PROGRESS_SUMMARY = 'Build inference in progress'
 
 export function initialRowStreamState(): RowStreamState {
   return {
     heldSolutions: [],
     status: 'pending',
-    summary: 'Build inference in progress',
+    summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
     isComplete: false,
     diagnostics: {},
     placeholders: [],
-    freshnessPhase: 'unlabeled',
-    hasStoredRow: false,
-    evidenceGeneration: null,
-    evidenceMark: null,
+    freshness: initialFreshnessState(),
     isStreamSettled: false,
   }
 }
@@ -122,28 +120,51 @@ function inFlightDisplayStatus(state: RowStreamState): InferenceDisplayStatus {
 }
 
 function freshnessForRow(state: RowStreamState): AnalyticFreshness {
-  return analyticFreshnessForPhase(state.freshnessPhase)
+  return analyticFreshnessForPhase(state.freshness.phase)
 }
 
 function searchingSummary(policyStepId: string | undefined): string {
   return policyStepId
     ? `Searching (${policyStepId.replace(/_/g, ' ')})`
-    : 'Build inference in progress'
+    : BUILD_INFERENCE_IN_PROGRESS_SUMMARY
 }
 
-function busyStoredRow(
-  state: RowStreamState,
-  summary: string,
-  patch: Partial<RowStreamState> = {}
-): RowStreamState {
+type RowRunUpdate = Partial<
+  Pick<RowStreamState, 'heldSolutions' | 'summary' | 'fleetTorpInputStatus'>
+>
+
+type RowRunActivity = {
+  restart: 'always' | 'when-complete'
+  summary: string
+  updates: RowRunUpdate
+}
+
+/**
+ * A restart keeps a stored row and shows it as pending.
+ * With nothing stored, the row is replaced by a fresh current row.
+ * An open run that is not restarting only applies the event updates.
+ */
+function rowForRunActivity(state: RowStreamState, activity: RowRunActivity): RowStreamState {
+  const restarting = activity.restart === 'always' || state.isComplete
+  if (!restarting) {
+    return { ...state, ...activity.updates }
+  }
+  if (state.freshness.hasStoredRow) {
+    return {
+      ...state,
+      ...activity.updates,
+      isComplete: false,
+      isStreamSettled: false,
+      status: 'pending',
+      displayStatus: 'pending',
+      summary: activity.summary,
+    }
+  }
   return {
-    ...state,
-    ...patch,
-    isComplete: false,
-    isStreamSettled: false,
-    status: 'pending',
-    summary,
-    displayStatus: 'pending',
+    ...initialRowStreamState(),
+    ...activity.updates,
+    freshness: freshnessAfterAccept(initialFreshnessState()),
+    summary: activity.summary,
   }
 }
 
@@ -226,23 +247,20 @@ function fleetTorpFieldsFromPaint(
   return fields
 }
 
+function scoreboardPaintIsStored(freshness: FreshnessState, event: ScoreboardPaintEvent): boolean {
+  return event.type === 'stored_row' || event.evidenceGeneration != null || freshness.hasStoredRow
+}
+
 function applyScoreboardPaint(
   state: RowStreamState,
   event: ScoreboardPaintEvent
 ): RowStreamState {
-  const hasStoredRow =
-    event.type === 'stored_row' || event.evidenceGeneration != null || state.hasStoredRow
-  const evidenceGeneration =
-    event.evidenceGeneration != null ? event.evidenceGeneration : state.evidenceGeneration
-  const evidenceMark = event.evidenceMark != null ? event.evidenceMark : state.evidenceMark
+  const freshness = scoreboardPaintIsStored(state.freshness, event)
+    ? freshnessAfterStoredPaint(state.freshness, event)
+    : freshnessAfterCurrentPaint(state.freshness, event)
   return {
     ...state,
-    freshnessPhase: hasStoredRow
-      ? phaseForStoredEvidence(evidenceGeneration, evidenceMark)
-      : 'current',
-    hasStoredRow,
-    evidenceGeneration,
-    evidenceMark,
+    freshness,
     status: event.status,
     displayStatus: event.displayStatus,
     summary: event.summary,
@@ -281,50 +299,38 @@ export function reduceRowStreamState(
       return {
         ...state,
         status: 'pending',
-        summary: 'Build inference in progress',
+        summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
       }
     }
     return state
   }
 
   if (event.type === 'no_stored_row') {
-    const freshnessPhase = freshnessPhaseAfterAbsentSignal(state.freshnessPhase)
-    if (freshnessPhase === state.freshnessPhase) {
+    const freshness = freshnessAfterAbsent(state.freshness)
+    if (freshness === state.freshness) {
       return state
     }
     return {
       ...state,
-      freshnessPhase,
+      freshness,
     }
   }
 
   if (event.type === 'work_accepted') {
-    if (state.hasStoredRow) {
-      return busyStoredRow(state, 'Build inference in progress')
-    }
-    return {
-      ...initialRowStreamState(),
-      freshnessPhase: freshnessPhaseAfterAccept(state.freshnessPhase, false),
-      heldSolutions: state.heldSolutions,
-    }
+    return rowForRunActivity(state, {
+      restart: 'always',
+      summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
+      updates: { heldSolutions: state.heldSolutions },
+    })
   }
 
   if (event.type === 'progress') {
     const summary = searchingSummary(event.policyStepId)
-    if (state.isComplete && state.hasStoredRow) {
-      return busyStoredRow(state, summary)
-    }
-    if (state.isComplete) {
-      return {
-        ...initialRowStreamState(),
-        freshnessPhase: 'current',
-        summary,
-      }
-    }
-    return {
-      ...state,
+    return rowForRunActivity(state, {
+      restart: 'when-complete',
       summary,
-    }
+      updates: { summary },
+    })
   }
 
   if (event.type === 'solution') {
@@ -332,26 +338,14 @@ export function reduceRowStreamState(
       event.fleetTorpInputStatus != null
         ? { fleetTorpInputStatus: event.fleetTorpInputStatus }
         : {}
-    const heldSolutions = streamSolutionsToRowSolutions(event.solutions)
-    if (state.isComplete && state.hasStoredRow) {
-      return busyStoredRow(state, 'Build inference in progress', {
-        heldSolutions,
+    return rowForRunActivity(state, {
+      restart: 'when-complete',
+      summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
+      updates: {
+        heldSolutions: streamSolutionsToRowSolutions(event.solutions),
         ...fleetTorpInputStatus,
-      })
-    }
-    if (state.isComplete) {
-      return {
-        ...initialRowStreamState(),
-        freshnessPhase: 'current',
-        heldSolutions,
-        ...fleetTorpInputStatus,
-      }
-    }
-    return {
-      ...state,
-      heldSolutions,
-      ...fleetTorpInputStatus,
-    }
+      },
+    })
   }
 
   if (event.type === 'complete' || event.type === 'stored_row') {

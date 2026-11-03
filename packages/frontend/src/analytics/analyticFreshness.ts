@@ -14,14 +14,126 @@ export type AnalyticFreshness = 'turn-load' | 'subject-to-revision' | 'none'
  */
 export type AnalyticFreshnessPhase = 'unlabeled' | 'turn-load' | 'current' | 'behind-mark'
 
-export function isBehindEvidenceMark(
-  evidenceGeneration: number | null | undefined,
-  evidenceMark: number | null | undefined
-): boolean {
-  if (evidenceGeneration == null || evidenceMark == null) {
-    return false
+/** Evidence carried on a paint event. Absent fields keep the previous value. */
+export type FreshnessEvidenceEvent = {
+  evidenceGeneration?: number | null
+  evidenceMark?: number | null
+}
+
+export type FreshnessState = {
+  phase: AnalyticFreshnessPhase
+  hasStoredRow: boolean
+  evidenceGeneration: number | null
+  evidenceMark: number | null
+}
+
+export function initialFreshnessState(): FreshnessState {
+  return {
+    phase: 'unlabeled',
+    hasStoredRow: false,
+    evidenceGeneration: null,
+    evidenceMark: null,
   }
-  return evidenceGeneration !== evidenceMark
+}
+
+function evidenceFrom(
+  state: FreshnessState,
+  event: FreshnessEvidenceEvent
+): Pick<FreshnessState, 'evidenceGeneration' | 'evidenceMark'> {
+  return {
+    evidenceGeneration:
+      event.evidenceGeneration != null ? event.evidenceGeneration : state.evidenceGeneration,
+    evidenceMark: event.evidenceMark != null ? event.evidenceMark : state.evidenceMark,
+  }
+}
+
+function withPhase(state: FreshnessState, phase: AnalyticFreshnessPhase): FreshnessState {
+  if (state.phase === phase) {
+    return state
+  }
+  return { ...state, phase }
+}
+
+function phaseForStoredEvidence(
+  evidenceGeneration: number | null,
+  evidenceMark: number | null
+): 'current' | 'behind-mark' {
+  if (evidenceGeneration == null || evidenceMark == null) {
+    return 'current'
+  }
+  return evidenceGeneration === evidenceMark ? 'current' : 'behind-mark'
+}
+
+/**
+ * Evidence from a paint that is not a stored row.
+ * Phase is left for the absent or current paint that follows.
+ */
+function freshnessClearingStoredRow(
+  state: FreshnessState,
+  event: FreshnessEvidenceEvent
+): FreshnessState {
+  return {
+    phase: state.phase,
+    hasStoredRow: false,
+    ...evidenceFrom(state, event),
+  }
+}
+
+/**
+ * An absent admission signal is turn load only before accept.
+ * Current and behind-mark stay: accept already happened, or a stored row is showing.
+ */
+export function freshnessAfterAbsent(state: FreshnessState): FreshnessState {
+  if (state.phase === 'current' || state.phase === 'behind-mark') {
+    return state
+  }
+  return withPhase(state, 'turn-load')
+}
+
+/**
+ * A paint that is not a stored row. Evidence updates when the event carries it.
+ * Phase follows the absent-signal rule, so a provisional row stays provisional.
+ */
+export function freshnessAfterAbsentPaint(
+  state: FreshnessState,
+  event: FreshnessEvidenceEvent
+): FreshnessState {
+  return freshnessAfterAbsent(freshnessClearingStoredRow(state, event))
+}
+
+/**
+ * A stored row is current or behind the mark.
+ * Evidence fields update when the event carries them.
+ */
+export function freshnessAfterStoredPaint(
+  state: FreshnessState,
+  event: FreshnessEvidenceEvent
+): FreshnessState {
+  const evidence = evidenceFrom(state, event)
+  return {
+    phase: phaseForStoredEvidence(evidence.evidenceGeneration, evidence.evidenceMark),
+    hasStoredRow: true,
+    ...evidence,
+  }
+}
+
+/**
+ * A painted result that is not a stored row is current.
+ * Evidence updates when the event carries it.
+ */
+export function freshnessAfterCurrentPaint(
+  state: FreshnessState,
+  event: FreshnessEvidenceEvent
+): FreshnessState {
+  return withPhase(freshnessClearingStoredRow(state, event), 'current')
+}
+
+/** Accept ends turn load when nothing is stored. A stored row keeps its phase. */
+export function freshnessAfterAccept(state: FreshnessState): FreshnessState {
+  if (state.hasStoredRow) {
+    return state
+  }
+  return withPhase(state, 'current')
 }
 
 export function analyticFreshnessForPhase(phase: AnalyticFreshnessPhase): AnalyticFreshness {
@@ -32,38 +144,6 @@ export function analyticFreshnessForPhase(phase: AnalyticFreshnessPhase): Analyt
     return 'subject-to-revision'
   }
   return 'none'
-}
-
-/** A stored row is current or behind the mark. It is never turn load. */
-export function phaseForStoredEvidence(
-  evidenceGeneration: number | null | undefined,
-  evidenceMark: number | null | undefined
-): 'current' | 'behind-mark' {
-  return isBehindEvidenceMark(evidenceGeneration, evidenceMark) ? 'behind-mark' : 'current'
-}
-
-/**
- * An absent admission signal is turn load only before accept.
- * Current and behind-mark stay: accept already happened, or a stored row is showing.
- */
-export function freshnessPhaseAfterAbsentSignal(
-  phase: AnalyticFreshnessPhase
-): AnalyticFreshnessPhase {
-  if (phase === 'unlabeled' || phase === 'turn-load') {
-    return 'turn-load'
-  }
-  return phase
-}
-
-/** Accept ends turn load when nothing is stored. A stored row keeps its phase. */
-export function freshnessPhaseAfterAccept(
-  phase: AnalyticFreshnessPhase,
-  hasStoredRow: boolean
-): AnalyticFreshnessPhase {
-  if (hasStoredRow) {
-    return phase
-  }
-  return 'current'
 }
 
 export function analyticFreshnessLabel(freshness: AnalyticFreshness): string | null {
