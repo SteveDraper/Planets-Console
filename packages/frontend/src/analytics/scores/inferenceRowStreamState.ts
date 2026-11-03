@@ -9,6 +9,7 @@ import type {
 } from '../../api/inferenceStreamEventSchema'
 import {
   analyticFreshnessForPhase,
+  freshnessPhaseAfterAbsentSignal,
   freshnessPhaseAfterAccept,
   phaseForStoredEvidence,
   type AnalyticFreshness,
@@ -76,6 +77,8 @@ export type RowStreamState = {
   hasStoredRow: boolean
   evidenceGeneration: number | null
   evidenceMark: number | null
+  /** Real complete or error. A stored paint does not settle the run. */
+  isStreamSettled: boolean
 }
 
 export function initialRowStreamState(): RowStreamState {
@@ -90,7 +93,13 @@ export function initialRowStreamState(): RowStreamState {
     hasStoredRow: false,
     evidenceGeneration: null,
     evidenceMark: null,
+    isStreamSettled: false,
   }
+}
+
+/** The run has a real complete or error. A stored paint leaves it open. */
+export function isRowStreamSettled(state: RowStreamState): boolean {
+  return state.isStreamSettled
 }
 
 function pausedSummaryFromSolutions(solutions: ScoresInferenceSolution[]): string {
@@ -131,6 +140,7 @@ function busyStoredRow(
     ...state,
     ...patch,
     isComplete: false,
+    isStreamSettled: false,
     status: 'pending',
     summary,
     displayStatus: 'pending',
@@ -200,8 +210,10 @@ export function failureDetail(playerId: number, summary: string): ScoresInferenc
   }
 }
 
-function fleetTorpFieldsFromCompleteEvent(
-  event: Extract<InferenceStreamEvent, { type: 'complete' }>
+type ScoreboardPaintEvent = Extract<InferenceStreamEvent, { type: 'complete' | 'stored_row' }>
+
+function fleetTorpFieldsFromPaint(
+  event: ScoreboardPaintEvent
 ): Pick<RowStreamState, 'fleetTorpInputStatus' | 'fleetTorpOverlayBeliefSetTorpIds'> {
   const fields: Pick<RowStreamState, 'fleetTorpInputStatus' | 'fleetTorpOverlayBeliefSetTorpIds'> =
     {}
@@ -212,6 +224,45 @@ function fleetTorpFieldsFromCompleteEvent(
     fields.fleetTorpOverlayBeliefSetTorpIds = event.fleetTorpOverlayBeliefSetTorpIds
   }
   return fields
+}
+
+function applyScoreboardPaint(
+  state: RowStreamState,
+  event: ScoreboardPaintEvent
+): RowStreamState {
+  const hasStoredRow =
+    event.type === 'stored_row' || event.evidenceGeneration != null || state.hasStoredRow
+  const evidenceGeneration =
+    event.evidenceGeneration != null ? event.evidenceGeneration : state.evidenceGeneration
+  const evidenceMark = event.evidenceMark != null ? event.evidenceMark : state.evidenceMark
+  return {
+    ...state,
+    freshnessPhase: hasStoredRow
+      ? phaseForStoredEvidence(evidenceGeneration, evidenceMark)
+      : 'current',
+    hasStoredRow,
+    evidenceGeneration,
+    evidenceMark,
+    status: event.status,
+    displayStatus: event.displayStatus,
+    summary: event.summary,
+    isComplete: event.isComplete,
+    isStreamSettled: event.type === 'complete',
+    diagnostics: event.diagnostics ?? {},
+    placeholders: event.placeholders ?? [],
+    ...(event.leftover != null ? { leftover: event.leftover } : {}),
+    ...(event.latticeSignatures != null
+      ? { latticeSignatures: event.latticeSignatures }
+      : {}),
+    unexplainedMilitaryDelta2x: pointUnexplainedMilitaryDelta2x(
+      event.leftover ?? state.leftover,
+      event.unexplainedMilitaryDelta2x ?? state.unexplainedMilitaryDelta2x
+    ),
+    ...fleetTorpFieldsFromPaint(event),
+    ...(event.solutions != null
+      ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }
+      : {}),
+  }
 }
 
 export function reduceRowStreamState(
@@ -237,12 +288,13 @@ export function reduceRowStreamState(
   }
 
   if (event.type === 'no_stored_row') {
-    if (state.hasStoredRow || state.freshnessPhase !== 'unlabeled') {
+    const freshnessPhase = freshnessPhaseAfterAbsentSignal(state.freshnessPhase)
+    if (freshnessPhase === state.freshnessPhase) {
       return state
     }
     return {
       ...state,
-      freshnessPhase: 'turn-load',
+      freshnessPhase,
     }
   }
 
@@ -302,38 +354,8 @@ export function reduceRowStreamState(
     }
   }
 
-  if (event.type === 'complete') {
-    const hasStoredRow = event.evidenceGeneration != null || state.hasStoredRow
-    const evidenceGeneration =
-      event.evidenceGeneration != null ? event.evidenceGeneration : state.evidenceGeneration
-    const evidenceMark = event.evidenceMark != null ? event.evidenceMark : state.evidenceMark
-    return {
-      ...state,
-      freshnessPhase: hasStoredRow
-        ? phaseForStoredEvidence(evidenceGeneration, evidenceMark)
-        : 'current',
-      hasStoredRow,
-      evidenceGeneration,
-      evidenceMark,
-      status: event.status,
-      displayStatus: event.displayStatus,
-      summary: event.summary,
-      isComplete: event.isComplete,
-      diagnostics: event.diagnostics ?? {},
-      placeholders: event.placeholders ?? [],
-      ...(event.leftover != null ? { leftover: event.leftover } : {}),
-      ...(event.latticeSignatures != null
-        ? { latticeSignatures: event.latticeSignatures }
-        : {}),
-      unexplainedMilitaryDelta2x: pointUnexplainedMilitaryDelta2x(
-        event.leftover ?? state.leftover,
-        event.unexplainedMilitaryDelta2x ?? state.unexplainedMilitaryDelta2x
-      ),
-      ...fleetTorpFieldsFromCompleteEvent(event),
-      ...(event.solutions != null
-        ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }
-        : {}),
-    }
+  if (event.type === 'complete' || event.type === 'stored_row') {
+    return applyScoreboardPaint(state, event)
   }
 
   if (event.type === 'error') {
@@ -343,6 +365,7 @@ export function reduceRowStreamState(
       displayStatus: 'failure',
       summary: event.detail,
       isComplete: true,
+      isStreamSettled: true,
     }
   }
 

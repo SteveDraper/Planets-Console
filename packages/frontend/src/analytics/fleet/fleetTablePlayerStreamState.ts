@@ -1,6 +1,7 @@
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
 import {
   analyticFreshnessForPhase,
+  freshnessPhaseAfterAbsentSignal,
   freshnessPhaseAfterAccept,
   phaseForStoredEvidence,
   type AnalyticFreshness,
@@ -125,13 +126,6 @@ function freshnessForState(state: FleetPlayerStreamState): AnalyticFreshness {
   return analyticFreshnessForPhase(state.freshnessPhase)
 }
 
-function phaseAfterSightings(phase: AnalyticFreshnessPhase): AnalyticFreshnessPhase {
-  if (phase === 'current') {
-    return phase
-  }
-  return 'turn-load'
-}
-
 function evidenceFromEvent(
   state: FleetPlayerStreamState,
   event: { evidenceGeneration?: number; evidenceMark?: number },
@@ -182,7 +176,7 @@ export function reduceFleetPlayerStreamState(
       ...evidence,
       freshnessPhase: hasStoredRow
         ? phaseForStoredEvidence(evidence.evidenceGeneration, evidence.evidenceMark)
-        : phaseAfterSightings(state.freshnessPhase),
+        : freshnessPhaseAfterAbsentSignal(state.freshnessPhase),
       rosterPaint: event.paint,
       mapPaint: mapPaintFromLedger(event.paint, event.ledger),
       ledgerWriting: false,

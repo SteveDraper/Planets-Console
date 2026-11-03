@@ -42,6 +42,19 @@ export function phaseForStoredEvidence(
   return isBehindEvidenceMark(evidenceGeneration, evidenceMark) ? 'behind-mark' : 'current'
 }
 
+/**
+ * An absent admission signal is turn load only before accept.
+ * Current and behind-mark stay: accept already happened, or a stored row is showing.
+ */
+export function freshnessPhaseAfterAbsentSignal(
+  phase: AnalyticFreshnessPhase
+): AnalyticFreshnessPhase {
+  if (phase === 'unlabeled' || phase === 'turn-load') {
+    return 'turn-load'
+  }
+  return phase
+}
+
 /** Accept ends turn load when nothing is stored. A stored row keeps its phase. */
 export function freshnessPhaseAfterAccept(
   phase: AnalyticFreshnessPhase,

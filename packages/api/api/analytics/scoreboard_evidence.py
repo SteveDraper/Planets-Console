@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
-from api.transport.inference_stream import stamp_inference_evidence_fields
+from api.serialization.inference_row_persistence import wire_complete_from_persisted_row
+from api.transport.inference_stream import (
+    inference_stored_row_event,
+    stamp_inference_evidence_fields,
+)
 
 if TYPE_CHECKING:
     from api.serialization.inference_row_persistence import PersistedInferenceRow
@@ -79,16 +83,33 @@ def annotate_stored_scoreboard_complete(
     stored: PersistedInferenceRow | None,
     evidence_mark: int | None,
 ) -> dict[str, object]:
-    """Put the stored generation and the current mark on a complete event.
+    """Put the stored generation and the current mark on a scoreboard paint.
 
-    A missing generation on a row that exists is 0. No stored row omits both
-    fields, so a skip with no scoreboard file stays the dash alone.
+    ``complete`` and ``stored_row`` both carry the pair. A missing generation
+    on a row that exists is 0. No stored row omits both fields, so a skip with
+    no scoreboard file stays the dash alone.
     """
-    if event.get("type") != "complete" or stored is None:
+    if stored is None:
         return event
     return stamp_inference_evidence_fields(
         event,
         evidence_generation=_stored_evidence_generation(stored),
+        evidence_mark=evidence_mark,
+    )
+
+
+def stored_scoreboard_prelude_event(
+    stored: PersistedInferenceRow,
+    *,
+    evidence_mark: int | None,
+) -> dict[str, object]:
+    """Non-terminal paint of a stored row: its status, generation, and mark.
+
+    Missing generation is 0. The scheduled run stays open; accept follows.
+    """
+    return annotate_stored_scoreboard_complete(
+        inference_stored_row_event(wire_complete_from_persisted_row(stored)),
+        stored=stored,
         evidence_mark=evidence_mark,
     )
 

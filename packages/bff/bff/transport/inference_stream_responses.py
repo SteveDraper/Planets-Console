@@ -63,6 +63,13 @@ class InferenceStreamNoStoredRowEvent(BaseModel):
     playerId: int | None = None
 
 
+class InferenceStreamStoredRowEvent(InferenceStreamCompleteEvent):
+    """Non-terminal paint of a stored scoreboard row before accept."""
+
+    type: Literal["stored_row"] = "stored_row"
+    playerId: int | None = None
+
+
 class InferenceStreamErrorEvent(BaseModel):
     type: Literal["error"]
     detail: str
@@ -74,5 +81,6 @@ __all__ = [
     "InferenceStreamNoStoredRowEvent",
     "InferenceStreamProgressEvent",
     "InferenceStreamSolutionEvent",
+    "InferenceStreamStoredRowEvent",
     "InferenceStreamWorkAcceptedEvent",
 ]

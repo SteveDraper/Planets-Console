@@ -145,6 +145,11 @@ export const inferenceStreamNoStoredRowEventSchema = inferenceStreamPlayerScopeS
   type: z.literal('no_stored_row'),
 })
 
+/** Non-terminal paint of a stored scoreboard row. Same fields as complete. */
+export const inferenceStreamStoredRowEventSchema = inferenceStreamCompleteEventSchema.extend({
+  type: z.literal('stored_row'),
+})
+
 export const inferenceStreamErrorEventSchema = inferenceStreamPlayerScopeSchema.extend({
   type: z.literal('error'),
   detail: z.string(),
@@ -163,6 +168,7 @@ export const inferenceStreamEventSchema = z.discriminatedUnion('type', [
   inferenceStreamGlobalPauseEventSchema,
   inferenceStreamWorkAcceptedEventSchema,
   inferenceStreamNoStoredRowEventSchema,
+  inferenceStreamStoredRowEventSchema,
 ])
 
 export type FleetTorpInputStatus = z.infer<typeof fleetTorpInputStatusSchema>

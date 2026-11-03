@@ -7,6 +7,7 @@ import {
   analyticFreshnessForPhase,
   analyticFreshnessLabel,
   analyticFreshnessTitle,
+  freshnessPhaseAfterAbsentSignal,
   freshnessPhaseAfterAccept,
   isBehindEvidenceMark,
   phaseForStoredEvidence,
@@ -22,6 +23,13 @@ describe('analytic freshness phase', () => {
 
   it('shows turn load only from the turn-load phase', () => {
     expect(analyticFreshnessForPhase('turn-load')).toBe('turn-load')
+  })
+
+  it('turns an absent signal into turn load only before accept', () => {
+    expect(freshnessPhaseAfterAbsentSignal('unlabeled')).toBe('turn-load')
+    expect(freshnessPhaseAfterAbsentSignal('turn-load')).toBe('turn-load')
+    expect(freshnessPhaseAfterAbsentSignal('current')).toBe('current')
+    expect(freshnessPhaseAfterAbsentSignal('behind-mark')).toBe('behind-mark')
   })
 
   it('maps a stored row to current or behind-mark, never turn load', () => {

@@ -350,6 +350,28 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(fleetPlayerStreamSliceFromState(behind)?.freshness).toBe('subject-to-revision')
   })
 
+  it('does not return a provisional ledger to turn load when sightings arrive', () => {
+    const stored = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'ledger',
+      evidenceGeneration: 1,
+      evidenceMark: 4,
+      ledger: ledgerPlayer,
+    })
+    const sightings = reduceFleetPlayerStreamState(stored, {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'sightings',
+      ledger: {
+        playerId: 8,
+        playerName: 'Alice',
+        records: [baseRecord],
+      },
+    })
+    expect(fleetPlayerStreamSliceFromState(sightings)?.freshness).toBe('subject-to-revision')
+  })
+
   it('does not restore turn load when sightings arrive after accept', () => {
     const sighting = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
       type: 'roster_paint',

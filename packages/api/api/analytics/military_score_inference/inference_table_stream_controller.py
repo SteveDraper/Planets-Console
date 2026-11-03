@@ -37,8 +37,10 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.scoreboard_evidence import (
     annotate_stored_scoreboard_complete,
     evidence_mark_for_player,
+    stored_scoreboard_prelude_event,
 )
 from api.models.game import TurnInfo
+from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.connect import AdmissionDispatch
@@ -125,10 +127,11 @@ class InferenceTableStreamController(
         self,
         scheduled: ScheduledInferenceRow,
     ) -> AdmissionDispatch[ScheduledInferenceRow]:
-        """Schedule without submitting, and say that no scoreboard row is stored.
+        """Schedule without submitting, and paint whether a scoreboard row is stored.
 
-        Connect yields ``wire_events`` before ``defer_submit``, so this prelude
-        is on the stream before accept can block on a missing turn.
+        Connect yields ``wire_events`` before ``defer_submit``. No stored row is
+        the absent signal. A stored row is a non-terminal paint, then the run
+        stays open through accept.
         """
         run_id = scheduled.session.run_id
 
@@ -138,12 +141,40 @@ class InferenceTableStreamController(
         return AdmissionDispatch(
             wire_events=(
                 tag_inference_stream_event(
-                    inference_no_stored_row_event(),
+                    self._schedule_admission_prelude(scheduled.player_id),
                     player_id=scheduled.player_id,
                 ),
             ),
             scheduled=scheduled,
             defer_submit=defer_submit,
+        )
+
+    def _schedule_admission_prelude(self, player_id: int) -> dict[str, object]:
+        """Absent signal when nothing is stored; otherwise the stored row paint."""
+        stored = self._stored_scoreboard_row(player_id)
+        if stored is None:
+            return inference_no_stored_row_event()
+        return stored_scoreboard_prelude_event(
+            stored,
+            evidence_mark=self._evidence_mark_for_player(player_id),
+        )
+
+    def _stored_scoreboard_row(self, player_id: int) -> PersistedInferenceRow | None:
+        if self.persistence is None:
+            return None
+        return self.persistence.get_row(
+            self.game_id,
+            self.perspective,
+            self.turn.settings.turn,
+            player_id,
+        )
+
+    def _evidence_mark_for_player(self, player_id: int) -> int | None:
+        return evidence_mark_for_player(
+            self.query_context,
+            game_id=self.game_id,
+            perspective=self.perspective,
+            player_id=player_id,
         )
 
     def _annotate_stored_complete(
@@ -155,23 +186,15 @@ class InferenceTableStreamController(
 
         A skip with no stored row stays unmarked, so the cell is the dash alone.
         """
-        if event.get("type") != "complete" or self.persistence is None:
+        if event.get("type") != "complete":
             return event
-        stored = self.persistence.get_row(
-            self.game_id,
-            self.perspective,
-            self.turn.settings.turn,
-            player_id,
-        )
+        stored = self._stored_scoreboard_row(player_id)
+        if stored is None:
+            return event
         return annotate_stored_scoreboard_complete(
             event,
             stored=stored,
-            evidence_mark=evidence_mark_for_player(
-                self.query_context,
-                game_id=self.game_id,
-                perspective=self.perspective,
-                player_id=player_id,
-            ),
+            evidence_mark=self._evidence_mark_for_player(player_id),
         )
 
     def cancel_player_row(self, player_id: int) -> None:

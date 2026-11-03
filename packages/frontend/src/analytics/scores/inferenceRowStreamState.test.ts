@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { inferenceStreamEventSchema } from '../../api/inferenceStreamEventSchema'
 import {
   initialRowStreamState,
+  isRowStreamSettled,
   pointUnexplainedMilitaryDelta2x,
   reduceRowStreamState,
   rowDetailFromStreamState,
@@ -205,6 +206,7 @@ describe('reduceRowStreamState', () => {
     })
 
     expect(next.isComplete).toBe(true)
+    expect(isRowStreamSettled(next)).toBe(true)
     expect(next.status).toBe('fetch_error')
     expect(next.summary).toBe('stream ended early')
     expect(rowDetailFromStreamState(8, next).displayStatus).toBe('failure')
@@ -413,7 +415,7 @@ describe('reduceRowStreamState', () => {
     expect(rowDetailFromStreamState(3, again).freshness).toBeUndefined()
   })
 
-  it('ignores the no-stored prelude once a row is stored', () => {
+  it('does not return a stored row to turn load when no_stored_row arrives', () => {
     const stored = reduceRowStreamState(initialRowStreamState(), {
       type: 'complete',
       status: 'exact',
@@ -466,6 +468,86 @@ describe('reduceRowStreamState', () => {
     expect(withSolution.evidenceMark).toBe(2)
     expect(rowDetailFromStreamState(4, withSolution).freshness).toBe('subject-to-revision')
     expect(rowDetailFromStreamState(4, withSolution).displayStatus).toBe('pending')
+  })
+
+  it('keeps provisional across a stored prelude and the following accept', () => {
+    const solution = {
+      objectiveValue: 1,
+      actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+    }
+    const painted = reduceRowStreamState(initialRowStreamState(), {
+      type: 'stored_row',
+      status: 'exact',
+      displayStatus: 'success',
+      summary: 'Best build',
+      solutionCount: 1,
+      isComplete: true,
+      evidenceGeneration: 1,
+      evidenceMark: 2,
+      solutions: [solution],
+    })
+    const paintedDetail = rowDetailFromStreamState(4, painted)
+    expect(paintedDetail.freshness).toBe('subject-to-revision')
+    expect(paintedDetail.displayStatus).toBe('success')
+    expect(paintedDetail.solutionCount).toBe(1)
+    expect(paintedDetail.isComplete).toBe(true)
+    expect(isRowStreamSettled(painted)).toBe(false)
+
+    const accepted = reduceRowStreamState(painted, { type: 'work_accepted' })
+    const busy = rowDetailFromStreamState(4, accepted)
+    expect(busy.freshness).toBe('subject-to-revision')
+    expect(busy.displayStatus).toBe('pending')
+    expect(busy.isComplete).toBe(false)
+    expect(isRowStreamSettled(accepted)).toBe(false)
+
+    const finished = reduceRowStreamState(accepted, {
+      type: 'complete',
+      status: 'exact',
+      displayStatus: 'success',
+      summary: 'Recomputed build',
+      solutionCount: 1,
+      isComplete: true,
+      evidenceGeneration: 2,
+      evidenceMark: 2,
+      solutions: [solution],
+    })
+    expect(isRowStreamSettled(finished)).toBe(true)
+    expect(rowDetailFromStreamState(4, finished).freshness).toBeUndefined()
+
+    const recomputing = reduceRowStreamState(finished, { type: 'work_accepted' })
+    expect(isRowStreamSettled(recomputing)).toBe(false)
+    expect(rowDetailFromStreamState(4, recomputing).displayStatus).toBe('pending')
+
+    const skip = reduceRowStreamState(initialRowStreamState(), {
+      type: 'stored_row',
+      status: 'dead',
+      displayStatus: 'skipped',
+      summary: 'Player is dead',
+      solutionCount: 0,
+      isComplete: true,
+      evidenceGeneration: 0,
+      evidenceMark: 1,
+      solutions: [],
+    })
+    const skipDetail = rowDetailFromStreamState(4, skip)
+    expect(skipDetail.displayStatus).toBe('skipped')
+    expect(skipDetail.freshness).toBe('subject-to-revision')
+    expect(skipDetail.isComplete).toBe(true)
+    expect(isRowStreamSettled(skip)).toBe(false)
+
+    const onMark = reduceRowStreamState(initialRowStreamState(), {
+      type: 'stored_row',
+      status: 'exact',
+      displayStatus: 'success',
+      summary: 'Best build',
+      solutionCount: 1,
+      isComplete: true,
+      evidenceGeneration: 3,
+      evidenceMark: 3,
+      solutions: [solution],
+    })
+    expect(rowDetailFromStreamState(4, onMark).freshness).toBeUndefined()
+    expect(rowDetailFromStreamState(4, onMark).displayStatus).toBe('success')
   })
 
   it('keeps Provisional beside a stored row that is behind the mark', () => {
