@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from api.analytics.fleet.constants import (
@@ -49,6 +50,73 @@ class PutLedgerResult:
 
     stored: PersistedFleetLedger
     deferred_notification: DeferredNotification | None = None
+
+
+@dataclass(frozen=True)
+class FleetLedgerWriteNotice:
+    """One player's ledger write attempt has started.
+
+    The listener returns the callable that runs when that attempt ends.
+    """
+
+    game_id: int
+    perspective: int
+    turn: int
+    player_id: int
+
+
+FleetLedgerWriteEnd = Callable[[], None]
+FleetLedgerWriteListener = Callable[[FleetLedgerWriteNotice], FleetLedgerWriteEnd]
+
+_ledger_write_listeners: list[FleetLedgerWriteListener] = []
+_ledger_write_listeners_lock = threading.Lock()
+
+
+def register_fleet_ledger_write_listener(
+    listener: FleetLedgerWriteListener,
+) -> Callable[[], None]:
+    """Subscribe to ledger write attempts. The returned callable unregisters.
+
+    An attempt calls ``listener`` with the player turn, then calls the callable
+    ``listener`` returned when the attempt ends.
+    """
+    with _ledger_write_listeners_lock:
+        _ledger_write_listeners.append(listener)
+
+    def unregister() -> None:
+        with _ledger_write_listeners_lock:
+            try:
+                _ledger_write_listeners.remove(listener)
+            except ValueError:
+                return
+
+    return unregister
+
+
+@contextmanager
+def _fleet_ledger_write(
+    game_id: int,
+    perspective: int,
+    turn: int,
+    player_id: int,
+) -> Iterator[None]:
+    """Bracket one ledger write attempt for the listeners registered now."""
+    with _ledger_write_listeners_lock:
+        listeners = tuple(_ledger_write_listeners)
+    notice = FleetLedgerWriteNotice(
+        game_id=game_id,
+        perspective=perspective,
+        turn=turn,
+        player_id=player_id,
+    )
+    ends: list[FleetLedgerWriteEnd] = []
+    try:
+        for listener in listeners:
+            ends.append(listener(notice))
+        yield
+    finally:
+        for end in reversed(ends):
+            end()
 
 
 class FleetSnapshotPersistenceService:
@@ -138,50 +206,52 @@ class FleetSnapshotPersistenceService:
         *,
         defer_ledger_persisted_notification: bool = False,
     ) -> PutLedgerResult:
-        if persisted.ledger.player_id != player_id:
-            raise ValidationError(
-                "persisted fleet ledger player_id "
-                f"{persisted.ledger.player_id} does not match key player_id {player_id}",
+        """Write one player's ledger and bracket a ledger-write notice around the attempt."""
+        with _fleet_ledger_write(game_id, perspective, turn_number, player_id):
+            if persisted.ledger.player_id != player_id:
+                raise ValidationError(
+                    "persisted fleet ledger player_id "
+                    f"{persisted.ledger.player_id} does not match key player_id {player_id}",
+                )
+            prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
+            mark = self.evidence_mark(game_id, perspective, player_id)
+            to_store = PersistedFleetLedger(
+                ledger=persisted.ledger,
+                provenance=persisted.provenance,
+                materialization_version=FLEET_MATERIALIZATION_VERSION,
+                evidence_generation=mark.evidence_generation,
             )
-        prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
-        mark = self.evidence_mark(game_id, perspective, player_id)
-        to_store = PersistedFleetLedger(
-            ledger=persisted.ledger,
-            provenance=persisted.provenance,
-            materialization_version=FLEET_MATERIALIZATION_VERSION,
-            evidence_generation=mark.evidence_generation,
-        )
-        prior_was_ensure_final = prior is not None and self.ledger_is_ensure_final(
-            game_id,
-            perspective,
-            turn_number,
-            player_id,
-            prior,
-        )
-        self._write_player_ledger(game_id, perspective, turn_number, player_id, to_store)
-        self._remember_ledger_turn(game_id, perspective, player_id, turn_number)
-        if to_store.provenance.is_final:
-            self._advance_evidence_mark_after_boundary_write(
+            prior_was_ensure_final = prior is not None and self.ledger_is_ensure_final(
                 game_id,
                 perspective,
-                player_id,
                 turn_number,
-                to_store.evidence_generation,
+                player_id,
+                prior,
             )
-        notification = self._ledger_persisted_notification_if_needed(
-            game_id,
-            perspective,
-            turn_number,
-            player_id,
-            prior=prior,
-            prior_was_ensure_final=prior_was_ensure_final,
-            persisted=to_store,
-        )
-        if defer_ledger_persisted_notification:
-            return PutLedgerResult(stored=to_store, deferred_notification=notification)
-        if notification is not None:
-            notification()
-        return PutLedgerResult(stored=to_store)
+            self._write_player_ledger(game_id, perspective, turn_number, player_id, to_store)
+            self._remember_ledger_turn(game_id, perspective, player_id, turn_number)
+            if to_store.provenance.is_final:
+                self._advance_evidence_mark_after_boundary_write(
+                    game_id,
+                    perspective,
+                    player_id,
+                    turn_number,
+                    to_store.evidence_generation,
+                )
+            notification = self._ledger_persisted_notification_if_needed(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+                prior=prior,
+                prior_was_ensure_final=prior_was_ensure_final,
+                persisted=to_store,
+            )
+            if defer_ledger_persisted_notification:
+                return PutLedgerResult(stored=to_store, deferred_notification=notification)
+            if notification is not None:
+                notification()
+            return PutLedgerResult(stored=to_store)
 
     def has_ledger(
         self,

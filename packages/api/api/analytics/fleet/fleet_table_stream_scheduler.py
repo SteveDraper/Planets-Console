@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -18,7 +19,11 @@ from api.analytics.fleet.fleet_table_player_run import (
 from api.analytics.fleet.fleet_table_stream_registry import wake_fleet_table_stream_multiplex
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.injected_services import FleetComputeServices
-from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.persistence import (
+    FleetLedgerWriteNotice,
+    FleetSnapshotPersistenceService,
+    register_fleet_ledger_write_listener,
+)
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
@@ -93,6 +98,7 @@ class FleetTableStreamScheduler:
         self._orchestrator_attachment = SchedulerOrchestratorAttachment(
             on_scope_outcome=self._on_orchestrator_scope_outcome,
         )
+        self._subscribe_to_ledger_writes()
 
     def begin_scope(self, scope: FleetTableStreamScope) -> str:
         """Claim the active fleet table-stream scope.
@@ -441,6 +447,81 @@ class FleetTableStreamScheduler:
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()
 
+    def host_turn_ledger_sessions(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        turn: int,
+        player_id: int,
+    ) -> tuple[FleetPlayerStreamSession, ...]:
+        """Shell sessions whose host turn is the turn being written.
+
+        Earlier hops of the walk write a different turn than the shell host turn,
+        so they match nothing and do not change the tile spinner.
+        """
+        with self._lock:
+            return tuple(
+                run.session
+                for run in self._runs.values()
+                if run.root_scope.game_id == game_id
+                and run.root_scope.perspective == perspective
+                and run.root_scope.player_id == player_id
+                and run.host_turn_number == turn
+            )
+
+    def on_ledger_write(self, notice: FleetLedgerWriteNotice) -> Callable[[], None]:
+        """Publish ``writing: true`` and return the publish of ``writing: false``.
+
+        The returned callable keeps the sessions captured for this attempt, so
+        a run removed during the write still receives the end signal.
+        """
+        sessions = self.host_turn_ledger_sessions(
+            game_id=notice.game_id,
+            perspective=notice.perspective,
+            turn=notice.turn,
+            player_id=notice.player_id,
+        )
+        self._publish_ledger_write(sessions, writing=True)
+
+        def _end() -> None:
+            self._publish_ledger_write(sessions, writing=False)
+
+        return _end
+
+    def _publish_ledger_write(
+        self,
+        sessions: tuple[FleetPlayerStreamSession, ...],
+        *,
+        writing: bool,
+    ) -> None:
+        if not sessions:
+            return
+        event = fleet_ledger_write_event(writing=writing)
+        for session in sessions:
+            session.event_queue.put(event)
+            _wake_multiplex_for_session(session)
+
+    def _subscribe_to_ledger_writes(self) -> None:
+        """Register once for this scheduler. Collection drops the registration."""
+        scheduler_ref = weakref.ref(self)
+
+        def _on_notice(notice: FleetLedgerWriteNotice) -> Callable[[], None]:
+            scheduler = scheduler_ref()
+            if scheduler is None:
+                return _ignore_ledger_write_end
+            return scheduler.on_ledger_write(notice)
+
+        unregister = register_fleet_ledger_write_listener(_on_notice)
+        self._unregister_ledger_write = unregister
+        # ``unregister`` does not reference this scheduler, so finalization can
+        # drop the listener after the last strong reference is gone.
+        weakref.finalize(self, unregister)
+
+
+def _ignore_ledger_write_end() -> None:
+    return
+
 
 def _emit_fleet_materialization_error(
     session: FleetPlayerStreamSession,
@@ -536,42 +617,6 @@ def _node_complete_stream_events(
     )
 
 
-def host_turn_ledger_write_sessions(
-    scope: ComputeScope,
-) -> tuple[FleetPlayerStreamSession, ...]:
-    """Shell sessions whose host turn is the turn being written.
-
-    Earlier hops of the walk write a different turn than the shell host turn,
-    so they match nothing and do not change the tile spinner.
-    """
-    if not isinstance(scope.turn, int):
-        return ()
-    scheduler = get_fleet_table_stream_scheduler()
-    with scheduler._lock:
-        return tuple(
-            run.session
-            for run in scheduler._runs.values()
-            if run.root_scope.game_id == scope.game_id
-            and run.root_scope.perspective == scope.perspective
-            and run.root_scope.player_id == scope.player_id
-            and run.host_turn_number == scope.turn
-        )
-
-
-def publish_ledger_write(
-    sessions: tuple[FleetPlayerStreamSession, ...],
-    *,
-    writing: bool,
-) -> None:
-    """Queue a ledger-write signal on the sessions captured for this attempt."""
-    if not sessions:
-        return
-    event = fleet_ledger_write_event(writing=writing)
-    for session in sessions:
-        session.event_queue.put(event)
-        _wake_multiplex_for_session(session)
-
-
 def publish_saved_host_turn_ledger(
     *,
     game_id: int,
@@ -640,5 +685,8 @@ def reset_fleet_table_stream_scheduler_for_tests() -> None:
     from api.compute.runtime import reset_orchestrators_for_tests
 
     with _process_scheduler_lock:
+        previous = _process_scheduler
+        if previous is not None:
+            previous._unregister_ledger_write()
         _process_scheduler = FleetTableStreamScheduler()
     reset_orchestrators_for_tests()
