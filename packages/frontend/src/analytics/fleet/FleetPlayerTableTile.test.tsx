@@ -24,13 +24,14 @@ const provenanceStreamSlice: FleetPlayerStreamSlice = {
   discrepancyOverlay: 'inherit',
   isComplete: false,
   isFinal: false,
-  isPending: true,
+  ledgerWriting: false,
+  freshness: 'none',
   summary: 'Collecting turn evidence',
   error: null,
 }
 
 describe('FleetPlayerTableTile provenance progress', () => {
-  it('shows provenance summary text while materializing', () => {
+  it('does not show the materialization spinner for earlier-turn provenance', () => {
     render(
       <FleetPlayerTableTile
         playerName="Alice"
@@ -40,10 +41,11 @@ describe('FleetPlayerTableTile provenance progress', () => {
     )
 
     const tile = screen.getByRole('region', { name: 'Alice fleet table' })
-    expect(within(tile).getByRole('status')).toHaveTextContent('Collecting turn evidence')
+    expect(within(tile).queryByText('Fleet materialization in progress')).not.toBeInTheDocument()
+    expect(within(tile).queryByText('Collecting turn evidence')).not.toBeInTheDocument()
   })
 
-  it('shows spinner alongside partial rows while materializing', () => {
+  it('shows the materialization spinner alongside rows while this turn is written', () => {
     render(
       <FleetPlayerTableTile
         playerName="Alice"
@@ -53,8 +55,9 @@ describe('FleetPlayerTableTile provenance progress', () => {
           discrepancyOverlay: 'inherit',
           isComplete: false,
           isFinal: false,
-          isPending: true,
-          summary: 'Refining fleet records',
+          ledgerWriting: true,
+          freshness: 'provisional',
+          summary: 'Fleet materialization in progress',
           error: null,
         }}
       />
@@ -62,7 +65,15 @@ describe('FleetPlayerTableTile provenance progress', () => {
 
     const tile = screen.getByRole('region', { name: 'Alice fleet table' })
     expect(within(tile).getByText('<= 318')).toBeInTheDocument()
-    expect(within(tile).getByRole('status')).toHaveTextContent('Refining fleet records')
+    const label = within(tile).getByText('Provisional')
+    expect(label).toHaveAttribute(
+      'title',
+      'This is a saved answer from before a newer result for this player. It may change once that result is included. Backfill earlier turns updates turns you are not viewing. Otherwise a turn updates when you open it.'
+    )
+    expect(label.className).toContain('ml-2')
+    expect(label.className).toContain('font-normal')
+    expect(label.className).toContain('text-amber-300')
+    expect(within(tile).getByRole('status')).toHaveTextContent('Fleet materialization in progress')
     expect(screen.queryByText('Waiting for fleet records.')).not.toBeInTheDocument()
   })
 })

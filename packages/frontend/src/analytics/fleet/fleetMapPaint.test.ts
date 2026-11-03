@@ -11,8 +11,10 @@ import { formatFleetRecordField } from './fleetRecordDisplay'
 import {
   fleetPlayerStreamSliceFromState,
   initialFleetPlayerStreamState,
+  pendingFleetPlayerStreamSlice,
   reduceFleetPlayerStreamState,
   type FleetPlayerStreamSlice,
+  type FleetPlayerStreamState,
 } from './fleetTablePlayerStreamState'
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
 import type { FleetTableRecord } from './fleetTableWireSchema'
@@ -304,13 +306,67 @@ describe('fleet map paint', () => {
       'ledger-seen',
     ])
   })
+
+  it('reconstructs a freshness-none slice with no stored roster as unlabeled', () => {
+    const painted = reducePlayerFrom(pendingFleetPlayerStreamSlice(), {
+      type: 'roster_paint',
+      playerId: 5,
+      paint: 'sightings',
+      ledger: {
+        playerId: 5,
+        playerName: 'Bob',
+        records: [sightingSeen],
+      },
+    })
+
+    expect(painted.freshness).toBe('turn-load')
+    expect(painted.mapPaint?.source).toBe('sightings')
+  })
+
+  it('keeps a stored ledger current when freshness has no word', () => {
+    const again = reducePlayerFrom(ledgerPlayer, {
+      type: 'roster_paint',
+      playerId: 3,
+      paint: 'sightings',
+      ledger: {
+        playerId: 3,
+        playerName: 'Cara',
+        records: [sightingSeen],
+      },
+    })
+
+    expect(ledgerPlayer.freshness).toBe('none')
+    expect(again.freshness).toBe('none')
+  })
 })
+
+function hasStoredRoster(slice: FleetPlayerStreamSlice): boolean {
+  return slice.rosterPaint === 'ledger' || slice.mapPaint?.source === 'ledger'
+}
+
+function phaseFromSlice(
+  slice: FleetPlayerStreamSlice
+): FleetPlayerStreamState['freshness']['phase'] {
+  if (slice.freshness === 'turn-load') {
+    return 'turn-load'
+  }
+  if (slice.freshness === 'provisional') {
+    return 'behind-mark'
+  }
+  // Freshness none covers unlabeled and current. A stored ledger is current.
+  // Anything else is still the pre-admission gap, so a sightings paint can enter turn load.
+  if (!hasStoredRoster(slice)) {
+    return 'unlabeled'
+  }
+  return 'current'
+}
 
 function reducePlayerFrom(
   slice: FleetPlayerStreamSlice,
   event: FleetTableStreamEvent
 ): FleetPlayerStreamSlice {
-  const state = {
+  const state: FleetPlayerStreamState = {
+    ...initialFleetPlayerStreamState(),
     playerName: slice.playerName ?? null,
     records: slice.records == null ? null : [...slice.records],
     rosterPaint: slice.rosterPaint ?? null,
@@ -319,9 +375,14 @@ function reducePlayerFrom(
     discrepancy: slice.discrepancy,
     isComplete: slice.isComplete,
     isFinal: slice.isFinal,
-    isPending: slice.isPending,
     summary: slice.summary,
     error: slice.error,
+    ledgerWriting: slice.ledgerWriting,
+    freshness: {
+      ...initialFleetPlayerStreamState().freshness,
+      hasStoredRow: slice.freshness === 'provisional' || hasStoredRoster(slice),
+      phase: phaseFromSlice(slice),
+    },
   }
   const next = fleetPlayerStreamSliceFromState(reduceFleetPlayerStreamState(state, event))
   if (next == null) {

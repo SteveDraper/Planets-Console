@@ -9,6 +9,9 @@ from typing import Literal
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.durable_turn_evidence import (
+    is_durable_turn_evidence_row_status,
+)
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_admission import (
@@ -37,6 +40,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     FleetTorpInputStatus,
     PriorTurnFleetTorpResolution,
 )
+from api.analytics.scoreboard_evidence import annotate_scoreboard_paint
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
@@ -55,12 +59,54 @@ def row_domain_event_to_wire_events(
     row: ScheduledInferenceRow,
     event: InferenceStreamDomainEvent,
 ) -> list[dict[str, object]]:
-    return domain_event_to_wire_events(
+    return session_domain_event_to_wire_events(row.session, event)
+
+
+def session_domain_event_to_wire_events(
+    session: InferenceRowStreamSession,
+    event: InferenceStreamDomainEvent,
+) -> list[dict[str, object]]:
+    events = domain_event_to_wire_events(
         event,
-        observation=row.session.observation,
-        turn=row.session.turn,
-        fleet_torp_input_status=row.session.fleet_torp_input_status,
+        observation=session.observation,
+        turn=session.turn,
+        fleet_torp_input_status=session.fleet_torp_input_status,
     )
+    return _stamp_live_complete_evidence(session, events)
+
+
+def _stamp_live_complete_evidence(
+    session: InferenceRowStreamSession,
+    events: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Paint durable completes from the row persist stored before delivery.
+
+    The generation on the paint is the stored integer. See
+    ``annotate_scoreboard_paint``.
+    """
+
+    def is_durable_complete(item: dict[str, object]) -> bool:
+        status = item.get("status")
+        return item.get("type") == "complete" and is_durable_turn_evidence_row_status(
+            status if isinstance(status, str) else ""
+        )
+
+    if not any(is_durable_complete(item) for item in events):
+        return events
+    return [
+        annotate_scoreboard_paint(
+            item,
+            persistence=session.persistence,
+            query_context=session.query_context,
+            game_id=session.game_id,
+            perspective=session.perspective,
+            turn=session.turn_number,
+            player_id=session.player_id,
+        )
+        if is_durable_complete(item)
+        else item
+        for item in events
+    ]
 
 
 @dataclass(frozen=True)
@@ -178,6 +224,10 @@ def schedule_inference_row(
     query_context: AnalyticQueryContext | None = None,
     persistence: InferenceRowPersistenceService | None = None,
 ) -> ScheduledInferenceRow | None:
+    """Admit one inference row and register its orchestrator accept.
+
+    Does not submit. The caller runs ``scheduler.accept_pending_run``.
+    """
     observation = build_inference_observation(
         score,
         turn,

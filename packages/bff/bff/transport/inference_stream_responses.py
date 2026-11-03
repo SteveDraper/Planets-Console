@@ -49,6 +49,25 @@ class InferenceStreamCompleteEvent(BaseModel):
     diagnostics: dict[str, Any] | None = None
     fleetTorpInputStatus: str | None = None
     fleetTorpOverlayBeliefSetTorpIds: list[int] | None = None
+    evidenceGeneration: int | None = None
+    evidenceMark: int | None = None
+
+
+class InferenceStreamWorkAcceptedEvent(BaseModel):
+    type: Literal["work_accepted"]
+    playerId: int | None = None
+
+
+class InferenceStreamNoStoredRowEvent(BaseModel):
+    type: Literal["no_stored_row"]
+    playerId: int | None = None
+
+
+class InferenceStreamStoredRowEvent(InferenceStreamCompleteEvent):
+    """Non-terminal paint of a stored scoreboard row before accept."""
+
+    type: Literal["stored_row"] = "stored_row"
+    playerId: int | None = None
 
 
 class InferenceStreamErrorEvent(BaseModel):
@@ -59,6 +78,9 @@ class InferenceStreamErrorEvent(BaseModel):
 __all__ = [
     "InferenceStreamCompleteEvent",
     "InferenceStreamErrorEvent",
+    "InferenceStreamNoStoredRowEvent",
     "InferenceStreamProgressEvent",
     "InferenceStreamSolutionEvent",
+    "InferenceStreamStoredRowEvent",
+    "InferenceStreamWorkAcceptedEvent",
 ]

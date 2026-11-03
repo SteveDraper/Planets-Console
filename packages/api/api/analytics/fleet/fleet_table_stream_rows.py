@@ -87,6 +87,7 @@ def resolve_player_stream_admission(
     if force_schedule:
         return SchedulePlayerAdmission()
     persisted = persistence.get_ledger(game_id, perspective, turn_number, player_id)
+    evidence_mark = persistence.evidence_mark(game_id, perspective, player_id).evidence_generation
     if persisted is not None and persistence.ledger_is_ensure_final(
         game_id,
         perspective,
@@ -94,11 +95,24 @@ def resolve_player_stream_admission(
         player_id,
         persisted,
     ):
-        return CachedCompletePlayerAdmission(events=wire_cached_player_events(persisted, turn=turn))
+        return CachedCompletePlayerAdmission(
+            events=_annotate_ledger_evidence(
+                wire_cached_player_events(persisted, turn=turn),
+                evidence_generation=persisted.evidence_generation,
+                evidence_mark=evidence_mark,
+            )
+        )
     if persisted is not None:
         ledger = fleet_acquisition_ledger_to_table_wire(persisted.ledger, turn=turn)
         return RosterThenScheduleAdmission(
-            events=(fleet_roster_paint_event(paint="ledger", ledger=ledger),)
+            events=(
+                fleet_roster_paint_event(
+                    paint="ledger",
+                    ledger=ledger,
+                    evidence_generation=persisted.evidence_generation,
+                    evidence_mark=evidence_mark,
+                ),
+            )
         )
     sightings = turn_load_sighting_ledger(turn, player_id, perspective=perspective)
     return RosterThenScheduleAdmission(
@@ -106,9 +120,31 @@ def resolve_player_stream_admission(
             fleet_roster_paint_event(
                 paint="sightings",
                 ledger=fleet_acquisition_ledger_to_table_wire(sightings, turn=turn),
+                evidence_mark=evidence_mark,
             ),
         )
     )
+
+
+def _annotate_ledger_evidence(
+    events: tuple[dict[str, object], ...],
+    *,
+    evidence_generation: int,
+    evidence_mark: int,
+) -> tuple[dict[str, object], ...]:
+    annotated: list[dict[str, object]] = []
+    for event in events:
+        if event.get("type") == "ledger_updated":
+            annotated.append(
+                {
+                    **event,
+                    "evidenceGeneration": evidence_generation,
+                    "evidenceMark": evidence_mark,
+                }
+            )
+        else:
+            annotated.append(event)
+    return tuple(annotated)
 
 
 def schedule_fleet_player_run(
@@ -123,6 +159,10 @@ def schedule_fleet_player_run(
     query_context: AnalyticQueryContext,
     stream_token: str | None = None,
 ) -> ScheduledFleetPlayer | None:
+    """Admit one player run and register its orchestrator accept.
+
+    Does not submit. The caller runs ``scheduler.accept_pending_run``.
+    """
     session = FleetPlayerStreamSession(
         player_id=player_id,
         turn=turn,

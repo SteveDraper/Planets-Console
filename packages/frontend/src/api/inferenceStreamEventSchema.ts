@@ -133,6 +133,21 @@ export const inferenceStreamCompleteEventSchema = inferenceStreamPlayerScopeSche
   diagnostics: z.record(z.string(), z.unknown()).optional(),
   fleetTorpInputStatus: fleetTorpInputStatusSchema.optional(),
   fleetTorpOverlayBeliefSetTorpIds: z.array(z.number().int()).optional(),
+  evidenceGeneration: z.number().int().optional(),
+  evidenceMark: z.number().int().optional(),
+})
+
+export const inferenceStreamWorkAcceptedEventSchema = inferenceStreamPlayerScopeSchema.extend({
+  type: z.literal('work_accepted'),
+})
+
+export const inferenceStreamNoStoredRowEventSchema = inferenceStreamPlayerScopeSchema.extend({
+  type: z.literal('no_stored_row'),
+})
+
+/** Non-terminal paint of a stored scoreboard row. Same fields as complete. */
+export const inferenceStreamStoredRowEventSchema = inferenceStreamCompleteEventSchema.extend({
+  type: z.literal('stored_row'),
 })
 
 export const inferenceStreamErrorEventSchema = inferenceStreamPlayerScopeSchema.extend({
@@ -151,6 +166,9 @@ export const inferenceStreamEventSchema = z.discriminatedUnion('type', [
   inferenceStreamCompleteEventSchema,
   inferenceStreamErrorEventSchema,
   inferenceStreamGlobalPauseEventSchema,
+  inferenceStreamWorkAcceptedEventSchema,
+  inferenceStreamNoStoredRowEventSchema,
+  inferenceStreamStoredRowEventSchema,
 ])
 
 export type FleetTorpInputStatus = z.infer<typeof fleetTorpInputStatusSchema>

@@ -113,12 +113,17 @@ def _copy_inference_product_fields(source: dict[str, object], shaped: dict[str, 
         shaped["latticeSignatures"] = [entry for entry in signatures if isinstance(entry, dict)]
 
 
+# Scoreboard paints that carry a row status. ``stored_row`` is the non-terminal
+# prelude; ``complete`` is the terminal. Both need the same display status.
+_DISPLAY_STATUS_EVENT_TYPES = frozenset({"complete", "stored_row"})
+
+
 def stamp_inference_stream_display_status(
     events: Iterator[dict[str, object]],
 ) -> Iterator[dict[str, object]]:
-    """Stamp BFF ``displayStatus`` on Core ``complete`` stream lines."""
+    """Stamp BFF ``displayStatus`` on scoreboard paints that carry a row status."""
     for event in events:
-        if event.get("type") != "complete":
+        if event.get("type") not in _DISPLAY_STATUS_EVENT_TYPES:
             yield event
             continue
         stamped = {**event, "displayStatus": _inference_cell_display_status(event)}

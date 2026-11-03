@@ -8,5 +8,5 @@ An absent mark becomes generation 1 with `appliesFromTurn` at the **analytic exp
 
 ## Considered options
 
-- Bump on every hop. Later hops built from the previous generation are discarded, and the shell row returns to subject to revision on each persist.
+- Bump on every hop. Later hops built from the previous generation are discarded, and the shell row returns to Provisional on each persist.
 - Bump when a persist is outside one walk even if another in-flight on-walk for that player submitted it. The other walk is discarded and the two open turns restart each other.

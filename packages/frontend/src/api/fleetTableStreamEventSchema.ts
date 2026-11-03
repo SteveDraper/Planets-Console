@@ -12,11 +12,17 @@ const fleetTableStreamPlayerScopeSchema = z.object({
   playerId: z.number().int().optional(),
 })
 
+const fleetEvidenceFreshnessFields = {
+  evidenceGeneration: z.number().int().optional(),
+  evidenceMark: z.number().int().optional(),
+}
+
 export const fleetTableStreamLedgerUpdatedEventSchema =
   fleetTableStreamPlayerScopeSchema.extend({
     type: z.literal('ledger_updated'),
     ledger: fleetTablePlayerSchema,
     replacesTurnLoad: z.boolean().optional(),
+    ...fleetEvidenceFreshnessFields,
   })
 
 export const fleetTableStreamRosterPaintEventSchema =
@@ -24,6 +30,7 @@ export const fleetTableStreamRosterPaintEventSchema =
     type: z.literal('roster_paint'),
     paint: z.enum(['sightings', 'ledger']),
     ledger: fleetTablePlayerSchema,
+    ...fleetEvidenceFreshnessFields,
   })
 
 export const fleetTableStreamRecordRefinedEventSchema =
@@ -51,6 +58,17 @@ export const fleetTableStreamErrorEventSchema = fleetTableStreamPlayerScopeSchem
   detail: z.string(),
 })
 
+export const fleetTableStreamWorkAcceptedEventSchema =
+  fleetTableStreamPlayerScopeSchema.extend({
+    type: z.literal('work_accepted'),
+  })
+
+export const fleetTableStreamLedgerWriteEventSchema =
+  fleetTableStreamPlayerScopeSchema.extend({
+    type: z.literal('ledger_write'),
+    writing: z.boolean(),
+  })
+
 export const fleetTableStreamEventSchema = z.discriminatedUnion('type', [
   fleetTableStreamLedgerUpdatedEventSchema,
   fleetTableStreamRosterPaintEventSchema,
@@ -58,6 +76,8 @@ export const fleetTableStreamEventSchema = z.discriminatedUnion('type', [
   fleetTableStreamProvenanceEventSchema,
   fleetTableStreamCompleteEventSchema,
   fleetTableStreamErrorEventSchema,
+  fleetTableStreamWorkAcceptedEventSchema,
+  fleetTableStreamLedgerWriteEventSchema,
 ])
 
 export type FleetTableStreamEvent = z.infer<typeof fleetTableStreamEventSchema>

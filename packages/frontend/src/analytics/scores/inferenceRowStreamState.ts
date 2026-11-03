@@ -7,6 +7,16 @@ import type {
   LatticeSignature,
   UnknownLossLeftover,
 } from '../../api/inferenceStreamEventSchema'
+import {
+  analyticFreshnessForPhase,
+  freshnessAfterAbsent,
+  freshnessAfterAccept,
+  freshnessAfterCurrentPaint,
+  freshnessAfterStoredPaint,
+  initialFreshnessState,
+  type AnalyticFreshness,
+  type FreshnessState,
+} from '../analyticFreshness'
 import { readMilitaryScoreArithmetic } from './inferenceConstraints'
 
 function omitNull<T>(value: T | null | undefined): T | undefined {
@@ -56,6 +66,7 @@ export type RowStreamState = {
   heldSolutions: ScoresInferenceSolution[]
   status: string
   summary: string
+  /** Painted result is finished. A stored row can be finished while the run is still open. */
   isComplete: boolean
   diagnostics: Record<string, unknown>
   placeholders: Record<string, unknown>[]
@@ -65,16 +76,23 @@ export type RowStreamState = {
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
+  freshness: FreshnessState
+  /** Real complete or error. A stored paint does not settle the run. */
+  isStreamSettled: boolean
 }
+
+const BUILD_INFERENCE_IN_PROGRESS_SUMMARY = 'Build inference in progress'
 
 export function initialRowStreamState(): RowStreamState {
   return {
     heldSolutions: [],
     status: 'pending',
-    summary: 'Build inference in progress',
+    summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
     isComplete: false,
     diagnostics: {},
     placeholders: [],
+    freshness: initialFreshnessState(),
+    isStreamSettled: false,
   }
 }
 
@@ -95,6 +113,62 @@ function inFlightDisplayStatus(state: RowStreamState): InferenceDisplayStatus {
     return 'pending'
   }
   return 'failure'
+}
+
+function freshnessForRow(state: RowStreamState): AnalyticFreshness {
+  return analyticFreshnessForPhase(state.freshness.phase)
+}
+
+function searchingSummary(policyStepId: string | undefined): string {
+  return policyStepId
+    ? `Searching (${policyStepId.replace(/_/g, ' ')})`
+    : BUILD_INFERENCE_IN_PROGRESS_SUMMARY
+}
+
+type RowRunUpdate = Partial<
+  Pick<RowStreamState, 'heldSolutions' | 'summary' | 'fleetTorpInputStatus'>
+>
+
+type RowRunActivity = {
+  restart: 'always' | 'when-complete'
+  summary: string
+  updates: RowRunUpdate
+}
+
+/**
+ * A restart keeps a stored row and shows it as pending.
+ * With nothing stored, the row is replaced by a fresh current row.
+ * An open run that is not restarting only applies the event updates.
+ */
+function rowForRunActivity(state: RowStreamState, activity: RowRunActivity): RowStreamState {
+  const restarting = activity.restart === 'always' || state.isComplete
+  if (!restarting) {
+    return { ...state, ...activity.updates }
+  }
+  if (state.freshness.hasStoredRow) {
+    return {
+      ...state,
+      ...activity.updates,
+      isComplete: false,
+      isStreamSettled: false,
+      status: 'pending',
+      displayStatus: 'pending',
+      summary: activity.summary,
+    }
+  }
+  return {
+    ...initialRowStreamState(),
+    ...activity.updates,
+    freshness: freshnessAfterAccept(initialFreshnessState()),
+    summary: activity.summary,
+  }
+}
+
+function freshnessField(freshness: AnalyticFreshness): Pick<ScoresInferenceRowDetail, 'freshness'> {
+  if (freshness === 'none') {
+    return {}
+  }
+  return { freshness }
 }
 
 export function rowDetailFromStreamState(
@@ -125,6 +199,7 @@ export function rowDetailFromStreamState(
     ...(state.fleetTorpOverlayBeliefSetTorpIds != null
       ? { fleetTorpOverlayBeliefSetTorpIds: state.fleetTorpOverlayBeliefSetTorpIds }
       : {}),
+    ...freshnessField(freshnessForRow(state)),
   }
 }
 
@@ -152,8 +227,10 @@ export function failureDetail(playerId: number, summary: string): ScoresInferenc
   }
 }
 
-function fleetTorpFieldsFromCompleteEvent(
-  event: Extract<InferenceStreamEvent, { type: 'complete' }>
+type ScoreboardPaintEvent = Extract<InferenceStreamEvent, { type: 'complete' | 'stored_row' }>
+
+function fleetTorpFieldsFromPaint(
+  event: ScoreboardPaintEvent
 ): Pick<RowStreamState, 'fleetTorpInputStatus' | 'fleetTorpOverlayBeliefSetTorpIds'> {
   const fields: Pick<RowStreamState, 'fleetTorpInputStatus' | 'fleetTorpOverlayBeliefSetTorpIds'> =
     {}
@@ -164,6 +241,42 @@ function fleetTorpFieldsFromCompleteEvent(
     fields.fleetTorpOverlayBeliefSetTorpIds = event.fleetTorpOverlayBeliefSetTorpIds
   }
   return fields
+}
+
+function scoreboardPaintIsStored(freshness: FreshnessState, event: ScoreboardPaintEvent): boolean {
+  return event.type === 'stored_row' || event.evidenceGeneration != null || freshness.hasStoredRow
+}
+
+function applyScoreboardPaint(
+  state: RowStreamState,
+  event: ScoreboardPaintEvent
+): RowStreamState {
+  const freshness = scoreboardPaintIsStored(state.freshness, event)
+    ? freshnessAfterStoredPaint(state.freshness, event)
+    : freshnessAfterCurrentPaint(state.freshness, event)
+  return {
+    ...state,
+    freshness,
+    status: event.status,
+    displayStatus: event.displayStatus,
+    summary: event.summary,
+    isComplete: event.isComplete,
+    isStreamSettled: event.type === 'complete',
+    diagnostics: event.diagnostics ?? {},
+    placeholders: event.placeholders ?? [],
+    ...(event.leftover != null ? { leftover: event.leftover } : {}),
+    ...(event.latticeSignatures != null
+      ? { latticeSignatures: event.latticeSignatures }
+      : {}),
+    unexplainedMilitaryDelta2x: pointUnexplainedMilitaryDelta2x(
+      event.leftover ?? state.leftover,
+      event.unexplainedMilitaryDelta2x ?? state.unexplainedMilitaryDelta2x
+    ),
+    ...fleetTorpFieldsFromPaint(event),
+    ...(event.solutions != null
+      ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }
+      : {}),
+  }
 }
 
 export function reduceRowStreamState(
@@ -182,27 +295,38 @@ export function reduceRowStreamState(
       return {
         ...state,
         status: 'pending',
-        summary: 'Build inference in progress',
+        summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
       }
     }
     return state
   }
 
-  if (event.type === 'progress') {
-    if (state.isComplete) {
-      return {
-        ...initialRowStreamState(),
-        summary: event.policyStepId
-          ? `Searching (${event.policyStepId.replace(/_/g, ' ')})`
-          : 'Build inference in progress',
-      }
+  if (event.type === 'no_stored_row') {
+    const freshness = freshnessAfterAbsent(state.freshness)
+    if (freshness === state.freshness) {
+      return state
     }
     return {
       ...state,
-      summary: event.policyStepId
-        ? `Searching (${event.policyStepId.replace(/_/g, ' ')})`
-        : 'Build inference in progress',
+      freshness,
     }
+  }
+
+  if (event.type === 'work_accepted') {
+    return rowForRunActivity(state, {
+      restart: 'always',
+      summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
+      updates: { heldSolutions: state.heldSolutions },
+    })
+  }
+
+  if (event.type === 'progress') {
+    const summary = searchingSummary(event.policyStepId)
+    return rowForRunActivity(state, {
+      restart: 'when-complete',
+      summary,
+      updates: { summary },
+    })
   }
 
   if (event.type === 'solution') {
@@ -210,42 +334,18 @@ export function reduceRowStreamState(
       event.fleetTorpInputStatus != null
         ? { fleetTorpInputStatus: event.fleetTorpInputStatus }
         : {}
-    if (state.isComplete) {
-      return {
-        ...initialRowStreamState(),
+    return rowForRunActivity(state, {
+      restart: 'when-complete',
+      summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
+      updates: {
         heldSolutions: streamSolutionsToRowSolutions(event.solutions),
         ...fleetTorpInputStatus,
-      }
-    }
-    return {
-      ...state,
-      heldSolutions: streamSolutionsToRowSolutions(event.solutions),
-      ...fleetTorpInputStatus,
-    }
+      },
+    })
   }
 
-  if (event.type === 'complete') {
-    return {
-      ...state,
-      status: event.status,
-      displayStatus: event.displayStatus,
-      summary: event.summary,
-      isComplete: event.isComplete,
-      diagnostics: event.diagnostics ?? {},
-      placeholders: event.placeholders ?? [],
-      ...(event.leftover != null ? { leftover: event.leftover } : {}),
-      ...(event.latticeSignatures != null
-        ? { latticeSignatures: event.latticeSignatures }
-        : {}),
-      unexplainedMilitaryDelta2x: pointUnexplainedMilitaryDelta2x(
-        event.leftover ?? state.leftover,
-        event.unexplainedMilitaryDelta2x ?? state.unexplainedMilitaryDelta2x
-      ),
-      ...fleetTorpFieldsFromCompleteEvent(event),
-      ...(event.solutions != null
-        ? { heldSolutions: streamSolutionsToRowSolutions(event.solutions) }
-        : {}),
-    }
+  if (event.type === 'complete' || event.type === 'stored_row') {
+    return applyScoreboardPaint(state, event)
   }
 
   if (event.type === 'error') {
@@ -255,6 +355,7 @@ export function reduceRowStreamState(
       displayStatus: 'failure',
       summary: event.detail,
       isComplete: true,
+      isStreamSettled: true,
     }
   }
 

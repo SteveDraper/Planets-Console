@@ -113,10 +113,28 @@ describe('useScoresInferenceByRow', () => {
       playerId: 8,
       displayStatus: 'pending',
     })
+    expect(result.current.inferenceByRow?.[0]?.freshness).toBeUndefined()
     expect(result.current.inferenceByRow?.[1]).toMatchObject({
       playerId: 9,
       displayStatus: 'pending',
     })
+    expect(result.current.inferenceByRow?.[1]?.freshness).toBeUndefined()
+  })
+
+  it('shows turn load only for the player that receives the no-stored prelude', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({ type: 'no_stored_row', playerId: 8 })
+        await new Promise(() => {})
+      }
+    )
+
+    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.freshness).toBe('turn-load')
+    })
+    expect(result.current.inferenceByRow?.[1]?.freshness).toBeUndefined()
   })
 
   it('merges settled inference independently per player from the table stream', async () => {
@@ -514,6 +532,67 @@ describe('useScoresInferenceByRow', () => {
       rows: [['other', ''], ['cyborg', ''], ['colonies', '']],
       inferenceByRow: [{ playerId: 8 }, { playerId: 6 }, { playerId: 11 }],
     }
+
+    it('reconnects when the stream ends after a stored paint and before accept', async () => {
+      let streamGeneration = 0
+      const solution = {
+        objectiveValue: 1,
+        actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+      }
+
+      vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+        async (_scope, _playerIds, handlers) => {
+          streamGeneration += 1
+          if (streamGeneration === 1) {
+            handlers.onEvent({
+              type: 'stored_row',
+              playerId: 8,
+              status: 'exact',
+              displayStatus: 'success',
+              summary: 'Saved build',
+              solutionCount: 1,
+              isComplete: true,
+              evidenceGeneration: 1,
+              evidenceMark: 4,
+              solutions: [solution],
+            })
+            handlers.onEvent({
+              type: 'stored_row',
+              playerId: 9,
+              status: 'dead',
+              displayStatus: 'skipped',
+              summary: 'Player is dead',
+              solutionCount: 0,
+              isComplete: true,
+              evidenceGeneration: 0,
+              evidenceMark: 4,
+              solutions: [],
+            })
+            return
+          }
+          emitComplete(handlers.onEvent, 8, 'Recomputed build')
+          emitComplete(handlers.onEvent, 9, 'Recomputed other')
+        }
+      )
+
+      const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.summary).toBe('Saved build')
+      })
+      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('success')
+      expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(true)
+      expect(result.current.inferenceByRow?.[0]?.freshness).toBe('provisional')
+      expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('skipped')
+      expect(result.current.inferenceByRow?.[1]?.freshness).toBe('provisional')
+      expect(streamGeneration).toBe(1)
+
+      await waitFor(() => {
+        expect(result.current.inferenceByRow?.[0]?.summary).toBe('Recomputed build')
+        expect(result.current.inferenceByRow?.[1]?.summary).toBe('Recomputed other')
+      })
+      expect(streamGeneration).toBe(2)
+    })
 
     it('reconnects when the stream resolves before every row is complete', async () => {
       let streamGeneration = 0

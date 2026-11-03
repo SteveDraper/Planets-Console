@@ -546,7 +546,10 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
     time.sleep(0.15)
     assert controller.current_scheduled_rows() == ()
     assert not terminal_seen.is_set()
-    assert events == [{"type": "globalPause", "paused": False}]
+    assert events == [
+        {"type": "globalPause", "paused": False},
+        {"type": "no_stored_row", "playerId": player_id},
+    ]
 
     row_complete = _row_complete(
         summary="persisted while multiplex unbound",

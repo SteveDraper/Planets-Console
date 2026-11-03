@@ -127,6 +127,27 @@ def inference_global_pause_event(*, paused: bool) -> dict[str, object]:
     return {"type": "globalPause", "paused": paused}
 
 
+def inference_work_accepted_event() -> dict[str, object]:
+    """The orchestrator has accepted this player's scores work."""
+    return {"type": "work_accepted"}
+
+
+def inference_no_stored_row_event() -> dict[str, object]:
+    """Admission prelude: this schedule has no stored scoreboard row yet."""
+    return {"type": "no_stored_row"}
+
+
+def inference_stored_row_event(complete: dict[str, object]) -> dict[str, object]:
+    """Non-terminal paint of a stored scoreboard row.
+
+    Same fields as a ``complete`` replay. The type is not a multiplex terminal,
+    so yielding it leaves the scheduled run open.
+    """
+    painted = dict(complete)
+    painted["type"] = "stored_row"
+    return painted
+
+
 InferenceStreamItem: TypeAlias = dict[str, object]
 
 

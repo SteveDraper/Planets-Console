@@ -114,7 +114,10 @@ def test_reschedule_row_does_not_hold_stream_lock_across_schedule(
 
     nest_depth = {"n": 0}
 
-    def schedule_that_reenters_reschedule(_player_id: int) -> ScheduledInferenceRow:
+    def schedule_that_reenters_reschedule(
+        _player_id: int,
+        **_kwargs: object,
+    ) -> ScheduledInferenceRow:
         nest_depth["n"] += 1
         if nest_depth["n"] == 1:
             # Same-thread re-entry fingerprint: nested work while outer reschedule

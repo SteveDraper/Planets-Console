@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.military_score_inference.durable_turn_evidence import (
+    is_durable_turn_evidence_row_status,
+)
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.errors import NotFoundError, ValidationError
 from api.serialization.inference_row_persistence import (
@@ -205,18 +210,23 @@ class InferenceRowPersistenceService:
         host_turn: int,
         player_id: int,
         fleet_torp_input_status: str | None = None,
+        query_context: AnalyticQueryContext | None = None,
     ) -> None:
         """Write durable turn evidence from a RowComplete payload alone."""
         status = event.wire_payload.status
-        # Lazy: avoid scores package import cycle at module load.
-        from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
-
         if not is_durable_turn_evidence_row_status(status):
             return
         wire_event = row_complete_to_complete_wire_event(event)
         row = persisted_inference_row_from_wire_complete(
             wire_event,
             fleet_torp_input_status=fleet_torp_input_status,  # type: ignore[arg-type]
+        )
+        row = stamp_scoreboard_row_for_context(
+            row,
+            query_context,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
         )
         self.put_row(game_id, perspective, host_turn, player_id, row)
 
@@ -233,4 +243,5 @@ class InferenceRowPersistenceService:
             perspective=session.perspective,
             host_turn=session.turn_number,
             player_id=session.player_id,
+            query_context=session.query_context,
         )

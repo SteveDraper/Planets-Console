@@ -22,9 +22,11 @@ from bff.transport.fleet_table_stream_responses import (
     FleetTableStreamCompleteEvent,
     FleetTableStreamErrorEvent,
     FleetTableStreamLedgerUpdatedEvent,
+    FleetTableStreamLedgerWriteEvent,
     FleetTableStreamProvenanceEvent,
     FleetTableStreamRecordRefinedEvent,
     FleetTableStreamRosterPaintEvent,
+    FleetTableStreamWorkAcceptedEvent,
 )
 from bff.transport.game_responses import (
     LoadAllProgressUpdate,
@@ -35,8 +37,11 @@ from bff.transport.game_responses import (
 from bff.transport.inference_stream_responses import (
     InferenceStreamCompleteEvent,
     InferenceStreamErrorEvent,
+    InferenceStreamNoStoredRowEvent,
     InferenceStreamProgressEvent,
     InferenceStreamSolutionEvent,
+    InferenceStreamStoredRowEvent,
+    InferenceStreamWorkAcceptedEvent,
 )
 
 app = FastAPI(
@@ -71,6 +76,9 @@ def build_openapi_schema() -> dict:
         LoadAllStreamCompleteEvent,
         LoadAllStreamErrorEvent,
         InferenceStreamSolutionEvent,
+        InferenceStreamNoStoredRowEvent,
+        InferenceStreamStoredRowEvent,
+        InferenceStreamWorkAcceptedEvent,
         InferenceStreamProgressEvent,
         InferenceStreamCompleteEvent,
         InferenceStreamErrorEvent,
@@ -78,6 +86,8 @@ def build_openapi_schema() -> dict:
         FleetTableStreamRecordRefinedEvent,
         FleetTableStreamProvenanceEvent,
         FleetTableStreamRosterPaintEvent,
+        FleetTableStreamWorkAcceptedEvent,
+        FleetTableStreamLedgerWriteEvent,
         FleetTableStreamCompleteEvent,
         FleetTableStreamErrorEvent,
     ):

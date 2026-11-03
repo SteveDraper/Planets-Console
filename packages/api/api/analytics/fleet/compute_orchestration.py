@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
     from api.models.game import TurnInfo
 
+
 FLEET_OBSERVATION_LEG = "observation_leg"
 FLEET_FINALIZATION_LEG = "finalization_leg"
 # Legacy alias for tests and diagnostics that still name the interpreter leg.

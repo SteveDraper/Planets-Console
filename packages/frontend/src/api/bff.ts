@@ -1,6 +1,7 @@
 import { turnUsernamesByPlayerIdFromPayload } from '../lib/turnPlayerUsernames'
 import { turnRelationsFromPayload, type TurnRelationEdge } from '../lib/turnRelations'
 
+import type { AnalyticFreshness } from '../analytics/analyticFreshness'
 import {
   appendRegisteredMapQueryParams,
   appendRegisteredTableQueryParams,
@@ -265,6 +266,8 @@ export type ScoresInferenceRowDetail = {
   unexplainedMilitaryDelta2x?: number
   fleetTorpInputStatus?: FleetTorpInputStatus
   fleetTorpOverlayBeliefSetTorpIds?: number[]
+  /** Absent when there is no freshness word. Turn load hides inference status. */
+  freshness?: Exclude<AnalyticFreshness, 'none'>
 }
 
 /** Scores table after per-row inference queries have been merged for display. */

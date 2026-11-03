@@ -25,6 +25,7 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
     compact_tier_emissions_from_step_diagnostics,
     tier_emissions_from_wire_complete,
 )
+from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
     ScoresExportResolved,
@@ -371,7 +372,7 @@ def _ensure_admit_inference_row(
         turn=turn,
         overlay_ensure=overlay_ensure,
     )
-    schedule_inference_row(
+    scheduled = schedule_inference_row(
         services.scheduler,
         score=score,
         turn=turn,
@@ -389,6 +390,8 @@ def _ensure_admit_inference_row(
         query_context=ctx,
         persistence=services.persistence,
     )
+    if scheduled is not None:
+        services.scheduler.accept_pending_run(scheduled.session.run_id)
     return True
 
 
@@ -513,7 +516,7 @@ def _store_admission_skip(
     ):
         return True
 
-    _persist_immediate_row_admission(services, scope, admission)
+    _persist_immediate_row_admission(services, scope, admission, query_context=ctx)
     ctx.invalidate_export_scope_cache(ANALYTIC_ID, scope)
     _wake_deferred_scores_after_evidence_close(ctx, scope)
     return True
@@ -523,6 +526,8 @@ def _persist_immediate_row_admission(
     services: ScoresExportContext,
     scope: ExportScope,
     admission: ImmediateRowAdmission,
+    *,
+    query_context: AnalyticQueryContext,
 ) -> None:
     """Write ImmediateRowAdmission to inference-row storage when missing.
 
@@ -543,12 +548,20 @@ def _persist_immediate_row_admission(
     ):
         return
     wire_event = wire_complete_event_from_terminal_admission(admission)
+    row = persisted_inference_row_from_wire_complete(wire_event)
+    row = stamp_scoreboard_row_for_context(
+        row,
+        query_context,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        player_id=scope.player_id,
+    )
     services.persistence.put_row(
         scope.game_id,
         scope.perspective,
         scope.turn,
         scope.player_id,
-        persisted_inference_row_from_wire_complete(wire_event),
+        row,
         # Establishing cheap terminal disk evidence must not fire fleet
         # invalidation: on_row_persisted would bump generation mid gap-fill
         # (FleetGapFillEpochInvalidated → 409 on sync table/map). Fleet sees

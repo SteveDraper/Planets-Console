@@ -132,6 +132,7 @@ def wire_ledger_progress_events(
         fleet_ledger_updated_event(
             ledger=fleet_acquisition_ledger_to_table_wire(host_shaped, turn=host_turn),
             replaces_turn_load=replaces_turn_load,
+            evidence_generation=persisted.evidence_generation,
         )
     )
     events.append(_wire_provenance(persisted))

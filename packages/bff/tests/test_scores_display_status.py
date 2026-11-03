@@ -257,12 +257,28 @@ def test_exact_and_in_flight_held_solutions_stay_success() -> None:
     assert in_flight["displayStatus"] == "success"
 
 
-def test_stamp_inference_stream_display_status_on_complete_only() -> None:
+def test_stamp_inference_stream_display_status_on_scoreboard_paints() -> None:
     events = list(
         stamp_inference_stream_display_status(
             iter(
                 [
                     {"type": "progress", "policyStepId": "tier_1"},
+                    {
+                        "type": "stored_row",
+                        "status": "exact",
+                        "summary": "Best build",
+                        "solutionCount": 1,
+                        "isComplete": True,
+                        "evidenceGeneration": 0,
+                        "evidenceMark": 4,
+                    },
+                    {
+                        "type": "stored_row",
+                        "status": "dead",
+                        "summary": "Player is dead",
+                        "solutionCount": 0,
+                        "isComplete": True,
+                    },
                     {
                         "type": "complete",
                         "status": "dead",
@@ -299,16 +315,23 @@ def test_stamp_inference_stream_display_status_on_complete_only() -> None:
         )
     )
     assert events[0] == {"type": "progress", "policyStepId": "tier_1"}
-    assert events[1]["displayStatus"] == "skipped"
-    assert events[1]["status"] == "dead"
-    assert events[2]["displayStatus"] == "failure"
-    assert events[2]["status"] == "novel_terminal"
-    assert events[3]["displayStatus"] == "mine_score_residual"
-    assert events[3]["solutionCount"] == 2
-    assert events[4]["displayStatus"] == "uncharacterized_roster"
-    assert events[4]["leftover"] == {"kind": "unknown_loss_bound", "lowerBound2x": 800}
-    assert "unexplainedMilitaryDelta2x" not in events[4]
-    assert events[4]["latticeSignatures"] == [{"shipClass": "warship"}]
+    assert events[1]["type"] == "stored_row"
+    assert events[1]["displayStatus"] == "success"
+    assert events[1]["evidenceGeneration"] == 0
+    assert events[1]["evidenceMark"] == 4
+    assert events[2]["type"] == "stored_row"
+    assert events[2]["displayStatus"] == "skipped"
+    assert events[2]["status"] == "dead"
+    assert events[3]["displayStatus"] == "skipped"
+    assert events[3]["status"] == "dead"
+    assert events[4]["displayStatus"] == "failure"
+    assert events[4]["status"] == "novel_terminal"
+    assert events[5]["displayStatus"] == "mine_score_residual"
+    assert events[5]["solutionCount"] == 2
+    assert events[6]["displayStatus"] == "uncharacterized_roster"
+    assert events[6]["leftover"] == {"kind": "unknown_loss_bound", "lowerBound2x": 800}
+    assert "unexplainedMilitaryDelta2x" not in events[6]
+    assert events[6]["latticeSignatures"] == [{"shipClass": "warship"}]
 
 
 def test_scores_inference_table_stream_stamps_display_status() -> None:

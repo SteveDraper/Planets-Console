@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
     RowComplete,
     RowFailed,
     TierProgress,
+    WorkAccepted,
 )
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
@@ -36,6 +37,7 @@ from api.transport.inference_stream import (
     inference_global_pause_event,
     inference_progress_event,
     inference_solution_event,
+    inference_work_accepted_event,
 )
 
 
@@ -189,5 +191,8 @@ def domain_event_to_wire_events(
 
     if isinstance(event, GlobalPauseChanged):
         return [inference_global_pause_event(paused=event.paused)]
+
+    if isinstance(event, WorkAccepted):
+        return [inference_work_accepted_event()]
 
     raise TypeError(f"Unsupported inference stream domain event: {type(event)!r}")

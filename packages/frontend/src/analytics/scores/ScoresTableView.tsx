@@ -75,6 +75,7 @@ function InferenceStatusCell({
   const chromeProps = {
     fleetTorpStatus,
     hullCatalogButton,
+    freshness: detail.freshness,
   }
 
   if (isIncompleteInferenceRow(detail)) {

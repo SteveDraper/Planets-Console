@@ -57,6 +57,36 @@ def _session_for_turn(
     )
 
 
+def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch) -> None:
+    reset_inference_row_scheduler_for_tests()
+    scheduler = InferenceRowScheduler()
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
+    submitted: list[object] = []
+
+    def record_submit(self, binding, root_scope) -> None:
+        del self, binding
+        submitted.append(root_scope)
+
+    monkeypatch.setattr(InferenceRowScheduler, "_submit_tier_solve_locked", record_submit)
+
+    cancelled = _session_for_turn(sample_turn)
+    scheduler.enqueue_tier_ladder(cancelled, stream_token=stream_token)
+    assert submitted == []
+    scheduler.cancel_row_run(cancelled.run_id)
+    scheduler.accept_pending_run(cancelled.run_id)
+    assert submitted == []
+
+    live = _session_for_turn(sample_turn)
+    scheduler.enqueue_tier_ladder(live, stream_token=stream_token)
+    scheduler.accept_pending_run(live.run_id)
+    assert submitted == [scheduler._root_scope_for_session(live)]
+
+
 def test_pause_without_active_stream_raises_validation_error(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler()

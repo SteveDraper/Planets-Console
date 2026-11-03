@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import threading
+import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
@@ -17,7 +19,11 @@ from api.analytics.fleet.fleet_table_player_run import (
 from api.analytics.fleet.fleet_table_stream_registry import wake_fleet_table_stream_multiplex
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.injected_services import FleetComputeServices
-from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.persistence import (
+    FleetLedgerWriteNotice,
+    FleetSnapshotPersistenceService,
+    register_fleet_ledger_write_listener,
+)
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.options import TurnAnalyticsOptions
@@ -26,11 +32,16 @@ from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
+from api.streaming.table_stream.pending_accepts import PendingAccepts
 from api.streaming.table_stream.scheduler_orchestrator_attachment import (
     SchedulerOrchestratorAttachment,
 )
 from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
-from api.transport.fleet_table_stream import fleet_error_event
+from api.transport.fleet_table_stream import (
+    fleet_error_event,
+    fleet_ledger_write_event,
+    fleet_work_accepted_event,
+)
 
 __all__ = [
     "FleetTableStreamScheduler",
@@ -80,12 +91,14 @@ class FleetTableStreamScheduler:
 
     def __init__(self) -> None:
         self._runs: dict[str, _FleetPlayerOrchestratorRun] = {}
+        self._pending_accepts = PendingAccepts()
         self._lock = threading.Lock()
         self._scope_guard = TableStreamScopeGuard[FleetTableStreamScope]()
         self._stream_bindings: dict[str, _FleetStreamOrchestratorBinding] = {}
         self._orchestrator_attachment = SchedulerOrchestratorAttachment(
             on_scope_outcome=self._on_orchestrator_scope_outcome,
         )
+        self._subscribe_to_ledger_writes()
 
     def begin_scope(self, scope: FleetTableStreamScope) -> str:
         """Claim the active fleet table-stream scope.
@@ -136,16 +149,17 @@ class FleetTableStreamScheduler:
         query_context: AnalyticQueryContext,
         stream_token: str | None = None,
     ) -> FleetPlayerStreamSession | None:
-        """Admit one fleet player run and submit ``force_fresh``.
+        """Admit one fleet player run and register its orchestrator accept.
 
         Persistence reads (``get_ledger`` / chain-anchor walk / deep-copy) and
         ``orchestrator.submit`` must run **outside** ``self._lock``. Scores
         ``tier_solve`` admits call ``reschedule_fleet_table_player`` on the pool
         worker; holding this lock across storage deep-copy wedged all workers and
-        the fleet multiplex ``owns_table_stream`` poll (game 680224 turn 13→14).
+        the fleet multiplex ``owns_table_stream`` poll (game 680224 turn 13 to 14).
+
+        The caller runs ``accept_pending_run`` after admission. Connect holds
+        that accept until every player's paint has been yielded.
         """
-        submit_binding: _FleetStreamOrchestratorBinding | None = None
-        submit_scope: ComputeScope | None = None
         host_turn = session.turn
         host_turn_number = host_turn.settings.turn
         player_id = session.player_id
@@ -204,27 +218,58 @@ class FleetTableStreamScheduler:
                 root_scope=root_scope,
             )
             self._runs[session.run_id] = run
-            # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
-            # listeners and may re-enter scores persist / fleet reschedule paths that need
-            # this lock (ABBA with pool workers finishing ``tier_solve`` persist).
-            # force_fresh: scores evidence invalidation reschedules while a prior fleet@N
-            # node may still be ``complete`` on this orchestrator (hollow after ledger
-            # wipe). Closed-stream wakes use the same primitive via ``wake_fleet_scope``.
-            # Without force_fresh, submit attaches to that terminal and never rematerializes.
-            submit_binding = binding
-            submit_scope = root_scope
+            self._pending_accepts.register(
+                session.run_id,
+                self._player_accept(binding, root_scope, session.run_id),
+            )
 
         self._orchestrator_attachment.ensure_registered()
-        if submit_binding is not None and submit_scope is not None:
-            submit_binding.orchestrator.submit(
-                ComputeRequest(
-                    scope=submit_scope,
-                    priority_band="stream_attached",
-                    force_fresh=True,
-                    ctx=submit_binding.query_context,
-                )
-            )
         return session
+
+    def accept_pending_run(self, run_id: str) -> None:
+        """Submit a run whose accept is still pending. A second call is a no-op."""
+        self._pending_accepts.accept(run_id)
+
+    def _player_accept(
+        self,
+        binding: _FleetStreamOrchestratorBinding,
+        scope: ComputeScope,
+        run_id: str,
+    ) -> Callable[[], None]:
+        def accept() -> None:
+            with self._lock:
+                run = self._runs.get(run_id)
+                if run is None:
+                    return
+                session = run.session
+            self._orchestrator_attachment.ensure_registered()
+            self._submit_accepted_player_run(binding, scope, session)
+
+        return accept
+
+    def _submit_accepted_player_run(
+        self,
+        binding: _FleetStreamOrchestratorBinding,
+        scope: ComputeScope,
+        session: FleetPlayerStreamSession,
+    ) -> None:
+        # Submit outside the scheduler lock: ``orchestrator.submit`` drains diagnostics
+        # listeners and may re-enter scores persist / fleet reschedule paths that need
+        # this lock (ABBA with pool workers finishing ``tier_solve`` persist).
+        # force_fresh: scores evidence invalidation reschedules while a prior fleet@N
+        # node may still be ``complete`` on this orchestrator (hollow after ledger
+        # wipe). Closed-stream wakes use the same primitive via ``wake_fleet_scope``.
+        # Without force_fresh, submit attaches to that terminal and never rematerializes.
+        binding.orchestrator.submit(
+            ComputeRequest(
+                scope=scope,
+                priority_band="stream_attached",
+                force_fresh=True,
+                ctx=binding.query_context,
+            )
+        )
+        session.event_queue.put(fleet_work_accepted_event())
+        _wake_multiplex_for_session(session)
 
     def _enqueue_admission_early_return_locked(
         self,
@@ -257,6 +302,7 @@ class FleetTableStreamScheduler:
             if run is not None:
                 run.session.cancel_token.cancel()
             self._runs.pop(run_id, None)
+            self._pending_accepts.discard(run_id)
 
     def end_fleet_table_stream(
         self,
@@ -275,6 +321,7 @@ class FleetTableStreamScheduler:
             for session in sessions:
                 session.cancel_token.cancel()
                 self._runs.pop(session.run_id, None)
+                self._pending_accepts.discard(session.run_id)
             self._stream_bindings.pop(stream_token, None)
 
     def publish_saved_host_turn_ledger(
@@ -390,13 +437,90 @@ class FleetTableStreamScheduler:
                 _wake_multiplex_for_session(session)
 
     def _preempt_active_table_stream_locked(self) -> None:
+        run_ids = tuple(self._runs)
         for run in self._runs.values():
             run.session.cancel_token.cancel()
         self._runs.clear()
         self._stream_bindings.clear()
+        self._pending_accepts.discard_all(run_ids)
 
     def _invalidate_retained_state_locked(self) -> None:
         self._preempt_active_table_stream_locked()
+
+    def host_turn_ledger_sessions(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        turn: int,
+        player_id: int,
+    ) -> tuple[FleetPlayerStreamSession, ...]:
+        """Shell sessions whose host turn is the turn being written.
+
+        Earlier hops of the walk write a different turn than the shell host turn,
+        so they match nothing and do not change the tile spinner.
+        """
+        with self._lock:
+            return tuple(
+                run.session
+                for run in self._runs.values()
+                if run.root_scope.game_id == game_id
+                and run.root_scope.perspective == perspective
+                and run.root_scope.player_id == player_id
+                and run.host_turn_number == turn
+            )
+
+    def on_ledger_write(self, notice: FleetLedgerWriteNotice) -> Callable[[], None]:
+        """Publish ``writing: true`` and return the publish of ``writing: false``.
+
+        The returned callable keeps the sessions captured for this attempt, so
+        a run removed during the write still receives the end signal.
+        """
+        sessions = self.host_turn_ledger_sessions(
+            game_id=notice.game_id,
+            perspective=notice.perspective,
+            turn=notice.turn,
+            player_id=notice.player_id,
+        )
+        self._publish_ledger_write(sessions, writing=True)
+
+        def _end() -> None:
+            self._publish_ledger_write(sessions, writing=False)
+
+        return _end
+
+    def _publish_ledger_write(
+        self,
+        sessions: tuple[FleetPlayerStreamSession, ...],
+        *,
+        writing: bool,
+    ) -> None:
+        if not sessions:
+            return
+        event = fleet_ledger_write_event(writing=writing)
+        for session in sessions:
+            session.event_queue.put(event)
+            _wake_multiplex_for_session(session)
+
+    def _subscribe_to_ledger_writes(self) -> None:
+        """Register once for this scheduler. Collection drops the registration."""
+        scheduler_ref = weakref.ref(self)
+
+        def _on_notice(notice: FleetLedgerWriteNotice) -> Callable[[], None]:
+            scheduler = scheduler_ref()
+            if scheduler is None:
+                return _ignore_ledger_write_end
+            return scheduler.on_ledger_write(notice)
+
+        unregister = register_fleet_ledger_write_listener(_on_notice)
+        self._unregister_ledger_write = unregister
+        # ``unregister`` does not reference this scheduler, so finalization can
+        # drop the listener after the last strong reference is gone.
+        weakref.finalize(self, unregister)
+
+
+def _ignore_ledger_write_end() -> None:
+    return
 
 
 def _emit_fleet_materialization_error(
@@ -561,5 +685,8 @@ def reset_fleet_table_stream_scheduler_for_tests() -> None:
     from api.compute.runtime import reset_orchestrators_for_tests
 
     with _process_scheduler_lock:
+        previous = _process_scheduler
+        if previous is not None:
+            previous._unregister_ledger_write()
         _process_scheduler = FleetTableStreamScheduler()
     reset_orchestrators_for_tests()

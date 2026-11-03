@@ -564,4 +564,96 @@ describe('ScoresTableView', () => {
     expect(header.className).toContain('sticky')
     expect(header.className).toContain('top-0')
   })
+
+  it('shows turn load without inference status or the fleet torpedo indicator', () => {
+    render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              playerId: 3,
+              displayStatus: 'pending',
+              status: 'turn_load',
+              summary: '',
+              solutionCount: 0,
+              isComplete: false,
+              solutions: [],
+              diagnostics: {},
+              freshness: 'turn-load',
+              fleetTorpInputStatus: 'pending',
+            },
+          ],
+        })}
+      />
+    )
+
+    const label = screen.getByText('Turn load')
+    expect(label.className).toContain('text-slate-400')
+    expect(screen.queryByLabelText('Build inference in progress')).toBeNull()
+    expect(screen.queryByText('—')).toBeNull()
+    expect(screen.getByLabelText('Adjust buildable hull catalog')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/fleet torpedo/i)).toBeNull()
+  })
+
+  it('shows Provisional beside a stored skip and the searching badge', () => {
+    const { rerender } = render(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              playerId: 3,
+              displayStatus: 'skipped',
+              status: 'dead',
+              summary: 'Player is dead',
+              solutionCount: 0,
+              isComplete: true,
+              solutions: [],
+              diagnostics: {},
+              placeholders: [],
+              freshness: 'provisional',
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(screen.getByText('Provisional').className).toContain('text-amber-300')
+    expect(screen.getByText('Provisional')).toHaveAttribute(
+      'title',
+      'This is a saved answer from before a newer result for this player. It may change once that result is included. Backfill earlier turns updates turns you are not viewing. Otherwise a turn updates when you open it.'
+    )
+    expect(screen.getByLabelText('Player is dead')).toBeInTheDocument()
+
+    rerender(
+      <ScoresTableView
+        analyticScope={testScope}
+        data={tableData({
+          columns: ['Race (player)', 'Build inference'],
+          rows: [['Federation (alice)']],
+          inferenceByRow: [
+            {
+              playerId: 3,
+              displayStatus: 'pending',
+              status: 'pending',
+              summary: 'Build inference in progress',
+              solutionCount: 0,
+              isComplete: false,
+              solutions: [],
+              diagnostics: {},
+              freshness: 'provisional',
+            },
+          ],
+        })}
+      />
+    )
+
+    expect(screen.getByText('Provisional')).toBeInTheDocument()
+    expect(screen.getByLabelText('Build inference in progress')).toBeInTheDocument()
+  })
 })

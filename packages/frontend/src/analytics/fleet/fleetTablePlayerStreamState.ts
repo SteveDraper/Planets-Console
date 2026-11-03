@@ -1,16 +1,25 @@
 import type { FleetTableStreamEvent } from '../../api/fleetTableStreamEventSchema'
+import {
+  analyticFreshnessForPhase,
+  freshnessAfterAbsentPaint,
+  freshnessAfterAccept,
+  freshnessAfterStoredPaint,
+  initialFreshnessState,
+  type AnalyticFreshness,
+  type FreshnessState,
+} from '../analyticFreshness'
 import type { FleetCountDiscrepancy, FleetTablePlayer, FleetTableRecord } from './fleetTableWireSchema'
 
 export const FLEET_MATERIALIZATION_PENDING_SUMMARY = 'Fleet materialization in progress'
 
 export type FleetDiscrepancyOverlay = 'inherit' | 'set' | 'clear'
 
-/** Turn-load roster: a stored ledger, or this turn's sightings when no file exists. */
+/** Painted roster: this turn's sightings, or a stored ledger. */
 export type FleetRosterPaint = 'sightings' | 'ledger'
 
 /**
  * Map picture for one player. A stored ledger is the paint, including an
- * approximate fleet and a ledger subject to revision. Sightings are the paint
+ * approximate fleet and a Provisional ledger. Sightings are the paint
  * only while this turn has no ledger. A host-turn ledger save replaces it.
  * Stream updates that do not save a ledger leave this picture in place.
  */
@@ -29,7 +38,8 @@ export type FleetPlayerStreamSlice = {
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
   isFinal: boolean
-  isPending: boolean
+  ledgerWriting: boolean
+  freshness: AnalyticFreshness
   summary: string
   error: string | null
 }
@@ -43,7 +53,8 @@ export type FleetPlayerStreamState = {
   discrepancy?: FleetCountDiscrepancy
   isComplete: boolean
   isFinal: boolean
-  isPending: boolean
+  ledgerWriting: boolean
+  freshness: FreshnessState
   summary: string
   error: string | null
 }
@@ -57,19 +68,22 @@ export function initialFleetPlayerStreamState(): FleetPlayerStreamState {
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
-    isPending: true,
-    summary: FLEET_MATERIALIZATION_PENDING_SUMMARY,
+    ledgerWriting: false,
+    freshness: initialFreshnessState(),
+    summary: '',
     error: null,
   }
 }
 
+/** Connection seed. No freshness word until an admission paint arrives. */
 export function pendingFleetPlayerStreamSlice(): FleetPlayerStreamSlice {
   return {
     discrepancyOverlay: 'inherit',
     isComplete: false,
     isFinal: false,
-    isPending: true,
-    summary: FLEET_MATERIALIZATION_PENDING_SUMMARY,
+    ledgerWriting: false,
+    freshness: 'none',
+    summary: '',
     error: null,
   }
 }
@@ -97,6 +111,10 @@ function ledgerDisplayState(
     discrepancyOverlay: hasDiscrepancy ? 'set' : 'clear',
     discrepancy: ledger.discrepancy,
   }
+}
+
+function freshnessForState(state: FleetPlayerStreamState): AnalyticFreshness {
+  return analyticFreshnessForPhase(state.freshness.phase)
 }
 
 function mapPaintFromLedger(
@@ -128,34 +146,57 @@ export function reduceFleetPlayerStreamState(
   event: FleetTableStreamEvent
 ): FleetPlayerStreamState {
   if (event.type === 'roster_paint') {
+    const freshness =
+      event.paint === 'ledger'
+        ? freshnessAfterStoredPaint(state.freshness, event)
+        : freshnessAfterAbsentPaint(state.freshness, event)
     return {
       ...state,
       ...ledgerDisplayState(event.ledger),
+      freshness,
       rosterPaint: event.paint,
       mapPaint: mapPaintFromLedger(event.paint, event.ledger),
+      ledgerWriting: false,
       error: null,
     }
   }
 
-  if (event.type === 'ledger_updated') {
-    const progress = {
-      isPending: !state.isComplete,
-      summary: state.isComplete ? state.summary : 'Refining fleet records',
+  if (event.type === 'work_accepted') {
+    return {
+      ...state,
+      freshness: freshnessAfterAccept(state.freshness),
+      ledgerWriting: false,
     }
+  }
+
+  if (event.type === 'ledger_write') {
+    return {
+      ...state,
+      ledgerWriting: event.writing,
+      summary: event.writing ? FLEET_MATERIALIZATION_PENDING_SUMMARY : state.summary,
+    }
+  }
+
+  if (event.type === 'ledger_updated') {
+    const summary = state.isComplete ? state.summary : 'Refining fleet records'
     // Hold the painted roster. An unpainted stream still shows this ledger.
     // Map paint changes only when this event saves the host-turn ledger.
     if (state.rosterPaint != null && event.replacesTurnLoad === false) {
       return {
         ...state,
-        ...progress,
+        summary,
       }
     }
     const savesHostTurnLedger = event.replacesTurnLoad !== false
     return {
       ...state,
       ...ledgerDisplayState(event.ledger),
-      ...progress,
+      summary,
+      freshness: savesHostTurnLedger
+        ? freshnessAfterStoredPaint(state.freshness, event)
+        : state.freshness,
       rosterPaint: null,
+      ledgerWriting: savesHostTurnLedger ? false : state.ledgerWriting,
       mapPaint: savesHostTurnLedger
         ? mapPaintFromLedger('ledger', event.ledger)
         : state.mapPaint,
@@ -172,7 +213,6 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       records: upsertRecord(baseRecords, event.record),
-      isPending: !state.isComplete,
       error: null,
     }
   }
@@ -181,7 +221,6 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       isFinal: event.isFinal,
-      isPending: !event.isFinal && !state.isComplete,
       summary: state.isComplete ? state.summary : provenanceSummary(event),
     }
   }
@@ -191,7 +230,7 @@ export function reduceFleetPlayerStreamState(
       ...state,
       isComplete: true,
       isFinal: event.isFinal,
-      isPending: false,
+      ledgerWriting: false,
       summary: event.summary,
       error: null,
     }
@@ -201,7 +240,7 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       isComplete: true,
-      isPending: false,
+      ledgerWriting: false,
       error: event.detail,
       summary: event.detail,
     }
@@ -215,15 +254,18 @@ export function fleetPlayerStreamSliceFromState(
 ): FleetPlayerStreamSlice | null {
   const hasProgressMetadata =
     state.summary !== FLEET_MATERIALIZATION_PENDING_SUMMARY || state.isFinal
+  const publishesFreshness =
+    state.freshness.phase === 'turn-load' || state.freshness.phase === 'behind-mark'
 
   if (
-    !state.isPending &&
+    !state.ledgerWriting &&
     state.records == null &&
     state.playerName == null &&
     state.discrepancyOverlay === 'inherit' &&
     state.error == null &&
     !state.isComplete &&
-    !hasProgressMetadata
+    !hasProgressMetadata &&
+    !publishesFreshness
   ) {
     return null
   }
@@ -232,7 +274,8 @@ export function fleetPlayerStreamSliceFromState(
     discrepancyOverlay: state.discrepancyOverlay,
     isComplete: state.isComplete,
     isFinal: state.isFinal,
-    isPending: state.isPending,
+    ledgerWriting: state.ledgerWriting,
+    freshness: freshnessForState(state),
     summary: state.summary,
     error: state.error,
   }

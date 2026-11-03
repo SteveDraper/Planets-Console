@@ -92,7 +92,16 @@ class FleetTableStreamController(
         prelude: tuple[dict[str, object], ...] = ()
         if isinstance(admission, RosterThenScheduleAdmission):
             prelude = self._tagged_events(admission.events, player_id)
-        return AdmissionDispatch(wire_events=prelude, scheduled=scheduled)
+        run_id = scheduled.session.run_id
+
+        def defer_submit() -> None:
+            self.scheduler.accept_pending_run(run_id)
+
+        return AdmissionDispatch(
+            wire_events=prelude,
+            scheduled=scheduled,
+            defer_submit=defer_submit,
+        )
 
     def _active_run_id_for_player(self, player_id: int) -> str | None:
         active = self.scheduler.row_run_for_player(self.scope, player_id)

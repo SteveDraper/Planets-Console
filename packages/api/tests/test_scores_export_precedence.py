@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from api.analytics.military_score_inference.durable_turn_evidence import (
+    is_durable_turn_evidence_row_status,
+)
 from api.analytics.military_score_inference.host_turn_targets import (
     HostTurnFunctionalTarget,
 )
@@ -35,10 +38,7 @@ from api.analytics.military_score_inference.solver import (
 from api.analytics.military_score_inference.uncharacterized_roster import (
     STATUS_UNCHARACTERIZED_ROSTER,
 )
-from api.analytics.scores.export_precedence import (
-    is_durable_turn_evidence_row_status,
-    resolve_scores_export,
-)
+from api.analytics.scores.export_precedence import resolve_scores_export
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 

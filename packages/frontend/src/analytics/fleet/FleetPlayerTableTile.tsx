@@ -29,6 +29,8 @@ import {
 } from './fleetRecordComponentDisplay'
 import { FleetRecordHullCell } from './FleetRecordHullCell'
 import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
+import { AnalyticFreshnessLabel } from '../AnalyticFreshnessLabel'
+import type { AnalyticFreshness } from '../analyticFreshness'
 import type { FleetPlayerStreamSlice, FleetRosterPaint } from './fleetTablePlayerStreamState'
 import { fleetTileProgressSummary, isFleetTileMaterializing } from './fleetTileStatus'
 
@@ -78,12 +80,15 @@ function FleetStatusIcons({ record }: { record: FleetTableRecord }) {
 
 function emptyFleetRosterMessage(
   rosterPaint: FleetRosterPaint | undefined,
-  materializing: boolean
+  streamSlice: FleetPlayerStreamSlice | undefined,
+  freshness: AnalyticFreshness
 ): string | null {
-  if (rosterPaint === 'sightings') {
+  if (rosterPaint === 'sightings' || freshness === 'turn-load') {
     return null
   }
-  if (rosterPaint === 'ledger' || !materializing) {
+  const hasSavedLedger =
+    streamSlice?.isComplete === true || streamSlice?.mapPaint?.source === 'ledger'
+  if (rosterPaint === 'ledger' || (hasSavedLedger && !isFleetTileMaterializing(streamSlice))) {
     return 'No active fleet records.'
   }
   return null
@@ -119,10 +124,8 @@ export function FleetPlayerTableTile({
 }: FleetPlayerTableTileProps) {
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const activeRecords = useMemo(() => activeFleetRecords(records), [records])
-  const emptyMessage = emptyFleetRosterMessage(
-    rosterPaint,
-    isFleetTileMaterializing(streamSlice)
-  )
+  const freshness = streamSlice?.freshness ?? 'none'
+  const emptyMessage = emptyFleetRosterMessage(rosterPaint, streamSlice, freshness)
 
   const columns = useMemo(
     () => [
@@ -222,7 +225,10 @@ export function FleetPlayerTableTile({
       aria-label={`${playerName} fleet table`}
     >
       <header className="border-b border-[#52575d]/70 px-4 py-2">
-        <h3 className="text-sm font-medium text-slate-200">{playerName}</h3>
+        <h3 className="text-sm font-medium text-slate-200">
+          {playerName}
+          <AnalyticFreshnessLabel freshness={freshness} className="ml-2 font-normal" />
+        </h3>
         {discrepancy != null ? (
           <p
             role="status"

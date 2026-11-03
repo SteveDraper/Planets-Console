@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     ScheduleRowAdmission,
     resolve_row_stream_admission,
     schedule_inference_row,
+    session_domain_event_to_wire_events,
     tag_inference_stream_event,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -33,12 +34,16 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
 )
+from api.analytics.scoreboard_evidence import (
+    annotate_scoreboard_paint,
+    stored_scoreboard_prelude_event,
+)
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
-from api.transport.inference_stream_wire import domain_event_to_wire_events
+from api.transport.inference_stream import inference_no_stored_row_event
 
 
 @dataclass(kw_only=True)
@@ -110,6 +115,61 @@ class InferenceTableStreamController(
             persistence=self.persistence,
         )
 
+    def _deferred_schedule_dispatch(
+        self,
+        scheduled: ScheduledInferenceRow,
+    ) -> AdmissionDispatch[ScheduledInferenceRow]:
+        """Paint whether a scoreboard row is stored, and defer the orchestrator accept.
+
+        Connect yields ``wire_events`` before ``defer_submit``. No stored row is
+        the absent signal. A stored row is a non-terminal paint, then the run
+        stays open through accept.
+        """
+        run_id = scheduled.session.run_id
+
+        def defer_submit() -> None:
+            self.scheduler.accept_pending_run(run_id)
+
+        return AdmissionDispatch(
+            wire_events=(
+                tag_inference_stream_event(
+                    self._schedule_admission_prelude(scheduled.player_id),
+                    player_id=scheduled.player_id,
+                ),
+            ),
+            scheduled=scheduled,
+            defer_submit=defer_submit,
+        )
+
+    def _schedule_admission_prelude(self, player_id: int) -> dict[str, object]:
+        """Absent signal when nothing is stored; otherwise the stored row paint."""
+        painted = stored_scoreboard_prelude_event(
+            persistence=self.persistence,
+            query_context=self.query_context,
+            game_id=self.game_id,
+            perspective=self.perspective,
+            turn=self.turn.settings.turn,
+            player_id=player_id,
+        )
+        if painted is None:
+            return inference_no_stored_row_event()
+        return painted
+
+    def _annotate_stored_complete(
+        self,
+        player_id: int,
+        event: dict[str, object],
+    ) -> dict[str, object]:
+        return annotate_scoreboard_paint(
+            event,
+            persistence=self.persistence,
+            query_context=self.query_context,
+            game_id=self.game_id,
+            perspective=self.perspective,
+            turn=self.turn.settings.turn,
+            player_id=player_id,
+        )
+
     def cancel_player_row(self, player_id: int) -> None:
         row = self.scheduled_rows.get(player_id)
         if row is not None:
@@ -123,14 +183,22 @@ class InferenceTableStreamController(
         if isinstance(admission, ImmediateRowAdmission):
             return AdmissionDispatch(
                 wire_events=tuple(
-                    tag_inference_stream_event(event, player_id=player_id)
+                    tag_inference_stream_event(
+                        self._annotate_stored_complete(player_id, event),
+                        player_id=player_id,
+                    )
                     for event in admission.events
                 ),
             )
         if isinstance(admission, CachedCompleteRowAdmission):
             if admission.event is not None:
                 return AdmissionDispatch(
-                    wire_events=(tag_inference_stream_event(admission.event, player_id=player_id),),
+                    wire_events=(
+                        tag_inference_stream_event(
+                            self._annotate_stored_complete(player_id, admission.event),
+                            player_id=player_id,
+                        ),
+                    ),
                 )
             return AdmissionDispatch()
         scheduled = self.schedule_player_row(player_id)
@@ -152,8 +220,8 @@ class InferenceTableStreamController(
             replacement = self.schedule_player_row(player_id)
             if replacement is None or replacement.session.cancel_token.is_cancelled():
                 return AdmissionDispatch(schedule_failed=True)
-            return AdmissionDispatch(scheduled=replacement)
-        return AdmissionDispatch(scheduled=scheduled)
+            return self._deferred_schedule_dispatch(replacement)
+        return self._deferred_schedule_dispatch(scheduled)
 
     def _refresh_host_turn(self) -> None:
         if self.reload_host_turn is not None:
@@ -235,12 +303,7 @@ class InferenceTableStreamController(
     ) -> None:
         """Append tagged domain-event wire to pending (drain-closed / upgrade path)."""
         with self.stream_lock:
-            for wire in domain_event_to_wire_events(
-                event,
-                observation=session.observation,
-                turn=session.turn,
-                fleet_torp_input_status=session.fleet_torp_input_status,
-            ):
+            for wire in session_domain_event_to_wire_events(session, event):
                 self.pending_wire_events.append(
                     tag_inference_stream_event(
                         wire,
@@ -267,12 +330,7 @@ class InferenceTableStreamController(
             if bound:
                 session.event_queue.put(event)
             else:
-                for wire in domain_event_to_wire_events(
-                    event,
-                    observation=session.observation,
-                    turn=session.turn,
-                    fleet_torp_input_status=session.fleet_torp_input_status,
-                ):
+                for wire in session_domain_event_to_wire_events(session, event):
                     self.pending_wire_events.append(
                         tag_inference_stream_event(
                             wire,

@@ -270,6 +270,29 @@ describe('parseInferenceStreamEvent', () => {
     })
   })
 
+  it('parses a stored scoreboard paint without treating it as complete', () => {
+    const event = parseInferenceStreamEvent(
+      JSON.stringify({
+        type: 'stored_row',
+        playerId: 4,
+        status: 'dead',
+        displayStatus: 'skipped',
+        summary: 'Player is dead',
+        solutionCount: 0,
+        isComplete: true,
+        solutions: [],
+        evidenceGeneration: 0,
+        evidenceMark: 4,
+      })
+    )
+    expect(event).toMatchObject({
+      type: 'stored_row',
+      displayStatus: 'skipped',
+      evidenceGeneration: 0,
+      evidenceMark: 4,
+    })
+  })
+
   it('parses global pause events', () => {
     const event = parseInferenceStreamEvent(
       JSON.stringify({

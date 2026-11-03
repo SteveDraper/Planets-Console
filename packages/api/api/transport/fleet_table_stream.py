@@ -14,14 +14,36 @@ logger = logging.getLogger(__name__)
 _FLEET_TABLE_STREAM_UNEXPECTED_ERROR_DETAIL = "Internal server error"
 
 
+def fleet_evidence_freshness_fields(
+    *,
+    evidence_generation: int | None = None,
+    evidence_mark: int | None = None,
+) -> dict[str, object]:
+    """Stored generation and the current mark. The table compares them."""
+    fields: dict[str, object] = {}
+    if evidence_generation is not None:
+        fields["evidenceGeneration"] = evidence_generation
+    if evidence_mark is not None:
+        fields["evidenceMark"] = evidence_mark
+    return fields
+
+
 def fleet_ledger_updated_event(
     *,
     ledger: dict[str, object],
     replaces_turn_load: bool = True,
+    evidence_generation: int | None = None,
+    evidence_mark: int | None = None,
 ) -> dict[str, object]:
     event: dict[str, object] = {"type": "ledger_updated", "ledger": ledger}
     if not replaces_turn_load:
         event["replacesTurnLoad"] = False
+    event.update(
+        fleet_evidence_freshness_fields(
+            evidence_generation=evidence_generation,
+            evidence_mark=evidence_mark,
+        )
+    )
     return event
 
 
@@ -29,9 +51,28 @@ def fleet_roster_paint_event(
     *,
     paint: Literal["sightings", "ledger"],
     ledger: dict[str, object],
+    evidence_generation: int | None = None,
+    evidence_mark: int | None = None,
 ) -> dict[str, object]:
     """Turn-load roster. The table shows it until a host-turn ledger save."""
-    return {"type": "roster_paint", "paint": paint, "ledger": ledger}
+    event: dict[str, object] = {"type": "roster_paint", "paint": paint, "ledger": ledger}
+    event.update(
+        fleet_evidence_freshness_fields(
+            evidence_generation=evidence_generation,
+            evidence_mark=evidence_mark,
+        )
+    )
+    return event
+
+
+def fleet_work_accepted_event() -> dict[str, object]:
+    """The orchestrator has accepted this player's fleet work."""
+    return {"type": "work_accepted"}
+
+
+def fleet_ledger_write_event(*, writing: bool) -> dict[str, object]:
+    """This turn's ledger file is being written."""
+    return {"type": "ledger_write", "writing": writing}
 
 
 def fleet_record_refined_event(*, record: dict[str, object]) -> dict[str, object]:

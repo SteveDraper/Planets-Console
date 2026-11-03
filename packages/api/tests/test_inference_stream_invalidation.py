@@ -110,6 +110,7 @@ def _schedule_player_row(
         query_context=minimal_stream_query_context(sample_turn),
     )
     assert scheduled is not None
+    scheduler.accept_pending_run(scheduled.session.run_id)
     return scheduled
 
 
@@ -869,7 +870,11 @@ def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
     )
     assert stale.session.run_id != fresher_run_id
 
-    monkeypatch.setattr(controller, "schedule_player_row", lambda _player_id: stale)
+    monkeypatch.setattr(
+        controller,
+        "schedule_player_row",
+        lambda _player_id, **_kwargs: stale,
+    )
 
     dispatch = controller.dispatch_admission(player_id, ScheduleRowAdmission())
     assert dispatch.schedule_failed is False
@@ -925,7 +930,7 @@ def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
 
     calls = {"n": 0}
 
-    def schedule_once_cancelled_then_live(_player_id: int):
+    def schedule_once_cancelled_then_live(_player_id: int, **_kwargs: object):
         calls["n"] += 1
         if calls["n"] == 1:
             return cancelled
