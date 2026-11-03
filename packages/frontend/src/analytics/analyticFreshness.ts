@@ -1,9 +1,4 @@
-/** On-screen analytic freshness. Words only; inference status stays beside them. */
-
-export const TURN_LOAD_LABEL = 'Turn load'
-export const PROVISIONAL_LABEL = 'Provisional'
-export const PROVISIONAL_TITLE =
-  'This is a saved answer from before a newer result for this player. It may change once that result is included. Backfill earlier turns updates turns you are not viewing. Otherwise a turn updates when you open it.'
+/** Freshness phase shared by fleet and scoreboard rows. */
 
 export type AnalyticFreshness = 'turn-load' | 'subject-to-revision' | 'none'
 
@@ -144,33 +139,4 @@ export function analyticFreshnessForPhase(phase: AnalyticFreshnessPhase): Analyt
     return 'subject-to-revision'
   }
   return 'none'
-}
-
-export function analyticFreshnessLabel(freshness: AnalyticFreshness): string | null {
-  if (freshness === 'turn-load') {
-    return TURN_LOAD_LABEL
-  }
-  if (freshness === 'subject-to-revision') {
-    return PROVISIONAL_LABEL
-  }
-  return null
-}
-
-/** Hover explanation for a freshness label. Turn load has none. */
-export function analyticFreshnessTitle(freshness: AnalyticFreshness): string | null {
-  if (freshness === 'subject-to-revision') {
-    return PROVISIONAL_TITLE
-  }
-  return null
-}
-
-/** Slate for turn load; amber in the same family as the fleet count-discrepancy line. */
-export function analyticFreshnessClassName(freshness: AnalyticFreshness): string | null {
-  if (freshness === 'turn-load') {
-    return 'text-slate-400'
-  }
-  if (freshness === 'subject-to-revision') {
-    return 'text-amber-300'
-  }
-  return null
 }

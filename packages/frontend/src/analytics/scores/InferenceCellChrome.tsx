@@ -1,10 +1,6 @@
 import type { ReactNode } from 'react'
-import {
-  analyticFreshnessClassName,
-  analyticFreshnessLabel,
-  analyticFreshnessTitle,
-  type AnalyticFreshness,
-} from '../analyticFreshness'
+import { AnalyticFreshnessLabel } from '../AnalyticFreshnessLabel'
+import type { AnalyticFreshness } from '../analyticFreshness'
 import { FleetTorpInputStatusIndicator } from './FleetTorpInputStatusIndicator'
 import {
   fleetTorpInputShowsTableIndicator,
@@ -24,19 +20,10 @@ export function InferenceCellChrome({
   hullCatalogButton,
   freshness = 'none',
 }: InferenceCellChromeProps) {
-  const freshnessLabel = analyticFreshnessLabel(freshness)
-  const freshnessTitle = analyticFreshnessTitle(freshness)
   const showInferenceStatus = freshness !== 'turn-load'
   return (
     <div className="inline-flex items-center gap-1">
-      {freshnessLabel != null ? (
-        <span
-          className={`text-xs ${analyticFreshnessClassName(freshness) ?? ''}`}
-          title={freshnessTitle ?? undefined}
-        >
-          {freshnessLabel}
-        </span>
-      ) : null}
+      <AnalyticFreshnessLabel freshness={freshness} />
       {showInferenceStatus ? children : null}
       {showInferenceStatus &&
       fleetTorpStatus != null &&

@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  PROVISIONAL_LABEL,
-  PROVISIONAL_TITLE,
-  TURN_LOAD_LABEL,
-  analyticFreshnessClassName,
   analyticFreshnessForPhase,
-  analyticFreshnessLabel,
-  analyticFreshnessTitle,
   freshnessAfterAbsent,
   freshnessAfterAbsentPaint,
   freshnessAfterAccept,
@@ -113,17 +107,5 @@ describe('analytic freshness phase', () => {
       evidenceMark: 4,
     })
     expect(freshnessAfterCurrentPaint(current, {})).toEqual(current)
-  })
-})
-
-describe('analytic freshness copy', () => {
-  it('uses slate for turn load and amber for provisional', () => {
-    expect(analyticFreshnessLabel('turn-load')).toBe(TURN_LOAD_LABEL)
-    expect(analyticFreshnessLabel('subject-to-revision')).toBe(PROVISIONAL_LABEL)
-    expect(analyticFreshnessLabel('none')).toBeNull()
-    expect(analyticFreshnessTitle('subject-to-revision')).toBe(PROVISIONAL_TITLE)
-    expect(analyticFreshnessTitle('turn-load')).toBeNull()
-    expect(analyticFreshnessClassName('turn-load')).toBe('text-slate-400')
-    expect(analyticFreshnessClassName('subject-to-revision')).toBe('text-amber-300')
   })
 })

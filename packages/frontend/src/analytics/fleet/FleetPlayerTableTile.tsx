@@ -29,12 +29,8 @@ import {
 } from './fleetRecordComponentDisplay'
 import { FleetRecordHullCell } from './FleetRecordHullCell'
 import type { FleetCountDiscrepancy, FleetTableRecord } from './fleetTableWireSchema'
-import {
-  analyticFreshnessClassName,
-  analyticFreshnessLabel,
-  analyticFreshnessTitle,
-  type AnalyticFreshness,
-} from '../analyticFreshness'
+import { AnalyticFreshnessLabel } from '../AnalyticFreshnessLabel'
+import type { AnalyticFreshness } from '../analyticFreshness'
 import type { FleetPlayerStreamSlice, FleetRosterPaint } from './fleetTablePlayerStreamState'
 import { fleetTileProgressSummary, isFleetTileMaterializing } from './fleetTileStatus'
 
@@ -137,9 +133,6 @@ export function FleetPlayerTableTile({
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const activeRecords = useMemo(() => activeFleetRecords(records), [records])
   const freshness = fleetTileFreshness(streamSlice)
-  const freshnessLabel = analyticFreshnessLabel(freshness)
-  const freshnessClassName = analyticFreshnessClassName(freshness)
-  const freshnessTitle = analyticFreshnessTitle(freshness)
   const emptyMessage = emptyFleetRosterMessage(rosterPaint, streamSlice, freshness)
 
   const columns = useMemo(
@@ -242,14 +235,7 @@ export function FleetPlayerTableTile({
       <header className="border-b border-[#52575d]/70 px-4 py-2">
         <h3 className="text-sm font-medium text-slate-200">
           {playerName}
-          {freshnessLabel != null ? (
-            <span
-              className={cn('ml-2 text-xs font-normal', freshnessClassName)}
-              title={freshnessTitle ?? undefined}
-            >
-              {freshnessLabel}
-            </span>
-          ) : null}
+          <AnalyticFreshnessLabel freshness={freshness} className="ml-2 font-normal" />
         </h3>
         {discrepancy != null ? (
           <p
