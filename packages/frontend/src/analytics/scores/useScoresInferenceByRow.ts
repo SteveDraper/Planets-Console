@@ -9,7 +9,6 @@ import { stablePlayerIdsKey } from '../../lib/stablePlayerIdsKey'
 import {
   failureDetail,
   initialRowStreamState,
-  isRowStreamSettled,
   reduceRowStreamState,
   rowDetailFromStreamState,
   type RowStreamState,
@@ -34,7 +33,7 @@ function createScoresInferenceStreamPolicy(
   return {
     initialRefState: () => initialRowStreamState(),
     reduceRefState: (current, event) => reduceRowStreamState(current, event),
-    isRefStateComplete: isRowStreamSettled,
+    isRefStateComplete: (state) => state.isStreamSettled,
     publishedFromRefState: (playerId, state) => rowDetailFromStreamState(playerId, state),
     seedPublishedOnNewConnection: (playerIds) => {
       const initialDetails = new Map<number, ScoresInferenceRowDetail>()

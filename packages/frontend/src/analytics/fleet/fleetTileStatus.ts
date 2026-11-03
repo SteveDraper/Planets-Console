@@ -20,5 +20,5 @@ export function isFleetTileMaterializing(streamSlice: FleetPlayerStreamSlice | u
   if (streamSlice == null || streamSlice.error != null || streamSlice.isComplete) {
     return false
   }
-  return streamSlice.ledgerWriting === true
+  return streamSlice.ledgerWriting
 }

@@ -162,7 +162,6 @@ describe('FleetPlayerTableTile', () => {
           ...pendingFleetPlayerStreamSlice(),
           freshness: 'none',
           ledgerWriting: true,
-          isPending: true,
           summary: 'Fleet materialization in progress',
         }}
       />
@@ -196,7 +195,8 @@ describe('FleetPlayerTableTile', () => {
           discrepancyOverlay: 'inherit',
           isComplete: true,
           isFinal: true,
-          isPending: false,
+          ledgerWriting: false,
+          freshness: 'none',
           summary: 'Fleet ledger loaded from cache.',
           error: null,
         }}

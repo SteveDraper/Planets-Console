@@ -78,9 +78,8 @@ describe('useFleetTableStream', () => {
       expect(result.current.streamPlayersById.get(8)?.freshness).toBe('none')
       expect(result.current.streamPlayersById.get(9)?.freshness).toBe('none')
     })
-    expect(result.current.streamPlayersById.get(8)?.isPending).toBe(false)
-    expect(result.current.streamPlayersById.get(9)?.isPending).toBe(false)
     expect(result.current.streamPlayersById.get(8)?.ledgerWriting).toBe(false)
+    expect(result.current.streamPlayersById.get(9)?.ledgerWriting).toBe(false)
   })
 
   it('shows progressive rows during leg-by-leg gap-fill stream events', async () => {
@@ -153,7 +152,7 @@ describe('useFleetTableStream', () => {
       const slice = result.current.streamPlayersById.get(8)
       expect(slice?.records).toEqual([firstLegRecord])
       expect(slice?.isComplete).toBe(false)
-      expect(slice?.isPending).toBe(true)
+      expect(slice?.ledgerWriting).toBe(false)
     })
 
     await act(async () => {

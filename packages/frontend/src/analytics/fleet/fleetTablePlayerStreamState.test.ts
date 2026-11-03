@@ -105,7 +105,6 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(interim.rosterPaint).toBe('sightings')
     expect(interim.mapPaint).toEqual(sighting.mapPaint)
     expect(interim.summary).toBe('Refining fleet records')
-    expect(interim.isPending).toBe(true)
 
     const interimSlice = fleetPlayerStreamSliceFromState(interim)
     expect(interimSlice?.freshness).toBe('turn-load')
@@ -212,7 +211,6 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(next.rosterPaint).toBeNull()
     expect(next.mapPaint).toBeNull()
     expect(next.summary).toBe('Refining fleet records')
-    expect(next.isPending).toBe(true)
 
     const refined = reduceFleetPlayerStreamState(next, {
       type: 'record_refined',
@@ -280,6 +278,11 @@ describe('reduceFleetPlayerStreamState', () => {
       playerId: 8,
       writing: true,
     })
+    expect(writing.ledgerWriting).toBe(true)
+    expect(isFleetTileMaterializing(fleetPlayerStreamSliceFromState(writing) ?? undefined)).toBe(
+      true
+    )
+
     const ended = reduceFleetPlayerStreamState(writing, {
       type: 'ledger_write',
       playerId: 8,
@@ -287,7 +290,6 @@ describe('reduceFleetPlayerStreamState', () => {
     })
 
     expect(ended.ledgerWriting).toBe(false)
-    expect(ended.isPending).toBe(false)
     expect(isFleetTileMaterializing(fleetPlayerStreamSliceFromState(ended) ?? undefined)).toBe(
       false
     )
@@ -485,7 +487,6 @@ describe('reduceFleetPlayerStreamState', () => {
     })
 
     expect(next.summary).toBe('Collecting turn evidence')
-    expect(next.isPending).toBe(true)
   })
 
   it('marks failure from error events', () => {
@@ -507,7 +508,8 @@ describe('fleetPlayerFromStreamSlice', () => {
     records: [refinedRecord],
     isComplete: true,
     isFinal: true,
-    isPending: false,
+    ledgerWriting: false,
+    freshness: 'none',
     summary: 'ok',
     error: null,
   } as const
@@ -583,7 +585,6 @@ describe('fleetPlayerStreamSliceFromState', () => {
       discrepancyOverlay: 'inherit',
       isComplete: false,
       isFinal: false,
-      isPending: false,
       ledgerWriting: false,
       freshness: 'none',
       summary: '',
@@ -610,7 +611,6 @@ describe('fleetPlayerStreamSliceFromState', () => {
       discrepancy: ledgerPlayer.discrepancy,
       isComplete: false,
       isFinal: false,
-      isPending: true,
       ledgerWriting: false,
       freshness: 'none',
       summary: 'Refining fleet records',
@@ -631,7 +631,6 @@ describe('fleetPlayerStreamSliceFromState', () => {
       discrepancyOverlay: 'inherit',
       isComplete: false,
       isFinal: false,
-      isPending: true,
       ledgerWriting: false,
       freshness: 'none',
       summary: 'Collecting turn evidence',
@@ -656,7 +655,6 @@ describe('fleetPlayerStreamSliceFromState', () => {
     const slice = fleetPlayerStreamSliceFromState(betweenLegs)
 
     expect(slice?.records).toEqual([refinedRecord])
-    expect(slice?.isPending).toBe(true)
     expect(slice?.summary).toBe('Refining fleet records')
   })
 })

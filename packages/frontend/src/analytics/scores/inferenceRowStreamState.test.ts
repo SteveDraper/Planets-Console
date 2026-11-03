@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { inferenceStreamEventSchema } from '../../api/inferenceStreamEventSchema'
 import {
   initialRowStreamState,
-  isRowStreamSettled,
   pointUnexplainedMilitaryDelta2x,
   reduceRowStreamState,
   rowDetailFromStreamState,
@@ -206,7 +205,7 @@ describe('reduceRowStreamState', () => {
     })
 
     expect(next.isComplete).toBe(true)
-    expect(isRowStreamSettled(next)).toBe(true)
+    expect(next.isStreamSettled).toBe(true)
     expect(next.status).toBe('fetch_error')
     expect(next.summary).toBe('stream ended early')
     expect(rowDetailFromStreamState(8, next).displayStatus).toBe('failure')
@@ -491,14 +490,14 @@ describe('reduceRowStreamState', () => {
     expect(paintedDetail.displayStatus).toBe('success')
     expect(paintedDetail.solutionCount).toBe(1)
     expect(paintedDetail.isComplete).toBe(true)
-    expect(isRowStreamSettled(painted)).toBe(false)
+    expect(painted.isStreamSettled).toBe(false)
 
     const accepted = reduceRowStreamState(painted, { type: 'work_accepted' })
     const busy = rowDetailFromStreamState(4, accepted)
     expect(busy.freshness).toBe('subject-to-revision')
     expect(busy.displayStatus).toBe('pending')
     expect(busy.isComplete).toBe(false)
-    expect(isRowStreamSettled(accepted)).toBe(false)
+    expect(accepted.isStreamSettled).toBe(false)
 
     const finished = reduceRowStreamState(accepted, {
       type: 'complete',
@@ -511,11 +510,11 @@ describe('reduceRowStreamState', () => {
       evidenceMark: 2,
       solutions: [solution],
     })
-    expect(isRowStreamSettled(finished)).toBe(true)
+    expect(finished.isStreamSettled).toBe(true)
     expect(rowDetailFromStreamState(4, finished).freshness).toBeUndefined()
 
     const recomputing = reduceRowStreamState(finished, { type: 'work_accepted' })
-    expect(isRowStreamSettled(recomputing)).toBe(false)
+    expect(recomputing.isStreamSettled).toBe(false)
     expect(rowDetailFromStreamState(4, recomputing).displayStatus).toBe('pending')
 
     const skip = reduceRowStreamState(initialRowStreamState(), {
@@ -533,7 +532,7 @@ describe('reduceRowStreamState', () => {
     expect(skipDetail.displayStatus).toBe('skipped')
     expect(skipDetail.freshness).toBe('subject-to-revision')
     expect(skipDetail.isComplete).toBe(true)
-    expect(isRowStreamSettled(skip)).toBe(false)
+    expect(skip.isStreamSettled).toBe(false)
 
     const onMark = reduceRowStreamState(initialRowStreamState(), {
       type: 'stored_row',

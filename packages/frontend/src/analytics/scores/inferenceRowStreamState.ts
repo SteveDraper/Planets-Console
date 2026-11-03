@@ -66,6 +66,7 @@ export type RowStreamState = {
   heldSolutions: ScoresInferenceSolution[]
   status: string
   summary: string
+  /** Painted result is finished. A stored row can be finished while the run is still open. */
   isComplete: boolean
   diagnostics: Record<string, unknown>
   placeholders: Record<string, unknown>[]
@@ -93,11 +94,6 @@ export function initialRowStreamState(): RowStreamState {
     freshness: initialFreshnessState(),
     isStreamSettled: false,
   }
-}
-
-/** The run has a real complete or error. A stored paint leaves it open. */
-export function isRowStreamSettled(state: RowStreamState): boolean {
-  return state.isStreamSettled
 }
 
 function pausedSummaryFromSolutions(solutions: ScoresInferenceSolution[]): string {

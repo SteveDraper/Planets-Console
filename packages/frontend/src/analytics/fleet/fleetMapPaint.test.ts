@@ -375,10 +375,9 @@ function reducePlayerFrom(
     discrepancy: slice.discrepancy,
     isComplete: slice.isComplete,
     isFinal: slice.isFinal,
-    isPending: slice.isPending,
     summary: slice.summary,
     error: slice.error,
-    ledgerWriting: slice.ledgerWriting ?? false,
+    ledgerWriting: slice.ledgerWriting,
     freshness: {
       ...initialFleetPlayerStreamState().freshness,
       hasStoredRow: slice.freshness === 'subject-to-revision' || hasStoredRoster(slice),

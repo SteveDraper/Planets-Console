@@ -24,7 +24,8 @@ const provenanceStreamSlice: FleetPlayerStreamSlice = {
   discrepancyOverlay: 'inherit',
   isComplete: false,
   isFinal: false,
-  isPending: true,
+  ledgerWriting: false,
+  freshness: 'none',
   summary: 'Collecting turn evidence',
   error: null,
 }
@@ -54,7 +55,6 @@ describe('FleetPlayerTableTile provenance progress', () => {
           discrepancyOverlay: 'inherit',
           isComplete: false,
           isFinal: false,
-          isPending: true,
           ledgerWriting: true,
           freshness: 'subject-to-revision',
           summary: 'Fleet materialization in progress',

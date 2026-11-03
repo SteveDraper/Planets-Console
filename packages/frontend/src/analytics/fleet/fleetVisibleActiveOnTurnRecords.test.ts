@@ -31,7 +31,8 @@ function streamSlice(
     discrepancyOverlay: 'inherit',
     isComplete: true,
     isFinal: true,
-    isPending: false,
+    ledgerWriting: false,
+    freshness: 'none',
     summary: 'ok',
     error: null,
   }
