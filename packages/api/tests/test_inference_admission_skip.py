@@ -7,6 +7,9 @@ from unittest.mock import patch
 
 import pytest
 from api.analytics.export_types import ExportScope
+from api.analytics.military_score_inference.durable_turn_evidence import (
+    is_durable_turn_evidence_row_status,
+)
 from api.analytics.military_score_inference.inference_admission import (
     admission_skip_api_payload,
     admission_skip_for_status,
@@ -43,10 +46,7 @@ from api.analytics.military_score_inference.solver import (
 from api.analytics.military_score_inference.uncharacterized_roster import (
     STATUS_UNCHARACTERIZED_ROSTER,
 )
-from api.analytics.scores.export_precedence import (
-    is_durable_turn_evidence_row_status,
-    is_persistable_inference_status,
-)
+from api.analytics.scores.export_precedence import is_persistable_inference_status
 from api.analytics.scores.exports import admit_scores_export_work
 from api.analytics.turn_roster import player_by_id
 from api.concepts.diplomacy import is_team_locked_full_alliance

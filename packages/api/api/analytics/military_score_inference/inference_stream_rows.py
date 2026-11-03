@@ -9,6 +9,9 @@ from typing import Literal
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.types import FleetShipRecord
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.durable_turn_evidence import (
+    is_durable_turn_evidence_row_status,
+)
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_admission import (
@@ -37,10 +40,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     FleetTorpInputStatus,
     PriorTurnFleetTorpResolution,
 )
-from api.analytics.scoreboard_evidence import (
-    annotate_stored_scoreboard_complete,
-    evidence_mark_for_player,
-)
+from api.analytics.scoreboard_evidence import annotate_scoreboard_paint
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
@@ -79,14 +79,11 @@ def _stamp_live_complete_evidence(
     session: InferenceRowStreamSession,
     events: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Report the generation just stored and the current mark.
+    """Paint durable completes from the row persist stored before delivery.
 
-    Orchestrator persist writes the row before this complete is delivered, so
-    the stored generation is the one this write stamped. Annotation compares
-    that integer to the mark read for the wire event. The same moment matches,
-    and the row is current.
+    The generation on the paint is the stored integer. See
+    ``annotate_scoreboard_paint``.
     """
-    from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 
     def is_durable_complete(item: dict[str, object]) -> bool:
         status = item.get("status")
@@ -96,22 +93,16 @@ def _stamp_live_complete_evidence(
 
     if not any(is_durable_complete(item) for item in events):
         return events
-    stored = None
-    if session.persistence is not None:
-        stored = session.persistence.get_row(
-            session.game_id,
-            session.perspective,
-            session.turn_number,
-            session.player_id,
-        )
-    mark = evidence_mark_for_player(
-        session.query_context,
-        game_id=session.game_id,
-        perspective=session.perspective,
-        player_id=session.player_id,
-    )
     return [
-        annotate_stored_scoreboard_complete(item, stored=stored, evidence_mark=mark)
+        annotate_scoreboard_paint(
+            item,
+            persistence=session.persistence,
+            query_context=session.query_context,
+            game_id=session.game_id,
+            perspective=session.perspective,
+            turn=session.turn_number,
+            player_id=session.player_id,
+        )
         if is_durable_complete(item)
         else item
         for item in events

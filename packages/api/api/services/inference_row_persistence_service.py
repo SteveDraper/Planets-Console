@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.military_score_inference.durable_turn_evidence import (
+    is_durable_turn_evidence_row_status,
+)
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
@@ -211,9 +214,6 @@ class InferenceRowPersistenceService:
     ) -> None:
         """Write durable turn evidence from a RowComplete payload alone."""
         status = event.wire_payload.status
-        # Lazy: avoid scores package import cycle at module load.
-        from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
-
         if not is_durable_turn_evidence_row_status(status):
             return
         wire_event = row_complete_to_complete_wire_event(event)

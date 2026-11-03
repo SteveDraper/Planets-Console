@@ -119,31 +119,6 @@ def inference_complete_event(
     return payload
 
 
-# Scoreboard paints that carry a stored generation and the current mark.
-# ``stored_row`` is not a multiplex terminal; ``complete`` is.
-_SCOREBOARD_EVIDENCE_EVENT_TYPES = frozenset({"complete", "stored_row"})
-
-
-def stamp_inference_evidence_fields(
-    event: dict[str, object],
-    *,
-    evidence_generation: int | None,
-    evidence_mark: int | None,
-) -> dict[str, object]:
-    """Copy stored generation and the current mark onto a scoreboard paint.
-
-    ``complete`` and ``stored_row`` carry the pair. Other event types are unchanged.
-    """
-    if event.get("type") not in _SCOREBOARD_EVIDENCE_EVENT_TYPES:
-        return event
-    stamped = dict(event)
-    if evidence_generation is not None:
-        stamped["evidenceGeneration"] = evidence_generation
-    if evidence_mark is not None:
-        stamped["evidenceMark"] = evidence_mark
-    return stamped
-
-
 def inference_error_event(detail: str) -> dict[str, object]:
     return {"type": "error", "detail": detail}
 

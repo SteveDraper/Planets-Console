@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
+from api.analytics.military_score_inference.durable_turn_evidence import (
+    is_durable_turn_evidence_row_status,
+)
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobOutcome,
@@ -17,7 +20,6 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     PriorTurnFleetTorpResolution,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.scores.export_precedence import is_durable_turn_evidence_row_status
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.exports import stored_closed_horwasp_skip
 from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores

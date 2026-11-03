@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from api.analytics.military_score_inference.inference_api_payload import (
-    COMPLETE_INFERENCE_SEARCH_STATUSES,
     FALLBACK_COMPLETE_PERSISTED_STATUSES,
     PERSISTABLE_INFERENCE_STATUSES,
     STATUS_HORWASP,
@@ -46,13 +45,7 @@ ScoresExportPrecedenceBranch = Literal[
     "empty",
 ]
 
-# RowComplete statuses that, once on disk, close fleet turnEvidenceAtN
-# (complete search statuses or stopped). Orchestrator tier_solve must persist
-# these rather than soft-completing the scores node with open evidence.
 _PRIORITY_STOPPED_PERSISTED_STATUSES = frozenset({STATUS_STOPPED, STATUS_TIME_LIMITED})
-DURABLE_TURN_EVIDENCE_ROW_STATUSES = (
-    COMPLETE_INFERENCE_SEARCH_STATUSES | _PRIORITY_STOPPED_PERSISTED_STATUSES
-)
 _AUTHORITATIVE_PERSISTED_BRANCHES = frozenset({"priority_persisted", "fallback_persisted"})
 
 
@@ -93,11 +86,6 @@ class ScoresExportDecision:
 
 def is_persistable_inference_status(status: str) -> bool:
     return status in PERSISTABLE_INFERENCE_STATUSES
-
-
-def is_durable_turn_evidence_row_status(status: str) -> bool:
-    """True when persisting this RowComplete status closes scores turn evidence."""
-    return status in DURABLE_TURN_EVIDENCE_ROW_STATUSES
 
 
 @dataclass(frozen=True)

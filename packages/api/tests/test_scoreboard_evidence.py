@@ -29,8 +29,7 @@ from api.analytics.military_score_inference.row_complete_factory import row_comp
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scoreboard_evidence import (
-    annotate_stored_scoreboard_complete,
-    stamp_scoreboard_evidence_generation,
+    annotate_scoreboard_paint,
     stamp_scoreboard_row_for_context,
 )
 from api.analytics.scores.export_services import ScoresExportContext
@@ -274,11 +273,16 @@ def test_both_write_paths_call_the_persist_stamp(
     assert immediate is not None and immediate.evidence_generation == 5
 
 
-def test_live_durable_complete_reports_the_generation_just_stored(
+def test_live_durable_complete_reads_the_generation_persist_just_wrote(
     sample_turn,
     persistence,
     memory_backend,
 ) -> None:
+    """Ordering contract: persist stamps the row, then the live paint reads it.
+
+    ``evidenceGeneration`` is that stored integer. The paint does not copy the
+    mark it reads at the same moment onto both fields.
+    """
     player_id = sample_turn.scores[0].ownerid
     turn = sample_turn.settings.turn
     context = _context_with_mark(
@@ -311,8 +315,10 @@ def test_live_durable_complete_reports_the_generation_just_stored(
         query_context=context,
     )
     wire = session_domain_event_to_wire_events(session, complete)
+    stored = persistence.get_row(GAME_ID, 1, turn, player_id)
+    assert stored is not None
     assert len(wire) == 1
-    assert wire[0]["evidenceGeneration"] == 3
+    assert wire[0]["evidenceGeneration"] == stored.evidence_generation == 3
     assert wire[0]["evidenceMark"] == 3
 
 
@@ -350,8 +356,14 @@ def test_live_durable_complete_does_not_copy_the_mark_onto_both_fields(
     assert wire[0]["evidenceMark"] == 4
 
 
-def test_missing_generation_on_a_stored_row_is_zero_and_a_missing_row_is_unmarked() -> None:
+def test_missing_generation_on_a_stored_row_is_zero_and_a_missing_row_is_unmarked(
+    sample_turn,
+    persistence,
+    memory_backend,
+) -> None:
     event = _dead_complete()
+    player_id = sample_turn.scores[0].ownerid
+    turn = sample_turn.settings.turn
     stored = PersistedInferenceRow(
         status="dead",
         summary="Player is dead",
@@ -360,17 +372,89 @@ def test_missing_generation_on_a_stored_row_is_zero_and_a_missing_row_is_unmarke
         solutions=[],
         evidence_generation=True,  # type: ignore[arg-type]
     )
-    marked = annotate_stored_scoreboard_complete(event, stored=stored, evidence_mark=2)
+
+    class _Rows:
+        def __init__(self, row: PersistedInferenceRow | None) -> None:
+            self._row = row
+
+        def get_row(
+            self,
+            game_id: int,
+            perspective: int,
+            host_turn: int,
+            player_id: int,
+        ) -> PersistedInferenceRow | None:
+            del game_id, perspective, host_turn, player_id
+            return self._row
+
+    context = _context_with_mark(
+        memory_backend,
+        sample_turn,
+        player_id=player_id,
+        mark=2,
+        persistence=persistence,
+    )
+    marked = annotate_scoreboard_paint(
+        event,
+        persistence=_Rows(stored),
+        query_context=context,
+        game_id=GAME_ID,
+        perspective=1,
+        turn=turn,
+        player_id=player_id,
+    )
     assert marked["evidenceGeneration"] == 0
     assert marked["evidenceMark"] == 2
 
-    unmarked = annotate_stored_scoreboard_complete(event, stored=None, evidence_mark=2)
+    unmarked = annotate_scoreboard_paint(
+        event,
+        persistence=_Rows(None),
+        query_context=context,
+        game_id=GAME_ID,
+        perspective=1,
+        turn=turn,
+        player_id=player_id,
+    )
     assert unmarked is event
     assert "evidenceGeneration" not in unmarked
 
-    unchanged = stamp_scoreboard_evidence_generation(stored, None)
+    progress = {"type": "progress"}
+    assert (
+        annotate_scoreboard_paint(
+            progress,
+            persistence=_Rows(stored),
+            query_context=context,
+            game_id=GAME_ID,
+            perspective=1,
+            turn=turn,
+            player_id=player_id,
+        )
+        is progress
+    )
+
+    unchanged = stamp_scoreboard_row_for_context(
+        stored,
+        None,
+        game_id=GAME_ID,
+        perspective=1,
+        player_id=player_id,
+    )
     assert unchanged.evidence_generation is True
-    stamped = stamp_scoreboard_evidence_generation(stored, 0)
+    # Absent fleet mark reads as generation 0. Use a player with no mark written.
+    zero_player = player_id + 1
+    stamped = stamp_scoreboard_row_for_context(
+        stored,
+        _context_with_mark(
+            memory_backend,
+            sample_turn,
+            player_id=zero_player,
+            mark=0,
+            persistence=persistence,
+        ),
+        game_id=GAME_ID,
+        perspective=1,
+        player_id=zero_player,
+    )
     assert stamped.evidence_generation == 0
 
 
