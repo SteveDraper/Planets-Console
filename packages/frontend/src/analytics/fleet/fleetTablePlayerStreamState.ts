@@ -185,6 +185,7 @@ export function reduceFleetPlayerStreamState(
         : phaseAfterSightings(state.freshnessPhase),
       rosterPaint: event.paint,
       mapPaint: mapPaintFromLedger(event.paint, event.ledger),
+      ledgerWriting: false,
       error: null,
     }
   }
@@ -193,6 +194,7 @@ export function reduceFleetPlayerStreamState(
     return {
       ...state,
       freshnessPhase: freshnessPhaseAfterAccept(state.freshnessPhase, state.hasStoredRow),
+      ledgerWriting: false,
     }
   }
 

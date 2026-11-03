@@ -522,30 +522,40 @@ def _node_complete_stream_events(
     )
 
 
-def publish_host_turn_ledger_write(scope: ComputeScope, *, writing: bool) -> None:
-    """Tell a live shell that this turn's ledger file is being written.
+def host_turn_ledger_write_sessions(
+    scope: ComputeScope,
+) -> tuple[FleetPlayerStreamSession, ...]:
+    """Shell sessions whose host turn is the turn being written.
 
-    Earlier hops of the walk write a different turn than the shell's host turn,
-    so they do not change the tile spinner.
+    Earlier hops of the walk write a different turn than the shell host turn,
+    so they match nothing and do not change the tile spinner.
     """
     if not isinstance(scope.turn, int):
-        return
+        return ()
     scheduler = get_fleet_table_stream_scheduler()
     with scheduler._lock:
-        runs = [
-            run
+        return tuple(
+            run.session
             for run in scheduler._runs.values()
             if run.root_scope.game_id == scope.game_id
             and run.root_scope.perspective == scope.perspective
             and run.root_scope.player_id == scope.player_id
             and run.host_turn_number == scope.turn
-        ]
-    if not runs:
+        )
+
+
+def publish_ledger_write(
+    sessions: tuple[FleetPlayerStreamSession, ...],
+    *,
+    writing: bool,
+) -> None:
+    """Queue a ledger-write signal on the sessions captured for this attempt."""
+    if not sessions:
         return
     event = fleet_ledger_write_event(writing=writing)
-    for run in runs:
-        run.session.event_queue.put(event)
-        _wake_multiplex_for_session(run.session)
+    for session in sessions:
+        session.event_queue.put(event)
+        _wake_multiplex_for_session(session)
 
 
 def publish_saved_host_turn_ledger(

@@ -6,6 +6,7 @@ import {
   initialFleetPlayerStreamState,
   reduceFleetPlayerStreamState,
 } from './fleetTablePlayerStreamState'
+import { isFleetTileMaterializing } from './fleetTileStatus'
 import type { FleetTablePlayer, FleetTableRecord } from './fleetTableWireSchema'
 
 const baseRecord: FleetTableRecord = {
@@ -266,10 +267,67 @@ describe('reduceFleetPlayerStreamState', () => {
       playerId: 8,
       writing: true,
     })
+    expect(writing.ledgerWriting).toBe(true)
+    expect(writing.hasStoredRow).toBe(true)
+    const writingSlice = fleetPlayerStreamSliceFromState(writing)
+    expect(writingSlice?.freshness).toBe('subject-to-revision')
+    expect(isFleetTileMaterializing(writingSlice ?? undefined)).toBe(true)
+  })
+
+  it('clears the ledger-write spinner when the write ends', () => {
+    const writing = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_write',
+      playerId: 8,
+      writing: true,
+    })
+    const ended = reduceFleetPlayerStreamState(writing, {
+      type: 'ledger_write',
+      playerId: 8,
+      writing: false,
+    })
+
+    expect(ended.ledgerWriting).toBe(false)
+    expect(ended.isPending).toBe(false)
+    expect(isFleetTileMaterializing(fleetPlayerStreamSliceFromState(ended) ?? undefined)).toBe(
+      false
+    )
+
+    const painted = reduceFleetPlayerStreamState(ended, {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'ledger',
+      ledger: ledgerPlayer,
+    })
+    const accepted = reduceFleetPlayerStreamState(painted, { type: 'work_accepted' })
+    expect(painted.ledgerWriting).toBe(false)
+    expect(accepted.ledgerWriting).toBe(false)
+  })
+
+  it('does not keep an abandoned ledger write across the next admission', () => {
+    const writing = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'ledger_write',
+      playerId: 8,
+      writing: true,
+    })
+    const painted = reduceFleetPlayerStreamState(writing, {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'ledger',
+      evidenceGeneration: 1,
+      evidenceMark: 4,
+      ledger: ledgerPlayer,
+    })
     const accepted = reduceFleetPlayerStreamState(writing, { type: 'work_accepted' })
-    expect(accepted.ledgerWriting).toBe(true)
-    expect(accepted.hasStoredRow).toBe(true)
-    expect(fleetPlayerStreamSliceFromState(accepted)?.freshness).toBe('subject-to-revision')
+
+    expect(painted.ledgerWriting).toBe(false)
+    expect(fleetPlayerStreamSliceFromState(painted)?.freshness).toBe('subject-to-revision')
+    expect(isFleetTileMaterializing(fleetPlayerStreamSliceFromState(painted) ?? undefined)).toBe(
+      false
+    )
+    expect(accepted.ledgerWriting).toBe(false)
+    expect(isFleetTileMaterializing(fleetPlayerStreamSliceFromState(accepted) ?? undefined)).toBe(
+      false
+    )
   })
 
   it('a host-turn ledger save is never turn load', () => {

@@ -31,10 +31,19 @@ if TYPE_CHECKING:
 
 
 def _put_ledger_signaled(scope: ComputeScope, persistence: Any, persisted: PersistedFleetLedger):
-    """Write the ledger and tell a live shell before the write blocks."""
-    from api.analytics.fleet.fleet_table_stream_scheduler import publish_host_turn_ledger_write
+    """Write the ledger and signal a live shell only while that write runs.
 
-    publish_host_turn_ledger_write(scope, writing=True)
+    The sessions that see ``writing: true`` see ``writing: false`` when the
+    attempt ends: success, a raised error, and a cancel that returns without
+    raising.
+    """
+    from api.analytics.fleet.fleet_table_stream_scheduler import (
+        host_turn_ledger_write_sessions,
+        publish_ledger_write,
+    )
+
+    sessions = host_turn_ledger_write_sessions(scope)
+    publish_ledger_write(sessions, writing=True)
     try:
         return persistence.put_ledger(
             scope.game_id,
@@ -44,9 +53,8 @@ def _put_ledger_signaled(scope: ComputeScope, persistence: Any, persisted: Persi
             persisted,
             defer_ledger_persisted_notification=True,
         )
-    except Exception:
-        publish_host_turn_ledger_write(scope, writing=False)
-        raise
+    finally:
+        publish_ledger_write(sessions, writing=False)
 
 
 FLEET_OBSERVATION_LEG = "observation_leg"
