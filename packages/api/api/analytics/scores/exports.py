@@ -81,6 +81,16 @@ ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
 )
 
 
+def scores_ensure_dependencies_for(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+) -> tuple[EnsureDependency, ...]:
+    """Delegate so this catalog module does not import the fleet analytic."""
+    from api.analytics.scores.ensure_dependencies import resolve_scores_ensure_dependencies
+
+    return resolve_scores_ensure_dependencies(ctx, scope)
+
+
 @dataclass(frozen=True)
 class ScoresRowEnsureInputs:
     """Shared row-level inputs for scores export ensure strategies."""
@@ -661,6 +671,7 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     path_prefix_scope_rules=PATH_PREFIX_SCOPE_RULES,
     ordering_semantics=ORDERING_SEMANTICS,
     ensure_dependencies=ENSURE_DEPENDENCIES,
+    ensure_dependencies_for=scores_ensure_dependencies_for,
     ensure_export=ensure_scores_export,
     materialize_export_tree=materialize_scores_export_tree,
     is_persisted=is_scores_export_persisted,

@@ -161,6 +161,9 @@ def test_ensure_fleet_export_fills_two_turn_gap_without_other_players(
     )
     host_turn = ctx.load_turn(turn_number)
     assert host_turn is not None
+    from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
+
+    enable_backfill_earlier_turns(ctx)
 
     with pytest.raises(ConflictError, match="requires a final prior ledger"):
         get_or_materialize_fleet_ledger_for_player(

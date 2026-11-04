@@ -601,6 +601,7 @@ def _invalidate_player_after_put(services, player_id: int, turn_number: int) -> 
         persisted,
         *,
         defer_ledger_persisted_notification=False,
+        evidence_generation=None,
     ):
         result = original(
             game_id,
@@ -609,6 +610,7 @@ def _invalidate_player_after_put(services, player_id: int, turn_number: int) -> 
             stored_player_id,
             persisted,
             defer_ledger_persisted_notification=defer_ledger_persisted_notification,
+            evidence_generation=evidence_generation,
         )
         if stored_turn == turn_number and stored_player_id == player_id:
             services.persistence.invalidate_player_ledgers_from_turn(

@@ -14,6 +14,15 @@ _orchestrator_lock = threading.Lock()
 _process_orchestrator: ComputeOrchestrator | None = None
 
 
+def peek_compute_orchestrator() -> ComputeOrchestrator | None:
+    """Return the process orchestrator when one already exists.
+
+    Does not create the singleton. A mark bump uses this to drop in-flight hops
+    without starting a worker pool from a persist that has no orchestrator yet.
+    """
+    return _process_orchestrator
+
+
 def get_compute_orchestrator(
     *,
     worker_pool: ComputeWorkerPool | None = None,

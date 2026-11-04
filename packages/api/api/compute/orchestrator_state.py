@@ -138,6 +138,10 @@ class ComputeNodeRun:
     bundle: OrchestrationBundle | None = None
     # Closes priority adoption once expensive work begins.
     execution_sealed: bool = False
+    # A mark bump set this on an off-screen step that is already executing.
+    # The worker may finish; persist and stamp are refused, and the step is
+    # not retried onto the new mark.
+    discard_without_stamp: bool = False
 
     @property
     def is_terminal(self) -> bool:

@@ -75,7 +75,9 @@ class PathPrefixScopeRule:
     requires: tuple[str, ...] = ()
 
 
-EnsureDependencyQuality = Literal["observation", "final"]
+# ``stamped`` is a fleet edge: a ledger already on the current evidence mark,
+# including an approximate fleet. It is not ensure-final.
+EnsureDependencyQuality = Literal["observation", "final", "stamped"]
 
 # ``"same"`` -- copy parent player_id (including None).
 # ``"all"`` -- expand to one concrete player scope per roster player at the

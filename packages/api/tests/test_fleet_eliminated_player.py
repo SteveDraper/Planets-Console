@@ -25,7 +25,11 @@ from api.compute.scope import ComputeScope
 from api.compute.wire import DependencyOutputs
 from api.errors import FleetScoresEvidenceOpenError
 
-from tests.export_chain_test_fixtures import GAME_ID, export_chain_query_context
+from tests.export_chain_test_fixtures import (
+    GAME_ID,
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.scores_exports_helpers import first_player_id, perspective
 
 _FLEET = "fleet"
@@ -262,6 +266,7 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
         persistence=persistence,
         stored_turns={23: turn},
     )
+    enable_backfill_earlier_turns(ctx)
     walk = walk_dependency_tree(ctx, _FLEET, _scope(turn, player_id), visiting=set())
     assert walk.turn_unavailable == "turn_not_stored"
     assert walk.unavailable_turn == 22
@@ -303,6 +308,7 @@ def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):
         persistence=persistence,
         stored_turns={90: turn},
     )
+    enable_backfill_earlier_turns(ctx)
     walk = walk_dependency_tree(ctx, _FLEET, _scope(turn, player_id), visiting=set())
     assert walk.turn_unavailable == "turn_not_stored"
     assert walk.unavailable_turn == 89

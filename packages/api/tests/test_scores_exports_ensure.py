@@ -19,7 +19,11 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_S
 from api.analytics.scores.exports import EXPORT_CATALOG, admit_scores_export_work
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
-from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
+from tests.export_chain_test_fixtures import (
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+    seed_fleet_unwind_through,
+)
 from tests.scores_exports_helpers import (
     GAME_ID,
     ensure_missing_step,
@@ -591,6 +595,7 @@ def test_probe_reports_scores_depends_on_fleet_prior_turn(sample_turn, persisten
     turn_number = sample_turn.settings.turn
     prior_turn = turn_number - 1
     ctx = export_chain_query_context(sample_turn, persistence=persistence)
+    enable_backfill_earlier_turns(ctx)
     seed_fleet_unwind_through(ctx, through_turn=prior_turn, player_id=player_id)
     put_persisted_row(
         persistence,

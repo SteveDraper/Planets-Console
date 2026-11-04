@@ -177,16 +177,33 @@ class OrchestratorLifecycleMixin:
         """Return True when persist/complete must not proceed. Caller holds the lock."""
         if node.state != "running":
             return True
+        if node.discard_without_stamp:
+            self._fail_discarded_stamp(node)
+            return True
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return True
         return False
+
+    def _fail_discarded_stamp(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """Finish an off-screen step without persisting or retrying onto the new mark."""
+        from api.exceptions import FleetStampRefused
+
+        self._fail_node(
+            node,
+            FleetStampRefused(
+                "off-screen step does not persist or stamp the new fleet evidence mark"
+            ),
+        )
 
     def _after_step_success(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
         result_wire: object | None,
     ) -> None:
+        if node.discard_without_stamp:
+            self._fail_discarded_stamp(node)
+            return
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return

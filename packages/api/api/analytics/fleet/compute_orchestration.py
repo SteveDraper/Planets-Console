@@ -111,13 +111,21 @@ def build_fleet_materialization_leg_job_wire(
 
     player_id = scope.player_id
     if fleet_player_eliminated_at_turn(turn, player_id):
-        return _eliminated_fleet_job_wire(scope, player_id=player_id)
+        return _eliminated_fleet_job_wire(scope, player_id=player_id, ctx=ctx)
 
+    from api.analytics.fleet.compute_services import resolve_fleet_services
+
+    services = resolve_fleet_services(ctx)
     return {
         "gameId": scope.game_id,
         "perspective": scope.perspective,
         "playerId": player_id,
         "materializeTurn": scope.turn,
+        "playerInvalidationGeneration": services.persistence.player_invalidation_generation(
+            scope.game_id,
+            scope.perspective,
+            player_id,
+        ),
     }
 
 
@@ -125,18 +133,30 @@ def _eliminated_fleet_job_wire(
     scope: ComputeScope,
     *,
     player_id: int,
+    ctx: AnalyticQueryContext | None = None,
 ) -> dict[str, Any]:
     """Job wire for an eliminated player: flag only, no ledger.
 
     Observation persist writes the empty non-final ledger from the flag.
     Finalization persist rebuilds the empty final ledger from the loaded turn.
     """
+    from api.analytics.fleet.compute_services import resolve_fleet_services
+
+    epoch = 0
+    if ctx is not None and isinstance(scope.player_id, int):
+        services = resolve_fleet_services(ctx)
+        epoch = services.persistence.player_invalidation_generation(
+            scope.game_id,
+            scope.perspective,
+            scope.player_id,
+        )
     return {
         "gameId": scope.game_id,
         "perspective": scope.perspective,
         "playerId": player_id,
         "materializeTurn": scope.turn,
         "eliminatedAtTurn": True,
+        "playerInvalidationGeneration": epoch,
     }
 
 
@@ -148,10 +168,22 @@ def build_fleet_finalization_leg_job_wire(
     node_result_wire: object | None = None,
 ) -> dict[str, Any]:
     """Pass the observation continue wire into the inline finalization leg."""
-    del dependency_outputs, ctx
+    del dependency_outputs
     if not isinstance(node_result_wire, dict):
         raise RuntimeError("fleet finalization leg requires observation result wire on node")
-    return dict(node_result_wire)
+    payload = dict(node_result_wire)
+    if ctx is not None and isinstance(scope.player_id, int):
+        from api.analytics.fleet.compute_services import resolve_fleet_services
+
+        services = resolve_fleet_services(ctx)
+        payload["playerInvalidationGeneration"] = (
+            services.persistence.player_invalidation_generation(
+                scope.game_id,
+                scope.perspective,
+                scope.player_id,
+            )
+        )
+    return payload
 
 
 class FleetPersistencePolicy:
@@ -278,6 +310,7 @@ class FleetPersistencePolicy:
             raise ValueError("fleet observation persist requires concrete player_id")
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet observation persist requires concrete turn")
+        _refuse_stale_fleet_epoch(services, scope, result_wire)
         # Epoch for the following-file walk. Read before the ledger put.
         player_invalidation_generation = services.persistence.player_invalidation_generation(
             scope.game_id,
@@ -330,6 +363,7 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
+            evidence_generation=_kept_open_turn_generation(services, scope),
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         if eliminated:
@@ -372,6 +406,7 @@ class FleetPersistencePolicy:
             raise ValueError("fleet persist requires concrete turn")
         if wire_ledger.ledger.player_id != scope.player_id:
             raise ValueError("fleet persist ledger player does not match scope")
+        _refuse_stale_fleet_epoch(services, scope, result_wire)
         # Epoch for the following-file walk. Read before the ledger put.
         player_invalidation_generation = services.persistence.player_invalidation_generation(
             scope.game_id,
@@ -385,6 +420,10 @@ class FleetPersistencePolicy:
 
         if fleet_player_eliminated_at_turn(turn, scope.player_id):
             return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
+        if _is_off_mode_catch_up_hop(services, scope):
+            # Observation already merged the refreshed prior. Do not read this
+            # turn's stored scoreboard and do not schedule a solve.
+            return None
         turn_context = FleetTurnContext.from_turn(turn)
 
         prior_on_disk, prior_is_ensure_final = self._stored_prior(services, scope, turn)
@@ -495,6 +534,7 @@ class FleetPersistencePolicy:
             services,
             scope,
             player_invalidation_generation,
+            clear_open_after_refresh=True,
         )
 
         def _after_final_save() -> None:
@@ -509,14 +549,22 @@ class FleetPersistencePolicy:
         services: FleetComputeServices,
         scope: ComputeScope,
         player_invalidation_generation: int,
+        *,
+        clear_open_after_refresh: bool = False,
     ) -> Callable[[], None]:
         """Replace later approximate files from the ledger this persist just saved.
 
         ``player_invalidation_generation`` is the epoch captured at the start of
-        that persist, before the ledger put.
+        that persist, before the ledger put. The observation merge of the open
+        turn leaves the registered open in place so its scoreboard persist can
+        stamp. Finalization clears it after the refreshed prior is folded.
         """
         from api.analytics.fleet.approximate_fleet import refresh_following_approximate_fleets
         from api.analytics.fleet.compute_services import FleetComputeServices
+        from api.analytics.fleet.off_mode_catch_up import (
+            clear_off_mode_open,
+            off_mode_open_turn,
+        )
 
         if not isinstance(services, FleetComputeServices):
             raise TypeError("fleet later-file refresh requires FleetComputeServices")
@@ -527,6 +575,9 @@ class FleetPersistencePolicy:
         player_id = scope.player_id
         saved_turn = scope.turn
         generation = player_invalidation_generation
+        backfill_enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
+        open_turn = off_mode_open_turn(scope.game_id, scope.perspective, player_id)
+        stop_after_turn = open_turn if not backfill_enabled and open_turn is not None else None
 
         def _refresh() -> None:
             refresh_following_approximate_fleets(
@@ -538,7 +589,15 @@ class FleetPersistencePolicy:
                 player_invalidation_generation=generation,
                 load_turn=services.load_turn,
                 inference_materialization=services.inference_materialization,
+                stop_after_turn=stop_after_turn,
             )
+            if (
+                clear_open_after_refresh
+                and not backfill_enabled
+                and open_turn is not None
+                and saved_turn == open_turn
+            ):
+                clear_off_mode_open(scope.game_id, scope.perspective, player_id)
 
         return _refresh
 
@@ -604,6 +663,71 @@ class FleetPersistencePolicy:
             scope.perspective,
             scope.player_id,
         )
+
+
+def _refuse_stale_fleet_epoch(
+    services: FleetComputeServices,
+    scope: ComputeScope,
+    result_wire: dict[str, object],
+) -> None:
+    """Refuse a persist whose job was built before the evidence epoch moved."""
+    from api.exceptions import FleetStampRefused
+
+    if not isinstance(scope.player_id, int):
+        return
+    expected = result_wire.get("playerInvalidationGeneration")
+    if isinstance(expected, bool) or not isinstance(expected, int):
+        return
+    current = services.persistence.player_invalidation_generation(
+        scope.game_id,
+        scope.perspective,
+        scope.player_id,
+    )
+    if current == expected:
+        return
+    raise FleetStampRefused(
+        f"fleet persist refused for game {scope.game_id} perspective {scope.perspective} "
+        f"player {scope.player_id} turn {scope.turn}: in-flight work cannot stamp the new mark"
+    )
+
+
+def _is_off_mode_catch_up_hop(services: FleetComputeServices, scope: ComputeScope) -> bool:
+    """True for an earlier hop of an off-mode open. The open turn itself is false."""
+    from api.analytics.fleet.off_mode_catch_up import off_mode_open_turn
+
+    if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
+        return False
+    if services.persistence.backfill_earlier_turns_enabled(scope.game_id):
+        return False
+    open_turn = off_mode_open_turn(scope.game_id, scope.perspective, scope.player_id)
+    return open_turn is not None and scope.turn < open_turn
+
+
+def _kept_open_turn_generation(services: FleetComputeServices, scope: ComputeScope) -> int | None:
+    """Generation to keep on the open turn's merge. None stamps the current mark.
+
+    A catch-up hop has no scoreboard solve coming, so it stamps. The open turn
+    keeps the generation already on the file until its own scoreboard is stored.
+    A missing file stays at generation 0 so the merge does not look complete.
+    """
+    from api.analytics.fleet.off_mode_catch_up import off_mode_open_turn
+
+    if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
+        return None
+    if services.persistence.backfill_earlier_turns_enabled(scope.game_id):
+        return None
+    open_turn = off_mode_open_turn(scope.game_id, scope.perspective, scope.player_id)
+    if open_turn is None or scope.turn != open_turn:
+        return None
+    stored = services.persistence.get_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn,
+        scope.player_id,
+    )
+    if stored is None:
+        return 0
+    return stored.evidence_generation
 
 
 FLEET_PERSISTENCE_POLICY = FleetPersistencePolicy()

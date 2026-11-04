@@ -27,10 +27,11 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.turn_roster import iter_turn_players
 from api.errors import NotFoundError
+from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
 from api.services.credential_service import CredentialService
-from api.services.game_service import GameService
+from api.services.game_service import GameService, backfill_earlier_turns_store_key
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
@@ -46,6 +47,18 @@ class ExportSeedContext:
     perspective: int
     load_turn: Callable[[int], object | None]
     export_services: Mapping[str, object]
+
+
+def enable_backfill_earlier_turns(ctx) -> None:
+    """Turn on the recursive final-fleet chain for one query context.
+
+    The product default is off. Tests of that chain opt in here.
+    """
+    services = ctx.export_services["fleet"]
+    services.persistence._storage.put(
+        backfill_earlier_turns_store_key(ctx.game_id),
+        backfill_earlier_turns_document(True),
+    )
 
 
 def export_chain_query_context(

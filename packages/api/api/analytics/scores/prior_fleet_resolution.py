@@ -72,10 +72,10 @@ def resolve_prior_fleet_for_scores(
     """Resolve prior-turn fleet torp overlay for scores wire build and ensure admit.
 
     Prefers an ensure-final DepOutputs / disk ledger via
-    ``resolve_fleet_prior_persisted``. Applies that ledger only when it passes
-    ``prior_is_ensure_final``; otherwise falls back to
-    ``resolve_prior_turn_fleet_torp_overlay``. A readable non-final prior is
-    never applied as the scores overlay.
+    ``resolve_fleet_prior_persisted``. While Backfill earlier turns is on, a
+    readable non-final prior is not the scores overlay. While it is off, an
+    approximate ledger on the current mark is the prior, and a missing earlier
+    turn is not ensured.
     """
     if turn_number == WILDCARD or not isinstance(turn_number, int):
         return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
@@ -135,18 +135,38 @@ def resolve_prior_fleet_for_scores(
         load_from_disk=load_prior_from_disk,
         is_ensure_final=prior_is_ensure_final,
     )
-    # ``resolve_fleet_prior_persisted`` may still return a non-final ledger for
-    # fleet job-wire baseline use; scores applies only ensure-final priors.
+    # An ensure-final prior is the overlay in either mode, and reading the
+    # backfill setting would touch storage the dependency wire already replaced.
     if (
         prior_persisted is not None
-        and prior_is_ensure_final(prior_persisted)
         and prior_turn is not None
+        and prior_is_ensure_final(prior_persisted)
     ):
         return _resolution_from_persisted_fleet(
             prior_persisted,
             prior_export_scope,
             prior_turn=prior_turn,
         )
+    # Missing fleet services cannot read the setting. Keep the overlay path so a
+    # provenance-final ledger is not admitted, and so a missing prior stays unavailable.
+    if fleet_services is not None and not fleet_services.persistence.backfill_earlier_turns_enabled(
+        game_id
+    ):
+        if prior_persisted is not None and prior_turn is not None:
+            from api.analytics.fleet.off_mode_catch_up import ledger_matches_evidence_mark
+
+            mark = fleet_services.persistence.evidence_mark(
+                game_id,
+                perspective,
+                player_id,
+            )
+            if ledger_matches_evidence_mark(prior_fleet_scope.turn, prior_persisted, mark):
+                return _resolution_from_persisted_fleet(
+                    prior_persisted,
+                    prior_export_scope,
+                    prior_turn=prior_turn,
+                )
+        return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
 
     return resolve_prior_turn_fleet_torp_overlay(
         turn=turn,

@@ -361,6 +361,61 @@ class ComputeOrchestrator(
                     self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
 
+    def discard_bumped_player_work(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        shell_turn: int | None,
+        live_turns: frozenset[int],
+    ) -> None:
+        """Drop in-flight fleet and scoreboard work that must not stamp a new mark.
+
+        The shell turn and any later turn with a live table stream stay so a
+        fresh submit can recompute them. A hop that is not the shell and has
+        no live stream is dropped when it has not started. A step already
+        executing there finishes the worker and does not persist or stamp.
+        """
+        from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+        from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+        from api.exceptions import FleetStampRefused
+
+        recompute_turns = set(live_turns)
+        if shell_turn is not None:
+            recompute_turns.add(shell_turn)
+        watched = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
+        with self._condition:
+            for scope, node in list(self._nodes.items()):
+                if scope.analytic_id not in watched:
+                    continue
+                if scope.game_id != game_id or scope.perspective != perspective:
+                    continue
+                if scope.player_id != player_id or not isinstance(scope.turn, int):
+                    continue
+                if node.is_terminal:
+                    continue
+                if scope.turn in recompute_turns:
+                    if node.state == "running":
+                        continue
+                    self._fail_node(
+                        node,
+                        FleetStampRefused(
+                            "in-flight work built from the previous prior was discarded"
+                        ),
+                    )
+                    continue
+                if node.state == "running":
+                    node.discard_without_stamp = True
+                    continue
+                self._dequeue_ready(scope)
+                self._fail_node(
+                    node,
+                    FleetStampRefused(
+                        "bump dropped an off-screen hop that had not started executing"
+                    ),
+                )
+
     def abort_scope(
         self,
         scope: ComputeScope,

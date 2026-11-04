@@ -12,6 +12,7 @@ from api.analytics.export_turn_fill import (
 from api.analytics.export_types import ExportScope
 from api.models.game import TurnInfo
 
+from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.fixtures.export_framework.harness import (
     build_stored_turn_chain,
     clone_turn_at,
@@ -102,7 +103,7 @@ def _fleet_prepare_context(turns: dict[int, TurnInfo]):
         game_id=shell.game.id,
         perspective=shell.player.id,
     )
-    return make_analytic_query_context(
+    ctx = make_analytic_query_context(
         shell,
         TurnAnalyticsOptions(),
         game_id=shell.game.id,
@@ -110,6 +111,8 @@ def _fleet_prepare_context(turns: dict[int, TurnInfo]):
         load_turn=turns.get,
         export_services={"fleet": services},
     )
+    enable_backfill_earlier_turns(ctx)
+    return ctx
 
 
 def _fleet_scope(ctx, turn: int, player_id: int) -> ExportScope:

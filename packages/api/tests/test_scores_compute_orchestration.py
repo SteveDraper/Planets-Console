@@ -68,7 +68,10 @@ from api.compute import (
 from api.compute.dag import plan_compute_dag
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
-from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.export_chain_test_fixtures import (
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
 from tests.scores_exports_helpers import minimal_stream_query_context
@@ -1534,6 +1537,7 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
         },
         ensure_turn=ensure_turn,
     )
+    enable_backfill_earlier_turns(leader_ctx)
     session = InferenceRowStreamSession(
         player_id=player_id,
         observation=build_inference_observation(

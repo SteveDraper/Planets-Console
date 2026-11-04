@@ -18,6 +18,12 @@ from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.fleet.export_scope import ledgers_for_scope
+from api.analytics.fleet.injected_services import lookup_fleet_compute_services
+from api.analytics.fleet.off_mode_catch_up import (
+    ledger_matches_evidence_mark,
+    note_off_mode_open,
+    off_mode_prior_needs_catch_up,
+)
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetTurnSnapshot
 from api.analytics.scores.export_precedence import SearchStatus
@@ -36,18 +42,35 @@ ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
     EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
 )
 
+# Off-mode catch-up depends on the prior fleet only until a ledger is on the
+# current mark. ``stamped`` is not ensure-final, so the hop does not pull a
+# scoreboard solve. The open turn's own scoreboard is scheduled separately.
+OFF_MODE_PRIOR_DEPENDENCY: tuple[EnsureDependency, ...] = (
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="stamped"),
+)
+
 
 def fleet_ensure_dependencies_for(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
 ) -> tuple[EnsureDependency, ...]:
-    """Prior-turn fleet does not apply once the player is eliminated on this turn."""
+    """Prior-turn fleet does not apply once the player is eliminated on this turn.
+
+    While Backfill earlier turns is off, a stale open walks back only through
+    ``appliesFromTurn`` and stops at a prior ledger already on the current mark.
+    An absent mark does not walk backward. Those hops are stamped fleet files,
+    not scoreboard solves.
+    """
     if not isinstance(scope.player_id, int):
         return ENSURE_DEPENDENCIES
     turn = ctx.load_turn(scope.turn)
     if turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id):
         return ()
-    return ENSURE_DEPENDENCIES
+    services = lookup_fleet_compute_services(ctx)
+    if services is None or services.persistence.backfill_earlier_turns_enabled(scope.game_id):
+        return ENSURE_DEPENDENCIES
+    note_off_mode_open(scope.game_id, scope.perspective, scope.player_id, scope.turn)
+    return _off_mode_fleet_dependencies(ctx, scope, services)
 
 
 def _fleet_snapshot_for_scope(
@@ -91,6 +114,65 @@ def _fleet_snapshot_for_scope(
         )
 
     return ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
+
+
+def _off_mode_fleet_dependencies(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    services: object,
+) -> tuple[EnsureDependency, ...]:
+    """Earlier fleet hop for one off-mode scope, or none when the walk stops."""
+    from api.analytics.fleet.compute_services import FleetComputeServices
+
+    if not isinstance(services, FleetComputeServices) or not isinstance(scope.player_id, int):
+        return ()
+    turn = ctx.load_turn(scope.turn)
+    if turn is None:
+        return ()
+    prior_turn = scope.turn - 1
+    mark = services.persistence.evidence_mark(scope.game_id, scope.perspective, scope.player_id)
+    prior = services.persistence.get_ledger(
+        scope.game_id,
+        scope.perspective,
+        prior_turn,
+        scope.player_id,
+    )
+    if not off_mode_prior_needs_catch_up(
+        turn_number=scope.turn,
+        settings=turn.settings,
+        load_turn=ctx.load_turn,
+        prior_ledger=prior,
+        mark=mark,
+    ):
+        return ()
+    return OFF_MODE_PRIOR_DEPENDENCY
+
+
+def is_fleet_export_on_current_mark(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
+    """True when a stored ledger is already on the current evidence mark.
+
+    An approximate fleet counts. A missing file does not. This is the off-mode
+    stop, not ensure-final.
+    """
+    if not isinstance(scope.player_id, int):
+        return False
+    services = lookup_fleet_compute_services(ctx)
+    if services is None or ctx.load_turn(scope.turn) is None:
+        return False
+    persisted = services.persistence.get_ledger(
+        services.game_id,
+        services.perspective,
+        scope.turn,
+        scope.player_id,
+    )
+    if persisted is None:
+        return False
+    mark = services.persistence.evidence_mark(
+        services.game_id,
+        services.perspective,
+        scope.player_id,
+    )
+    return ledger_matches_evidence_mark(scope.turn, persisted, mark)
 
 
 def is_fleet_export_observation_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:

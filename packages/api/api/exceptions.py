@@ -129,6 +129,16 @@ class FleetGapFillEpochInvalidated(CoreAPIError):
     http_error: int = 409
 
 
+class FleetStampRefused(CoreAPIError):
+    """A fleet or scoreboard persist built from the previous evidence mark must not stamp.
+
+    The mark moved, or the step is an off-screen hop a bump dropped. The write
+    does not land and the worker does not stamp the new generation.
+    """
+
+    http_error: int = 409
+
+
 class FleetScoresEvidenceOpenError(PersistDeferredError, CoreAPIError):
     """Fleet host-turn persist refused because same-turn scores evidence is open.
 

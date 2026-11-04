@@ -85,7 +85,18 @@ class InferenceInvalidationService:
             player_id,
             durable=durable,
         )
-        for fleet_turn in sorted(turns_to_reschedule):
+        recompute_turns = self._recompute_turns_after_evidence(
+            game_id,
+            perspective,
+            player_id,
+            host_turn,
+            durable=durable,
+        )
+        if recompute_turns is None:
+            turns_to_wake = turns_to_reschedule
+        else:
+            turns_to_wake = recompute_turns
+        for fleet_turn in sorted(turns_to_wake):
             stream_woke = reschedule_fleet_table_player(
                 FleetTableStreamScope(
                     game_id=game_id,
@@ -94,6 +105,12 @@ class InferenceInvalidationService:
                 ),
                 player_id,
             )
+            if (
+                recompute_turns is not None
+                and fleet_turn in recompute_turns
+                and fleet_turn in self._live_scores_turns(game_id, perspective)
+            ):
+                reschedule_inference_row(self._scope(game_id, perspective, fleet_turn), player_id)
             if stream_woke:
                 continue
             wake_fleet_scope(
@@ -106,6 +123,58 @@ class InferenceInvalidationService:
                 )
             )
         return turns_to_reschedule
+
+    def _live_scores_turns(self, game_id: int, perspective: int) -> frozenset[int]:
+        from api.analytics.military_score_inference.inference_table_stream_registry import (
+            get_inference_table_stream_registry,
+        )
+
+        return frozenset(
+            scope.turn_number
+            for scope in get_inference_table_stream_registry().list_active_scopes()
+            if scope.game_id == game_id and scope.perspective == perspective
+        )
+
+    def _recompute_turns_after_evidence(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        host_turn: int,
+        *,
+        durable: bool,
+    ) -> set[int] | None:
+        """Turns to wake after a durable bump while backfill is off.
+
+        None means the existing wake-every-known-turn rule. A durable bump with
+        the setting off recomputes the shell and later turns that already have
+        a live table stream, and leaves every other later turn on disk.
+        """
+        if not durable or self._fleet_persistence is None:
+            return None
+        if self._fleet_persistence.backfill_earlier_turns_enabled(game_id):
+            return None
+        from api.analytics.fleet.off_mode_catch_up import (
+            live_fleet_and_scores_turns,
+            off_mode_open_turn,
+        )
+        from api.compute.runtime import peek_compute_orchestrator
+
+        live_turns = live_fleet_and_scores_turns(game_id, perspective)
+        shell_turn = off_mode_open_turn(game_id, perspective, player_id)
+        recompute = {turn for turn in live_turns if turn >= host_turn}
+        if shell_turn is not None and shell_turn >= host_turn:
+            recompute.add(shell_turn)
+        orchestrator = peek_compute_orchestrator()
+        if orchestrator is not None:
+            orchestrator.discard_bumped_player_work(
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                shell_turn=shell_turn,
+                live_turns=live_turns,
+            )
+        return recompute
 
     def wire_fleet_invalidation_to_persistence(self) -> None:
         """Register fleet snapshot invalidation on inference row persistence writes."""
@@ -128,13 +197,56 @@ class InferenceInvalidationService:
         host_turn: int,
         player_id: int,
     ) -> None:
-        """Durable scores evidence: bump the fleet evidence mark and wake fleet."""
+        """Durable scores evidence.
+
+        A catch-up persist of the turn already being refreshed writes the
+        current mark and does not increment it. The first persist on an absent
+        mark sets generation 1. Any other persist bumps the mark and leaves
+        ledger files in place. Either persist of the registered open ends that
+        open, after a bump has already chosen which turns to recompute.
+        """
+        from api.analytics.fleet.off_mode_catch_up import clear_off_mode_open, off_mode_open_turn
+
+        open_turn = None
+        if self._fleet_persistence is not None:
+            open_turn = off_mode_open_turn(game_id, perspective, player_id)
+        if self._fleet_persistence is not None and self._scoreboard_persist_stamps(
+            game_id,
+            perspective,
+            host_turn,
+            player_id,
+        ):
+            clear_off_mode_open(game_id, perspective, player_id)
+            return
         self.on_inference_evidence_updated(
             game_id,
             perspective,
             host_turn,
             player_id,
             durable=True,
+        )
+        if open_turn is not None and host_turn == open_turn:
+            clear_off_mode_open(game_id, perspective, player_id)
+
+    def _scoreboard_persist_stamps(
+        self,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
+    ) -> bool:
+        from api.analytics.fleet.off_mode_catch_up import (
+            off_mode_open_turn,
+            scoreboard_persist_stamps_current_mark,
+        )
+
+        if self._fleet_persistence is None:
+            return False
+        return scoreboard_persist_stamps_current_mark(
+            backfill_enabled=self._fleet_persistence.backfill_earlier_turns_enabled(game_id),
+            open_turn=off_mode_open_turn(game_id, perspective, player_id),
+            host_turn=host_turn,
+            mark=self._fleet_persistence.evidence_mark(game_id, perspective, player_id),
         )
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:

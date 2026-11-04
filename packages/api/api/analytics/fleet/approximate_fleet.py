@@ -167,6 +167,7 @@ def refresh_following_approximate_fleets(
     player_invalidation_generation: int,
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None,
+    stop_after_turn: int | None = None,
 ) -> None:
     """Replace each later approximate file from the ledger just saved.
 
@@ -189,6 +190,8 @@ def refresh_following_approximate_fleets(
         )
 
     next_turn = saved_turn + 1
+    if stop_after_turn is not None and next_turn > stop_after_turn:
+        return None
 
     def target_stops_the_walk() -> bool:
         stored = persistence.get_ledger(game_id, perspective, next_turn, player_id)
@@ -203,6 +206,8 @@ def refresh_following_approximate_fleets(
         )
 
     while True:
+        if stop_after_turn is not None and next_turn > stop_after_turn:
+            return
         if not epoch_matches() or target_stops_the_walk():
             return
         turn = load_turn(next_turn)

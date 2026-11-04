@@ -28,7 +28,10 @@ from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.errors import ConflictError
 from api.storage.memory_asset import MemoryAssetBackend
 
-from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.export_chain_test_fixtures import (
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.scores_exports_helpers import first_player_id
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -84,6 +87,7 @@ def test_scores_ensure_walk_skips_missing_turn_below_accelerated_floor(sample_tu
     turn4 = stored[4]
     player_id = first_player_id(sample_turn)
     ctx = export_chain_query_context(turn4, stored_turns=stored)
+    enable_backfill_earlier_turns(ctx)
     scope = ExportScope(
         game_id=ctx.game_id,
         perspective=ctx.perspective,

@@ -22,6 +22,9 @@ def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
         "materializeTurn": int(job_wire["materializeTurn"]),
         "fleetPersistLeg": FLEET_PERSIST_LEG_OBSERVATION,
     }
+    epoch = job_wire.get("playerInvalidationGeneration")
+    if isinstance(epoch, int) and not isinstance(epoch, bool):
+        payload["playerInvalidationGeneration"] = epoch
     if job_wire.get("eliminatedAtTurn") is True:
         payload["eliminatedAtTurn"] = True
     return StepResult(

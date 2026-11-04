@@ -31,6 +31,7 @@ from api.compute import (
 from api.compute.turn_cache import TurnInfoCache
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
 
+from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.fixtures.export_framework.harness import build_stored_turn_chain
 from tests.test_compute_foundation import _StubPersistencePolicy
 
@@ -295,6 +296,7 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
     )
+    enable_backfill_earlier_turns(ctx)
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     player_id = next(row.ownerid for row in sample_turn.scores)
@@ -378,6 +380,7 @@ def test_pool_fleet_observation_leg_does_not_fill_worker_turn_cache(sample_turn)
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
     )
+    enable_backfill_earlier_turns(ctx)
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     pool = ComputeWorkerPool(worker_count=1)
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)

@@ -22,7 +22,11 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.turn_roster import iter_turn_players
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
-from tests.export_chain_test_fixtures import GAME_ID, export_chain_query_context
+from tests.export_chain_test_fixtures import (
+    GAME_ID,
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.fleet_exports_helpers import materialize_fleet_tree
 from tests.scores_exports_helpers import (
     ensure_missing_step,
@@ -146,6 +150,7 @@ def test_probe_fleet_at_8_lists_missing_scores_5_6_7_with_partial_ledgers(
         persistence=persistence,
         stored_turns=stored_turns,
     )
+    enable_backfill_earlier_turns(ctx)
     fleet_services = ctx.export_services["fleet"]
     fleet_services.persistence.put_ledger(
         GAME_ID,

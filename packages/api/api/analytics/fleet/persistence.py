@@ -212,6 +212,7 @@ class FleetSnapshotPersistenceService:
         persisted: PersistedFleetLedger,
         *,
         defer_ledger_persisted_notification: bool = False,
+        evidence_generation: int | None = None,
     ) -> PutLedgerResult:
         """Write one player's ledger and bracket a ledger-write notice around the attempt."""
         with _fleet_ledger_write(game_id, perspective, turn_number, player_id):
@@ -222,11 +223,14 @@ class FleetSnapshotPersistenceService:
                 )
             prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
             mark = self.evidence_mark(game_id, perspective, player_id)
+            stored_generation = (
+                mark.evidence_generation if evidence_generation is None else evidence_generation
+            )
             to_store = PersistedFleetLedger(
                 ledger=persisted.ledger,
                 provenance=persisted.provenance,
                 materialization_version=FLEET_MATERIALIZATION_VERSION,
-                evidence_generation=mark.evidence_generation,
+                evidence_generation=stored_generation,
             )
             prior_was_ensure_final = prior is not None and self.ledger_is_ensure_final(
                 game_id,
@@ -417,6 +421,12 @@ class FleetSnapshotPersistenceService:
     ) -> None:
         for player_id in self._list_player_ids(game_id, perspective, turn_number):
             self.delete_ledger(game_id, perspective, turn_number, player_id)
+
+    def backfill_earlier_turns_enabled(self, game_id: int) -> bool:
+        """Read Backfill earlier turns. A missing record is off."""
+        from api.analytics.fleet.off_mode_catch_up import read_backfill_earlier_turns
+
+        return read_backfill_earlier_turns(self._storage, game_id)
 
     def evidence_mark(
         self,
