@@ -20,6 +20,8 @@ from api.analytics.homeworld_locator.evidence_ensure import (
 )
 from api.analytics.homeworld_locator.fleet_age_input import fleet_persistence_from_context
 from api.analytics.homeworld_locator.serialization import (
+    fleet_age_stale_marker_from_json,
+    fleet_age_stale_marker_to_json,
     homeworld_evidence_aggregate_from_json,
     homeworld_evidence_aggregate_to_json,
     homeworld_locator_game_state_from_json,
@@ -197,7 +199,6 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         services,
         baseline_turn=state.baseline_turn,
         shell_turn=shell_turn,
-        fleet_persistence=fleet_persistence,
     )
     if not already_durable:
         ensure_evidence_floor_algorithm_current(
@@ -217,6 +218,10 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         "available": True,
         "evidenceAggregate": homeworld_evidence_aggregate_to_json(step.aggregate),
     }
+    if step.observed_fleet_age_stale is not None:
+        payload["observedFleetAgeStaleMarker"] = fleet_age_stale_marker_to_json(
+            step.observed_fleet_age_stale
+        )
     if already_durable:
         return StepResult(outcome="complete", payload=payload)
     return StepResult(outcome="persist", payload=payload)
@@ -265,6 +270,16 @@ class HomeworldLocatorPersistencePolicy:
                 export_scope.game_id,
                 export_scope.perspective,
                 aggregate,
+            )
+            observed_raw = result_wire.get("observedFleetAgeStaleMarker")
+            observed = (
+                None if observed_raw is None else fleet_age_stale_marker_from_json(observed_raw)
+            )
+            services.persistence.advance_fleet_age_stale_marker(
+                export_scope.game_id,
+                export_scope.perspective,
+                refined_turn=aggregate.turn,
+                observed=observed,
             )
             return
 

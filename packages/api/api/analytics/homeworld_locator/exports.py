@@ -128,7 +128,6 @@ def is_homeworld_export_ensure_satisfied(ctx: AnalyticQueryContext, scope: Expor
         services,
         baseline_turn=state.baseline_turn,
         shell_turn=scope.turn,
-        fleet_persistence=fleet_persistence_from_context(ctx),
     )
 
 

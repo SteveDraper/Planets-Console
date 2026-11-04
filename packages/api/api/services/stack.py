@@ -3,7 +3,7 @@
 from typing import NamedTuple
 
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.homeworld_locator.fleet_age_refetch import note_fleet_age_identity_changed
+from api.analytics.homeworld_locator.fleet_age_refetch import fleet_age_identity_changed_handler
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
@@ -38,8 +38,10 @@ class ServiceStack(NamedTuple):
 def build_service_stack(storage: StorageBackend) -> ServiceStack:
     credentials = CredentialService(storage)
     fleet_persistence = FleetSnapshotPersistenceService(storage)
-    fleet_persistence.on_fleet_age_identity_changed = note_fleet_age_identity_changed
     homeworld_persistence = HomeworldLocatorPersistenceService(storage)
+    fleet_persistence.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(
+        homeworld_persistence
+    )
     inference_persistence = InferenceRowPersistenceService(storage)
     inference_invalidation = InferenceInvalidationService(
         inference_persistence,

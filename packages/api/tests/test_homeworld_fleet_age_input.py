@@ -21,12 +21,12 @@ from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.evidence_ensure import evidence_refined_through_shell
 from api.analytics.homeworld_locator.exports import EXPORT_CATALOG, ensure_homeworld_export
 from api.analytics.homeworld_locator.fleet_age_input import (
-    fleet_persistence_from_context,
     merged_built_turns,
     read_fleet_age_input_stamp,
 )
 from api.analytics.homeworld_locator.fleet_age_refetch import (
     clear_fleet_age_refetch_notices,
+    fleet_age_identity_changed_handler,
     fleet_age_refetch_notice,
     note_fleet_age_identity_changed,
 )
@@ -204,12 +204,10 @@ def test_stamp_mismatch_rerefines_from_that_turn_and_keeps_later_aggregate() -> 
         perspective=1,
     ).exports
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
-    fleet_persistence = fleet_persistence_from_context(ctx)
     assert evidence_refined_through_shell(
         services,
         baseline_turn=1,
         shell_turn=4,
-        fleet_persistence=fleet_persistence,
     )
 
     state = persistence.get_game_state(628580)
@@ -219,6 +217,9 @@ def test_stamp_mismatch_rerefines_from_that_turn_and_keeps_later_aggregate() -> 
         628580,
         replace(state, asserted_location_provenances=(asserted,)),
     )
+    fleet.persistence.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(
+        persistence
+    )
     fleet.persistence.put_ledger(
         628580,
         1,
@@ -226,15 +227,25 @@ def test_stamp_mismatch_rerefines_from_that_turn_and_keeps_later_aggregate() -> 
         owner,
         _ledger(owner, 42, 9, final=False),
     )
-    assert (
-        evidence_refined_through_shell(
+    with patch.object(
+        fleet.persistence,
+        "get_ledger",
+        wraps=fleet.persistence.get_ledger,
+    ) as get_ledger:
+        assert (
+            evidence_refined_through_shell(
+                services,
+                baseline_turn=1,
+                shell_turn=2,
+            )
+            is False
+        )
+        assert evidence_refined_through_shell(
             services,
             baseline_turn=1,
-            shell_turn=2,
-            fleet_persistence=fleet_persistence,
+            shell_turn=1,
         )
-        is False
-    )
+        get_ledger.assert_not_called()
     kept = persistence.get_evidence_aggregate(628580, 1, 4)
     assert kept is not None
 
@@ -250,7 +261,6 @@ def test_stamp_mismatch_rerefines_from_that_turn_and_keeps_later_aggregate() -> 
         services,
         baseline_turn=1,
         shell_turn=3,
-        fleet_persistence=fleet_persistence,
     )
     assert persistence.get_evidence_aggregate(628580, 1, 4) == kept
     assert (
@@ -258,7 +268,6 @@ def test_stamp_mismatch_rerefines_from_that_turn_and_keeps_later_aggregate() -> 
             services,
             baseline_turn=1,
             shell_turn=4,
-            fleet_persistence=fleet_persistence,
         )
         is False
     )

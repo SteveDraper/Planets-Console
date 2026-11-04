@@ -57,6 +57,26 @@ class HomeworldLocatorGameState:
 
 
 @dataclass(frozen=True)
+class FleetAgeStaleMarker:
+    """First homeworld turn that must be refined again after a fleet-age change.
+
+    ``stale_from_turn`` is that turn. Every later stored aggregate stays stale
+    until refine advances the marker contiguously past it. ``generation``
+    increments on every build-turn identity change. A refine reads the
+    generation before it reads ledger stamps and advances the marker only when
+    the stored generation is still that value, so a save during refine stays
+    marked.
+    """
+
+    stale_from_turn: int
+    generation: int
+
+    def covers(self, turn: int) -> bool:
+        """True when ``turn`` is on the stale frontier or later."""
+        return turn >= self.stale_from_turn
+
+
+@dataclass(frozen=True)
 class HomeworldEvidenceAggregate:
     """Turn-scoped durable evidence aggregate refined through the shell turn."""
 

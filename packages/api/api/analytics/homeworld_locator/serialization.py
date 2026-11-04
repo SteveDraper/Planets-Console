@@ -24,6 +24,7 @@ from api.analytics.homeworld_locator.models import (
     SectorOwnerMember,
 )
 from api.analytics.homeworld_locator.types import (
+    FleetAgeStaleMarker,
     HomeworldCandidateRecord,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
@@ -607,6 +608,25 @@ def _fleet_age_input_stamp_from_json(data: object, *, field_name: str) -> FleetA
     if len(player_ids) != len(set(player_ids)):
         raise ValidationError(f"homeworld {field_name} playerId values must be unique")
     return FleetAgeInputStamp(players=tuple(sorted(players, key=lambda player: player.player_id)))
+
+
+def fleet_age_stale_marker_to_json(marker: FleetAgeStaleMarker) -> dict[str, int]:
+    return {
+        "staleFromTurn": marker.stale_from_turn,
+        "generation": marker.generation,
+    }
+
+
+def fleet_age_stale_marker_from_json(data: object) -> FleetAgeStaleMarker:
+    if not isinstance(data, dict):
+        raise ValidationError("homeworld fleet-age stale marker must be a JSON object")
+    stale_from = data.get("staleFromTurn")
+    generation = data.get("generation")
+    if isinstance(stale_from, bool) or not isinstance(stale_from, int) or stale_from < 1:
+        raise ValidationError("homeworld fleet-age stale marker staleFromTurn must be an int >= 1")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        raise ValidationError("homeworld fleet-age stale marker generation must be an int >= 1")
+    return FleetAgeStaleMarker(stale_from_turn=stale_from, generation=generation)
 
 
 def homeworld_evidence_aggregate_to_json(

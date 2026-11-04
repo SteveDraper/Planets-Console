@@ -1,16 +1,22 @@
-"""In-process notice that a fleet build-turn identity changed.
+"""Fleet build-turn identity changes for the homeworld locator.
 
-The homeworld map query refetches a shown shell at or after the changed turn.
+``note_fleet_age_identity_changed`` records an in-process refetch notice. The
+homeworld map query refetches a shown shell at or after the changed turn.
 Turns after that shell are not ensured until they are shown. The notice does
 not submit fleet work and does not delete evidence aggregates.
+
+``fleet_age_identity_changed_handler`` is the production callback: that notice,
+plus the durable stale marker on homeworld persistence.
 """
 
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.fleet.ledger_persisted_event import FleetAgeIdentityChanged
+from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 
 _RETAINED_CHANGES = 256
 _lock = threading.Lock()
@@ -24,6 +30,18 @@ class FleetAgeRefetchNotice:
 
     epoch: int
     from_turn: int | None
+
+
+def fleet_age_identity_changed_handler(
+    homeworld_persistence: HomeworldLocatorPersistenceService,
+) -> Callable[[FleetAgeIdentityChanged], None]:
+    """Refetch notice plus the durable stale marker for one homeworld store."""
+
+    def on_changed(event: FleetAgeIdentityChanged) -> None:
+        note_fleet_age_identity_changed(event)
+        homeworld_persistence.record_fleet_age_identity_changed(event)
+
+    return on_changed
 
 
 def note_fleet_age_identity_changed(event: FleetAgeIdentityChanged) -> None:

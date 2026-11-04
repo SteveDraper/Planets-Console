@@ -51,6 +51,7 @@ from api.analytics.homeworld_locator.types import (
 )
 from api.analytics.persistence_paths import (
     game_global_analytic_document_key,
+    perspective_analytic_document_key,
     turn_scoped_analytic_document_key,
 )
 from api.analytics.turn_roster import iter_turn_players, race_id_by_owner_slot
@@ -191,6 +192,9 @@ def test_path_helpers() -> None:
     )
     assert turn_scoped_analytic_document_key(628580, 1, 111, ANALYTIC_ID) == (
         "games/628580/1/turns/111/analytics/homeworld-locator"
+    )
+    assert perspective_analytic_document_key(628580, 1, ANALYTIC_ID) == (
+        "games/628580/1/analytics/homeworld-locator"
     )
 
 
