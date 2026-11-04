@@ -87,3 +87,15 @@ def test_bff_refresh_forwards_username_to_core() -> None:
         )
     assert response.status_code == 200, response.text
     mock_core.refresh_homeworld_locator.assert_called_once_with(628580, 1, 111, username="captain")
+
+
+def test_fleet_age_refetch_passes_after_epoch():
+    mock_core = MagicMock()
+    mock_core.fleet_age_refetch_notice.return_value = {"epoch": 4, "fromTurn": 2}
+    with patch("bff.routers.homeworld_locator.get_core_client", return_value=mock_core):
+        response = client.get(
+            "/analytics/homeworld-locator/fleet-age-refetch?gameId=628580&perspective=1&afterEpoch=3"
+        )
+    assert response.status_code == 200
+    assert response.json() == {"epoch": 4, "fromTurn": 2}
+    mock_core.fleet_age_refetch_notice.assert_called_once_with(628580, 1, after_epoch=3)

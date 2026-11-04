@@ -149,7 +149,7 @@ Generic BFF reads (every selectable analytic plus base-map):
 
 Connections map extra query params (BFF aliases): `warpSpeed` (1-9), `gravitonicMovement`, `flareMode` (`off`/`include`/`only`), `flareDepth` (1-3), `includeIllustrativeRoutes`. Scores table extra: `includeBuildInference` (adds stub inference column; live results come from the stream).
 
-Optional `username` on table/map **and** every table-stream that admits compute (fleet and scores): not a second login. It is the turn-load credential so compute DAG planning can `ensure_turn` missing historical turns via the stored account API key (homeworld evidence chain, fleet `turn_delta=-1` self-chain, scores prior-turn fleet, and homeworld's fleet-at-shell-turn dependency). Homeworld assertion/refresh rematerialize takes the same query param.
+Optional `username` on table/map **and** every table-stream that admits compute (fleet and scores): not a second login. It is the turn-load credential so compute DAG planning can `ensure_turn` missing historical turns via the stored account API key (homeworld evidence chain, fleet `turn_delta=-1` self-chain, scores prior-turn fleet; the homeworld locator reads on-disk fleet ledgers and has no fleet dependency). Homeworld assertion/refresh rematerialize takes the same query param.
 
 ### 2.1 Per-analytic table/map payloads
 
@@ -203,6 +203,7 @@ Catalog marks homeworld **map-only**, but the map-mode accordion calls **GET tab
 |-------|-------|-----|---------|-------------|---------|
 | `POST /bff/analytics/homeworld-locator/assertions?username?` | BFF | Yes (map context menu / panel) | Same locator payload after upsert/revoke. Body: `{axis: location\|ownership, action: upsert\|revoke, planetId?, sectorIndex?, ownerSlot?}` | Stored turn; `username` auto-fetches DAG holes on rematerialize | Recompute/view after assertion |
 | `POST /bff/analytics/homeworld-locator/refresh?username?` | BFF | Yes | Same payload after wipe of machine state (asserts kept) | **Yes** -- rebuild via ensure (historical turns); `username` auto-fetches DAG holes | **Yes** |
+| `GET /bff/analytics/homeworld-locator/fleet-age-refetch?gameId&perspective&afterEpoch?` | BFF | Yes (polled while the locator is enabled) | `{epoch, fromTurn}`: the fleet-age stale marker generation and the earliest turn changed after `afterEpoch` (`fromTurn` null when unchanged, 1 when the client epoch is ahead or the change log no longer covers it) | No | **No** -- reads the durable marker only; never ensures homeworld or fleet |
 | Core `POST .../analytics/homeworld-locator/assertions` | Core | No | Same | Same | Same |
 | Core `POST .../analytics/homeworld-locator/refresh` | Core | No | Same | Same | Same |
 

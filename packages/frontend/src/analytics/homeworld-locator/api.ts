@@ -106,3 +106,29 @@ export async function postHomeworldLocatorRefresh(
   )
   return parseHomeworldMutationResponse(response, endpointLabel)
 }
+
+export type FleetAgeRefetchNotice =
+  components['schemas']['FleetAgeRefetchNoticeResponse']
+
+/** Epoch of on-disk fleet build-turn identity changes. Does not ensure. */
+export async function fetchHomeworldFleetAgeRefetch(
+  scope: Pick<AnalyticShellScope, 'gameId' | 'perspective'>,
+  afterEpoch: number
+): Promise<FleetAgeRefetchNotice> {
+  const params = new URLSearchParams({
+    gameId: scope.gameId,
+    perspective: String(scope.perspective),
+    afterEpoch: String(afterEpoch),
+  })
+  const path = `/bff/analytics/${encodeURIComponent(HOMEWORLD_LOCATOR_ANALYTIC_ID)}/fleet-age-refetch`
+  const endpointLabel = `GET ${path}`
+  const response = await bffRequest(
+    `${path}?${params.toString()}`,
+    { cache: 'no-store' },
+    endpointLabel
+  )
+  if (!response.ok) {
+    await throwBffHttpErrorFromResponse(response, endpointLabel)
+  }
+  return response.json()
+}

@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+from api.analytics.homeworld_locator.fleet_age_input import FleetAgeInputStamp
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_POSSIBLE,
     HomeworldSingleStarbasePromotion,
@@ -56,6 +57,50 @@ class HomeworldLocatorGameState:
 
 
 @dataclass(frozen=True)
+class FleetAgeStaleMarker:
+    """First homeworld turn that must be refined again after a fleet-age change.
+
+    ``stale_from_turn`` is that turn. Every later stored aggregate stays stale
+    until refine advances the marker contiguously past it. ``generation``
+    increments on every build-turn identity change. A refine reads the
+    generation before it reads ledger stamps and advances the marker only when
+    the stored generation is still that value, so a save during refine stays
+    marked.
+    """
+
+    stale_from_turn: int
+    generation: int
+
+    def covers(self, turn: int) -> bool:
+        """True when ``turn`` is on the stale frontier or later."""
+        return turn >= self.stale_from_turn
+
+
+@dataclass(frozen=True)
+class FleetAgeStaleDocument:
+    """Perspective fleet-age document: refine frontier plus retained identity changes.
+
+    ``generation`` counts build-turn identity changes and does not restart when
+    refine clears the frontier. ``changes`` is the retained suffix of
+    ``(generation, turn)`` pairs, oldest first. ``stale_from_turn`` is absent
+    once refine has passed every stored aggregate.
+    """
+
+    generation: int
+    changes: tuple[tuple[int, int], ...]
+    stale_from_turn: int | None
+
+    def stale_marker(self) -> FleetAgeStaleMarker | None:
+        """Active refine frontier, or none when refine has passed it."""
+        if self.stale_from_turn is None:
+            return None
+        return FleetAgeStaleMarker(
+            stale_from_turn=self.stale_from_turn,
+            generation=self.generation,
+        )
+
+
+@dataclass(frozen=True)
 class HomeworldEvidenceAggregate:
     """Turn-scoped durable evidence aggregate refined through the shell turn."""
 
@@ -79,6 +124,12 @@ class HomeworldEvidenceAggregate:
     """Machine location provenances accumulated through this turn (not UI asserts)."""
     evidence_algorithm_version: int = 0
     """``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` at last refine write; 0 = pre-version."""
+    fleet_age_input_stamp: FleetAgeInputStamp | None = None
+    """Build-turn maps read from roster ledger files at this turn.
+
+    ``None`` means this aggregate was written before stamps existed.
+    A player entry with ``missing`` is a file that was not on disk.
+    """
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
@@ -159,6 +210,7 @@ def empty_candidate_view(*, inactive_reason: str | None = None) -> HomeworldCand
 
 
 __all__ = [
+    "FleetAgeInputStamp",
     "HomeworldBaselineEnsureResult",
     "HomeworldCandidateRecord",
     "HomeworldCandidateView",

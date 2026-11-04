@@ -15,6 +15,10 @@ from api.analytics.homeworld_locator.evidence_refine_report import (
     EvidenceRefineCounts,
     EvidenceRefineInnerTimingMs,
 )
+from api.analytics.homeworld_locator.fleet_age_input import (
+    FleetAgeInputStamp,
+    merged_built_turns,
+)
 from api.analytics.homeworld_locator.layout_distributions_asset import (
     LayoutDistributionsAsset,
     load_default_layout_distributions_asset,
@@ -69,7 +73,7 @@ def refine_homeworld_evidence_aggregate(
     candidate_planet_ids_set: frozenset[int],
     planets_by_id: Mapping[int, Planet],
     load_turn: Callable[[int], TurnInfo | None],
-    fleet_built_turns: Mapping[int, int] | None = None,
+    fleet_age_input_stamp: FleetAgeInputStamp | None = None,
 ) -> EvidenceRefineComputeResult:
     """Advance the durable evidence aggregate by one turn of observations.
 
@@ -140,11 +144,16 @@ def refine_homeworld_evidence_aggregate(
             )
         single_starbase_ms += (time.perf_counter() - sb_t0) * 1000.0
 
+    stamp = (
+        fleet_age_input_stamp
+        if fleet_age_input_stamp is not None
+        else FleetAgeInputStamp(players=())
+    )
     sector_owner_sets, owner_possible_sectors = accumulate_ownership_evidence_for_turn(
         prior,
         turn=turn,
         candidates=candidates,
-        fleet_built_turns=fleet_built_turns or {},
+        fleet_built_turns=merged_built_turns(stamp),
         load_turn=load_turn,
     )
 
@@ -166,6 +175,7 @@ def refine_homeworld_evidence_aggregate(
         owner_possible_sectors=owner_possible_sectors,
         location_provenances=location_provenances,
         evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+        fleet_age_input_stamp=stamp,
     )
     total_ms = (time.perf_counter() - total_t0) * 1000.0
     return EvidenceRefineComputeResult(

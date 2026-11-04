@@ -14,3 +14,17 @@ class FleetLedgerPersistedEvent:
     fleet_turn: int
     player_id: int
     materialization_version: int
+
+
+@dataclass(frozen=True)
+class FleetAgeIdentityChanged:
+    """One player's on-disk ``ship_id -> built_turn`` map was created, removed, or edited.
+
+    This channel includes approximate writes and generation-behind files.
+    It is separate from the ensure-final ledger side channel.
+    """
+
+    game_id: int
+    perspective: int
+    turn: int
+    player_id: int

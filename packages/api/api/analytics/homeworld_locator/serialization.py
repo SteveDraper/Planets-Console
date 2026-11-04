@@ -8,6 +8,10 @@ from api.analytics.homeworld_locator.constants import (
     ATTRIBUTION_INFERRED,
     ATTRIBUTION_USER_ASSERTED,
 )
+from api.analytics.homeworld_locator.fleet_age_input_codec import (
+    fleet_age_input_stamp_from_json,
+    fleet_age_input_stamp_to_json,
+)
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
@@ -20,6 +24,8 @@ from api.analytics.homeworld_locator.models import (
     SectorOwnerMember,
 )
 from api.analytics.homeworld_locator.types import (
+    FleetAgeStaleDocument,
+    FleetAgeStaleMarker,
     HomeworldCandidateRecord,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
@@ -540,6 +546,74 @@ def _owner_possible_sectors_from_json(
     return tuple(sorted(rows, key=lambda row: row[0]))
 
 
+def fleet_age_stale_marker_to_json(marker: FleetAgeStaleMarker) -> dict[str, int]:
+    return {
+        "staleFromTurn": marker.stale_from_turn,
+        "generation": marker.generation,
+    }
+
+
+def fleet_age_stale_marker_from_json(data: object) -> FleetAgeStaleMarker:
+    if not isinstance(data, dict):
+        raise ValidationError("homeworld fleet-age stale marker must be a JSON object")
+    stale_from = data.get("staleFromTurn")
+    generation = data.get("generation")
+    if isinstance(stale_from, bool) or not isinstance(stale_from, int) or stale_from < 1:
+        raise ValidationError("homeworld fleet-age stale marker staleFromTurn must be an int >= 1")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        raise ValidationError("homeworld fleet-age stale marker generation must be an int >= 1")
+    return FleetAgeStaleMarker(stale_from_turn=stale_from, generation=generation)
+
+
+def fleet_age_stale_document_to_json(document: FleetAgeStaleDocument) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "generation": document.generation,
+        "changes": [[change_generation, turn] for change_generation, turn in document.changes],
+    }
+    if document.stale_from_turn is not None:
+        payload["staleFromTurn"] = document.stale_from_turn
+    return payload
+
+
+def fleet_age_stale_document_from_json(data: object) -> FleetAgeStaleDocument:
+    if not isinstance(data, dict):
+        raise ValidationError("homeworld fleet-age document must be a JSON object")
+    generation = data.get("generation")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        raise ValidationError("homeworld fleet-age document generation must be an int >= 1")
+    stale_raw = data.get("staleFromTurn")
+    if stale_raw is None:
+        stale_from_turn = None
+    elif isinstance(stale_raw, bool) or not isinstance(stale_raw, int) or stale_raw < 1:
+        raise ValidationError("homeworld fleet-age document staleFromTurn must be an int >= 1")
+    else:
+        stale_from_turn = stale_raw
+    changes_raw = data.get("changes")
+    if not isinstance(changes_raw, list):
+        raise ValidationError("homeworld fleet-age document changes must be an array")
+    changes: list[tuple[int, int]] = []
+    for entry in changes_raw:
+        if (
+            not isinstance(entry, list)
+            or len(entry) != 2
+            or isinstance(entry[0], bool)
+            or isinstance(entry[1], bool)
+            or not isinstance(entry[0], int)
+            or not isinstance(entry[1], int)
+            or entry[0] < 1
+            or entry[1] < 1
+        ):
+            raise ValidationError(
+                "homeworld fleet-age document changes entries must be [generation, turn] ints"
+            )
+        changes.append((entry[0], entry[1]))
+    return FleetAgeStaleDocument(
+        generation=generation,
+        changes=tuple(changes),
+        stale_from_turn=stale_from_turn,
+    )
+
+
 def homeworld_evidence_aggregate_to_json(
     aggregate: HomeworldEvidenceAggregate,
 ) -> dict[str, Any]:
@@ -571,6 +645,10 @@ def homeworld_evidence_aggregate_to_json(
         ]
     if aggregate.evidence_algorithm_version > 0:
         payload["evidenceAlgorithmVersion"] = aggregate.evidence_algorithm_version
+    if aggregate.fleet_age_input_stamp is not None:
+        payload["fleetAgeInputStamp"] = fleet_age_input_stamp_to_json(
+            aggregate.fleet_age_input_stamp
+        )
     if aggregate.layout_prior_algorithm_version is not None:
         payload["layoutPriorSelection"] = _layout_prior_selection_to_json(aggregate)
     return payload
@@ -648,6 +726,11 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             "homeworld evidence aggregate evidenceAlgorithmVersion must be an int >= 0"
         )
 
+    fleet_age_raw = data.get("fleetAgeInputStamp")
+    fleet_age_input_stamp = (
+        None if fleet_age_raw is None else fleet_age_input_stamp_from_json(fleet_age_raw)
+    )
+
     return HomeworldEvidenceAggregate(
         turn=turn,
         baseline_turn=baseline_turn,
@@ -661,6 +744,7 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             field_name="homeworld evidence aggregate locationProvenances",
         ),
         evidence_algorithm_version=version_raw,
+        fleet_age_input_stamp=fleet_age_input_stamp,
         layout_prior_algorithm_version=selection_version,
         layout_prior_input_fingerprint=selection_fingerprint,
         layout_prior_evidence_lambda=selection_evidence_lambda,

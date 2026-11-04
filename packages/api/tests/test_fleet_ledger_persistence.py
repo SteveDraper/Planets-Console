@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
@@ -271,6 +272,66 @@ def test_delete_ledger_removes_one_player_entry(persistence, sample_ledger):
     assert persistence.get_ledger(628580, 1, 111, 8) is None
     assert persistence.get_ledger(628580, 1, 111, 3) is not None
     assert persistence.list_ledger_player_ids(628580, 1, 111) == [3]
+
+
+def test_delete_does_not_parse_ledgers_and_notifies_for_each_removed_file(memory_backend):
+    counts = FileIoCounts()
+    persistence = FleetSnapshotPersistenceService(CountingStorageBackend(memory_backend, counts))
+    events: list[tuple[int, int]] = []
+    persistence.on_fleet_age_identity_changed = lambda event: events.append(
+        (event.turn, event.player_id)
+    )
+    empty_built_turns = PersistedFleetLedger(ledger=FleetAcquisitionLedger(player_id=8))
+    known = PersistedFleetLedger(
+        ledger=FleetAcquisitionLedger(
+            player_id=3,
+            records=[
+                FleetShipRecord(
+                    record_id="rec-known",
+                    fields=FleetShipRecordFields(
+                        ship_id=FleetFieldKnown(9),
+                        built_turn=FleetFieldKnown(4),
+                    ),
+                )
+            ],
+        )
+    )
+    persistence.put_ledger(628580, 1, 111, 8, empty_built_turns)
+    persistence.put_ledger(628580, 1, 111, 3, known)
+    counts.reset()
+    events.clear()
+
+    with patch("api.analytics.fleet.persistence.persisted_fleet_ledger_from_json") as parse:
+        persistence.delete_ledger(628580, 1, 111, 3)
+        persistence.delete_ledger(628580, 1, 111, 8)
+        persistence.delete_ledger(628580, 1, 111, 8)
+        parse.assert_not_called()
+
+    assert counts.get_calls == 0
+    assert events == [(111, 3), (111, 8)]
+    assert persistence.get_ledger(628580, 1, 111, 3) is None
+    assert persistence.get_ledger(628580, 1, 111, 8) is None
+
+    persistence.put_ledger(628580, 1, 111, 8, empty_built_turns)
+    persistence.put_ledger(628580, 1, 111, 3, known)
+    counts.reset()
+    events.clear()
+    with patch("api.analytics.fleet.persistence.persisted_fleet_ledger_from_json") as parse:
+        persistence.delete_snapshot(628580, 1, 111)
+        parse.assert_not_called()
+
+    assert counts.get_calls == 0
+    assert counts.delete_calls == 2
+    assert events == [(111, 3), (111, 8)]
+
+    persistence.on_fleet_age_identity_changed = None
+    persistence.put_ledger(628580, 1, 111, 8, empty_built_turns)
+    counts.reset()
+    with patch("api.analytics.fleet.persistence.persisted_fleet_ledger_from_json") as parse:
+        persistence.delete_ledger(628580, 1, 111, 8)
+        parse.assert_not_called()
+    assert counts.get_calls == 0
+    assert persistence.get_ledger(628580, 1, 111, 8) is None
 
 
 def test_delete_snapshot_removes_all_player_ledgers(persistence, memory_backend, sample_ledger):

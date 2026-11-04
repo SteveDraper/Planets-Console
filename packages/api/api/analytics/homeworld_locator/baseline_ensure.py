@@ -17,7 +17,10 @@ from api.analytics.homeworld_locator.constants import (
     HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     LAYOUT_PRIOR_ALGORITHM_VERSION,
 )
-from api.analytics.homeworld_locator.evidence_ensure import evidence_aggregate_at_shell_turn
+from api.analytics.homeworld_locator.evidence_ensure import (
+    ensure_evidence_floor_algorithm_current,
+    evidence_aggregate_at_shell_turn,
+)
 from api.analytics.homeworld_locator.evidence_refine import (
     apply_definite_keyed_candidate_culls,
     candidate_planet_ids_from_records,
@@ -25,6 +28,7 @@ from api.analytics.homeworld_locator.evidence_refine import (
 )
 from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
 from api.analytics.homeworld_locator.evidence_refine_timing_history import record_baseline_report
+from api.analytics.homeworld_locator.fleet_age_input import read_fleet_age_input_stamp
 from api.analytics.homeworld_locator.layout_prior import (
     apply_layout_prior_most_probable,
     layout_prior_evidence_fingerprint,
@@ -84,9 +88,8 @@ def _floor_aggregate_with_baseline_ownership(
     Refine is skipped when shell == baseline (the DAG does not ensure turn 1 as a
     refine node). Ownership accumulate -- including preferred-candidate ownership
     on the viewpoint definite HW -- must therefore run as part of floor write so
-    overlay ``isPinned`` can unique-resolve that slot on turn 1. Fleet
-    ``built_turn`` ages are not required here: T1 envelopes have zero travel
-    turns; later shell turns still refine with fleet via the DAG.
+    overlay ``isPinned`` can unique-resolve that slot on turn 1. The floor reads
+    every roster player's on-disk ledger at the baseline turn for ship ages.
     """
     stub = HomeworldEvidenceAggregate(
         turn=baseline_turn,
@@ -106,6 +109,12 @@ def _floor_aggregate_with_baseline_ownership(
         candidate_planet_ids_set=candidate_planet_ids_from_records(candidates),
         planets_by_id={planet.id: planet for planet in baseline_turn_info.planets},
         load_turn=services.load_turn,
+        fleet_age_input_stamp=read_fleet_age_input_stamp(
+            services.fleet_persistence,
+            game_id=services.game_id,
+            perspective=services.perspective,
+            turn=baseline_turn_info,
+        ),
     ).aggregate
 
 
@@ -333,21 +342,34 @@ def ensure_homeworld_baseline(
     Turn-1 auto-ensure reads ``ctx.ensure_turn``.
     """
     result = compute_homeworld_baseline(ctx, shell_turn=shell_turn)
-    if not result.recomputed:
-        return result
     services = resolve_homeworld_services(ctx)
-    services.persistence.invalidate_evidence_from_turn(
+    if result.recomputed:
+        services.persistence.invalidate_evidence_from_turn(
+            services.game_id,
+            services.perspective,
+            result.game_state.baseline_turn,
+        )
+        services.persistence.put_baseline(
+            services.game_id,
+            services.perspective,
+            result.game_state,
+            result.floor_aggregate,
+        )
+        return result
+    rewritten = ensure_evidence_floor_algorithm_current(
+        services,
+        baseline_turn=result.game_state.baseline_turn,
+    )
+    if not rewritten:
+        return result
+    floor = services.persistence.get_evidence_aggregate(
         services.game_id,
         services.perspective,
         result.game_state.baseline_turn,
     )
-    services.persistence.put_baseline(
-        services.game_id,
-        services.perspective,
-        result.game_state,
-        result.floor_aggregate,
-    )
-    return result
+    if floor is None:
+        raise ValidationError("homeworld floor evidence aggregate missing after fleet-age rewrite")
+    return replace(result, floor_aggregate=floor)
 
 
 def materialize_homeworld_candidates(

@@ -344,6 +344,7 @@ def test_ensure_refine_freeze_cutoff_walks_scoreboard_turns() -> None:
     from api.analytics.homeworld_locator.evidence_ensure import (
         compute_homeworld_evidence_refine_step_detailed,
     )
+    from api.analytics.homeworld_locator.fleet_age_input import read_fleet_age_input_stamp
     from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
     from api.analytics.homeworld_locator.types import (
         HomeworldLocatorGameState,
@@ -377,6 +378,12 @@ def test_ensure_refine_freeze_cutoff_walks_scoreboard_turns() -> None:
             turn=4,
             baseline_turn=1,
             evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+            fleet_age_input_stamp=read_fleet_age_input_stamp(
+                services.fleet_persistence,
+                game_id=628580,
+                perspective=1,
+                turn=turns[4],
+            ),
             origin_distance_observations=(
                 OriginDistanceObservation(turn=2, x=0, y=0, matched_planet_ids=(10,)),
                 OriginDistanceObservation(turn=4, x=1, y=1, matched_planet_ids=(10,)),

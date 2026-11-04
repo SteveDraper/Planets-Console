@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from api.analytics.fleet.types import (
     FleetFieldBounded,
     FleetFieldConstraint,
@@ -36,6 +38,17 @@ def known_built_turn_value(record: FleetShipRecord) -> int | None:
     if isinstance(built_turn, FleetFieldKnown) and isinstance(built_turn.value, int):
         return built_turn.value
     return None
+
+
+def known_ship_built_turns(records: Iterable[FleetShipRecord]) -> dict[int, int]:
+    """Known positive ``ship_id -> built_turn`` pairs on these ledger records."""
+    built_turns: dict[int, int] = {}
+    for record in records:
+        ship_id = known_positive_component_id(record.fields.ship_id)
+        built_turn = known_built_turn_value(record)
+        if ship_id is not None and built_turn is not None:
+            built_turns[ship_id] = built_turn
+    return built_turns
 
 
 def known_ship_id_value(record: FleetShipRecord) -> int | None:

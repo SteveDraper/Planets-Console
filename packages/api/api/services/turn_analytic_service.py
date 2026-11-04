@@ -71,14 +71,14 @@ class TurnAnalyticService:
             self._inference_persistence = inference_persistence
         else:
             self._inference_persistence = InferenceRowPersistenceService(storage)
-        if fleet_persistence is not None:
-            self._fleet_persistence = fleet_persistence
-        else:
-            self._fleet_persistence = FleetSnapshotPersistenceService(storage)
         if homeworld_persistence is not None:
             self._homeworld_persistence = homeworld_persistence
         else:
             self._homeworld_persistence = HomeworldLocatorPersistenceService(storage)
+        if fleet_persistence is not None:
+            self._fleet_persistence = fleet_persistence
+        else:
+            self._fleet_persistence = FleetSnapshotPersistenceService(storage)
         if inference_invalidation is not None:
             self._inference_invalidation = inference_invalidation
         else:
@@ -268,6 +268,7 @@ class TurnAnalyticService:
             perspective=perspective,
             load_turn=load_turn,
             list_stored_turns=list_stored_turns,
+            fleet_persistence=self._fleet_persistence,
         )
 
     def _fleet_compute_services(
@@ -645,6 +646,27 @@ class TurnAnalyticService:
             sector_index=sector_index,
             owner_slot=owner_slot,
         )
+
+    def fleet_age_refetch_notice(
+        self,
+        game_id: int,
+        perspective: int,
+        *,
+        after_epoch: int,
+    ) -> dict[str, int | None]:
+        """Build-turn identity changes after ``after_epoch``.
+
+        Reads the durable homeworld fleet-age log. Does not ensure or wake fleet.
+        ``fromTurn`` is null when ``after_epoch`` equals the stored generation,
+        and 1 when ``after_epoch`` is ahead of that generation or the retained
+        window does not hold the changes.
+        """
+        notice = self._homeworld_persistence.fleet_age_refetch_notice(
+            game_id,
+            perspective,
+            after_epoch=after_epoch,
+        )
+        return {"epoch": notice.epoch, "fromTurn": notice.from_turn}
 
     def refresh_homeworld_locator(
         self,

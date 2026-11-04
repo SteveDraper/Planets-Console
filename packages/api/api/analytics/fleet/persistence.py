@@ -12,6 +12,11 @@ from api.analytics.fleet.constants import (
     FLEET_EVIDENCE_MARK_SEGMENT,
     FLEET_MATERIALIZATION_VERSION,
 )
+from api.analytics.fleet.identity_change import (
+    OnFleetAgeIdentityChangedCallback,
+    notify_fleet_age_identity_if_changed,
+    notify_fleet_age_identity_removed,
+)
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.fleet.serialization import (
     fleet_evidence_mark_from_json,
@@ -155,10 +160,12 @@ class FleetSnapshotPersistenceService:
         *,
         on_snapshot_persisted: OnSnapshotPersistedCallback | None = None,
         on_ledger_persisted: OnLedgerPersistedCallback | None = None,
+        on_fleet_age_identity_changed: OnFleetAgeIdentityChangedCallback | None = None,
     ) -> None:
         self._storage = storage
         self._on_snapshot_persisted = on_snapshot_persisted
         self._on_ledger_persisted = on_ledger_persisted
+        self._on_fleet_age_identity_changed = on_fleet_age_identity_changed
         # Player-scoped: fleet compute / gap-fill coherence across turns.
         self._invalidation_generation: dict[tuple[int, int, int], int] = {}
         # Turn-scoped: scores@N epoch tracks fleet@(N-1) only.
@@ -247,6 +254,15 @@ class FleetSnapshotPersistenceService:
                 prior_was_ensure_final=prior_was_ensure_final,
                 persisted=to_store,
             )
+            notify_fleet_age_identity_if_changed(
+                self._on_fleet_age_identity_changed,
+                game_id=game_id,
+                perspective=perspective,
+                turn=turn_number,
+                player_id=player_id,
+                prior=prior,
+                current=to_store,
+            )
             if defer_ledger_persisted_notification:
                 return PutLedgerResult(stored=to_store, deferred_notification=notification)
             if notification is not None:
@@ -306,8 +322,17 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         player_id: int,
     ) -> None:
-        self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
+        removed = self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
         self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
+        if not removed:
+            return
+        notify_fleet_age_identity_removed(
+            self._on_fleet_age_identity_changed,
+            game_id=game_id,
+            perspective=perspective,
+            turn=turn_number,
+            player_id=player_id,
+        )
 
     def list_ledger_player_ids(
         self,
@@ -391,8 +416,7 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
     ) -> None:
         for player_id in self._list_player_ids(game_id, perspective, turn_number):
-            self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
-            self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
+            self.delete_ledger(game_id, perspective, turn_number, player_id)
 
     def evidence_mark(
         self,
@@ -617,6 +641,17 @@ class FleetSnapshotPersistenceService:
     def on_ledger_persisted(self, callback: OnLedgerPersistedCallback | None) -> None:
         self._on_ledger_persisted = callback
 
+    @property
+    def on_fleet_age_identity_changed(self) -> OnFleetAgeIdentityChangedCallback | None:
+        return self._on_fleet_age_identity_changed
+
+    @on_fleet_age_identity_changed.setter
+    def on_fleet_age_identity_changed(
+        self,
+        callback: OnFleetAgeIdentityChangedCallback | None,
+    ) -> None:
+        self._on_fleet_age_identity_changed = callback
+
     def _bump_durable_evidence_mark(
         self,
         game_id: int,
@@ -738,8 +773,11 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         turn_number: int,
         player_id: int,
-    ) -> None:
-        self._delete_if_present(self.ledger_key(game_id, perspective, turn_number, player_id))
+    ) -> bool:
+        """Remove the ledger file. Return whether a file was present."""
+        return self._delete_if_present(
+            self.ledger_key(game_id, perspective, turn_number, player_id),
+        )
 
     def _list_player_ids(
         self,

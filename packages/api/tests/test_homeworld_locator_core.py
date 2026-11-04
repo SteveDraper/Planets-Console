@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
     FleetMaterializationProvenance,
@@ -51,6 +52,7 @@ from api.analytics.homeworld_locator.types import (
 )
 from api.analytics.persistence_paths import (
     game_global_analytic_document_key,
+    perspective_analytic_document_key,
     turn_scoped_analytic_document_key,
 )
 from api.analytics.turn_roster import iter_turn_players, race_id_by_owner_slot
@@ -99,6 +101,7 @@ def _services(
 ):
     return build_ephemeral_homeworld_services(
         persistence=persistence,
+        fleet_persistence=FleetSnapshotPersistenceService(MemoryAssetBackend(initial={})),
         game_id=game_id,
         perspective=perspective,
         load_turn=lambda n: turns.get(n),
@@ -158,13 +161,16 @@ def _export_services(
     services,
     turns: dict[int, TurnInfo],
 ) -> dict[str, object]:
-    """Homeworld + fleet export services with final fleet ledgers for dependency walk."""
+    """Homeworld services plus on-disk fleet ledgers for fleet-age stamps."""
     shell_turn = turns[max(turns)]
-    fleet_services = build_ephemeral_fleet_compute_services(
-        shell_turn,
-        game_id=services.game_id,
-        perspective=services.perspective,
-        stored_turns=turns,
+    fleet_services = replace(
+        build_ephemeral_fleet_compute_services(
+            shell_turn,
+            game_id=services.game_id,
+            perspective=services.perspective,
+            stored_turns=turns,
+        ),
+        persistence=services.fleet_persistence,
     )
     _seed_fleet_final_ledgers(fleet_services, turns=turns)
     return {
@@ -191,6 +197,9 @@ def test_path_helpers() -> None:
     )
     assert turn_scoped_analytic_document_key(628580, 1, 111, ANALYTIC_ID) == (
         "games/628580/1/turns/111/analytics/homeworld-locator"
+    )
+    assert perspective_analytic_document_key(628580, 1, ANALYTIC_ID) == (
+        "games/628580/1/analytics/homeworld-locator"
     )
 
 
@@ -886,7 +895,6 @@ def test_export_catalog_declares_self_chain() -> None:
     assert EXPORT_CATALOG.analytic_id == ANALYTIC_ID
     assert EXPORT_CATALOG.ensure_dependencies == (
         EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
-        EnsureDependency(analytic_id="fleet", turn_delta=0, player_id="all", quality="final"),
     )
 
 
