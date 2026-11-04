@@ -7,7 +7,6 @@ from dataclasses import replace
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
-from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.baseline import infer_homeworld_baseline_candidates
 from api.analytics.homeworld_locator.compute_services import (
     HomeworldLocatorComputeServices,
@@ -29,10 +28,7 @@ from api.analytics.homeworld_locator.evidence_refine import (
 )
 from api.analytics.homeworld_locator.evidence_refine_report import build_baseline_report
 from api.analytics.homeworld_locator.evidence_refine_timing_history import record_baseline_report
-from api.analytics.homeworld_locator.fleet_age_input import (
-    fleet_persistence_from_context,
-    read_fleet_age_input_stamp,
-)
+from api.analytics.homeworld_locator.fleet_age_input import read_fleet_age_input_stamp
 from api.analytics.homeworld_locator.layout_prior import (
     apply_layout_prior_most_probable,
     layout_prior_evidence_fingerprint,
@@ -86,7 +82,6 @@ def _floor_aggregate_with_baseline_ownership(
     baseline_turn: int,
     baseline_turn_info: TurnInfo,
     candidates: tuple[HomeworldCandidateRecord, ...],
-    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> HomeworldEvidenceAggregate:
     """Seed the baseline floor, then run one evidence refine on that same turn.
 
@@ -115,7 +110,7 @@ def _floor_aggregate_with_baseline_ownership(
         planets_by_id={planet.id: planet for planet in baseline_turn_info.planets},
         load_turn=services.load_turn,
         fleet_age_input_stamp=read_fleet_age_input_stamp(
-            fleet_persistence,
+            services.fleet_persistence,
             game_id=services.game_id,
             perspective=services.perspective,
             turn=baseline_turn_info,
@@ -317,7 +312,6 @@ def compute_homeworld_baseline(
         baseline_turn=baseline_turn,
         baseline_turn_info=baseline_turn_info,
         candidates=candidates,
-        fleet_persistence=fleet_persistence_from_context(ctx),
     )
     record_baseline_report(
         build_baseline_report(
@@ -365,7 +359,6 @@ def ensure_homeworld_baseline(
     rewritten = ensure_evidence_floor_algorithm_current(
         services,
         baseline_turn=result.game_state.baseline_turn,
-        fleet_persistence=fleet_persistence_from_context(ctx),
     )
     if not rewritten:
         return result

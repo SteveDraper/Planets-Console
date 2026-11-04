@@ -32,7 +32,6 @@ from api.analytics.homeworld_locator.evidence_refine_report import build_ensure_
 from api.analytics.homeworld_locator.evidence_refine_timing_history import (
     record_ensure_failure_report,
 )
-from api.analytics.homeworld_locator.fleet_age_input import fleet_persistence_from_context
 from api.analytics.homeworld_locator.serialization import (
     homeworld_candidate_record_to_json,
     homeworld_evidence_aggregate_to_json,
@@ -290,7 +289,6 @@ def materialize_homeworld_export_tree(
         services,
         shell_turn=turn,
         game_state_baseline_turn=result.game_state.baseline_turn,
-        fleet_persistence=fleet_persistence_from_context(ctx),
     )
     return {
         "meta": build_export_meta_branch(host_turn=scope.turn),

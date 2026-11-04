@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.baseline_ensure import compute_homeworld_baseline
 from api.analytics.homeworld_locator.compute_services import (
     HomeworldLocatorComputeServices,
@@ -18,7 +17,6 @@ from api.analytics.homeworld_locator.evidence_ensure import (
     evidence_refined_through_shell,
     record_evidence_refine_step_report,
 )
-from api.analytics.homeworld_locator.fleet_age_input import fleet_persistence_from_context
 from api.analytics.homeworld_locator.serialization import (
     fleet_age_stale_marker_from_json,
     fleet_age_stale_marker_to_json,
@@ -49,7 +47,6 @@ HOMEWORLD_COMPUTE_PROFILE = AnalyticComputeProfile(
 # Inline-only job-wire keys (not JSON-serializable across pool boundaries).
 _COMPUTE_SERVICES_KEY = "computeServices"
 _QUERY_CONTEXT_KEY = "queryContext"
-_FLEET_PERSISTENCE_KEY = "fleetPersistence"
 
 
 def build_homeworld_baseline_job_wire(
@@ -154,7 +151,6 @@ def build_homeworld_refine_job_wire(
         "turnWire": turn_info_to_json(turn),
         "analyticId": ANALYTIC_ID,
         _COMPUTE_SERVICES_KEY: resolve_homeworld_services(ctx),
-        _FLEET_PERSISTENCE_KEY: fleet_persistence_from_context(ctx),
     }
 
 
@@ -188,14 +184,6 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         raise ValidationError("homeworld refine requires game-global state")
 
     shell_turn = turn.settings.turn
-    fleet_persistence = job_wire.get(_FLEET_PERSISTENCE_KEY)
-    if fleet_persistence is not None and not isinstance(
-        fleet_persistence, FleetSnapshotPersistenceService
-    ):
-        raise TypeError(
-            "homeworld refine job wire fleetPersistence must be "
-            "FleetSnapshotPersistenceService when present"
-        )
 
     already_durable = evidence_refined_through_shell(
         services,
@@ -206,12 +194,10 @@ def run_homeworld_refine(job_wire: dict[str, Any]) -> StepResult:
         ensure_evidence_floor_algorithm_current(
             services,
             baseline_turn=state.baseline_turn,
-            fleet_persistence=fleet_persistence,
         )
     step = compute_homeworld_evidence_refine_step_detailed(
         services,
         turn=turn,
-        fleet_persistence=fleet_persistence,
     )
     # Persist timing is owned by PersistencePolicy; record refine compute cost here.
     if not already_durable:

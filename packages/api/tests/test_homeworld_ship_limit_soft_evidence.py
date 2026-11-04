@@ -379,7 +379,7 @@ def test_ensure_refine_freeze_cutoff_walks_scoreboard_turns() -> None:
             baseline_turn=1,
             evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
             fleet_age_input_stamp=read_fleet_age_input_stamp(
-                None,
+                services.fleet_persistence,
                 game_id=628580,
                 perspective=1,
                 turn=turns[4],

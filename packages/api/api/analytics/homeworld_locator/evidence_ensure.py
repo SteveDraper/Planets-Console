@@ -12,7 +12,6 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.constants import HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
 from api.analytics.homeworld_locator.evidence_refine import (
@@ -154,7 +153,6 @@ def ensure_evidence_floor_algorithm_current(
     services: HomeworldLocatorComputeServices,
     *,
     baseline_turn: int,
-    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> bool:
     """Rewrite+persist the baseline floor when its algorithm version or fleet-age marker is stale.
 
@@ -201,7 +199,7 @@ def ensure_evidence_floor_algorithm_current(
         services.perspective,
     )
     stamp = read_fleet_age_input_stamp(
-        fleet_persistence,
+        services.fleet_persistence,
         game_id=services.game_id,
         perspective=services.perspective,
         turn=turn,
@@ -254,7 +252,6 @@ def compute_homeworld_evidence_refine_step(
     services: HomeworldLocatorComputeServices,
     *,
     turn: TurnInfo,
-    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> HomeworldEvidenceAggregate:
     """Compute one refine step for ``turn`` without persisting.
 
@@ -270,7 +267,6 @@ def compute_homeworld_evidence_refine_step(
     return compute_homeworld_evidence_refine_step_detailed(
         services,
         turn=turn,
-        fleet_persistence=fleet_persistence,
     ).aggregate
 
 
@@ -278,7 +274,6 @@ def compute_homeworld_evidence_refine_step_detailed(
     services: HomeworldLocatorComputeServices,
     *,
     turn: TurnInfo,
-    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> EvidenceRefineStepResult:
     """Like :func:`compute_homeworld_evidence_refine_step`` with timing payload.
 
@@ -376,7 +371,7 @@ def compute_homeworld_evidence_refine_step_detailed(
             "refine that turn before this one"
         )
     stamp = read_fleet_age_input_stamp(
-        fleet_persistence,
+        services.fleet_persistence,
         game_id=services.game_id,
         perspective=services.perspective,
         turn=turn,
@@ -439,7 +434,6 @@ def ensure_homeworld_evidence_refined(
     *,
     shell_turn: TurnInfo,
     game_state_baseline_turn: int,
-    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> HomeworldEvidenceAggregate:
     """Ensure evidence at the shell turn via a single refine step, then persist.
 
@@ -475,13 +469,11 @@ def ensure_homeworld_evidence_refined(
     ensure_evidence_floor_algorithm_current(
         services,
         baseline_turn=game_state_baseline_turn,
-        fleet_persistence=fleet_persistence,
     )
 
     step = compute_homeworld_evidence_refine_step_detailed(
         services,
         turn=shell_turn,
-        fleet_persistence=fleet_persistence,
     )
     persist_ms = 0.0
     if step.computed:

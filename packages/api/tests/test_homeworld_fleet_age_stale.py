@@ -381,7 +381,6 @@ def test_floor_rewrite_reads_baseline_stamps_only_when_marker_covers_it() -> Non
             ensure_evidence_floor_algorithm_current(
                 services,
                 baseline_turn=1,
-                fleet_persistence=fleet,
             )
             is False
         )
@@ -394,7 +393,6 @@ def test_floor_rewrite_reads_baseline_stamps_only_when_marker_covers_it() -> Non
         assert ensure_evidence_floor_algorithm_current(
             services,
             baseline_turn=1,
-            fleet_persistence=fleet,
         )
         assert get_ledger.call_count > 0
         assert {call.args[2] for call in get_ledger.call_args_list} == {1}

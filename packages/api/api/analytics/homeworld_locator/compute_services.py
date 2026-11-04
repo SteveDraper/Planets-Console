@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.errors import ValidationError
@@ -21,6 +22,8 @@ class HomeworldLocatorComputeServices:
     perspective: int
     load_turn: Callable[[int], TurnInfo | None]
     list_stored_turns: Callable[[], list[int]]
+    fleet_persistence: FleetSnapshotPersistenceService
+    """Fleet ledgers read for build-turn stamps. Callers share this with fleet compute services."""
     game_info: GameInfo | None = None
     """Optional roster for Player.id ↔ perspective slot mapping via GameService."""
 
@@ -40,6 +43,7 @@ def resolve_homeworld_services(ctx: AnalyticQueryContext) -> HomeworldLocatorCom
 def build_ephemeral_homeworld_services(
     *,
     persistence: HomeworldLocatorPersistenceService,
+    fleet_persistence: FleetSnapshotPersistenceService,
     game_id: int,
     perspective: int,
     load_turn: Callable[[int], TurnInfo | None],
@@ -64,5 +68,6 @@ def build_ephemeral_homeworld_services(
         perspective=perspective,
         load_turn=load_turn,
         list_stored_turns=_list_stored,
+        fleet_persistence=fleet_persistence,
         game_info=game_info,
     )

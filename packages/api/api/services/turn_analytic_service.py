@@ -268,6 +268,7 @@ class TurnAnalyticService:
             perspective=perspective,
             load_turn=load_turn,
             list_stored_turns=list_stored_turns,
+            fleet_persistence=self._fleet_persistence,
         )
 
     def _fleet_compute_services(

@@ -539,14 +539,10 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
         from api.analytics.homeworld_locator.evidence_ensure import (
             ensure_homeworld_evidence_refined,
         )
-        from api.analytics.homeworld_locator.fleet_age_input import (
-            fleet_persistence_from_context,
-        )
 
         turn = ctx.load_turn(scope.turn)
         assert turn is not None
         resolved = resolve_homeworld_services(ctx)
-        fleet_persistence = fleet_persistence_from_context(ctx)
         baseline_result = ensure_homeworld_baseline(ctx, shell_turn=turn)
         for refine_turn_number in range(
             baseline_result.game_state.baseline_turn,
@@ -558,7 +554,6 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
                 resolved,
                 shell_turn=refine_turn,
                 game_state_baseline_turn=baseline_result.game_state.baseline_turn,
-                fleet_persistence=fleet_persistence,
             )
         return True
 
@@ -618,12 +613,9 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
         perspective=services.perspective,
         ensure_turn=ensure_turn,
     ).exports
-    from api.analytics.homeworld_locator.fleet_age_input import (
-        fleet_persistence_from_context,
-        read_fleet_age_input_stamp,
-    )
+    from api.analytics.homeworld_locator.fleet_age_input import read_fleet_age_input_stamp
 
-    fleet_persistence = fleet_persistence_from_context(ctx)
+    fleet_persistence = services.fleet_persistence
     floor_stamp = read_fleet_age_input_stamp(
         fleet_persistence,
         game_id=628580,
@@ -1151,6 +1143,8 @@ def test_run_homeworld_refine_persist_round_trip(persistence) -> None:
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
     )
+    assert "fleetPersistence" not in job_wire
+    assert job_wire["computeServices"].fleet_persistence is services.fleet_persistence
     result = run_homeworld_refine(job_wire)
     assert result.outcome == "persist"
     assert persistence.get_evidence_aggregate(628580, 1, 2) is None

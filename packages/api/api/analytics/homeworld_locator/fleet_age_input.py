@@ -10,9 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.field_constraints import known_ship_built_turns
-from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.turn_roster import iter_turn_players
 from api.models.game import TurnInfo
@@ -48,7 +46,7 @@ def merged_built_turns(stamp: FleetAgeInputStamp) -> dict[int, int]:
 
 
 def read_fleet_age_input_stamp(
-    persistence: FleetSnapshotPersistenceService | None,
+    persistence: FleetSnapshotPersistenceService,
     *,
     game_id: int,
     perspective: int,
@@ -58,9 +56,6 @@ def read_fleet_age_input_stamp(
     players: list[FleetAgePlayerStamp] = []
     player_ids = sorted({player.id for player in iter_turn_players(turn)})
     for player_id in player_ids:
-        if persistence is None:
-            players.append(FleetAgePlayerStamp(player_id=player_id, missing=True))
-            continue
         persisted = persistence.get_ledger(game_id, perspective, turn.settings.turn, player_id)
         if persisted is None:
             players.append(FleetAgePlayerStamp(player_id=player_id, missing=True))
@@ -74,12 +69,3 @@ def read_fleet_age_input_stamp(
             )
         )
     return FleetAgeInputStamp(players=tuple(players))
-
-
-def fleet_persistence_from_context(
-    ctx: AnalyticQueryContext,
-) -> FleetSnapshotPersistenceService | None:
-    fleet = lookup_fleet_compute_services(ctx)
-    if fleet is None:
-        return None
-    return fleet.persistence

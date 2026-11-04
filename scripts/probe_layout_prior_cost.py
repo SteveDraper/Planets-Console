@@ -30,6 +30,7 @@ sys.path.insert(0, _api_root_str)
 
 import typer  # noqa: E402
 from api.analytics.compute_context import make_analytic_compute_context  # noqa: E402
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService  # noqa: E402
 from api.analytics.homeworld_locator.baseline_ensure import (  # noqa: E402
     materialize_homeworld_candidate_view,
 )
@@ -345,6 +346,7 @@ def main(
     persistence = HomeworldLocatorPersistenceService(storage)
     services = build_ephemeral_homeworld_services(
         persistence=persistence,
+        fleet_persistence=FleetSnapshotPersistenceService(storage),
         game_id=game_id,
         perspective=resolved_perspective,
         load_turn=lambda n: turn_load.get_turn_info(game_id, resolved_perspective, n),
