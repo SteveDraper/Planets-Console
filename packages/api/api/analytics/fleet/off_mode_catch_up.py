@@ -3,9 +3,9 @@
 Backfill earlier turns is off by default. A stale open refreshes fleet from
 that turn back through ``appliesFromTurn`` and does not schedule scoreboard
 solves on the earlier hops. An absent mark does not walk backward. The open
-turn's own scoreboard still runs. A catch-up persist of that turn stamps the
-current mark. A scoreboard persist that carries new information for a later
-turn bumps the mark and leaves ledger files in place.
+turn's own scoreboard still runs. ``off_mode_persist_decision`` is the one
+table for that scoreboard and for the fleet merge: stamp, bump, or first
+persist, and the generation the open turn's merge keeps.
 
 The open turn is the root of the submission the user opens. The orchestrator
 copies it onto every node of that plan, and fleet job wires carry ``openTurn``
@@ -18,6 +18,8 @@ the walk.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from enum import StrEnum
 
 from api.analytics.fleet.types import FleetEvidenceMark, PersistedFleetLedger
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -109,23 +111,67 @@ def mark_is_absent(mark: FleetEvidenceMark) -> bool:
     return mark.evidence_generation == 0 and mark.applies_from_turn is None
 
 
-def scoreboard_persist_stamps_current_mark(
+class MarkPersist(StrEnum):
+    """What a scoreboard persist does to the player's evidence mark."""
+
+    STAMP = "stamp"
+    BUMP = "bump"
+    FIRST_PERSIST = "first_persist"
+
+
+@dataclass(frozen=True)
+class OffModePersistDecision:
+    """Stamp, bump, or first persist, and the generation a fleet merge writes.
+
+    ``merge_generation`` is None when the merge stamps the current mark. An int
+    is the generation kept on the open turn's approximate file so that merge
+    does not look complete before its scoreboard is stored.
+    """
+
+    mark_persist: MarkPersist
+    merge_generation: int | None
+
+
+def off_mode_persist_decision(
     *,
     backfill_enabled: bool,
     open_turn: int | None,
+    is_catch_up: bool,
     host_turn: int,
     mark: FleetEvidenceMark,
-) -> bool:
-    """Catch-up scoreboard of the turn already being refreshed stamps and does not bump.
+    stored_generation: int | None,
+) -> OffModePersistDecision:
+    """One table for a scoreboard persist and for the fleet merge at ``host_turn``.
 
-    An absent mark is the first originating persist: it sets generation 1
-    instead of stamping. Any other persist bumps.
+    Scoreboard: the submission's open turn, with backfill off and a mark
+    already present, stamps and does not increment. An absent mark is the
+    first persist and becomes generation 1. Every other scoreboard persist
+    bumps. ``is_catch_up`` and ``stored_generation`` do not change this
+    classification. A catch-up hop does not run a scoreboard solve.
+
+    Fleet merge: a catch-up hop, any turn that is not the open turn, and every
+    turn while backfill is on stamps the current mark (``merge_generation``
+    is None). The open turn's own merge keeps ``stored_generation``, or 0 when
+    the file is missing. ``mark`` does not change the kept generation.
     """
-    if backfill_enabled or open_turn is None or host_turn != open_turn:
-        return False
     if mark_is_absent(mark):
-        return False
-    return True
+        mark_persist = MarkPersist.FIRST_PERSIST
+    elif not backfill_enabled and open_turn is not None and host_turn == open_turn:
+        mark_persist = MarkPersist.STAMP
+    else:
+        mark_persist = MarkPersist.BUMP
+
+    if backfill_enabled or is_catch_up or open_turn is None or host_turn != open_turn:
+        merge_generation = None
+    elif stored_generation is None:
+        merge_generation = 0
+    else:
+        merge_generation = stored_generation
+
+    return OffModePersistDecision(
+        mark_persist=mark_persist,
+        merge_generation=merge_generation,
+    )
 
 
 def off_mode_prior_needs_catch_up(

@@ -22,6 +22,8 @@ def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
         "materializeTurn": int(job_wire["materializeTurn"]),
         "fleetPersistLeg": FLEET_PERSIST_LEG_OBSERVATION,
     }
+    # Persist requires this integer. A job wire without it leaves the field
+    # off the payload, and fleet persist rejects that payload.
     epoch = job_wire.get("playerInvalidationGeneration")
     if isinstance(epoch, int) and not isinstance(epoch, bool):
         payload["playerInvalidationGeneration"] = epoch

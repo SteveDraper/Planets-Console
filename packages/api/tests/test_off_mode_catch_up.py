@@ -10,6 +10,7 @@ from api.analytics.fleet.compute_orchestration import (
 )
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.off_mode_catch_up import MarkPersist, off_mode_persist_decision
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -28,6 +29,7 @@ from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.registry import build_compute_registry
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
+from api.errors import ValidationError
 from api.exceptions import DiscardedWorkRefused, FleetScoresEvidenceOpenError
 from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
 from api.services.game_service import backfill_earlier_turns_store_key
@@ -139,6 +141,145 @@ def _install_open_root(game_id: int, perspective: int, player_id: int, turn: int
     )
     orchestrator.nodes[scope] = node
     return node
+
+
+def test_off_mode_persist_decision_is_one_table():
+    """Scoreboard classification and the fleet merge generation share one record."""
+    present = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
+    absent = FleetEvidenceMark()
+    cases = (
+        (
+            "open turn stamps and keeps the stored generation",
+            False,
+            40,
+            False,
+            40,
+            present,
+            1,
+            MarkPersist.STAMP,
+            1,
+        ),
+        (
+            "open turn with no file keeps generation 0",
+            False,
+            40,
+            False,
+            40,
+            present,
+            None,
+            MarkPersist.STAMP,
+            0,
+        ),
+        (
+            "catch-up hop merge stamps; a scoreboard of that turn would bump",
+            False,
+            40,
+            True,
+            39,
+            present,
+            1,
+            MarkPersist.BUMP,
+            None,
+        ),
+        (
+            "later turn bumps and stamps the merge",
+            False,
+            40,
+            False,
+            41,
+            present,
+            1,
+            MarkPersist.BUMP,
+            None,
+        ),
+        (
+            "no open turn bumps",
+            False,
+            None,
+            False,
+            40,
+            present,
+            1,
+            MarkPersist.BUMP,
+            None,
+        ),
+        (
+            "absent mark with no open is the first persist",
+            False,
+            None,
+            False,
+            10,
+            absent,
+            None,
+            MarkPersist.FIRST_PERSIST,
+            None,
+        ),
+        (
+            "absent mark on the open turn is the first persist and keeps 0",
+            False,
+            40,
+            False,
+            40,
+            absent,
+            None,
+            MarkPersist.FIRST_PERSIST,
+            0,
+        ),
+        (
+            "backfill on bumps and stamps the merge",
+            True,
+            40,
+            False,
+            40,
+            present,
+            1,
+            MarkPersist.BUMP,
+            None,
+        ),
+        (
+            "backfill on an absent mark is the first persist",
+            True,
+            None,
+            False,
+            10,
+            absent,
+            None,
+            MarkPersist.FIRST_PERSIST,
+            None,
+        ),
+        (
+            "catch-up flag on the open turn still stamps the mark and the merge",
+            False,
+            40,
+            True,
+            40,
+            present,
+            1,
+            MarkPersist.STAMP,
+            None,
+        ),
+    )
+    for (
+        name,
+        backfill_enabled,
+        open_turn,
+        is_catch_up,
+        host_turn,
+        mark,
+        stored_generation,
+        mark_persist,
+        merge_generation,
+    ) in cases:
+        decision = off_mode_persist_decision(
+            backfill_enabled=backfill_enabled,
+            open_turn=open_turn,
+            is_catch_up=is_catch_up,
+            host_turn=host_turn,
+            mark=mark,
+            stored_generation=stored_generation,
+        )
+        assert decision.mark_persist is mark_persist, name
+        assert decision.merge_generation == merge_generation, name
 
 
 def test_stale_open_refreshes_back_through_the_mark_and_skips_scoreboard(sample_turn):
@@ -411,6 +552,37 @@ def test_late_persist_is_refused(sample_turn):
     assert stored.ledger.records[0].record_id == "ship-40"
 
 
+def test_persist_requires_the_job_epoch(sample_turn):
+    host, ctx = _ctx_at(sample_turn, 40)
+    player_id = first_player_id(host)
+    services = ctx.export_services[FLEET_ANALYTIC_ID]
+    persistence = services.persistence
+    _store_generation(persistence, ctx.game_id, ctx.perspective, 40, player_id, 1, ship_id=40)
+    policy = FleetPersistencePolicy()
+    scope = ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=40,
+        player_id=player_id,
+    )
+
+    for wire in (
+        {"fleetPersistLeg": "observation"},
+        {"fleetPersistLeg": "observation", "playerInvalidationGeneration": True},
+    ):
+        try:
+            policy.persist(ctx, scope, wire)
+        except ValidationError as exc:
+            assert "playerInvalidationGeneration" in str(exc)
+        else:
+            raise AssertionError("persist without an integer epoch must be rejected")
+
+    stored = persistence.get_ledger(ctx.game_id, ctx.perspective, 40, player_id)
+    assert stored is not None and stored.evidence_generation == 1
+    assert stored.ledger.records[0].record_id == "ship-40"
+
+
 def test_bump_drops_offscreen_hops_and_refuses_an_executing_step():
     orchestrator = ComputeOrchestrator(compute_registry={})
     ready = ComputeScope(
@@ -555,6 +727,7 @@ def test_catch_up_hop_finalization_does_not_read_the_scoreboard(sample_turn, mon
         {
             "fleetPersistLeg": "finalization",
             "persistedLedgerWire": persisted_fleet_ledger_to_json(_ledger(player_id, ship_id=39)),
+            "playerInvalidationGeneration": 0,
             **_open_fields(40, 39),
         },
     )
@@ -671,6 +844,11 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
                     "fleetPersistLeg": "finalization",
                     "persistedLedgerWire": persisted_fleet_ledger_to_json(
                         _ledger(player_id, ship_id=40)
+                    ),
+                    "playerInvalidationGeneration": persistence.player_invalidation_generation(
+                        ctx.game_id,
+                        ctx.perspective,
+                        player_id,
                     ),
                     **_open_fields(40, 40),
                 },

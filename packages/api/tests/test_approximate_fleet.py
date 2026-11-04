@@ -392,6 +392,7 @@ def test_non_terminal_scoreboard_leaves_the_approximate_file() -> None:
         "persistedLedgerWire": before,
         "materializeTurn": 5,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     try:
         FleetPersistencePolicy().persist(ctx, _scope(services, turn, player_id), wire)
@@ -429,6 +430,7 @@ def test_terminal_scoreboard_replaces_the_file_and_wakes_the_side_channel() -> N
         "persistedLedgerWire": persisted_fleet_ledger_to_json(approximate),
         "materializeTurn": 1,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     callback = FleetPersistencePolicy().persist(ctx, _scope(services, turn, player_id), wire)
     assert callback is not None
@@ -822,6 +824,7 @@ def test_finalization_refresh_keeps_generation_from_before_the_put() -> None:
             "persistedLedgerWire": persisted_fleet_ledger_to_json(approximate),
             "materializeTurn": 1,
             "fleetPersistLeg": "finalization",
+            "playerInvalidationGeneration": 0,
         },
     )
 

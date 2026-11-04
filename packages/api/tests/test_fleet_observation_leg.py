@@ -27,6 +27,18 @@ def test_observation_leg_does_not_carry_a_ledger(sample_turn) -> None:
     }
 
 
+def test_observation_leg_copies_the_job_epoch() -> None:
+    result = run_fleet_observation_leg(
+        {
+            "playerId": 1,
+            "materializeTurn": 4,
+            "playerInvalidationGeneration": 3,
+        }
+    )
+    assert result.payload is not None
+    assert result.payload["playerInvalidationGeneration"] == 3
+
+
 def test_eliminated_observation_leg_is_flag_only() -> None:
     result = run_fleet_observation_leg(
         {

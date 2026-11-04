@@ -406,7 +406,7 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
-            evidence_generation=_kept_open_turn_generation(services, scope, result_wire),
+            evidence_generation=_observation_merge_generation(services, scope, result_wire),
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         if eliminated:
@@ -706,13 +706,29 @@ def _refuse_stale_fleet_epoch(
     scope: ComputeScope,
     result_wire: dict[str, object],
 ) -> None:
-    """Refuse a persist whose job was built before the evidence epoch moved."""
-    from api.exceptions import DiscardedWorkRefused
+    """Refuse a fleet persist whose job epoch is not the player's current epoch.
 
-    if not isinstance(scope.player_id, int):
-        return
+    ``playerInvalidationGeneration`` is required. A missing or non-integer
+    value is a ``ValidationError``. When the player id is concrete and the
+    current epoch differs, the write raises ``DiscardedWorkRefused``.
+
+    Orchestrator epoch retry and ``discard_without_stamp`` stay separate.
+    Epoch retry requeues a step when ``generation_at_submit`` has moved,
+    before persist runs. ``discard_without_stamp`` fails a running node the
+    bump predicate already chose, and it does not read this wire. Persist
+    runs after that check releases the orchestrator lock, and direct persist
+    callers never take the lock. This compare uses the generation captured
+    on the job wire. A mismatch fails the write instead of retrying, so a
+    job built for an old mark cannot stamp. Putting the compare in the
+    orchestrator would either retry that write or teach the generic
+    orchestrator to read a fleet field.
+    """
+    from api.errors import DiscardedWorkRefused, ValidationError
+
     expected = result_wire.get("playerInvalidationGeneration")
     if isinstance(expected, bool) or not isinstance(expected, int):
+        raise ValidationError("fleet persist wire requires integer playerInvalidationGeneration")
+    if not isinstance(scope.player_id, int):
         return
     current = services.persistence.player_invalidation_generation(
         scope.game_id,
@@ -727,33 +743,53 @@ def _refuse_stale_fleet_epoch(
     )
 
 
-def _kept_open_turn_generation(
+def _observation_merge_generation(
     services: FleetComputeServices,
     scope: ComputeScope,
     result_wire: dict[str, object],
 ) -> int | None:
-    """Generation to keep on the open turn's merge. None stamps the current mark.
+    """Generation this observation merge writes. None stamps the current mark.
 
-    A catch-up hop has no scoreboard solve coming, so it stamps. The open turn
-    keeps the generation already on the file until its own scoreboard is stored.
-    A missing file stays at generation 0 so the merge does not look complete.
+    ``merge_generation`` comes from ``off_mode_persist_decision``. The mark is
+    always loaded so that column is the real mark. Backfill and the stored
+    generation are loaded only when the wire carries a submission root: with
+    no root, neither value changes the decision.
     """
-    from api.analytics.fleet.off_mode_catch_up import open_turn_on_wire, wire_is_catch_up_hop
+    from api.analytics.fleet.off_mode_catch_up import (
+        off_mode_persist_decision,
+        open_turn_on_wire,
+        wire_is_catch_up_hop,
+    )
 
     if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
-        return None
+        raise ValueError("fleet observation merge requires concrete player_id and turn")
     open_turn = open_turn_on_wire(result_wire)
-    if wire_is_catch_up_hop(result_wire) or open_turn is None or scope.turn != open_turn:
-        return None
-    stored = services.persistence.get_ledger(
+    is_catch_up = wire_is_catch_up_hop(result_wire)
+    mark = services.persistence.evidence_mark(
         scope.game_id,
         scope.perspective,
-        scope.turn,
         scope.player_id,
     )
-    if stored is None:
-        return 0
-    return stored.evidence_generation
+    backfill_enabled = False
+    stored_generation: int | None = None
+    if open_turn is not None:
+        backfill_enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
+        stored = services.persistence.get_ledger(
+            scope.game_id,
+            scope.perspective,
+            scope.turn,
+            scope.player_id,
+        )
+        if stored is not None:
+            stored_generation = stored.evidence_generation
+    return off_mode_persist_decision(
+        backfill_enabled=backfill_enabled,
+        open_turn=open_turn,
+        is_catch_up=is_catch_up,
+        host_turn=scope.turn,
+        mark=mark,
+        stored_generation=stored_generation,
+    ).merge_generation
 
 
 FLEET_PERSISTENCE_POLICY = FleetPersistencePolicy()

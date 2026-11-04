@@ -248,23 +248,30 @@ class InferenceInvalidationService:
     ) -> None:
         """Durable scores evidence.
 
-        A catch-up persist of the turn already being refreshed writes the
-        current mark and does not increment it. The first persist on an absent
-        mark sets generation 1. Any other persist bumps the mark and leaves
-        ledger files in place. The matching in-flight submission root is
-        consumed either way, after a bump has already chosen which turns to
-        recompute.
+        ``off_mode_persist_decision`` classifies this persist. A stamp leaves
+        the mark unchanged. First persist and bump both advance it through
+        durable evidence update: an absent mark becomes generation 1, and an
+        existing mark increments. Ledger files stay in place. The matching
+        in-flight submission root is consumed either way, after a bump has
+        already chosen which turns to recompute.
         """
+        from api.analytics.fleet.off_mode_catch_up import MarkPersist, off_mode_persist_decision
+
         open_turn = self._unconsumed_submission_open(game_id, perspective, player_id, host_turn)
-        if self._fleet_persistence is not None and self._scoreboard_persist_stamps(
-            game_id,
-            perspective,
-            host_turn,
-            player_id,
-            open_turn=open_turn,
-        ):
-            self._consume_submission_open(game_id, perspective, player_id, host_turn)
-            return
+        if self._fleet_persistence is not None:
+            # This call classifies the mark. It is not a fleet merge, so the
+            # catch-up flag is false and the stored generation is unused.
+            decision = off_mode_persist_decision(
+                backfill_enabled=self._fleet_persistence.backfill_earlier_turns_enabled(game_id),
+                open_turn=open_turn,
+                is_catch_up=False,
+                host_turn=host_turn,
+                mark=self._fleet_persistence.evidence_mark(game_id, perspective, player_id),
+                stored_generation=None,
+            )
+            if decision.mark_persist is MarkPersist.STAMP:
+                self._consume_submission_open(game_id, perspective, player_id, host_turn)
+                return
         self.on_inference_evidence_updated(
             game_id,
             perspective,
@@ -317,26 +324,6 @@ class InferenceInvalidationService:
             player_id=player_id,
             open_turn=open_turn,
             analytic_ids=_OPEN_TURN_ANALYTICS,
-        )
-
-    def _scoreboard_persist_stamps(
-        self,
-        game_id: int,
-        perspective: int,
-        host_turn: int,
-        player_id: int,
-        *,
-        open_turn: int | None,
-    ) -> bool:
-        from api.analytics.fleet.off_mode_catch_up import scoreboard_persist_stamps_current_mark
-
-        if self._fleet_persistence is None:
-            return False
-        return scoreboard_persist_stamps_current_mark(
-            backfill_enabled=self._fleet_persistence.backfill_earlier_turns_enabled(game_id),
-            open_turn=open_turn,
-            host_turn=host_turn,
-            mark=self._fleet_persistence.evidence_mark(game_id, perspective, player_id),
         )
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:

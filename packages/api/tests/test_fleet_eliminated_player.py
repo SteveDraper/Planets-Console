@@ -215,6 +215,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
         "materializeTurn": turn_number,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     finalization_deferred = FleetPersistencePolicy().persist(ctx, compute_scope, finalization_wire)
     assert finalization_deferred is not None
@@ -275,6 +276,7 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
         "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
         "materializeTurn": 23,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     with pytest.raises(FleetScoresEvidenceOpenError) as raised:
         FleetPersistencePolicy().persist(
@@ -317,6 +319,7 @@ def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):
         "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
         "materializeTurn": 90,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     with pytest.raises(FleetScoresEvidenceOpenError) as raised:
         FleetPersistencePolicy().persist(

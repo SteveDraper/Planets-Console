@@ -874,7 +874,10 @@ def test_orchestrator_fleet_persist_notifies_scores_invalidation(
             turn=111,
             player_id=player_p,
         ),
-        {"persistedLedgerWire": persisted_fleet_ledger_to_json(persisted)},
+        {
+            "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
+            "playerInvalidationGeneration": 0,
+        },
     )
     assert notification is not None
     notification()
