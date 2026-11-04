@@ -1,0 +1,52 @@
+"""Stamped prior-fleet edge for off-mode catch-up.
+
+One edge and one ladder, shared by the fleet and scores ensure resolvers.
+The hop is a fleet file on the current evidence mark. It does not schedule a
+scoreboard solve. Resolvers still decide player scope, elimination, a missing
+turn, and whether backfill is on.
+"""
+
+from __future__ import annotations
+
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.export_types import EnsureDependency, ExportScope
+from api.analytics.fleet.injected_services import FleetComputeServices
+from api.analytics.fleet.off_mode_catch_up import off_mode_prior_needs_catch_up
+from api.models.game import TurnInfo
+
+# ``stamped`` is not ensure-final, so the hop does not pull a scoreboard solve.
+# The open turn's own scoreboard is scheduled separately.
+OFF_MODE_PRIOR_FLEET: tuple[EnsureDependency, ...] = (
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="stamped"),
+)
+
+
+def off_mode_prior_dependency(
+    ctx: AnalyticQueryContext,
+    scope: ExportScope,
+    services: FleetComputeServices,
+    *,
+    player_id: int,
+    turn: TurnInfo,
+) -> tuple[EnsureDependency, ...]:
+    """Stamped prior-fleet edge when ``scope.turn - 1`` still needs a hop.
+
+    Reads that prior ledger and the player's evidence mark, then applies
+    ``off_mode_prior_needs_catch_up``.
+    """
+    prior = services.persistence.get_ledger(
+        scope.game_id,
+        scope.perspective,
+        scope.turn - 1,
+        player_id,
+    )
+    mark = services.persistence.evidence_mark(scope.game_id, scope.perspective, player_id)
+    if not off_mode_prior_needs_catch_up(
+        turn_number=scope.turn,
+        settings=turn.settings,
+        load_turn=ctx.load_turn,
+        prior_ledger=prior,
+        mark=mark,
+    ):
+        return ()
+    return OFF_MODE_PRIOR_FLEET

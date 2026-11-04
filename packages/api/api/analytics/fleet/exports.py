@@ -19,12 +19,10 @@ from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_tur
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.fleet.export_scope import ledgers_for_scope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
-from api.analytics.fleet.off_mode_catch_up import (
-    ledger_matches_evidence_mark,
-    off_mode_prior_needs_catch_up,
-)
+from api.analytics.fleet.off_mode_catch_up import ledger_matches_evidence_mark
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetTurnSnapshot
+from api.analytics.off_mode_prior_dependency import off_mode_prior_dependency
 from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.exports import held_scores_for_scope
 from api.errors import ValidationError
@@ -39,13 +37,6 @@ PATH_PREFIX_SCOPE_RULES = (
 
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
     EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
-)
-
-# Off-mode catch-up depends on the prior fleet only until a ledger is on the
-# current mark. ``stamped`` is not ensure-final, so the hop does not pull a
-# scoreboard solve. The open turn's own scoreboard is scheduled separately.
-OFF_MODE_PRIOR_DEPENDENCY: tuple[EnsureDependency, ...] = (
-    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="stamped"),
 )
 
 
@@ -68,7 +59,15 @@ def fleet_ensure_dependencies_for(
     services = lookup_fleet_compute_services(ctx)
     if services is None or services.persistence.backfill_earlier_turns_enabled(scope.game_id):
         return ENSURE_DEPENDENCIES
-    return _off_mode_fleet_dependencies(ctx, scope, services)
+    if turn is None:
+        return ()
+    return off_mode_prior_dependency(
+        ctx,
+        scope,
+        services,
+        player_id=scope.player_id,
+        turn=turn,
+    )
 
 
 def _fleet_snapshot_for_scope(
@@ -112,38 +111,6 @@ def _fleet_snapshot_for_scope(
         )
 
     return ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
-
-
-def _off_mode_fleet_dependencies(
-    ctx: AnalyticQueryContext,
-    scope: ExportScope,
-    services: object,
-) -> tuple[EnsureDependency, ...]:
-    """Earlier fleet hop for one off-mode scope, or none when the walk stops."""
-    from api.analytics.fleet.compute_services import FleetComputeServices
-
-    if not isinstance(services, FleetComputeServices) or not isinstance(scope.player_id, int):
-        return ()
-    turn = ctx.load_turn(scope.turn)
-    if turn is None:
-        return ()
-    prior_turn = scope.turn - 1
-    mark = services.persistence.evidence_mark(scope.game_id, scope.perspective, scope.player_id)
-    prior = services.persistence.get_ledger(
-        scope.game_id,
-        scope.perspective,
-        prior_turn,
-        scope.player_id,
-    )
-    if not off_mode_prior_needs_catch_up(
-        turn_number=scope.turn,
-        settings=turn.settings,
-        load_turn=ctx.load_turn,
-        prior_ledger=prior,
-        mark=mark,
-    ):
-        return ()
-    return OFF_MODE_PRIOR_DEPENDENCY
 
 
 def is_fleet_export_on_current_mark(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
