@@ -7,13 +7,18 @@ export type ShellLivedStreamMountProps = {
   children: ReactNode
 }
 
+type ShellLivedHook<TSession> = (
+  analyticScope: AnalyticShellScope | null,
+  enabled: boolean,
+) => TSession
+
 /**
  * Shell-lived table stream: `hook` session props match `Provider` props (minus children).
  * Construct with `shellLivedStream` so the registry mounts a typed pair.
  */
 export type ShellLivedStreamSlot<TSession extends object> = {
   lifetime: 'shell'
-  hook: (analyticScope: AnalyticShellScope | null, enabled: boolean) => TSession
+  hook: ShellLivedHook<TSession>
   Provider: ComponentType<TSession & { children: ReactNode }>
 }
 
@@ -29,20 +34,49 @@ export type TileLivedStreamSlot = {
 
 export type ShellAnalyticStreamSlot = ShellLivedStreamMountSlot | TileLivedStreamSlot
 
+type SessionStream<TSession extends object> = ShellLivedStreamSlot<TSession> &
+  ShellLivedStreamMountSlot
+
+type EffectStream = ShellLivedStreamMountSlot & {
+  hook: ShellLivedHook<undefined>
+}
+
 /**
- * Bind a hook/Provider pair whose session type stays inside `Mount`.
- * The returned object still exposes `lifetime`, `hook`, and `Provider`.
+ * Bind a hook to a shell-lived Mount.
+ * Pass `Provider` when descendants read the hook session. Omit it when the hook
+ * only performs side effects; Mount still calls the hook.
+ * A no-session hook returns `undefined`, which keeps `Provider` required
+ * when the hook returns a session.
  */
-export function shellLivedStream<TSession extends object>({
-  hook,
-  Provider,
-}: {
-  hook: (analyticScope: AnalyticShellScope | null, enabled: boolean) => TSession
+export function shellLivedStream<TSession extends object>(args: {
+  hook: ShellLivedHook<TSession>
   Provider: ComponentType<TSession & { children: ReactNode }>
-}): ShellLivedStreamSlot<TSession> & ShellLivedStreamMountSlot {
-  function Mount({ analyticScope, enabled, children }: ShellLivedStreamMountProps) {
-    const session = hook(analyticScope, enabled)
-    return <Provider {...session}>{children}</Provider>
+}): SessionStream<TSession>
+export function shellLivedStream(args: {
+  hook: ShellLivedHook<undefined>
+}): EffectStream
+export function shellLivedStream<TSession extends object>(
+  args:
+    | {
+        hook: ShellLivedHook<TSession>
+        Provider: ComponentType<TSession & { children: ReactNode }>
+      }
+    | {
+        hook: ShellLivedHook<undefined>
+      },
+): SessionStream<TSession> | EffectStream {
+  if ('Provider' in args) {
+    const { hook, Provider } = args
+    function Mount({ analyticScope, enabled, children }: ShellLivedStreamMountProps) {
+      const session = hook(analyticScope, enabled)
+      return <Provider {...session}>{children}</Provider>
+    }
+    return { lifetime: 'shell', hook, Provider, Mount }
   }
-  return { lifetime: 'shell', hook, Provider, Mount }
+  const { hook } = args
+  function Mount({ analyticScope, enabled, children }: ShellLivedStreamMountProps) {
+    hook(analyticScope, enabled)
+    return children
+  }
+  return { lifetime: 'shell', hook, Mount }
 }

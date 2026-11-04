@@ -29,7 +29,7 @@ from api.analytics.homeworld_locator.serialization import (
 )
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import WILDCARD, ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
-from api.compute.wire import DependencyOutputs, StepResult
+from api.compute.wire import StepResult
 from api.concepts.homeworld_layout import is_homeworld_locator_available
 from api.errors import ValidationError
 from api.serialization.turn import turn_info_to_json
@@ -55,15 +55,14 @@ _FLEET_PERSISTENCE_KEY = "fleetPersistence"
 def build_homeworld_baseline_job_wire(
     scope: ComputeScope,
     *,
-    dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a job wire for baseline-only homeworld compute.
 
     Attaches ``queryContext`` for the inline step (same process; not pool-safe).
+    Orchestrator dependency outputs are not an input.
     """
-    del dependency_outputs
     if ctx is None:
         raise RuntimeError("homeworld baseline job wire requires AnalyticQueryContext")
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -128,10 +127,14 @@ def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
 def build_homeworld_refine_job_wire(
     scope: ComputeScope,
     *,
-    dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
+    """Assemble a refine job wire from the query context.
+
+    Prior-turn evidence is loaded from persistence. Orchestrator dependency
+    outputs are not an input.
+    """
     if ctx is None:
         raise RuntimeError("homeworld refine job wire requires AnalyticQueryContext")
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -139,7 +142,6 @@ def build_homeworld_refine_job_wire(
     if scope.perspective == WILDCARD or not isinstance(scope.perspective, int):
         raise ValueError("homeworld refine requires concrete perspective")
 
-    del dependency_outputs
     export_scope = compute_scope_to_export_scope(scope)
     turn = ctx.load_turn(export_scope.turn)
     if turn is None:

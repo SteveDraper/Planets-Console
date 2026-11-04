@@ -8,10 +8,6 @@ import { homeworldLocatorMapQueryKey } from './mapAnalytic'
 /** Poll while the locator is enabled. The map query's own fetch checks stamps. */
 export const HOMEWORLD_FLEET_AGE_REFETCH_INTERVAL_MS = 2000
 
-export type FleetAgeRefetchSession = {
-  watching: true
-}
-
 /**
  * Shown shell refetches when a later sample reports a change at or before that shell.
  * The first sample only records the epoch.
@@ -29,7 +25,7 @@ export function shownShellRefetchesForFleetAgeNotice(input: {
 export function useHomeworldFleetAgeRefetch(
   analyticScope: AnalyticShellScope | null,
   enabled: boolean
-): FleetAgeRefetchSession {
+): undefined {
   const queryClient = useQueryClient()
   const afterEpochRef = useRef(0)
   const hasSampledRef = useRef(false)
@@ -73,6 +69,4 @@ export function useHomeworldFleetAgeRefetch(
       return notice
     },
   })
-
-  return { watching: true }
 }

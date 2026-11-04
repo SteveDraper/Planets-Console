@@ -1,6 +1,5 @@
 import { shellLivedStream } from '../shellLivedStream'
 import { sidebarTileChrome, type ShellAnalyticChrome } from '../shellAnalyticRegistry'
-import { HomeworldFleetAgeRefetchFrame } from './HomeworldFleetAgeRefetchFrame'
 import { HomeworldLocatorTile } from './HomeworldLocatorTile'
 import { useHomeworldFleetAgeRefetch } from './useHomeworldFleetAgeRefetch'
 
@@ -19,6 +18,5 @@ export const homeworldLocatorShellAnalytic: ShellAnalyticChrome = {
   },
   stream: shellLivedStream({
     hook: useHomeworldFleetAgeRefetch,
-    Provider: HomeworldFleetAgeRefetchFrame,
   }),
 }

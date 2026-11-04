@@ -8,7 +8,6 @@ fleet evidence generation.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -84,7 +83,3 @@ def fleet_persistence_from_context(
     if fleet is None:
         return None
     return fleet.persistence
-
-
-def stamp_player_ids(stamp: FleetAgeInputStamp) -> Sequence[int]:
-    return tuple(player.player_id for player in stamp.players)
