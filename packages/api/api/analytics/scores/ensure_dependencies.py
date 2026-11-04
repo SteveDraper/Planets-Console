@@ -11,7 +11,10 @@ from __future__ import annotations
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
-from api.analytics.off_mode_prior_dependency import off_mode_prior_dependency
+from api.analytics.off_mode_prior_dependency import (
+    backfill_is_enabled,
+    off_mode_prior_dependency,
+)
 
 # Final prior fleet. Off-mode resolution may replace this with a stamped hop.
 ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
@@ -22,6 +25,8 @@ ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
 def resolve_scores_ensure_dependencies(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
+    *,
+    backfill_earlier_turns: bool | None = None,
 ) -> tuple[EnsureDependency, ...]:
     """While Backfill earlier turns is off, read an on-mark prior and do not invent holes.
 
@@ -33,7 +38,7 @@ def resolve_scores_ensure_dependencies(
     if not isinstance(scope.player_id, int):
         return ENSURE_DEPENDENCIES
     services = lookup_fleet_compute_services(ctx)
-    if services is None or services.persistence.backfill_earlier_turns_enabled(scope.game_id):
+    if services is None or backfill_is_enabled(services, scope.game_id, backfill_earlier_turns):
         return ENSURE_DEPENDENCIES
     turn = ctx.load_turn(scope.turn)
     if turn is None:

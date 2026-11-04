@@ -299,6 +299,7 @@ class AnalyticQueryContext:
         *,
         catch_ensure_cycle: bool = False,
         force_root: bool = False,
+        backfill_earlier_turns: bool | None = None,
     ) -> DependencyWalkResult | UnavailableReason:
         try:
             walk_result = walk_dependency_tree(
@@ -307,6 +308,7 @@ class AnalyticQueryContext:
                 scope,
                 visiting=set(),
                 force_root=force_root,
+                backfill_earlier_turns=backfill_earlier_turns,
             )
         except ExportCycleDetectedError:
             if catch_ensure_cycle:
@@ -386,6 +388,7 @@ class AnalyticQueryContext:
         scope: ExportScope,
         *,
         force_root: bool = False,
+        backfill_earlier_turns: bool | None = None,
     ) -> UnavailableReason | None:
         """Return walk-time unavailability without running ensure work.
 
@@ -400,6 +403,7 @@ class AnalyticQueryContext:
             scope,
             catch_ensure_cycle=False,
             force_root=force_root,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
         if not isinstance(walk_outcome, DependencyWalkResult):
             return walk_outcome

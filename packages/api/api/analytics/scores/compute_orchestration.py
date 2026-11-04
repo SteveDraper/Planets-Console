@@ -83,6 +83,7 @@ def build_scores_materialize_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    backfill_earlier_turns: bool | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Materialize scores export tree on the orchestration plane."""
@@ -96,7 +97,12 @@ def build_scores_materialize_job_wire(
         raise RuntimeError("scores materialize job wire requires AnalyticQueryContext")
     export_scope = compute_scope_to_export_scope(scope)
     # Admit only -- never ensure_scope / wait. Fleet deps are already terminal on the DAG.
-    admit_scores_export_work(ctx, export_scope, overlay_ensure=False)
+    admit_scores_export_work(
+        ctx,
+        export_scope,
+        overlay_ensure=False,
+        backfill_earlier_turns=backfill_earlier_turns,
+    )
     tree = materialize_scores_export_tree(ctx, export_scope)
     return {"exportTree": tree}
 
@@ -106,6 +112,7 @@ def build_scores_tier_solve_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    backfill_earlier_turns: bool | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
@@ -148,6 +155,7 @@ def build_scores_tier_solve_job_wire(
             ctx,
             export_scope,
             overlay_ensure=False,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
         run = get_row_run_for_scope(scope)
     if run is None:
@@ -179,6 +187,7 @@ def build_scores_tier_solve_job_wire(
             turn=turn,
             dependency_outputs=dependency_outputs,
             overlay_ensure=False,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
 

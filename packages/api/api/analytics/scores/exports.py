@@ -271,6 +271,7 @@ def admit_scores_export_work(
     scope: ExportScope,
     *,
     overlay_ensure: bool = False,
+    backfill_earlier_turns: bool | None = None,
 ) -> bool:
     """Admit scores work for one scope without waiting on the orchestrator.
 
@@ -312,6 +313,7 @@ def admit_scores_export_work(
         scope,
         turn,
         overlay_ensure=overlay_ensure,
+        backfill_earlier_turns=backfill_earlier_turns,
     )
     if not mutated:
         return is_scores_export_ensure_satisfied_from_snapshot(
@@ -347,6 +349,7 @@ def _ensure_admit_inference_row(
     turn: TurnInfo,
     *,
     overlay_ensure: bool = False,
+    backfill_earlier_turns: bool | None = None,
 ) -> bool:
     """Schedule a RowRun for CP-SAT; admission skips are handled by the caller."""
     player_id = scope.player_id
@@ -371,6 +374,7 @@ def _ensure_admit_inference_row(
         player_id=inputs.player_id,
         turn=turn,
         overlay_ensure=overlay_ensure,
+        backfill_earlier_turns=backfill_earlier_turns,
     )
     scheduled = schedule_inference_row(
         services.scheduler,

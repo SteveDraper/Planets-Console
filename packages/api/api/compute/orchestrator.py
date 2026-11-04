@@ -268,12 +268,14 @@ class ComputeOrchestrator(
             ctx = self._ctx_for_node(node)
             node_result_wire = node.result_wire
             open_turn = node.open_turn
+            backfill_earlier_turns = node.backfill_earlier_turns
         job_wire = builder(
             node_scope,
             dependency_outputs=dependency_outputs,
             ctx=ctx,
             node_result_wire=node_result_wire,
             open_turn=open_turn,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
         return run_step(job_wire)
 
@@ -395,6 +397,39 @@ class ComputeOrchestrator(
                 if scope.turn == node.open_turn:
                     turns.add(node.open_turn)
         return frozenset(turns)
+
+    def unconsumed_root_backfill(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        host_turn: int,
+        analytic_ids: frozenset[str],
+        preferred_analytic_id: str | None = None,
+    ) -> bool | None:
+        """Backfill choice of the unconsumed in-flight root at ``host_turn``.
+
+        None when no such root exists. ``preferred_analytic_id`` wins when more
+        than one analytic has a root at that turn.
+        """
+        found: bool | None = None
+        with self._condition:
+            for scope, node in self._nodes.items():
+                if node.is_terminal or node.open_turn is None or node.open_turn_consumed:
+                    continue
+                if scope.analytic_id not in analytic_ids:
+                    continue
+                if scope.game_id != game_id or scope.perspective != perspective:
+                    continue
+                if scope.player_id != player_id or scope.turn != host_turn:
+                    continue
+                if node.open_turn != host_turn:
+                    continue
+                if scope.analytic_id == preferred_analytic_id:
+                    return node.backfill_earlier_turns
+                found = node.backfill_earlier_turns
+        return found
 
     def consume_open_turn_roots(
         self,

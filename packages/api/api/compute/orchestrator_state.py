@@ -40,6 +40,9 @@ class ComputeRequest:
     # Root turn of this submission. None uses ``scope.turn`` when that axis is concrete.
     # A resubmitted hop passes the root it was planned under.
     open_turn: int | None = None
+    # Backfill earlier turns as of this submission. None is resolved once at entry.
+    # A resubmitted hop passes the value the walk started with.
+    backfill_earlier_turns: bool | None = None
 
     def resolved_bundle(self) -> OrchestrationBundle | None:
         """Return the caller-supplied bundle, or build one from ``ctx`` for convenience."""
@@ -150,6 +153,8 @@ class ComputeNodeRun:
     open_turn: int | None = None
     # The one-shot for this root has already been applied. Hops leave this false.
     open_turn_consumed: bool = False
+    # Backfill earlier turns for the submission that planned this node.
+    backfill_earlier_turns: bool = False
 
     @property
     def is_terminal(self) -> bool:

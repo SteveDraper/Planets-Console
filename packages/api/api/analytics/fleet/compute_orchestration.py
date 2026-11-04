@@ -15,7 +15,9 @@ from api.analytics.fleet.serialization import (
 )
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.off_mode import (
+    BACKFILL_EARLIER_TURNS_WIRE_FIELD,
     apply_off_mode_job_wire_fields,
+    backfill_earlier_turns_on_wire,
     off_mode_persist_decision,
     open_turn_on_wire,
     wire_is_catch_up_hop,
@@ -80,6 +82,7 @@ def build_fleet_observation_leg_job_wire(
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
     open_turn: int | None = None,
+    backfill_earlier_turns: bool | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg."""
@@ -88,6 +91,7 @@ def build_fleet_observation_leg_job_wire(
         dependency_outputs=dependency_outputs,
         ctx=ctx,
         open_turn=open_turn,
+        backfill_earlier_turns=backfill_earlier_turns,
     )
 
 
@@ -97,6 +101,7 @@ def build_fleet_materialization_leg_job_wire(
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
     open_turn: int | None = None,
+    backfill_earlier_turns: bool | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg.
@@ -135,7 +140,13 @@ def build_fleet_materialization_leg_job_wire(
                 player_id,
             ),
         }
-    _stamp_submission_open(wire, scope, ctx, open_turn)
+    _stamp_submission_open(
+        wire,
+        scope,
+        ctx,
+        open_turn,
+        backfill_earlier_turns=backfill_earlier_turns,
+    )
     return wire
 
 
@@ -179,26 +190,38 @@ def _stamp_submission_open(
     scope: ComputeScope,
     ctx: AnalyticQueryContext | None,
     open_turn: int | None,
+    *,
+    backfill_earlier_turns: bool | None,
 ) -> None:
-    """Write the submission root onto a fleet job wire.
+    """Write the submission root and its backfill choice onto a fleet job wire.
 
-    No concrete open leaves the wire without those fields and does not read
-    storage. The backfill setting is read only when a root is being stamped.
+    A carried choice is written and storage is not read. A direct builder call
+    with no carried choice reads the record only when a concrete open turn is
+    being stamped. No concrete open and no carried choice leaves those fields
+    off the wire.
     """
     if ctx is None or not isinstance(scope.turn, int):
         return
     concrete = _concrete_open_turn(open_turn)
+    enabled = backfill_earlier_turns
+    if enabled is None:
+        if concrete is None:
+            wire.pop("openTurn", None)
+            wire.pop("catchUp", None)
+            return
+        services = resolve_fleet_services(ctx)
+        enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
     if concrete is None:
         wire.pop("openTurn", None)
         wire.pop("catchUp", None)
-        return
-    services = resolve_fleet_services(ctx)
-    apply_off_mode_job_wire_fields(
-        wire,
-        open_turn=concrete,
-        turn=scope.turn,
-        backfill_enabled=services.persistence.backfill_earlier_turns_enabled(scope.game_id),
-    )
+    else:
+        apply_off_mode_job_wire_fields(
+            wire,
+            open_turn=concrete,
+            turn=scope.turn,
+            backfill_enabled=enabled,
+        )
+    wire[BACKFILL_EARLIER_TURNS_WIRE_FIELD] = enabled
 
 
 def build_fleet_finalization_leg_job_wire(
@@ -208,6 +231,7 @@ def build_fleet_finalization_leg_job_wire(
     ctx: AnalyticQueryContext | None = None,
     node_result_wire: object | None = None,
     open_turn: int | None = None,
+    backfill_earlier_turns: bool | None = None,
 ) -> dict[str, Any]:
     """Pass the observation continue wire into the inline finalization leg."""
     del dependency_outputs
@@ -223,7 +247,13 @@ def build_fleet_finalization_leg_job_wire(
                 scope.player_id,
             )
         )
-    _stamp_submission_open(payload, scope, ctx, open_turn)
+    _stamp_submission_open(
+        payload,
+        scope,
+        ctx,
+        open_turn,
+        backfill_earlier_turns=backfill_earlier_turns,
+    )
     return payload
 
 
@@ -727,9 +757,10 @@ def _observation_merge_generation(
     """Generation this observation merge writes. None stamps the current mark.
 
     ``merge_generation`` comes from ``off_mode_persist_decision``. The mark is
-    always loaded so that column is the real mark. Backfill and the stored
-    generation are loaded only when the wire carries a submission root: with
-    no root, neither value changes the decision.
+    always loaded so that column is the real mark. A carried
+    ``backfillEarlierTurns`` value is used as-is. A wire with an open turn and
+    no carried choice reads the record once. The stored generation is loaded
+    only when the wire carries a submission root.
     """
     if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
         raise ValueError("fleet observation merge requires concrete player_id and turn")
@@ -740,10 +771,12 @@ def _observation_merge_generation(
         scope.perspective,
         scope.player_id,
     )
-    backfill_enabled = False
+    carried_backfill = backfill_earlier_turns_on_wire(result_wire)
+    backfill_enabled = False if carried_backfill is None else carried_backfill
     stored_generation: int | None = None
     if open_turn is not None:
-        backfill_enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
+        if carried_backfill is None:
+            backfill_enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
         stored = services.persistence.get_ledger(
             scope.game_id,
             scope.perspective,

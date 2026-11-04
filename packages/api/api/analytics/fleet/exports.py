@@ -24,7 +24,10 @@ from api.analytics.fleet.injected_services import (
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetTurnSnapshot
 from api.analytics.off_mode import ledger_matches_evidence_mark
-from api.analytics.off_mode_prior_dependency import off_mode_prior_dependency
+from api.analytics.off_mode_prior_dependency import (
+    backfill_is_enabled,
+    off_mode_prior_dependency,
+)
 from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.exports import held_scores_for_scope
 from api.errors import ValidationError
@@ -45,6 +48,8 @@ ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
 def fleet_ensure_dependencies_for(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
+    *,
+    backfill_earlier_turns: bool | None = None,
 ) -> tuple[EnsureDependency, ...]:
     """Prior-turn fleet does not apply once the player is eliminated on this turn.
 
@@ -59,7 +64,7 @@ def fleet_ensure_dependencies_for(
     if turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id):
         return ()
     services = lookup_fleet_compute_services(ctx)
-    if services is None or services.persistence.backfill_earlier_turns_enabled(scope.game_id):
+    if services is None or backfill_is_enabled(services, scope.game_id, backfill_earlier_turns):
         return ENSURE_DEPENDENCIES
     if turn is None:
         return ()

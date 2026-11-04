@@ -158,6 +158,7 @@ class OrchestratorLifecycleMixin:
 
         step_kind = recovery.step_kind
         open_turn = node.open_turn
+        backfill_earlier_turns = node.backfill_earlier_turns
 
         def _force_fresh_dependency() -> None:
             self.submit(
@@ -168,6 +169,7 @@ class OrchestratorLifecycleMixin:
                     step_kind=step_kind,
                     bundle=bundle,
                     open_turn=open_turn,
+                    backfill_earlier_turns=backfill_earlier_turns,
                 )
             )
 

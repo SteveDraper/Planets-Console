@@ -105,6 +105,7 @@ class InferenceInvalidationService:
         player_id: int,
         *,
         durable: bool = False,
+        backfill_earlier_turns: bool | None = None,
     ) -> set[int]:
         """Wake fleet after scores evidence changes, without rewriting ledger files.
 
@@ -134,6 +135,7 @@ class InferenceInvalidationService:
             player_id,
             host_turn,
             durable=durable,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
         if recompute_turns is None:
             turns_to_wake = turns_to_reschedule
@@ -178,16 +180,24 @@ class InferenceInvalidationService:
         host_turn: int,
         *,
         durable: bool,
+        backfill_earlier_turns: bool | None = None,
     ) -> set[int] | None:
         """Turns to wake after a durable bump while backfill is off.
 
         None means the existing wake-every-known-turn rule. A durable bump with
         the setting off recomputes the shell and later turns that already have
         a live table stream, and leaves every other later turn on disk.
+        ``backfill_earlier_turns`` is the current setting when the caller
+        already read it for this event.
         """
         if not durable or self._fleet_persistence is None:
             return None
-        if self._fleet_persistence.backfill_earlier_turns_enabled(game_id):
+        enabled = (
+            backfill_earlier_turns
+            if backfill_earlier_turns is not None
+            else self._fleet_persistence.backfill_earlier_turns_enabled(game_id)
+        )
+        if enabled:
             return None
         live_turns = active_table_stream_turns(
             game_id,
@@ -252,11 +262,19 @@ class InferenceInvalidationService:
         already chosen which turns to recompute.
         """
         open_turn = self._unconsumed_submission_open(game_id, perspective, player_id, host_turn)
+        carried = self._carried_submission_backfill(game_id, perspective, player_id, host_turn)
+        current: bool | None = None
+        if carried is None and self._fleet_persistence is not None:
+            current = self._fleet_persistence.backfill_earlier_turns_enabled(game_id)
         if self._fleet_persistence is not None:
             # This call classifies the mark. It is not a fleet merge, so the
             # catch-up flag is false and the stored generation is unused.
+            # An in-flight submission keeps the choice it started with. A
+            # persist with no such submission uses the current record, read
+            # once for this event.
+            decision_backfill = current if carried is None else carried
             decision = off_mode_persist_decision(
-                backfill_enabled=self._fleet_persistence.backfill_earlier_turns_enabled(game_id),
+                backfill_enabled=decision_backfill if decision_backfill is not None else False,
                 open_turn=open_turn,
                 is_catch_up=False,
                 host_turn=host_turn,
@@ -266,12 +284,15 @@ class InferenceInvalidationService:
             if decision.mark_persist is MarkPersist.STAMP:
                 self._consume_submission_open(game_id, perspective, player_id, host_turn)
                 return
+        if current is None and self._fleet_persistence is not None:
+            current = self._fleet_persistence.backfill_earlier_turns_enabled(game_id)
         self.on_inference_evidence_updated(
             game_id,
             perspective,
             host_turn,
             player_id,
             durable=True,
+            backfill_earlier_turns=current,
         )
         if open_turn is not None and host_turn == open_turn:
             self._consume_submission_open(game_id, perspective, player_id, host_turn)
@@ -297,6 +318,26 @@ class InferenceInvalidationService:
         if host_turn not in opens:
             return None
         return host_turn
+
+    def _carried_submission_backfill(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        host_turn: int,
+    ) -> bool | None:
+        """Setting the in-flight submission started with, when this turn is that root."""
+        orchestrator = peek_compute_orchestrator()
+        if orchestrator is None:
+            return None
+        return orchestrator.unconsumed_root_backfill(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            host_turn=host_turn,
+            analytic_ids=_OPEN_TURN_ANALYTICS,
+            preferred_analytic_id=SCORES_ANALYTIC_ID,
+        )
 
     def _consume_submission_open(
         self,

@@ -10,6 +10,7 @@ from api.analytics.fleet.compute_orchestration import (
 )
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -25,7 +26,7 @@ from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.dag import plan_compute_dag
-from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
 from api.compute.registry import build_compute_registry
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
@@ -863,3 +864,74 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
         assert scheduled
     finally:
         reset_fleet_table_stream_registry_for_tests()
+
+
+def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn, monkeypatch):
+    """A multi-hop submit reads the record once. Nodes and the job wire carry it.
+
+    An accepted walk keeps that value after the stored record changes.
+    """
+    host, ctx = _ctx_at(sample_turn, 10)
+    player_id = first_player_id(host)
+    services = ctx.export_services[FLEET_ANALYTIC_ID]
+    persistence = services.persistence
+    _mark_at(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=1,
+        applies_from=8,
+    )
+    reads: list[int] = []
+    real = FleetSnapshotPersistenceService.backfill_earlier_turns_enabled
+
+    def counting(self, game_id: int) -> bool:
+        reads.append(game_id)
+        return real(self, game_id)
+
+    monkeypatch.setattr(
+        FleetSnapshotPersistenceService,
+        "backfill_earlier_turns_enabled",
+        counting,
+    )
+    scope = ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=10,
+        player_id=player_id,
+    )
+    wires: list[object] = []
+
+    def capture(_node, _step, *, job_wire=None, run_step=None) -> None:
+        del run_step
+        wires.append(job_wire)
+
+    orchestrator = ComputeOrchestrator(compute_registry=_REGISTRY, pool_submitter=capture)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+
+    fleet_turns = {
+        node.scope.turn
+        for node in orchestrator.nodes.values()
+        if node.scope.analytic_id == FLEET_ANALYTIC_ID and node.scope.player_id == player_id
+    }
+    assert fleet_turns >= {8, 9, 10}
+    assert reads == [ctx.game_id]
+    assert all(node.backfill_earlier_turns is False for node in orchestrator.nodes.values())
+    assert wires
+    assert all(
+        isinstance(wire, dict) and wire.get("backfillEarlierTurns") is False for wire in wires
+    )
+    hop = next(
+        wire for wire in wires if isinstance(wire, dict) and wire.get("materializeTurn") != 10
+    )
+    assert hop["openTurn"] == 10
+    assert hop["catchUp"] is True
+
+    persistence._storage.put(
+        backfill_earlier_turns_store_key(ctx.game_id),
+        backfill_earlier_turns_document(True),
+    )
+    assert orchestrator.nodes[scope].backfill_earlier_turns is False
+    assert reads == [ctx.game_id]

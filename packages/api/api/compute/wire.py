@@ -99,6 +99,8 @@ class BuildStepJobWireKwargs(TypedDict, total=False):
     node_result_wire: object | None
     # Root turn of the submission that owns this node, including on earlier hops.
     open_turn: int | None
+    # Backfill earlier turns for the submission that owns this node.
+    backfill_earlier_turns: bool
 
 
 # Orchestration plane: scope + dependency outputs -> serializable job payload.

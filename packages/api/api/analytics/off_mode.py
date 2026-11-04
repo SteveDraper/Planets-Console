@@ -9,11 +9,17 @@ persist, and the generation the open turn's merge keeps.
 
 The open turn is the root of the submission the user opens. The orchestrator
 copies it onto every node of that plan, and fleet job wires carry ``openTurn``
-plus ``catchUp``. Dependency resolution does not record it.
+plus ``catchUp``. Dependency resolution does not record the open turn.
+
+Backfill earlier turns is resolved once when a submission is entered and
+carried on that request, on every node of the plan, and on the fleet job wire
+as ``backfillEarlierTurns``. Dependency resolvers, the fleet merge, and a hop
+resubmit read the carried value. A walk that is not part of a submission reads
+the record once at the start of that walk. An accepted walk keeps the value it
+started with.
 
 The homeworld locator does not call this module, so opening it does not start
-the walk. The Backfill earlier turns record is read by the game service, not
-here.
+the walk. The stored record is read by the game service.
 """
 
 from __future__ import annotations
@@ -21,11 +27,34 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from api.analytics.export_context import AnalyticQueryContext
 
 from api.analytics.fleet.types import FleetEvidenceMark, PersistedFleetLedger
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings, TurnInfo
+
+BACKFILL_EARLIER_TURNS_WIRE_FIELD = "backfillEarlierTurns"
+
+
+def backfill_earlier_turns_for_context(ctx: AnalyticQueryContext) -> bool:
+    """Read Backfill earlier turns once for the game on this query context.
+
+    Missing fleet services have no record to read. The caller still decides
+    what a missing service bundle means for its edge.
+
+    Fleet services are imported on the call. This module is imported by the
+    observation leg inside a subinterpreter, and a module-level import of
+    those services pulls the export context and the transport stack.
+    """
+    from api.analytics.fleet.injected_services import lookup_fleet_compute_services
+
+    services = lookup_fleet_compute_services(ctx)
+    if services is None:
+        return False
+    return services.persistence.backfill_earlier_turns_enabled(ctx.game_id)
 
 
 def off_mode_job_wire_fields(
@@ -76,15 +105,28 @@ def wire_is_catch_up_hop(result_wire: Mapping[str, object]) -> bool:
     return result_wire.get("catchUp") is True
 
 
+def backfill_earlier_turns_on_wire(result_wire: Mapping[str, object]) -> bool | None:
+    """Carried Backfill earlier turns value, or None when the wire has none."""
+    value = result_wire.get(BACKFILL_EARLIER_TURNS_WIRE_FIELD)
+    if isinstance(value, bool):
+        return value
+    return None
+
+
 def copy_submission_open_fields(
     job_wire: Mapping[str, Any],
     payload: MutableMapping[str, Any],
 ) -> None:
-    """Copy ``openTurn`` and ``catchUp`` from a job wire onto a persist payload.
+    """Copy the submission's open turn and backfill choice onto a persist payload.
 
-    A wire without an integer open turn leaves those fields unset. ``catchUp``
-    is copied only together with that open turn.
+    A wire without an integer open turn leaves ``openTurn`` and ``catchUp``
+    unset. ``catchUp`` is copied only together with that open turn. A carried
+    ``backfillEarlierTurns`` boolean is copied on its own, including when
+    backfill is on and the open turn is left off the wire.
     """
+    carried_backfill = backfill_earlier_turns_on_wire(job_wire)
+    if carried_backfill is not None:
+        payload[BACKFILL_EARLIER_TURNS_WIRE_FIELD] = carried_backfill
     open_turn = open_turn_on_wire(job_wire)
     if open_turn is None:
         return

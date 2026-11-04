@@ -197,6 +197,7 @@ class OrchestratorStepExecutionMixin:
                 ctx=ctx,
                 node_result_wire=node.result_wire,
                 open_turn=node.open_turn,
+                backfill_earlier_turns=node.backfill_earlier_turns,
             )
         except BaseException as exc:
             with self._condition:
@@ -268,6 +269,7 @@ class OrchestratorStepExecutionMixin:
                         ctx=ctx,
                         node_result_wire=node.result_wire,
                         open_turn=node.open_turn,
+                        backfill_earlier_turns=node.backfill_earlier_turns,
                     )
                     with self._condition:
                         if node.state != "running":

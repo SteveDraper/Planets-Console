@@ -16,6 +16,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.off_mode import ledger_matches_evidence_mark
+from api.analytics.off_mode_prior_dependency import backfill_is_enabled
 from api.compute.scope import WILDCARD, ComputeScope, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -69,6 +70,7 @@ def resolve_prior_fleet_for_scores(
     turn: TurnInfo,
     dependency_outputs: DependencyOutputs | None = None,
     overlay_ensure: bool = False,
+    backfill_earlier_turns: bool | None = None,
 ) -> PriorTurnFleetTorpResolution:
     """Resolve prior-turn fleet torp overlay for scores wire build and ensure admit.
 
@@ -150,8 +152,10 @@ def resolve_prior_fleet_for_scores(
         )
     # Missing fleet services cannot read the setting. Keep the overlay path so a
     # provenance-final ledger is not admitted, and so a missing prior stays unavailable.
-    if fleet_services is not None and not fleet_services.persistence.backfill_earlier_turns_enabled(
-        game_id
+    if fleet_services is not None and not backfill_is_enabled(
+        fleet_services,
+        game_id,
+        backfill_earlier_turns,
     ):
         if prior_persisted is not None and prior_turn is not None:
             mark = fleet_services.persistence.evidence_mark(
