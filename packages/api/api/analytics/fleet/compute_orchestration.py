@@ -9,18 +9,17 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.injected_services import FleetComputeServices, resolve_fleet_services
+from api.analytics.fleet.off_mode_job_wire import stamp_submission_open
+from api.analytics.fleet.off_mode_persist import (
+    observation_merge_generation,
+    refuse_stale_fleet_epoch,
+)
 from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
 )
-from api.analytics.fleet.types import PersistedFleetLedger, StampCurrentEvidenceMark
-from api.analytics.off_mode import (
-    BACKFILL_EARLIER_TURNS_WIRE_FIELD,
-    OffModeWireFields,
-    apply_off_mode_job_wire_fields,
-    off_mode_persist_decision,
-    parse_off_mode_wire,
-)
+from api.analytics.fleet.types import PersistedFleetLedger
+from api.analytics.off_mode import parse_off_mode_wire
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import (
     WILDCARD,
@@ -30,7 +29,6 @@ from api.compute.scope import (
 )
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-from api.exceptions import DiscardedWorkRefused, ValidationError
 from api.models.game import GameSettings
 
 if TYPE_CHECKING:
@@ -139,7 +137,7 @@ def build_fleet_materialization_leg_job_wire(
                 player_id,
             ),
         }
-    _stamp_submission_open(
+    stamp_submission_open(
         wire,
         scope,
         ctx,
@@ -177,55 +175,6 @@ def _eliminated_fleet_job_wire(
     }
 
 
-def _concrete_open_turn(open_turn: int | None) -> int | None:
-    """Return a submission root, or None when this call has no open turn.
-
-    A bool is not a turn. ``parse_off_mode_wire`` rejects it.
-    """
-    if open_turn is None:
-        return None
-    return parse_off_mode_wire({"openTurn": open_turn}).open_turn
-
-
-def _stamp_submission_open(
-    wire: dict[str, Any],
-    scope: ComputeScope,
-    ctx: AnalyticQueryContext,
-    open_turn: int | None,
-    *,
-    backfill_earlier_turns: bool | None,
-) -> None:
-    """Write the submission root and its backfill choice onto a fleet job wire.
-
-    A carried choice is written and storage is not read. A direct builder call
-    with no carried choice reads the record only when a concrete open turn is
-    being stamped. No concrete open and no carried choice leaves those fields
-    off the wire.
-    """
-    if isinstance(scope.turn, bool) or not isinstance(scope.turn, int):
-        raise ValueError("fleet job wire requires concrete turn")
-    concrete = _concrete_open_turn(open_turn)
-    enabled = backfill_earlier_turns
-    if enabled is None:
-        if concrete is None:
-            wire.pop("openTurn", None)
-            wire.pop("catchUp", None)
-            return
-        services = resolve_fleet_services(ctx)
-        enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
-    if concrete is None:
-        wire.pop("openTurn", None)
-        wire.pop("catchUp", None)
-    else:
-        apply_off_mode_job_wire_fields(
-            wire,
-            open_turn=concrete,
-            turn=scope.turn,
-            backfill_enabled=enabled,
-        )
-    wire[BACKFILL_EARLIER_TURNS_WIRE_FIELD] = enabled
-
-
 def build_fleet_finalization_leg_job_wire(
     scope: ComputeScope,
     *,
@@ -250,7 +199,7 @@ def build_fleet_finalization_leg_job_wire(
         scope.perspective,
         scope.player_id,
     )
-    _stamp_submission_open(
+    stamp_submission_open(
         payload,
         scope,
         ctx,
@@ -380,7 +329,7 @@ class FleetPersistencePolicy:
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet observation persist requires concrete turn")
         fields = parse_off_mode_wire(result_wire)
-        _refuse_stale_fleet_epoch(services, scope, fields)
+        refuse_stale_fleet_epoch(services, scope, fields)
         # Epoch for the following-file walk. Read before the ledger put.
         player_invalidation_generation = services.persistence.player_invalidation_generation(
             scope.game_id,
@@ -433,7 +382,7 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
-            evidence_generation=_observation_merge_generation(services, scope, fields),
+            evidence_generation=observation_merge_generation(services, scope, fields),
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         if eliminated:
@@ -477,7 +426,7 @@ class FleetPersistencePolicy:
         if wire_ledger.ledger.player_id != scope.player_id:
             raise ValueError("fleet persist ledger player does not match scope")
         fields = parse_off_mode_wire(result_wire)
-        _refuse_stale_fleet_epoch(services, scope, fields)
+        refuse_stale_fleet_epoch(services, scope, fields)
         # Epoch for the following-file walk. Read before the ledger put.
         player_invalidation_generation = services.persistence.player_invalidation_generation(
             scope.game_id,
@@ -714,94 +663,6 @@ class FleetPersistencePolicy:
             scope.perspective,
             scope.player_id,
         )
-
-
-def _refuse_stale_fleet_epoch(
-    services: FleetComputeServices,
-    scope: ComputeScope,
-    fields: OffModeWireFields,
-) -> None:
-    """Refuse a fleet persist whose job epoch is not the player's current epoch.
-
-    ``playerInvalidationGeneration`` is required. A missing value is a
-    ``ValidationError``. A present non-integer is already rejected by
-    ``parse_off_mode_wire``. When the player id is concrete and the current
-    epoch differs, the write raises ``DiscardedWorkRefused``.
-
-    Orchestrator epoch retry and ``discard_without_stamp`` stay separate.
-    Epoch retry requeues a step when ``generation_at_submit`` has moved,
-    before persist runs. ``discard_without_stamp`` fails a running node the
-    bump predicate already chose, and it does not read this wire. Persist
-    runs after that check releases the orchestrator lock, and direct persist
-    callers never take the lock. This compare uses the generation captured
-    on the job wire. A mismatch fails the write instead of retrying, so a
-    job built for an old mark cannot stamp. Putting the compare in the
-    orchestrator would either retry that write or teach the generic
-    orchestrator to read a fleet field.
-    """
-    expected = fields.player_invalidation_generation
-    if expected is None:
-        raise ValidationError("fleet persist wire requires integer playerInvalidationGeneration")
-    if not isinstance(scope.player_id, int):
-        return
-    current = services.persistence.player_invalidation_generation(
-        scope.game_id,
-        scope.perspective,
-        scope.player_id,
-    )
-    if current == expected:
-        return
-    raise DiscardedWorkRefused(
-        f"fleet persist refused for game {scope.game_id} perspective {scope.perspective} "
-        f"player {scope.player_id} turn {scope.turn}: in-flight work cannot stamp the new mark"
-    )
-
-
-def _observation_merge_generation(
-    services: FleetComputeServices,
-    scope: ComputeScope,
-    fields: OffModeWireFields,
-) -> int | StampCurrentEvidenceMark:
-    """Generation this observation merge writes.
-
-    ``STAMP_CURRENT_EVIDENCE_MARK`` stamps the current mark. An int is the
-    generation kept on the open turn. ``merge_generation`` comes from
-    ``off_mode_persist_decision``. The mark is always loaded so that column
-    is the real mark. A carried ``backfillEarlierTurns`` value is used as-is.
-    A wire with an open turn and no carried choice reads the record once.
-    The stored generation is loaded only when the wire carries a submission root.
-    """
-    if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
-        raise ValueError("fleet observation merge requires concrete player_id and turn")
-    open_turn = fields.open_turn
-    is_catch_up = fields.catch_up
-    mark = services.persistence.evidence_mark(
-        scope.game_id,
-        scope.perspective,
-        scope.player_id,
-    )
-    carried_backfill = fields.backfill_earlier_turns
-    backfill_enabled = False if carried_backfill is None else carried_backfill
-    stored_generation: int | None = None
-    if open_turn is not None:
-        if carried_backfill is None:
-            backfill_enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
-        stored = services.persistence.get_ledger(
-            scope.game_id,
-            scope.perspective,
-            scope.turn,
-            scope.player_id,
-        )
-        if stored is not None:
-            stored_generation = stored.evidence_generation
-    return off_mode_persist_decision(
-        backfill_enabled=backfill_enabled,
-        open_turn=open_turn,
-        is_catch_up=is_catch_up,
-        host_turn=scope.turn,
-        mark=mark,
-        stored_generation=stored_generation,
-    ).merge_generation
 
 
 FLEET_PERSISTENCE_POLICY = FleetPersistencePolicy()
