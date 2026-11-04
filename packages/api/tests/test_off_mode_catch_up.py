@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.fleet.compute_orchestration import (
@@ -13,6 +14,7 @@ from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
+    STAMP_CURRENT_EVIDENCE_MARK,
     FleetAcquisitionLedger,
     FleetEvidenceMark,
     FleetMaterializationProvenance,
@@ -22,7 +24,7 @@ from api.analytics.fleet.types import (
 )
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
 from api.analytics.homeworld_locator.exports import EXPORT_CATALOG as HOMEWORLD_EXPORT_CATALOG
-from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
+from api.analytics.off_mode import MarkPersist, off_mode_persist_decision, parse_off_mode_wire
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.dag import plan_compute_dag
@@ -180,7 +182,7 @@ def test_off_mode_persist_decision_is_one_table():
             present,
             1,
             MarkPersist.BUMP,
-            None,
+            STAMP_CURRENT_EVIDENCE_MARK,
         ),
         (
             "later turn bumps and stamps the merge",
@@ -191,7 +193,7 @@ def test_off_mode_persist_decision_is_one_table():
             present,
             1,
             MarkPersist.BUMP,
-            None,
+            STAMP_CURRENT_EVIDENCE_MARK,
         ),
         (
             "no open turn bumps",
@@ -202,7 +204,7 @@ def test_off_mode_persist_decision_is_one_table():
             present,
             1,
             MarkPersist.BUMP,
-            None,
+            STAMP_CURRENT_EVIDENCE_MARK,
         ),
         (
             "absent mark with no open is the first persist",
@@ -213,7 +215,7 @@ def test_off_mode_persist_decision_is_one_table():
             absent,
             None,
             MarkPersist.FIRST_PERSIST,
-            None,
+            STAMP_CURRENT_EVIDENCE_MARK,
         ),
         (
             "absent mark on the open turn is the first persist and keeps 0",
@@ -235,7 +237,7 @@ def test_off_mode_persist_decision_is_one_table():
             present,
             1,
             MarkPersist.BUMP,
-            None,
+            STAMP_CURRENT_EVIDENCE_MARK,
         ),
         (
             "backfill on an absent mark is the first persist",
@@ -246,7 +248,7 @@ def test_off_mode_persist_decision_is_one_table():
             absent,
             None,
             MarkPersist.FIRST_PERSIST,
-            None,
+            STAMP_CURRENT_EVIDENCE_MARK,
         ),
         (
             "catch-up flag on the open turn still stamps the mark and the merge",
@@ -257,7 +259,7 @@ def test_off_mode_persist_decision_is_one_table():
             present,
             1,
             MarkPersist.STAMP,
-            None,
+            STAMP_CURRENT_EVIDENCE_MARK,
         ),
     )
     for (
@@ -935,3 +937,35 @@ def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn, monk
     )
     assert orchestrator.nodes[scope].backfill_earlier_turns is False
     assert reads == [ctx.game_id]
+
+
+def test_parse_off_mode_wire_rejects_wrong_types_and_catch_up_without_open_turn():
+    """Absent fields stay absent. A present field of the wrong JSON type is rejected."""
+    empty = parse_off_mode_wire({})
+    assert empty.open_turn is None
+    assert empty.catch_up is False
+    assert empty.backfill_earlier_turns is None
+    assert empty.player_invalidation_generation is None
+
+    parsed = parse_off_mode_wire(
+        {
+            "openTurn": 40,
+            "catchUp": False,
+            "backfillEarlierTurns": True,
+            "playerInvalidationGeneration": 2,
+        }
+    )
+    assert parsed.open_turn == 40
+    assert parsed.catch_up is False
+    assert parsed.backfill_earlier_turns is True
+    assert parsed.player_invalidation_generation == 2
+
+    for wire in (
+        {"openTurn": True},
+        {"openTurn": 40, "catchUp": 1},
+        {"backfillEarlierTurns": 0},
+        {"playerInvalidationGeneration": True},
+        {"catchUp": True},
+    ):
+        with pytest.raises(ValidationError):
+            parse_off_mode_wire(wire)

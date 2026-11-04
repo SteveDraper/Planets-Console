@@ -23,13 +23,10 @@ def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
         "materializeTurn": int(job_wire["materializeTurn"]),
         "fleetPersistLeg": FLEET_PERSIST_LEG_OBSERVATION,
     }
-    # Persist requires this integer. A job wire without it leaves the field
-    # off the payload, and fleet persist rejects that payload.
-    epoch = job_wire.get("playerInvalidationGeneration")
-    if isinstance(epoch, int) and not isinstance(epoch, bool):
-        payload["playerInvalidationGeneration"] = epoch
     if job_wire.get("eliminatedAtTurn") is True:
         payload["eliminatedAtTurn"] = True
+    # Copies a carried epoch when the job wire has an integer. A missing epoch
+    # stays off the payload, and fleet persist rejects that payload.
     copy_submission_open_fields(job_wire, payload)
     return StepResult(
         outcome="persist",

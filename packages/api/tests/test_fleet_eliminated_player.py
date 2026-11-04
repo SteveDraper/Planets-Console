@@ -252,6 +252,51 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
     }
 
 
+def test_eliminated_job_wire_reads_the_player_epoch(sample_turn, persistence):
+    """An eliminated player's job wire carries the current epoch, not a default of 0."""
+    player_id = first_player_id(sample_turn)
+    turn_number = 24
+    turn = _stamp_player(
+        sample_turn,
+        player_id,
+        status=3,
+        statusturn=turn_number,
+        turn_number=turn_number,
+        username="dead",
+    )
+    ctx = export_chain_query_context(
+        turn,
+        persistence=persistence,
+        stored_turns={turn_number: turn},
+    )
+    fleet_services = ctx.export_services[_FLEET]
+    fleet_services.persistence.bump_player_and_turn_invalidations(
+        GAME_ID,
+        perspective(turn),
+        player_id,
+        (turn_number,),
+    )
+    expected = fleet_services.persistence.player_invalidation_generation(
+        GAME_ID,
+        perspective(turn),
+        player_id,
+    )
+    assert expected == 1
+    job_wire = build_fleet_materialization_leg_job_wire(
+        ComputeScope(
+            analytic_id=_FLEET,
+            game_id=GAME_ID,
+            perspective=perspective(turn),
+            turn=turn_number,
+            player_id=player_id,
+        ),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+    )
+    assert job_wire["eliminatedAtTurn"] is True
+    assert job_wire["playerInvalidationGeneration"] == expected
+
+
 def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
     turn = _stamp_player(

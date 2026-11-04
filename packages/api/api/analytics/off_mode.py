@@ -32,8 +32,14 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
-from api.analytics.fleet.types import FleetEvidenceMark, PersistedFleetLedger
+from api.analytics.fleet.types import (
+    STAMP_CURRENT_EVIDENCE_MARK,
+    FleetEvidenceMark,
+    PersistedFleetLedger,
+    StampCurrentEvidenceMark,
+)
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
+from api.exceptions import ValidationError
 from api.models.game import GameSettings, TurnInfo
 
 BACKFILL_EARLIER_TURNS_WIRE_FIELD = "backfillEarlierTurns"
@@ -92,47 +98,105 @@ def apply_off_mode_job_wire_fields(
     )
 
 
-def open_turn_on_wire(result_wire: Mapping[str, object]) -> int | None:
-    """Submission root carried on a fleet job or persist payload."""
-    value = result_wire.get("openTurn")
+_OPEN_TURN_FIELD = "openTurn"
+_CATCH_UP_FIELD = "catchUp"
+_PLAYER_INVALIDATION_GENERATION_FIELD = "playerInvalidationGeneration"
+
+
+def _require_json_int(value: object, *, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        return None
+        raise ValidationError(f"{field} must be an integer")
     return value
 
 
-def wire_is_catch_up_hop(result_wire: Mapping[str, object]) -> bool:
-    """True when this payload is an earlier hop of the submission open."""
-    return result_wire.get("catchUp") is True
+def _require_json_bool(value: object, *, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValidationError(f"{field} must be a boolean")
+    return value
 
 
-def backfill_earlier_turns_on_wire(result_wire: Mapping[str, object]) -> bool | None:
-    """Carried Backfill earlier turns value, or None when the wire has none."""
-    value = result_wire.get(BACKFILL_EARLIER_TURNS_WIRE_FIELD)
-    if isinstance(value, bool):
-        return value
-    return None
+@dataclass(frozen=True)
+class OffModeWireFields:
+    """Off-mode fields on a fleet job wire or persist payload.
+
+    ``open_turn`` is None when the wire is not an off-mode open. ``catch_up``
+    is true only for an earlier hop of that open. ``backfill_earlier_turns``
+    is None when the wire does not carry the choice. ``player_invalidation_generation``
+    is None when the wire does not carry an epoch.
+    """
+
+    open_turn: int | None
+    catch_up: bool
+    backfill_earlier_turns: bool | None
+    player_invalidation_generation: int | None
+
+
+def parse_off_mode_wire(wire: Mapping[str, object]) -> OffModeWireFields:
+    """Read openTurn, catchUp, backfillEarlierTurns, and playerInvalidationGeneration.
+
+    A missing field keeps the meaning above. A present field of the wrong JSON
+    type is a ``ValidationError``. ``catchUp: true`` without ``openTurn`` is a
+    ``ValidationError``. Bool is not an integer.
+    """
+    if _OPEN_TURN_FIELD in wire:
+        open_turn = _require_json_int(wire[_OPEN_TURN_FIELD], field=_OPEN_TURN_FIELD)
+    else:
+        open_turn = None
+
+    if _CATCH_UP_FIELD in wire:
+        catch_up = _require_json_bool(wire[_CATCH_UP_FIELD], field=_CATCH_UP_FIELD)
+    else:
+        catch_up = False
+    if catch_up and open_turn is None:
+        raise ValidationError("catchUp requires openTurn")
+
+    if BACKFILL_EARLIER_TURNS_WIRE_FIELD in wire:
+        backfill_earlier_turns = _require_json_bool(
+            wire[BACKFILL_EARLIER_TURNS_WIRE_FIELD],
+            field=BACKFILL_EARLIER_TURNS_WIRE_FIELD,
+        )
+    else:
+        backfill_earlier_turns = None
+
+    if _PLAYER_INVALIDATION_GENERATION_FIELD in wire:
+        player_invalidation_generation = _require_json_int(
+            wire[_PLAYER_INVALIDATION_GENERATION_FIELD],
+            field=_PLAYER_INVALIDATION_GENERATION_FIELD,
+        )
+    else:
+        player_invalidation_generation = None
+
+    return OffModeWireFields(
+        open_turn=open_turn,
+        catch_up=catch_up,
+        backfill_earlier_turns=backfill_earlier_turns,
+        player_invalidation_generation=player_invalidation_generation,
+    )
 
 
 def copy_submission_open_fields(
     job_wire: Mapping[str, Any],
     payload: MutableMapping[str, Any],
 ) -> None:
-    """Copy the submission's open turn and backfill choice onto a persist payload.
+    """Copy submission open fields and the job epoch onto a persist payload.
 
     A wire without an integer open turn leaves ``openTurn`` and ``catchUp``
     unset. ``catchUp`` is copied only together with that open turn. A carried
     ``backfillEarlierTurns`` boolean is copied on its own, including when
-    backfill is on and the open turn is left off the wire.
+    backfill is on and the open turn is left off the wire. A carried integer
+    ``playerInvalidationGeneration`` is copied. A missing epoch stays off the
+    payload so persist can reject it.
     """
-    carried_backfill = backfill_earlier_turns_on_wire(job_wire)
-    if carried_backfill is not None:
-        payload[BACKFILL_EARLIER_TURNS_WIRE_FIELD] = carried_backfill
-    open_turn = open_turn_on_wire(job_wire)
-    if open_turn is None:
+    fields = parse_off_mode_wire(job_wire)
+    if fields.backfill_earlier_turns is not None:
+        payload[BACKFILL_EARLIER_TURNS_WIRE_FIELD] = fields.backfill_earlier_turns
+    if fields.player_invalidation_generation is not None:
+        payload[_PLAYER_INVALIDATION_GENERATION_FIELD] = fields.player_invalidation_generation
+    if fields.open_turn is None:
         return
-    payload["openTurn"] = open_turn
-    if wire_is_catch_up_hop(job_wire):
-        payload["catchUp"] = True
+    payload[_OPEN_TURN_FIELD] = fields.open_turn
+    if fields.catch_up:
+        payload[_CATCH_UP_FIELD] = True
 
 
 def ledger_matches_evidence_mark(
@@ -168,13 +232,14 @@ class MarkPersist(StrEnum):
 class OffModePersistDecision:
     """Stamp, bump, or first persist, and the generation a fleet merge writes.
 
-    ``merge_generation`` is None when the merge stamps the current mark. An int
-    is the generation kept on the open turn's approximate file so that merge
-    does not look complete before its scoreboard is stored.
+    ``merge_generation`` is ``STAMP_CURRENT_EVIDENCE_MARK`` when the merge
+    stamps the current mark. An int is the generation kept on the open turn's
+    approximate file so that merge does not look complete before its
+    scoreboard is stored.
     """
 
     mark_persist: MarkPersist
-    merge_generation: int | None
+    merge_generation: int | StampCurrentEvidenceMark
 
 
 def off_mode_persist_decision(
@@ -195,9 +260,9 @@ def off_mode_persist_decision(
     classification. A catch-up hop does not run a scoreboard solve.
 
     Fleet merge: a catch-up hop, any turn that is not the open turn, and every
-    turn while backfill is on stamps the current mark (``merge_generation``
-    is None). The open turn's own merge keeps ``stored_generation``, or 0 when
-    the file is missing. ``mark`` does not change the kept generation.
+    turn while backfill is on stamps the current mark. The open turn's own
+    merge keeps ``stored_generation``, or 0 when the file is missing. ``mark``
+    does not change the kept generation.
     """
     if mark_is_absent(mark):
         mark_persist = MarkPersist.FIRST_PERSIST
@@ -207,7 +272,7 @@ def off_mode_persist_decision(
         mark_persist = MarkPersist.BUMP
 
     if backfill_enabled or is_catch_up or open_turn is None or host_turn != open_turn:
-        merge_generation = None
+        merge_generation: int | StampCurrentEvidenceMark = STAMP_CURRENT_EVIDENCE_MARK
     elif stored_generation is None:
         merge_generation = 0
     else:

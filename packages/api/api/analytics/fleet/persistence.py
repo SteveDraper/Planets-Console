@@ -27,10 +27,12 @@ from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.types import (
+    STAMP_CURRENT_EVIDENCE_MARK,
     FleetEvidenceMark,
     FleetMaterializationProvenance,
     FleetTurnSnapshot,
     PersistedFleetLedger,
+    StampCurrentEvidenceMark,
 )
 from api.errors import NotFoundError, ValidationError
 from api.services.game_service import read_backfill_earlier_turns
@@ -38,6 +40,22 @@ from api.storage.base import StorageBackend
 
 OnSnapshotPersistedCallback = Callable[[int, int, int], None]
 OnLedgerPersistedCallback = Callable[[FleetLedgerPersistedEvent], None]
+
+
+def _ledger_evidence_generation(
+    evidence_generation: int | StampCurrentEvidenceMark,
+    mark: FleetEvidenceMark,
+) -> int:
+    """Integer generation written on the ledger file."""
+    if isinstance(evidence_generation, StampCurrentEvidenceMark):
+        return mark.evidence_generation
+    if isinstance(evidence_generation, bool) or not isinstance(evidence_generation, int):
+        raise ValidationError(
+            "fleet ledger evidence_generation must be an integer or the current evidence mark"
+        )
+    return evidence_generation
+
+
 DeferredNotification = Callable[[], None]
 
 _ABSENT_EVIDENCE_MARK = FleetEvidenceMark()
@@ -213,9 +231,14 @@ class FleetSnapshotPersistenceService:
         persisted: PersistedFleetLedger,
         *,
         defer_ledger_persisted_notification: bool = False,
-        evidence_generation: int | None = None,
+        evidence_generation: int | StampCurrentEvidenceMark = STAMP_CURRENT_EVIDENCE_MARK,
     ) -> PutLedgerResult:
-        """Write one player's ledger and bracket a ledger-write notice around the attempt."""
+        """Write one player's ledger and bracket a ledger-write notice around the attempt.
+
+        ``evidence_generation`` is either the integer stored on the file or
+        ``STAMP_CURRENT_EVIDENCE_MARK``, which reads the player's current mark
+        at write time.
+        """
         with _fleet_ledger_write(game_id, perspective, turn_number, player_id):
             if persisted.ledger.player_id != player_id:
                 raise ValidationError(
@@ -224,9 +247,7 @@ class FleetSnapshotPersistenceService:
                 )
             prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
             mark = self.evidence_mark(game_id, perspective, player_id)
-            stored_generation = (
-                mark.evidence_generation if evidence_generation is None else evidence_generation
-            )
+            stored_generation = _ledger_evidence_generation(evidence_generation, mark)
             to_store = PersistedFleetLedger(
                 ledger=persisted.ledger,
                 provenance=persisted.provenance,

@@ -219,6 +219,18 @@ class FleetEvidenceMark:
     applies_from_turn: int | None = None
 
 
+@dataclass(frozen=True)
+class StampCurrentEvidenceMark:
+    """Write the generation on the player's current evidence mark.
+
+    A ledger put always stores an integer generation. This value means that
+    integer is the mark's generation, read at write time.
+    """
+
+
+STAMP_CURRENT_EVIDENCE_MARK = StampCurrentEvidenceMark()
+
+
 @dataclass
 class PersistedFleetLedger:
     """One player's fleet acquisition ledger at a turn, plus cache metadata."""

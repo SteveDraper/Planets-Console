@@ -30,6 +30,7 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
 )
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
+    STAMP_CURRENT_EVIDENCE_MARK,
     FleetAcquisitionLedger,
     FleetCountDiscrepancy,
     FleetEvidenceEvent,
@@ -603,7 +604,7 @@ def _invalidate_player_after_put(services, player_id: int, turn_number: int) -> 
         persisted,
         *,
         defer_ledger_persisted_notification=False,
-        evidence_generation=None,
+        evidence_generation=STAMP_CURRENT_EVIDENCE_MARK,
     ):
         result = original(
             game_id,
