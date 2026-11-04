@@ -20,8 +20,8 @@ class FleetLedgerPersistedEvent:
 class FleetAgeIdentityChanged:
     """One player's on-disk ``ship_id -> built_turn`` map was created, removed, or edited.
 
-    This is not the ensure-final ledger side channel. Approximate writes and
-    generation-behind files notify here when the build-turn identity changes.
+    This channel includes approximate writes and generation-behind files.
+    It is separate from the ensure-final ledger side channel.
     """
 
     game_id: int

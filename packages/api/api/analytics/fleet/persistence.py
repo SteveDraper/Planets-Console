@@ -15,6 +15,7 @@ from api.analytics.fleet.constants import (
 from api.analytics.fleet.identity_change import (
     OnFleetAgeIdentityChangedCallback,
     notify_fleet_age_identity_if_changed,
+    notify_fleet_age_identity_removed,
 )
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.fleet.serialization import (
@@ -321,17 +322,16 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         player_id: int,
     ) -> None:
-        prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
-        self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
+        removed = self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
         self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
-        notify_fleet_age_identity_if_changed(
+        if not removed:
+            return
+        notify_fleet_age_identity_removed(
             self._on_fleet_age_identity_changed,
             game_id=game_id,
             perspective=perspective,
             turn=turn_number,
             player_id=player_id,
-            prior=prior,
-            current=None,
         )
 
     def list_ledger_player_ids(
@@ -773,8 +773,11 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         turn_number: int,
         player_id: int,
-    ) -> None:
-        self._delete_if_present(self.ledger_key(game_id, perspective, turn_number, player_id))
+    ) -> bool:
+        """Remove the ledger file. Return whether a file was present."""
+        return self._delete_if_present(
+            self.ledger_key(game_id, perspective, turn_number, player_id),
+        )
 
     def _list_player_ids(
         self,

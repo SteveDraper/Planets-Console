@@ -1,4 +1,4 @@
-"""Build-turn identity diff for fleet ledger writes."""
+"""Build-turn identity changes for fleet ledger writes and removals."""
 
 from __future__ import annotations
 
@@ -28,13 +28,52 @@ def notify_fleet_age_identity_if_changed(
     prior: PersistedFleetLedger | None,
     current: PersistedFleetLedger | None,
 ) -> None:
-    """Notify when the on-disk ship_id -> built_turn map is created, removed, or edited.
+    """Invoke ``callback`` when the build-turn maps differ.
 
     A missing file is distinct from a ledger whose known built turns are empty.
-    Other ledger field edits do not notify. This is not the ensure-final side channel.
+    Other ledger field edits do not notify.
     """
-    if _built_turn_identity(prior) == _built_turn_identity(current):
+    if callback is None or _built_turn_identity(prior) == _built_turn_identity(current):
         return
+    _notify_fleet_age_identity_changed(
+        callback,
+        game_id=game_id,
+        perspective=perspective,
+        turn=turn,
+        player_id=player_id,
+    )
+
+
+def notify_fleet_age_identity_removed(
+    callback: OnFleetAgeIdentityChangedCallback | None,
+    *,
+    game_id: int,
+    perspective: int,
+    turn: int,
+    player_id: int,
+) -> None:
+    """Invoke ``callback`` because an on-disk ledger file was removed.
+
+    The file is not read. A file that was present is an identity change.
+    """
+    _notify_fleet_age_identity_changed(
+        callback,
+        game_id=game_id,
+        perspective=perspective,
+        turn=turn,
+        player_id=player_id,
+    )
+
+
+def _notify_fleet_age_identity_changed(
+    callback: OnFleetAgeIdentityChangedCallback | None,
+    *,
+    game_id: int,
+    perspective: int,
+    turn: int,
+    player_id: int,
+) -> None:
+    """Deliver the event. No callback means no notification."""
     if callback is None:
         return
     callback(
