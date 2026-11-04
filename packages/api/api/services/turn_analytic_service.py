@@ -17,9 +17,6 @@ from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_A
 from api.analytics.homeworld_locator.fleet_age_refetch import (
     fleet_age_identity_changed_handler,
 )
-from api.analytics.homeworld_locator.fleet_age_refetch import (
-    fleet_age_refetch_notice as read_fleet_age_refetch_notice,
-)
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
@@ -663,8 +660,14 @@ class TurnAnalyticService:
         *,
         after_epoch: int,
     ) -> dict[str, int | None]:
-        """Build-turn identity changes after ``after_epoch``. Does not ensure or wake fleet."""
-        notice = read_fleet_age_refetch_notice(
+        """Build-turn identity changes after ``after_epoch``.
+
+        Reads the durable homeworld fleet-age log. Does not ensure or wake fleet.
+        ``fromTurn`` is null when ``after_epoch`` equals the stored generation,
+        and 1 when ``after_epoch`` is ahead of that generation or the retained
+        window does not hold the changes.
+        """
+        notice = self._homeworld_persistence.fleet_age_refetch_notice(
             game_id,
             perspective,
             after_epoch=after_epoch,

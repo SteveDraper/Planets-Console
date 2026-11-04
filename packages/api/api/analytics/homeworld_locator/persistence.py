@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 
 from api.analytics.fleet.ledger_persisted_event import FleetAgeIdentityChanged
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID
+from api.analytics.homeworld_locator.fleet_age_refetch import (
+    FLEET_AGE_RETAINED_CHANGES,
+    FleetAgeRefetchNotice,
+    notice_for_fleet_age_changes,
+)
 from api.analytics.homeworld_locator.serialization import (
-    fleet_age_stale_marker_from_json,
-    fleet_age_stale_marker_to_json,
+    fleet_age_stale_document_from_json,
+    fleet_age_stale_document_to_json,
     homeworld_evidence_aggregate_from_json,
     homeworld_evidence_aggregate_to_json,
     homeworld_locator_game_state_from_json,
     homeworld_locator_game_state_to_json,
 )
 from api.analytics.homeworld_locator.types import (
+    FleetAgeStaleDocument,
     FleetAgeStaleMarker,
     HomeworldEvidenceAggregate,
     HomeworldLocatorGameState,
@@ -35,13 +42,17 @@ class HomeworldLocatorPersistenceService:
     Logical paths (ADR 0002):
     - Game-global: ``games/{gameId}/analytics/homeworld-locator``
     - Evidence: ``games/{gameId}/{perspective}/turns/{turn}/analytics/homeworld-locator``
-    - Fleet-age stale marker: ``games/{gameId}/{perspective}/analytics/homeworld-locator``
+    - Fleet-age document: ``games/{gameId}/{perspective}/analytics/homeworld-locator``
 
-    The marker ``generation`` increments when a roster ledger's build-turn map
-    is created, removed, or edited. A refine reads that generation before it
-    reads ledger stamps and advances ``staleFromTurn`` only when the stored
-    generation is still the one it read. A ledger save during refine stays
-    marked. Advancing past every stored aggregate deletes the marker.
+    The document ``generation`` increments when a roster ledger's build-turn map
+    is created, removed, or edited. ``changes`` keeps the last
+    ``FLEET_AGE_RETAINED_CHANGES`` ``(generation, turn)`` pairs so a poll can
+    name the earliest turn changed after a client epoch. ``staleFromTurn`` is
+    the refine frontier. A refine reads ``generation`` before it reads ledger
+    stamps and advances ``staleFromTurn`` only when the stored generation is
+    still the one it read. A ledger save during refine stays marked. Advancing
+    past every stored aggregate clears ``staleFromTurn`` and keeps ``generation``
+    and ``changes``.
     """
 
     def __init__(self, storage: StorageBackend) -> None:
@@ -141,26 +152,39 @@ class HomeworldLocatorPersistenceService:
         game_id: int,
         perspective: int,
     ) -> FleetAgeStaleMarker | None:
-        return self._read_fleet_age_stale_marker(game_id, perspective)
+        document = self._read_fleet_age_stale_document(game_id, perspective)
+        if document is None:
+            return None
+        return document.stale_marker()
 
     def record_fleet_age_identity_changed(
         self,
         event: FleetAgeIdentityChanged,
     ) -> FleetAgeStaleMarker:
-        """Mark this perspective stale from ``event.turn`` through later turns.
+        """Mark this perspective stale from ``event.turn`` and append the refetch log.
 
         ``stale_from_turn`` moves earlier when the event is before the current
-        mark and never moves later. ``generation`` increments on every call.
+        mark and never moves later. A cleared frontier starts again at
+        ``event.turn``. ``generation`` increments on every call and does not
+        restart when the frontier is cleared.
         """
         if event.turn < 1:
             raise ValidationError("fleet-age stale marker turn must be >= 1")
         with self._stale_marker_lock:
-            current = self._read_fleet_age_stale_marker(event.game_id, event.perspective)
-            stale_from = event.turn if current is None else min(current.stale_from_turn, event.turn)
+            current = self._read_fleet_age_stale_document(event.game_id, event.perspective)
             generation = 1 if current is None else current.generation + 1
-            updated = FleetAgeStaleMarker(stale_from_turn=stale_from, generation=generation)
-            self._write_fleet_age_stale_marker(event.game_id, event.perspective, updated)
-            return updated
+            if current is None or current.stale_from_turn is None:
+                stale_from = event.turn
+            else:
+                stale_from = min(current.stale_from_turn, event.turn)
+            prior_changes = () if current is None else current.changes
+            updated = FleetAgeStaleDocument(
+                generation=generation,
+                changes=(prior_changes + ((generation, event.turn),))[-FLEET_AGE_RETAINED_CHANGES:],
+                stale_from_turn=stale_from,
+            )
+            self._write_fleet_age_stale_document(event.game_id, event.perspective, updated)
+            return FleetAgeStaleMarker(stale_from_turn=stale_from, generation=generation)
 
     def advance_fleet_age_stale_marker(
         self,
@@ -177,33 +201,58 @@ class HomeworldLocatorPersistenceService:
         marker in place. The frontier also stays put when a stored aggregate
         still sits between the marker and ``refined_turn``. A gap with no
         stored aggregate is contiguous, so the marker moves past ``refined_turn``.
-        When that move passes every stored aggregate, the marker is deleted.
+        When that move passes every stored aggregate, ``stale_from_turn`` is
+        cleared. ``generation`` and the retained changes stay.
         """
         if observed is None:
             return
         with self._stale_marker_lock:
-            current = self._read_fleet_age_stale_marker(game_id, perspective)
-            if current != observed or refined_turn < current.stale_from_turn:
+            current = self._read_fleet_age_stale_document(game_id, perspective)
+            marker = None if current is None else current.stale_marker()
+            if (
+                current is None
+                or marker is None
+                or marker != observed
+                or refined_turn < marker.stale_from_turn
+            ):
                 return
             if self._has_evidence_aggregate_in_range(
                 game_id,
                 perspective,
-                current.stale_from_turn,
+                marker.stale_from_turn,
                 refined_turn,
             ):
                 return
             next_turn = refined_turn + 1
             if self._has_evidence_aggregate_in_range(game_id, perspective, next_turn, None):
-                self._write_fleet_age_stale_marker(
+                self._write_fleet_age_stale_document(
                     game_id,
                     perspective,
-                    FleetAgeStaleMarker(
-                        stale_from_turn=next_turn,
-                        generation=current.generation,
-                    ),
+                    replace(current, stale_from_turn=next_turn),
                 )
                 return
-            self._delete_fleet_age_stale_marker(game_id, perspective)
+            self._write_fleet_age_stale_document(
+                game_id,
+                perspective,
+                replace(current, stale_from_turn=None),
+            )
+
+    def fleet_age_refetch_notice(
+        self,
+        game_id: int,
+        perspective: int,
+        *,
+        after_epoch: int,
+    ) -> FleetAgeRefetchNotice:
+        """Earliest retained identity change with a generation above ``after_epoch``."""
+        document = self._read_fleet_age_stale_document(game_id, perspective)
+        if document is None:
+            return notice_for_fleet_age_changes(0, (), after_epoch=after_epoch)
+        return notice_for_fleet_age_changes(
+            document.generation,
+            document.changes,
+            after_epoch=after_epoch,
+        )
 
     def invalidate_inferred_game_state(self, game_id: int) -> HomeworldLocatorGameState | None:
         """Drop inferred game-global candidates; preserve asserted provenances when present."""
@@ -313,35 +362,29 @@ class HomeworldLocatorPersistenceService:
                 return True
         return False
 
-    def _read_fleet_age_stale_marker(
+    def _read_fleet_age_stale_document(
         self,
         game_id: int,
         perspective: int,
-    ) -> FleetAgeStaleMarker | None:
+    ) -> FleetAgeStaleDocument | None:
         try:
             data = self._storage.get(self.fleet_age_stale_marker_key(game_id, perspective))
         except NotFoundError:
             return None
         if data is None:
             return None
-        return fleet_age_stale_marker_from_json(data)
+        return fleet_age_stale_document_from_json(data)
 
-    def _write_fleet_age_stale_marker(
+    def _write_fleet_age_stale_document(
         self,
         game_id: int,
         perspective: int,
-        marker: FleetAgeStaleMarker,
+        document: FleetAgeStaleDocument,
     ) -> None:
         self._storage.put(
             self.fleet_age_stale_marker_key(game_id, perspective),
-            fleet_age_stale_marker_to_json(marker),
+            fleet_age_stale_document_to_json(document),
         )
-
-    def _delete_fleet_age_stale_marker(self, game_id: int, perspective: int) -> None:
-        try:
-            self._storage.delete(self.fleet_age_stale_marker_key(game_id, perspective))
-        except NotFoundError:
-            return
 
     def _bump_generations_for_game(self, game_id: int) -> None:
         with self._generation_lock:

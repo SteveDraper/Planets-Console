@@ -24,6 +24,7 @@ from api.analytics.homeworld_locator.models import (
     SectorOwnerMember,
 )
 from api.analytics.homeworld_locator.types import (
+    FleetAgeStaleDocument,
     FleetAgeStaleMarker,
     HomeworldCandidateRecord,
     HomeworldEvidenceAggregate,
@@ -627,6 +628,55 @@ def fleet_age_stale_marker_from_json(data: object) -> FleetAgeStaleMarker:
     if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
         raise ValidationError("homeworld fleet-age stale marker generation must be an int >= 1")
     return FleetAgeStaleMarker(stale_from_turn=stale_from, generation=generation)
+
+
+def fleet_age_stale_document_to_json(document: FleetAgeStaleDocument) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "generation": document.generation,
+        "changes": [[change_generation, turn] for change_generation, turn in document.changes],
+    }
+    if document.stale_from_turn is not None:
+        payload["staleFromTurn"] = document.stale_from_turn
+    return payload
+
+
+def fleet_age_stale_document_from_json(data: object) -> FleetAgeStaleDocument:
+    if not isinstance(data, dict):
+        raise ValidationError("homeworld fleet-age document must be a JSON object")
+    generation = data.get("generation")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        raise ValidationError("homeworld fleet-age document generation must be an int >= 1")
+    stale_raw = data.get("staleFromTurn")
+    if stale_raw is None:
+        stale_from_turn = None
+    elif isinstance(stale_raw, bool) or not isinstance(stale_raw, int) or stale_raw < 1:
+        raise ValidationError("homeworld fleet-age document staleFromTurn must be an int >= 1")
+    else:
+        stale_from_turn = stale_raw
+    changes_raw = data.get("changes")
+    if not isinstance(changes_raw, list):
+        raise ValidationError("homeworld fleet-age document changes must be an array")
+    changes: list[tuple[int, int]] = []
+    for entry in changes_raw:
+        if (
+            not isinstance(entry, list)
+            or len(entry) != 2
+            or isinstance(entry[0], bool)
+            or isinstance(entry[1], bool)
+            or not isinstance(entry[0], int)
+            or not isinstance(entry[1], int)
+            or entry[0] < 1
+            or entry[1] < 1
+        ):
+            raise ValidationError(
+                "homeworld fleet-age document changes entries must be [generation, turn] ints"
+            )
+        changes.append((entry[0], entry[1]))
+    return FleetAgeStaleDocument(
+        generation=generation,
+        changes=tuple(changes),
+        stale_from_turn=stale_from_turn,
+    )
 
 
 def homeworld_evidence_aggregate_to_json(

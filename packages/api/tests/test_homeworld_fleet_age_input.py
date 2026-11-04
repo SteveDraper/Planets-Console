@@ -5,9 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from unittest.mock import patch
 
-import pytest
 from api.analytics.export_types import EnsureDependency, ExportScope
-from api.analytics.fleet.ledger_persisted_event import FleetAgeIdentityChanged
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -25,10 +23,7 @@ from api.analytics.homeworld_locator.fleet_age_input import (
     read_fleet_age_input_stamp,
 )
 from api.analytics.homeworld_locator.fleet_age_refetch import (
-    clear_fleet_age_refetch_notices,
     fleet_age_identity_changed_handler,
-    fleet_age_refetch_notice,
-    note_fleet_age_identity_changed,
 )
 from api.analytics.homeworld_locator.models import PROVENANCE_ASSERTED, LocationProvenance
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
@@ -42,13 +37,6 @@ from tests.test_homeworld_evidence_refine import (
     _load_turn,
 )
 from tests.test_homeworld_locator_core import _export_services, _services
-
-
-@pytest.fixture(autouse=True)
-def _clear_refetch_notices():
-    clear_fleet_age_refetch_notices()
-    yield
-    clear_fleet_age_refetch_notices()
 
 
 def _ledger(player_id: int, ship_id: int, built_turn: int, *, final: bool) -> PersistedFleetLedger:
@@ -123,11 +111,12 @@ def test_read_includes_approximate_generation_behind_and_missing_files() -> None
 
 
 def test_unchanged_build_turn_identity_does_not_bump_epoch_or_ensure() -> None:
+    homeworld = HomeworldLocatorPersistenceService(MemoryAssetBackend(initial={}))
     persistence = FleetSnapshotPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.on_fleet_age_identity_changed = note_fleet_age_identity_changed
+    persistence.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(homeworld)
     first = _ledger(1, 42, 7, final=False)
     persistence.put_ledger(9, 1, 3, 1, first)
-    assert fleet_age_refetch_notice(9, 1, after_epoch=0).epoch == 1
+    assert homeworld.fleet_age_refetch_notice(9, 1, after_epoch=0).epoch == 1
 
     edited = replace(
         first,
@@ -141,13 +130,14 @@ def test_unchanged_build_turn_identity_does_not_bump_epoch_or_ensure() -> None:
         persistence.delete_ledger(9, 1, 4, 1)
         ensure.assert_not_called()
         wake.assert_not_called()
-    assert fleet_age_refetch_notice(9, 1, after_epoch=0).epoch == 1
-    assert fleet_age_refetch_notice(9, 1, after_epoch=1).from_turn is None
+    assert homeworld.fleet_age_refetch_notice(9, 1, after_epoch=0).epoch == 1
+    assert homeworld.fleet_age_refetch_notice(9, 1, after_epoch=1).from_turn is None
 
 
 def test_create_edit_and_delete_bump_epoch_without_starting_work() -> None:
+    homeworld = HomeworldLocatorPersistenceService(MemoryAssetBackend(initial={}))
     persistence = FleetSnapshotPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.on_fleet_age_identity_changed = note_fleet_age_identity_changed
+    persistence.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(homeworld)
     with (
         patch("api.compute.export_ensure.ensure_export_scope_via_orchestrator") as ensure,
         patch("api.analytics.fleet.compute_orchestration.wake_fleet_scope") as wake,
@@ -157,20 +147,10 @@ def test_create_edit_and_delete_bump_epoch_without_starting_work() -> None:
         persistence.delete_ledger(9, 1, 2, 1)
         ensure.assert_not_called()
         wake.assert_not_called()
-    notice = fleet_age_refetch_notice(9, 1, after_epoch=0)
+    notice = homeworld.fleet_age_refetch_notice(9, 1, after_epoch=0)
     assert notice.epoch == 3
     assert notice.from_turn == 2
-    assert fleet_age_refetch_notice(9, 1, after_epoch=3).from_turn is None
-
-
-def test_refetch_window_falls_open_when_changes_are_dropped() -> None:
-    for turn in range(1, 258):
-        note_fleet_age_identity_changed(
-            FleetAgeIdentityChanged(game_id=1, perspective=1, turn=turn, player_id=1)
-        )
-    notice = fleet_age_refetch_notice(1, 1, after_epoch=0)
-    assert notice.epoch == 257
-    assert notice.from_turn == 1
+    assert homeworld.fleet_age_refetch_notice(9, 1, after_epoch=3).from_turn is None
 
 
 def test_stamp_mismatch_rerefines_from_that_turn_and_keeps_later_aggregate() -> None:

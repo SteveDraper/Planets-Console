@@ -14,7 +14,7 @@ class FleetAgeRefetchNoticeResponse(BaseModel):
         alias="fromTurn",
         description=(
             "Earliest turn whose build-turn identity changed after afterEpoch. "
-            "Null when the epoch has not moved. 1 when the retained window no longer "
-            "holds the changes."
+            "Null when the epoch has not moved. 1 when afterEpoch is ahead of the "
+            "durable epoch or the retained window no longer holds the changes."
         ),
     )

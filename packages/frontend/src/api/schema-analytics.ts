@@ -319,7 +319,7 @@ export interface components {
             epoch: number;
             /**
              * Fromturn
-             * @description Earliest turn whose build-turn identity changed after afterEpoch. Null when the epoch has not moved. 1 when the retained window no longer holds the changes.
+             * @description Earliest turn whose build-turn identity changed after afterEpoch. Null when the epoch has not moved. 1 when afterEpoch is ahead of the durable epoch or the retained window no longer holds the changes.
              */
             fromTurn?: number | null;
         };

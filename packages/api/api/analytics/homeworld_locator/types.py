@@ -77,6 +77,30 @@ class FleetAgeStaleMarker:
 
 
 @dataclass(frozen=True)
+class FleetAgeStaleDocument:
+    """Perspective fleet-age document: refine frontier plus retained identity changes.
+
+    ``generation`` counts build-turn identity changes and does not restart when
+    refine clears the frontier. ``changes`` is the retained suffix of
+    ``(generation, turn)`` pairs, oldest first. ``stale_from_turn`` is absent
+    once refine has passed every stored aggregate.
+    """
+
+    generation: int
+    changes: tuple[tuple[int, int], ...]
+    stale_from_turn: int | None
+
+    def stale_marker(self) -> FleetAgeStaleMarker | None:
+        """Active refine frontier, or none when refine has passed it."""
+        if self.stale_from_turn is None:
+            return None
+        return FleetAgeStaleMarker(
+            stale_from_turn=self.stale_from_turn,
+            generation=self.generation,
+        )
+
+
+@dataclass(frozen=True)
 class HomeworldEvidenceAggregate:
     """Turn-scoped durable evidence aggregate refined through the shell turn."""
 

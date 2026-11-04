@@ -22,15 +22,24 @@ from api.analytics.homeworld_locator.exports import (
 )
 from api.analytics.homeworld_locator.fleet_age_input import FleetAgeInputStamp
 from api.analytics.homeworld_locator.fleet_age_refetch import (
-    clear_fleet_age_refetch_notices,
+    FLEET_AGE_RETAINED_CHANGES,
+    FleetAgeRefetchNotice,
     fleet_age_identity_changed_handler,
-    fleet_age_refetch_notice,
 )
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
-from api.analytics.homeworld_locator.serialization import fleet_age_stale_marker_from_json
-from api.analytics.homeworld_locator.types import FleetAgeStaleMarker, HomeworldEvidenceAggregate
+from api.analytics.homeworld_locator.serialization import (
+    fleet_age_stale_document_from_json,
+    fleet_age_stale_document_to_json,
+    fleet_age_stale_marker_from_json,
+)
+from api.analytics.homeworld_locator.types import (
+    FleetAgeStaleDocument,
+    FleetAgeStaleMarker,
+    HomeworldEvidenceAggregate,
+)
 from api.analytics.turn_roster import iter_turn_players
 from api.errors import ValidationError
+from api.services.turn_analytic_service import TurnAnalyticService
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.test_homeworld_evidence_refine import (
@@ -41,13 +50,6 @@ from tests.test_homeworld_evidence_refine import (
 )
 from tests.test_homeworld_fleet_age_input import _ledger, _turn_ladder
 from tests.test_homeworld_locator_core import _export_services, _services
-
-
-@pytest.fixture(autouse=True)
-def _clear_refetch_notices():
-    clear_fleet_age_refetch_notices()
-    yield
-    clear_fleet_age_refetch_notices()
 
 
 def _stamped_aggregate(turn: int) -> HomeworldEvidenceAggregate:
@@ -61,6 +63,32 @@ def _stamped_aggregate(turn: int) -> HomeworldEvidenceAggregate:
 
 def _event(turn: int, *, player_id: int = 1) -> FleetAgeIdentityChanged:
     return FleetAgeIdentityChanged(game_id=7, perspective=1, turn=turn, player_id=player_id)
+
+
+def test_fleet_age_document_codec_round_trip() -> None:
+    document = FleetAgeStaleDocument(
+        generation=2,
+        changes=((1, 4), (2, 2)),
+        stale_from_turn=2,
+    )
+    restored_document = fleet_age_stale_document_from_json(
+        fleet_age_stale_document_to_json(document)
+    )
+    assert restored_document == document
+    cleared = FleetAgeStaleDocument(
+        generation=2,
+        changes=((1, 4), (2, 2)),
+        stale_from_turn=None,
+    )
+    restored = fleet_age_stale_document_from_json(fleet_age_stale_document_to_json(cleared))
+    assert restored == cleared
+    assert restored.stale_marker() is None
+    with pytest.raises(ValidationError):
+        fleet_age_stale_document_from_json({"generation": 1, "staleFromTurn": 1})
+    with pytest.raises(ValidationError):
+        fleet_age_stale_document_from_json(
+            {"generation": 1, "changes": [[True, 1]], "staleFromTurn": 1}
+        )
 
 
 def test_marker_codec_rejects_non_ints() -> None:
@@ -84,7 +112,7 @@ def test_identity_change_sets_durable_marker_and_skips_unchanged_saves() -> None
     fleet.put_ledger(7, 1, 4, 1, created)
     marker = homeworld.get_fleet_age_stale_marker(7, 1)
     assert marker == FleetAgeStaleMarker(stale_from_turn=4, generation=1)
-    assert fleet_age_refetch_notice(7, 1, after_epoch=0).epoch == 1
+    assert homeworld.fleet_age_refetch_notice(7, 1, after_epoch=0).epoch == 1
 
     same_identity = replace(
         created,
@@ -107,6 +135,88 @@ def test_identity_change_sets_durable_marker_and_skips_unchanged_saves() -> None
 
     reloaded = HomeworldLocatorPersistenceService(storage)
     assert reloaded.get_fleet_age_stale_marker(7, 1) == removed
+
+
+def test_refetch_notice_survives_a_new_service_and_a_client_ahead() -> None:
+    storage = MemoryAssetBackend(initial={})
+    first = HomeworldLocatorPersistenceService(storage)
+    first.record_fleet_age_identity_changed(_event(4))
+    first.record_fleet_age_identity_changed(_event(6, player_id=2))
+    second = HomeworldLocatorPersistenceService(storage)
+    assert second.fleet_age_refetch_notice(7, 1, after_epoch=0) == FleetAgeRefetchNotice(
+        epoch=2,
+        from_turn=4,
+    )
+    assert second.fleet_age_refetch_notice(7, 1, after_epoch=1) == FleetAgeRefetchNotice(
+        epoch=2,
+        from_turn=6,
+    )
+    assert second.fleet_age_refetch_notice(7, 1, after_epoch=2).from_turn is None
+    ahead = second.fleet_age_refetch_notice(7, 1, after_epoch=9)
+    assert ahead == FleetAgeRefetchNotice(epoch=2, from_turn=1)
+
+    empty = HomeworldLocatorPersistenceService(MemoryAssetBackend(initial={}))
+    assert empty.fleet_age_refetch_notice(7, 1, after_epoch=0) == FleetAgeRefetchNotice(
+        epoch=0,
+        from_turn=None,
+    )
+    assert empty.fleet_age_refetch_notice(7, 1, after_epoch=4) == FleetAgeRefetchNotice(
+        epoch=0,
+        from_turn=1,
+    )
+
+    polled = TurnAnalyticService(
+        object(),  # type: ignore[arg-type]
+        storage=storage,
+        homeworld_persistence=second,
+        planets_client_factory=lambda: None,
+    )
+    assert polled.fleet_age_refetch_notice(7, 1, after_epoch=1) == {"epoch": 2, "fromTurn": 6}
+    restarted = TurnAnalyticService(
+        object(),  # type: ignore[arg-type]
+        storage=storage,
+        planets_client_factory=lambda: None,
+    )
+    assert restarted.fleet_age_refetch_notice(7, 1, after_epoch=1) == {"epoch": 2, "fromTurn": 6}
+    assert restarted.fleet_age_refetch_notice(7, 1, after_epoch=9) == {"epoch": 2, "fromTurn": 1}
+
+
+def test_clearing_the_frontier_keeps_the_refetch_epoch() -> None:
+    storage = MemoryAssetBackend(initial={})
+    persistence = HomeworldLocatorPersistenceService(storage)
+    persistence.record_fleet_age_identity_changed(_event(2))
+    observed = persistence.get_fleet_age_stale_marker(7, 1)
+    persistence.advance_fleet_age_stale_marker(7, 1, refined_turn=2, observed=observed)
+    assert persistence.get_fleet_age_stale_marker(7, 1) is None
+    assert persistence.fleet_age_refetch_notice(7, 1, after_epoch=0) == FleetAgeRefetchNotice(
+        epoch=1,
+        from_turn=2,
+    )
+    assert persistence.fleet_age_refetch_notice(7, 1, after_epoch=1).from_turn is None
+    reloaded = HomeworldLocatorPersistenceService(storage)
+    assert reloaded.fleet_age_refetch_notice(7, 1, after_epoch=5) == FleetAgeRefetchNotice(
+        epoch=1,
+        from_turn=1,
+    )
+    persistence.record_fleet_age_identity_changed(_event(3))
+    assert persistence.get_fleet_age_stale_marker(7, 1) == FleetAgeStaleMarker(
+        stale_from_turn=3,
+        generation=2,
+    )
+
+
+def test_refetch_window_falls_open_when_changes_are_dropped() -> None:
+    persistence = HomeworldLocatorPersistenceService(MemoryAssetBackend(initial={}))
+    for turn in range(1, FLEET_AGE_RETAINED_CHANGES + 2):
+        persistence.record_fleet_age_identity_changed(_event(turn))
+    notice = persistence.fleet_age_refetch_notice(7, 1, after_epoch=0)
+    assert notice.epoch == FLEET_AGE_RETAINED_CHANGES + 1
+    assert notice.from_turn == 1
+    kept = persistence.fleet_age_refetch_notice(7, 1, after_epoch=FLEET_AGE_RETAINED_CHANGES)
+    assert kept == FleetAgeRefetchNotice(
+        epoch=FLEET_AGE_RETAINED_CHANGES + 1,
+        from_turn=FLEET_AGE_RETAINED_CHANGES + 1,
+    )
 
 
 def test_satisfaction_reads_no_ledgers_and_does_not_walk_turns() -> None:
@@ -303,7 +413,7 @@ def test_advance_skips_gaps_and_stops_for_a_stored_aggregate() -> None:
     persistence.advance_fleet_age_stale_marker(7, 1, refined_turn=4, observed=observed)
     assert persistence.get_fleet_age_stale_marker(7, 1) == FleetAgeStaleMarker(
         stale_from_turn=2,
-        generation=1,
+        generation=2,
     )
 
 
