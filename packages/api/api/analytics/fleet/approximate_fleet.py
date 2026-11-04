@@ -190,8 +190,6 @@ def refresh_following_approximate_fleets(
         )
 
     next_turn = saved_turn + 1
-    if stop_after_turn is not None and next_turn > stop_after_turn:
-        return None
 
     def target_stops_the_walk() -> bool:
         stored = persistence.get_ledger(game_id, perspective, next_turn, player_id)
