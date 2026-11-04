@@ -79,14 +79,12 @@ def evidence_aggregate_is_current(
 ) -> bool:
     """True when ``aggregate`` matches the baseline and is not fleet-age stale.
 
-    An aggregate with no fleet-age stamp was written before stamps existed.
-    A missing marker means nothing is stale. This does not read ledger files.
+    The stale marker is the only fleet-age authority: a missing marker means
+    nothing is stale. This does not read ledger files.
     """
     if aggregate.baseline_turn != baseline_turn:
         return False
     if aggregate.evidence_algorithm_version != HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
-        return False
-    if aggregate.fleet_age_input_stamp is None:
         return False
     if marker is not None and marker.covers(aggregate.turn):
         return False
