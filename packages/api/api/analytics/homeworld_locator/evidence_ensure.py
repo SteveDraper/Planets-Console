@@ -57,13 +57,17 @@ def evidence_aggregate_at_shell_turn(
 
 
 def prior_evidence_turn(turn: TurnInfo, *, baseline_turn: int) -> int | None:
-    """Prior aggregate turn for ``turn``, or None on the baseline floor."""
+    """Prior aggregate turn for ``turn``, or None on the baseline floor.
+
+    Sole decision for which stored aggregate a refine step reads as prior.
+    When the previous turn is below the accelerated ensure floor, that prior
+    is the baseline aggregate.
+    """
     shell = turn.settings.turn
     if shell <= baseline_turn:
         return None
-    ensure_floor = accelerated_ensure_floor(turn.settings, shell)
     prior = shell - 1
-    if prior < ensure_floor or prior < baseline_turn:
+    if prior < accelerated_ensure_floor(turn.settings, shell):
         return baseline_turn
     return prior
 
@@ -310,7 +314,8 @@ def compute_homeworld_evidence_refine_step_detailed(
             step_elapsed_ms=(time.perf_counter() - step_t0) * 1000.0,
         )
 
-    if shell <= baseline_turn:
+    prior_turn = prior_evidence_turn(turn, baseline_turn=baseline_turn)
+    if prior_turn is None:
         floor = services.persistence.get_evidence_aggregate(
             services.game_id,
             services.perspective,
@@ -343,11 +348,6 @@ def compute_homeworld_evidence_refine_step_detailed(
             "homeworld floor evidence aggregate fleet-age input is stale "
             "(call ensure_evidence_floor_algorithm_current first)"
         )
-
-    ensure_floor = accelerated_ensure_floor(turn.settings, shell)
-    prior_turn = shell - 1
-    if prior_turn < ensure_floor or prior_turn < baseline_turn:
-        prior_turn = baseline_turn
 
     prior_t0 = time.perf_counter()
     prior = services.persistence.get_evidence_aggregate(
