@@ -22,9 +22,7 @@ from api.analytics.homeworld_locator.fleet_age_input import (
     merged_built_turns,
     read_fleet_age_input_stamp,
 )
-from api.analytics.homeworld_locator.fleet_age_refetch import (
-    fleet_age_identity_changed_handler,
-)
+from api.analytics.homeworld_locator.fleet_age_refetch import wire_fleet_age_identity_changed
 from api.analytics.homeworld_locator.models import PROVENANCE_ASSERTED, LocationProvenance
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.turn_roster import iter_turn_players
@@ -113,7 +111,7 @@ def test_read_includes_approximate_generation_behind_and_missing_files() -> None
 def test_unchanged_build_turn_identity_does_not_bump_epoch_or_ensure() -> None:
     homeworld = HomeworldLocatorPersistenceService(MemoryAssetBackend(initial={}))
     persistence = FleetSnapshotPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(homeworld)
+    wire_fleet_age_identity_changed(persistence, homeworld)
     first = _ledger(1, 42, 7, final=False)
     persistence.put_ledger(9, 1, 3, 1, first)
     assert homeworld.fleet_age_refetch_notice(9, 1, after_epoch=0).epoch == 1
@@ -137,7 +135,7 @@ def test_unchanged_build_turn_identity_does_not_bump_epoch_or_ensure() -> None:
 def test_create_edit_and_delete_bump_epoch_without_starting_work() -> None:
     homeworld = HomeworldLocatorPersistenceService(MemoryAssetBackend(initial={}))
     persistence = FleetSnapshotPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(homeworld)
+    wire_fleet_age_identity_changed(persistence, homeworld)
     with (
         patch("api.compute.export_ensure.ensure_export_scope_via_orchestrator") as ensure,
         patch("api.analytics.fleet.compute_orchestration.wake_fleet_scope") as wake,
@@ -197,9 +195,7 @@ def test_stamp_mismatch_rerefines_from_that_turn_and_keeps_later_aggregate() -> 
         628580,
         replace(state, asserted_location_provenances=(asserted,)),
     )
-    fleet.persistence.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(
-        persistence
-    )
+    wire_fleet_age_identity_changed(fleet.persistence, persistence)
     fleet.persistence.put_ledger(
         628580,
         1,

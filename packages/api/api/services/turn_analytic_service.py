@@ -14,9 +14,6 @@ from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
-from api.analytics.homeworld_locator.fleet_age_refetch import (
-    fleet_age_identity_changed_handler,
-)
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
@@ -82,10 +79,6 @@ class TurnAnalyticService:
             self._fleet_persistence = fleet_persistence
         else:
             self._fleet_persistence = FleetSnapshotPersistenceService(storage)
-        if self._fleet_persistence.on_fleet_age_identity_changed is None:
-            self._fleet_persistence.on_fleet_age_identity_changed = (
-                fleet_age_identity_changed_handler(self._homeworld_persistence)
-            )
         if inference_invalidation is not None:
             self._inference_invalidation = inference_invalidation
         else:

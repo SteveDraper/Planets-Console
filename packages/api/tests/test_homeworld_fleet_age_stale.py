@@ -24,7 +24,7 @@ from api.analytics.homeworld_locator.fleet_age_input import FleetAgeInputStamp
 from api.analytics.homeworld_locator.fleet_age_refetch import (
     FLEET_AGE_RETAINED_CHANGES,
     FleetAgeRefetchNotice,
-    fleet_age_identity_changed_handler,
+    wire_fleet_age_identity_changed,
 )
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.homeworld_locator.serialization import (
@@ -39,6 +39,7 @@ from api.analytics.homeworld_locator.types import (
 )
 from api.analytics.turn_roster import iter_turn_players
 from api.errors import ValidationError
+from api.services.stack import build_service_stack
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -107,7 +108,7 @@ def test_identity_change_sets_durable_marker_and_skips_unchanged_saves() -> None
     storage = MemoryAssetBackend(initial={})
     homeworld = HomeworldLocatorPersistenceService(storage)
     fleet = FleetSnapshotPersistenceService(MemoryAssetBackend(initial={}))
-    fleet.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(homeworld)
+    wire_fleet_age_identity_changed(fleet, homeworld)
     created = _ledger(1, 42, 7, final=False)
     fleet.put_ledger(7, 1, 4, 1, created)
     marker = homeworld.get_fleet_age_stale_marker(7, 1)
@@ -135,6 +136,24 @@ def test_identity_change_sets_durable_marker_and_skips_unchanged_saves() -> None
 
     reloaded = HomeworldLocatorPersistenceService(storage)
     assert reloaded.get_fleet_age_stale_marker(7, 1) == removed
+
+
+def test_service_stack_records_fleet_age_identity_on_ledger_save() -> None:
+    stack = build_service_stack(MemoryAssetBackend(initial={}))
+    try:
+        stack.analytics._fleet_persistence.put_ledger(
+            7,
+            1,
+            4,
+            1,
+            _ledger(1, 42, 7, final=False),
+        )
+        assert stack.analytics.fleet_age_refetch_notice(7, 1, after_epoch=0) == {
+            "epoch": 1,
+            "fromTurn": 4,
+        }
+    finally:
+        stack.analytics.shutdown_background_workers()
 
 
 def test_refetch_notice_survives_a_new_service_and_a_client_ahead() -> None:
@@ -326,9 +345,7 @@ def test_marker_unsatisfies_from_changed_turn_and_rerefine_keeps_later_aggregate
     kept = persistence.get_evidence_aggregate(628580, 1, 5)
     assert kept is not None
 
-    fleet.persistence.on_fleet_age_identity_changed = fleet_age_identity_changed_handler(
-        persistence
-    )
+    wire_fleet_age_identity_changed(fleet.persistence, persistence)
     fleet.persistence.delete_ledger(628580, 1, 3, owner)
     assert evidence_refined_through_shell(services, baseline_turn=1, shell_turn=2)
     assert evidence_refined_through_shell(services, baseline_turn=1, shell_turn=3) is False

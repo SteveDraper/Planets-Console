@@ -6,19 +6,21 @@ turn changed after ``after_epoch``, null when that epoch is current, and 1
 when ``after_epoch`` is ahead of the stored generation or the retained window
 no longer holds the answer.
 
-``fleet_age_identity_changed_handler`` is the production callback. It records
-the durable stale marker and this log. It does not ensure homeworld or fleet.
+``wire_fleet_age_identity_changed`` installs the production callback on fleet
+persistence. The callback records the durable stale marker and this log. It
+does not ensure homeworld or fleet.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from api.analytics.fleet.ledger_persisted_event import FleetAgeIdentityChanged
 
 if TYPE_CHECKING:
+    from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
     from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 
 FLEET_AGE_RETAINED_CHANGES = 256
@@ -57,12 +59,13 @@ def notice_for_fleet_age_changes(
     return FleetAgeRefetchNotice(epoch=generation, from_turn=min(turns))
 
 
-def fleet_age_identity_changed_handler(
+def wire_fleet_age_identity_changed(
+    fleet_persistence: FleetSnapshotPersistenceService,
     homeworld_persistence: HomeworldLocatorPersistenceService,
-) -> Callable[[FleetAgeIdentityChanged], None]:
-    """Durable stale marker and refetch log for one homeworld store."""
+) -> None:
+    """Point fleet build-turn identity changes at this homeworld store."""
 
     def on_changed(event: FleetAgeIdentityChanged) -> None:
         homeworld_persistence.record_fleet_age_identity_changed(event)
 
-    return on_changed
+    fleet_persistence.on_fleet_age_identity_changed = on_changed
