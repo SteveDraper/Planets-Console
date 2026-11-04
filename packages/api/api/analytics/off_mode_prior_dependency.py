@@ -1,9 +1,9 @@
-"""Stamped prior-fleet edge for off-mode catch-up.
+"""Prior-fleet edge for off-mode catch-up.
 
 One edge and one ladder, shared by the fleet and scores ensure resolvers.
-The hop is a fleet file on the current evidence mark. It does not schedule a
-scoreboard solve. Resolvers still decide player scope, elimination, a missing
-turn, and whether backfill is on.
+The hop is a fleet file brought onto the current evidence mark. It does not
+schedule a scoreboard solve. Resolvers still decide player scope, elimination,
+a missing turn, and whether backfill is on.
 """
 
 from __future__ import annotations
@@ -14,10 +14,10 @@ from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.off_mode import off_mode_prior_needs_catch_up
 from api.models.game import TurnInfo
 
-# ``stamped`` is not ensure-final, so the hop does not pull a scoreboard solve.
+# Prior fleet only. Catch-up finalization does not solve that turn's scoreboard.
 # The open turn's own scoreboard is scheduled separately.
 OFF_MODE_PRIOR_FLEET: tuple[EnsureDependency, ...] = (
-    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="stamped"),
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
 )
 
 
@@ -40,7 +40,7 @@ def off_mode_prior_dependency(
     player_id: int,
     turn: TurnInfo,
 ) -> tuple[EnsureDependency, ...]:
-    """Stamped prior-fleet edge when ``scope.turn - 1`` still needs a hop.
+    """Prior-fleet edge when ``scope.turn - 1`` still needs a hop.
 
     Reads that prior ledger and the player's evidence mark, then applies
     ``off_mode_prior_needs_catch_up``.

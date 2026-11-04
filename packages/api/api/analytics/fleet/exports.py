@@ -23,7 +23,6 @@ from api.analytics.fleet.injected_services import (
 )
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetTurnSnapshot
-from api.analytics.off_mode import ledger_matches_evidence_mark
 from api.analytics.off_mode_prior_dependency import (
     backfill_is_enabled,
     off_mode_prior_dependency,
@@ -118,33 +117,6 @@ def _fleet_snapshot_for_scope(
         )
 
     return ctx.export_snapshot_for(ANALYTIC_ID, scope, gather)
-
-
-def is_fleet_export_on_current_mark(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:
-    """True when a stored ledger is already on the current evidence mark.
-
-    An approximate fleet counts. A missing file does not. This is the off-mode
-    stop, not ensure-final.
-    """
-    if not isinstance(scope.player_id, int):
-        return False
-    services = lookup_fleet_compute_services(ctx)
-    if services is None or ctx.load_turn(scope.turn) is None:
-        return False
-    persisted = services.persistence.get_ledger(
-        services.game_id,
-        services.perspective,
-        scope.turn,
-        scope.player_id,
-    )
-    if persisted is None:
-        return False
-    mark = services.persistence.evidence_mark(
-        services.game_id,
-        services.perspective,
-        scope.player_id,
-    )
-    return ledger_matches_evidence_mark(scope.turn, persisted, mark)
 
 
 def is_fleet_export_observation_satisfied(ctx: AnalyticQueryContext, scope: ExportScope) -> bool:

@@ -302,11 +302,6 @@ def is_export_scope_ensure_satisfied(
         from api.analytics.fleet.exports import is_fleet_export_observation_satisfied
 
         return is_fleet_export_observation_satisfied(ctx, scope)
-    if quality == "stamped" and analytic_id == "fleet":
-        # fleet.exports imports export_context, which imports this walker.
-        from api.analytics.fleet.exports import is_fleet_export_on_current_mark
-
-        return is_fleet_export_on_current_mark(ctx, scope)
     if catalog.is_ensure_satisfied is not None:
         return catalog.is_ensure_satisfied(ctx, scope)
     if catalog.is_persisted is None:
