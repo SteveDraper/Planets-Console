@@ -26,6 +26,7 @@ from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmit
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
 from api.compute.turn_cache import TurnInfoCache, get_process_turn_info_cache
+from api.exceptions import DiscardedWorkRefused
 from api.models.game import TurnInfo
 
 # Re-exports for external callers; in-package compute code imports state types
@@ -432,8 +433,6 @@ class ComputeOrchestrator(
         is failed and leaves the ready queue. A match that is running finishes
         its worker; persist and stamp are refused and the step is not retried.
         """
-        from api.exceptions import DiscardedWorkRefused
-
         with self._condition:
             for scope, node in list(self._nodes.items()):
                 if node.is_terminal or not should_discard(scope, node):

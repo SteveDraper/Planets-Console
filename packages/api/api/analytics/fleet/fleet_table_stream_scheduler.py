@@ -18,7 +18,7 @@ from api.analytics.fleet.fleet_table_player_run import (
 )
 from api.analytics.fleet.fleet_table_stream_registry import wake_fleet_table_stream_multiplex
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.analytics.fleet.injected_services import FleetComputeServices
+from api.analytics.fleet.injected_services import FleetComputeServices, resolve_fleet_services
 from api.analytics.fleet.persistence import (
     FleetLedgerWriteNotice,
     FleetSnapshotPersistenceService,
@@ -553,8 +553,6 @@ def _persisted_ledger_from_result_wire_or_storage(
         return None
     if scope.turn == "*" or not isinstance(scope.turn, int):
         return None
-    from api.analytics.fleet.compute_services import resolve_fleet_services
-
     for binding in stream_bindings.values():
         services = resolve_fleet_services(binding.query_context)
         persisted = services.persistence.get_ledger(

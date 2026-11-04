@@ -283,10 +283,12 @@ def is_export_scope_ensure_satisfied(
     if ctx.is_scope_ensured(analytic_id, scope):
         return True
     if quality == "observation" and analytic_id == "fleet":
+        # fleet.exports imports export_context, which imports this walker.
         from api.analytics.fleet.exports import is_fleet_export_observation_satisfied
 
         return is_fleet_export_observation_satisfied(ctx, scope)
     if quality == "stamped" and analytic_id == "fleet":
+        # fleet.exports imports export_context, which imports this walker.
         from api.analytics.fleet.exports import is_fleet_export_on_current_mark
 
         return is_fleet_export_on_current_mark(ctx, scope)

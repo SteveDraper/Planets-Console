@@ -15,6 +15,7 @@ from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.scope import format_compute_scope_key
 from api.compute.wire import coerce_step_result
+from api.exceptions import DiscardedWorkRefused
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -189,8 +190,6 @@ class OrchestratorLifecycleMixin:
 
     def _fail_discarded_stamp(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """Finish a discarded step without persisting or retrying."""
-        from api.exceptions import DiscardedWorkRefused
-
         self._fail_node(
             node,
             DiscardedWorkRefused("discarded step does not persist or stamp the new evidence mark"),

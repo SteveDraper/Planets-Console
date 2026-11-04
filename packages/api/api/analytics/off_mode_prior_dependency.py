@@ -11,7 +11,7 @@ from __future__ import annotations
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope
 from api.analytics.fleet.injected_services import FleetComputeServices
-from api.analytics.fleet.off_mode_catch_up import off_mode_prior_needs_catch_up
+from api.analytics.off_mode import off_mode_prior_needs_catch_up
 from api.models.game import TurnInfo
 
 # ``stamped`` is not ensure-final, so the hop does not pull a scoreboard solve.

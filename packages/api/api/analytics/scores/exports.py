@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
+from api.analytics.export_types import ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
@@ -26,6 +26,10 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
     tier_emissions_from_wire_complete,
 )
 from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
+from api.analytics.scores.ensure_dependencies import (
+    ENSURE_DEPENDENCIES,
+    resolve_scores_ensure_dependencies,
+)
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
     ScoresExportResolved,
@@ -75,20 +79,6 @@ ORDERING_SEMANTICS = {
         "$.solutions[0] is the top held explanation."
     ),
 }
-
-ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
-    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
-)
-
-
-def scores_ensure_dependencies_for(
-    ctx: AnalyticQueryContext,
-    scope: ExportScope,
-) -> tuple[EnsureDependency, ...]:
-    """Delegate so this catalog module does not import the fleet analytic."""
-    from api.analytics.scores.ensure_dependencies import resolve_scores_ensure_dependencies
-
-    return resolve_scores_ensure_dependencies(ctx, scope)
 
 
 @dataclass(frozen=True)
@@ -671,7 +661,7 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     path_prefix_scope_rules=PATH_PREFIX_SCOPE_RULES,
     ordering_semantics=ORDERING_SEMANTICS,
     ensure_dependencies=ENSURE_DEPENDENCIES,
-    ensure_dependencies_for=scores_ensure_dependencies_for,
+    ensure_dependencies_for=resolve_scores_ensure_dependencies,
     ensure_export=ensure_scores_export,
     materialize_export_tree=materialize_scores_export_tree,
     is_persisted=is_scores_export_persisted,

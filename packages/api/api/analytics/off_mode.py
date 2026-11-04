@@ -1,4 +1,4 @@
-"""Off-mode catch-up: which fleet turns refresh, and stamp versus bump.
+"""Off-mode catch-up shared by fleet and scores.
 
 Backfill earlier turns is off by default. A stale open refreshes fleet from
 that turn back through ``appliesFromTurn`` and does not schedule scoreboard
@@ -12,23 +12,20 @@ copies it onto every node of that plan, and fleet job wires carry ``openTurn``
 plus ``catchUp``. Dependency resolution does not record it.
 
 The homeworld locator does not call this module, so opening it does not start
-the walk.
+the walk. The Backfill earlier turns record is read by the game service, not
+here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from api.analytics.fleet.types import FleetEvidenceMark, PersistedFleetLedger
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-from api.errors import NotFoundError
 from api.models.game import GameSettings, TurnInfo
-from api.serialization.backfill_earlier_turns import backfill_earlier_turns_enabled
-from api.services.game_service import backfill_earlier_turns_store_key
-from api.services.storage_json import require_dict
-from api.storage.base import StorageBackend
 
 
 def off_mode_job_wire_fields(
@@ -79,15 +76,21 @@ def wire_is_catch_up_hop(result_wire: Mapping[str, object]) -> bool:
     return result_wire.get("catchUp") is True
 
 
-def read_backfill_earlier_turns(storage: StorageBackend, game_id: int) -> bool:
-    """Return the stored setting. A missing record is off and does not submit a walk."""
-    try:
-        raw = storage.get(backfill_earlier_turns_store_key(game_id))
-    except NotFoundError:
-        return False
-    if not isinstance(raw, dict):
-        return False
-    return backfill_earlier_turns_enabled(require_dict(raw, f"backfill earlier turns {game_id}"))
+def copy_submission_open_fields(
+    job_wire: Mapping[str, Any],
+    payload: MutableMapping[str, Any],
+) -> None:
+    """Copy ``openTurn`` and ``catchUp`` from a job wire onto a persist payload.
+
+    A wire without an integer open turn leaves those fields unset. ``catchUp``
+    is copied only together with that open turn.
+    """
+    open_turn = open_turn_on_wire(job_wire)
+    if open_turn is None:
+        return
+    payload["openTurn"] = open_turn
+    if wire_is_catch_up_hop(job_wire):
+        payload["catchUp"] = True
 
 
 def ledger_matches_evidence_mark(
@@ -201,16 +204,3 @@ def off_mode_prior_needs_catch_up(
     if prior_ledger is not None and ledger_matches_evidence_mark(prior_turn, prior_ledger, mark):
         return False
     return True
-
-
-def live_fleet_and_scores_turns(game_id: int, perspective: int) -> frozenset[int]:
-    """Host turns that already have a live fleet or scoreboard table stream."""
-    from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.streaming.table_stream.registry_catalog import active_table_stream_turns
-
-    return active_table_stream_turns(
-        game_id,
-        perspective,
-        (FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID),
-    )

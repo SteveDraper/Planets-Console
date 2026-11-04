@@ -5,12 +5,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 from api.analytics.compute_context import AnalyticComputeContext
-from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.held_solutions import FleetInferenceMaterialization, FleetInferenceSupport
 from api.analytics.fleet.injected_services import (
     FleetComputeServices,
-    lookup_fleet_compute_services,
+    resolve_fleet_services,
 )
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
@@ -55,23 +53,6 @@ def build_ephemeral_fleet_compute_services(
         perspective=perspective,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
-    )
-
-
-def resolve_fleet_services(exports: AnalyticQueryContext) -> FleetComputeServices:
-    services = lookup_fleet_compute_services(exports)
-    if services is not None:
-        return services
-
-    injected = exports.export_services.get(ANALYTIC_ID)
-    if injected is None:
-        raise RuntimeError(
-            f"Fleet requires {ANALYTIC_ID!r} in ctx.export_services; "
-            "inject FleetComputeServices via TurnAnalyticService or test helpers."
-        )
-    raise RuntimeError(
-        f"Fleet export_services[{ANALYTIC_ID!r}] must be FleetComputeServices, "
-        f"got {type(injected).__name__}."
     )
 
 

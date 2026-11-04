@@ -10,7 +10,6 @@ from api.analytics.fleet.compute_orchestration import (
 )
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
-from api.analytics.fleet.off_mode_catch_up import MarkPersist, off_mode_persist_decision
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -22,6 +21,7 @@ from api.analytics.fleet.types import (
 )
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
 from api.analytics.homeworld_locator.exports import EXPORT_CATALOG as HOMEWORLD_EXPORT_CATALOG
+from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.dag import plan_compute_dag
@@ -748,8 +748,9 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
         reset_fleet_table_stream_registry_for_tests,
     )
     from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-    from api.analytics.fleet.off_mode_catch_up import live_fleet_and_scores_turns
     from api.analytics.scores.ensure_dependencies import resolve_scores_ensure_dependencies
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.streaming.table_stream.registry_catalog import active_table_stream_turns
 
     host, ctx = _ctx_at(sample_turn, 41)
     player_id = first_player_id(host)
@@ -777,7 +778,11 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
 
     get_fleet_table_stream_registry().attach(later_scope, _LaterStream())
     try:
-        assert 41 in live_fleet_and_scores_turns(ctx.game_id, ctx.perspective)
+        assert 41 in active_table_stream_turns(
+            ctx.game_id,
+            ctx.perspective,
+            (FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID),
+        )
         export_41 = ExportScope(
             game_id=ctx.game_id,
             perspective=ctx.perspective,

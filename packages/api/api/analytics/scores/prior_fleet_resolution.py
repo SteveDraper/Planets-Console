@@ -15,6 +15,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolution_from_fleet_records,
     resolve_prior_turn_fleet_torp_overlay,
 )
+from api.analytics.off_mode import ledger_matches_evidence_mark
 from api.compute.scope import WILDCARD, ComputeScope, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -153,8 +154,6 @@ def resolve_prior_fleet_for_scores(
         game_id
     ):
         if prior_persisted is not None and prior_turn is not None:
-            from api.analytics.fleet.off_mode_catch_up import ledger_matches_evidence_mark
-
             mark = fleet_services.persistence.evidence_mark(
                 game_id,
                 perspective,

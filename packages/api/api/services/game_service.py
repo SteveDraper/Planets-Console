@@ -32,6 +32,22 @@ def backfill_earlier_turns_store_key(game_id: int) -> str:
     return f"games/{game_id}/backfill-earlier-turns"
 
 
+def read_backfill_earlier_turns(storage: StorageBackend, game_id: int) -> bool:
+    """Return the stored Backfill earlier turns choice.
+
+    A missing record is off. A present record is decoded by the codec, so a
+    non-object or a malformed document is rejected. This read does not check
+    that the game exists and does not submit a walk.
+    """
+    try:
+        raw = storage.get(backfill_earlier_turns_store_key(game_id))
+    except NotFoundError:
+        return False
+    return backfill_earlier_turns_enabled(
+        require_dict(raw, f"backfill earlier turns for game {game_id}")
+    )
+
+
 # (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.
 OnGameInfoRefreshed = Callable[[int, GameInfo | None, GameInfo], None]
 
@@ -203,12 +219,7 @@ class GameService:
         read does not submit a walk.
         """
         self.get_game_info(game_id)
-        try:
-            raw = self._storage.get(backfill_earlier_turns_store_key(game_id))
-        except NotFoundError:
-            return False
-        payload = require_dict(raw, f"backfill earlier turns for game {game_id}")
-        return backfill_earlier_turns_enabled(payload)
+        return read_backfill_earlier_turns(self._storage, game_id)
 
     def set_backfill_earlier_turns(self, game_id: int, enabled: bool) -> bool:
         """Store one Backfill earlier turns choice for ``game_id``.

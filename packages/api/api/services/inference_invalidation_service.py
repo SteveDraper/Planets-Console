@@ -17,9 +17,11 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reschedule_all_inference_rows,
     reschedule_inference_row,
 )
+from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_state import ComputeNodeRun
+from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns
@@ -187,10 +189,11 @@ class InferenceInvalidationService:
             return None
         if self._fleet_persistence.backfill_earlier_turns_enabled(game_id):
             return None
-        from api.analytics.fleet.off_mode_catch_up import live_fleet_and_scores_turns
-        from api.compute.runtime import peek_compute_orchestrator
-
-        live_turns = live_fleet_and_scores_turns(game_id, perspective)
+        live_turns = active_table_stream_turns(
+            game_id,
+            perspective,
+            _OPEN_TURN_ANALYTICS,
+        )
         orchestrator = peek_compute_orchestrator()
         # Shell turns are the roots of in-flight fleet and scores submissions.
         # A live table stream is not itself an open: turn 41 streaming while
@@ -248,8 +251,6 @@ class InferenceInvalidationService:
         in-flight submission root is consumed either way, after a bump has
         already chosen which turns to recompute.
         """
-        from api.analytics.fleet.off_mode_catch_up import MarkPersist, off_mode_persist_decision
-
         open_turn = self._unconsumed_submission_open(game_id, perspective, player_id, host_turn)
         if self._fleet_persistence is not None:
             # This call classifies the mark. It is not a fleet merge, so the
@@ -283,8 +284,6 @@ class InferenceInvalidationService:
         host_turn: int,
     ) -> int | None:
         """The in-flight submission root when this host turn is that root and still one-shot."""
-        from api.compute.runtime import peek_compute_orchestrator
-
         orchestrator = peek_compute_orchestrator()
         if orchestrator is None:
             return None
@@ -306,8 +305,6 @@ class InferenceInvalidationService:
         player_id: int,
         open_turn: int,
     ) -> None:
-        from api.compute.runtime import peek_compute_orchestrator
-
         orchestrator = peek_compute_orchestrator()
         if orchestrator is None:
             return

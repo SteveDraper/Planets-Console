@@ -1,6 +1,9 @@
-"""Scores ensure edges, including the off-mode stamped fleet hop.
+"""Scores ensure edges that read fleet services for an off-mode prior.
 
-Lives outside the scores export catalog so mark readers do not import fleet.
+The default edge is a final prior fleet. While Backfill earlier turns is off,
+the shared off-mode rule may replace that edge with a stamped hop. Fleet
+compute services are the seam for the prior ledger and the evidence mark.
+The catch-up rule itself lives in ``api.analytics.off_mode``.
 """
 
 from __future__ import annotations
@@ -9,6 +12,11 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.off_mode_prior_dependency import off_mode_prior_dependency
+
+# Final prior fleet. Off-mode resolution may replace this with a stamped hop.
+ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
+    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
+)
 
 
 def resolve_scores_ensure_dependencies(
@@ -22,8 +30,6 @@ def resolve_scores_ensure_dependencies(
     absent mark does not walk backward. The open turn's own scoreboard is this
     scope, not an earlier one.
     """
-    from api.analytics.scores.exports import ENSURE_DEPENDENCIES
-
     if not isinstance(scope.player_id, int):
         return ENSURE_DEPENDENCIES
     services = lookup_fleet_compute_services(ctx)

@@ -13,15 +13,17 @@ from api.analytics.fleet.chain import (
     get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.composition_export import build_fleet_composition_branch
-from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.fleet.export_scope import ledgers_for_scope
-from api.analytics.fleet.injected_services import lookup_fleet_compute_services
-from api.analytics.fleet.off_mode_catch_up import ledger_matches_evidence_mark
+from api.analytics.fleet.injected_services import (
+    lookup_fleet_compute_services,
+    resolve_fleet_services,
+)
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetTurnSnapshot
+from api.analytics.off_mode import ledger_matches_evidence_mark
 from api.analytics.off_mode_prior_dependency import off_mode_prior_dependency
 from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.exports import held_scores_for_scope

@@ -7,8 +7,9 @@ from unittest.mock import patch
 
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import EnsureDependency, ExportScope
-from api.analytics.fleet.compute_services import resolve_fleet_services, turn_chain_through
+from api.analytics.fleet.compute_services import turn_chain_through
 from api.analytics.fleet.exports import EXPORT_CATALOG
+from api.analytics.fleet.injected_services import resolve_fleet_services
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,

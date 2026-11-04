@@ -1275,8 +1275,9 @@ def test_get_or_materialize_fleet_ledger_for_player_raises_on_epoch_abort(
         _FleetSnapshotInvalidated,
         get_or_materialize_fleet_ledger_for_player,
     )
-    from api.analytics.fleet.compute_services import resolve_fleet_services, turn_chain_through
+    from api.analytics.fleet.compute_services import turn_chain_through
     from api.analytics.fleet.exports import is_fleet_export_ensure_satisfied
+    from api.analytics.fleet.injected_services import resolve_fleet_services
     from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.errors import FleetGapFillEpochInvalidated

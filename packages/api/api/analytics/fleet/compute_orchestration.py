@@ -8,11 +8,18 @@ from typing import TYPE_CHECKING, Any
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
+from api.analytics.fleet.injected_services import FleetComputeServices, resolve_fleet_services
 from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.types import PersistedFleetLedger
+from api.analytics.off_mode import (
+    apply_off_mode_job_wire_fields,
+    off_mode_persist_decision,
+    open_turn_on_wire,
+    wire_is_catch_up_hop,
+)
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import (
     WILDCARD,
@@ -22,10 +29,10 @@ from api.compute.scope import (
 )
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
+from api.exceptions import DiscardedWorkRefused, ValidationError
 from api.models.game import GameSettings
 
 if TYPE_CHECKING:
-    from api.analytics.fleet.compute_services import FleetComputeServices
     from api.compute.orchestrator import ComputeOrchestrator
     from api.models.game import TurnInfo
 
@@ -116,8 +123,6 @@ def build_fleet_materialization_leg_job_wire(
     if fleet_player_eliminated_at_turn(turn, player_id):
         wire = _eliminated_fleet_job_wire(scope, player_id=player_id, ctx=ctx)
     else:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         services = resolve_fleet_services(ctx)
         wire = {
             "gameId": scope.game_id,
@@ -145,8 +150,6 @@ def _eliminated_fleet_job_wire(
     Observation persist writes the empty non-final ledger from the flag.
     Finalization persist rebuilds the empty final ledger from the loaded turn.
     """
-    from api.analytics.fleet.compute_services import resolve_fleet_services
-
     epoch = 0
     if ctx is not None and isinstance(scope.player_id, int):
         services = resolve_fleet_services(ctx)
@@ -189,9 +192,6 @@ def _stamp_submission_open(
         wire.pop("openTurn", None)
         wire.pop("catchUp", None)
         return
-    from api.analytics.fleet.compute_services import resolve_fleet_services
-    from api.analytics.fleet.off_mode_catch_up import apply_off_mode_job_wire_fields
-
     services = resolve_fleet_services(ctx)
     apply_off_mode_job_wire_fields(
         wire,
@@ -215,8 +215,6 @@ def build_fleet_finalization_leg_job_wire(
         raise RuntimeError("fleet finalization leg requires observation result wire on node")
     payload = dict(node_result_wire)
     if ctx is not None and isinstance(scope.player_id, int):
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         services = resolve_fleet_services(ctx)
         payload["playerInvalidationGeneration"] = (
             services.persistence.player_invalidation_generation(
@@ -240,8 +238,6 @@ class FleetPersistencePolicy:
     """
 
     def is_satisfied(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> bool:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return False
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -260,8 +256,6 @@ class FleetPersistencePolicy:
         scope: ComputeScope,
     ) -> dict[str, object] | None:
         """Hydrate short-circuit completes with the durable final ledger wire."""
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return None
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -343,7 +337,6 @@ class FleetPersistencePolicy:
         """
         from api.analytics.fleet.approximate_fleet import approximate_fleet_ledger
         from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
-        from api.analytics.fleet.compute_services import resolve_fleet_services
         from api.analytics.fleet.fleet_table_stream_scheduler import publish_saved_host_turn_ledger
         from api.analytics.fleet.materialization_provenance import fleet_prior_ledger_at_n_minus_1
         from api.analytics.fleet.types import FleetAcquisitionLedger, FleetMaterializationProvenance
@@ -418,8 +411,6 @@ class FleetPersistencePolicy:
             player_id=scope.player_id,
             persisted=put_result.stored,
         )
-        from api.analytics.fleet.off_mode_catch_up import open_turn_on_wire
-
         return self._refresh_following_callback(
             services,
             scope,
@@ -433,7 +424,6 @@ class FleetPersistencePolicy:
         scope: ComputeScope,
         result_wire: dict[str, object],
     ) -> Callable[[], None] | None:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
         from api.analytics.fleet.materialization_provenance import (
             resolve_fleet_materialization_provenance,
         )
@@ -466,8 +456,6 @@ class FleetPersistencePolicy:
 
         if fleet_player_eliminated_at_turn(turn, scope.player_id):
             return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
-        from api.analytics.fleet.off_mode_catch_up import wire_is_catch_up_hop
-
         if wire_is_catch_up_hop(result_wire):
             # Observation already merged the refreshed prior. Do not read this
             # turn's stored scoreboard and do not schedule a solve.
@@ -560,8 +548,6 @@ class FleetPersistencePolicy:
         player_invalidation_generation: int,
     ) -> Callable[[], None]:
         """Store a living final ledger, then wake scores and later approximate files."""
-        from api.analytics.fleet.compute_services import FleetComputeServices
-
         if not isinstance(services, FleetComputeServices):
             raise TypeError("fleet finalization persist requires FleetComputeServices")
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
@@ -578,8 +564,6 @@ class FleetPersistencePolicy:
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         scores_notification = put_result.deferred_notification
-        from api.analytics.fleet.off_mode_catch_up import open_turn_on_wire
-
         refresh = self._refresh_following_callback(
             services,
             scope,
@@ -609,7 +593,6 @@ class FleetPersistencePolicy:
         stays on disk.
         """
         from api.analytics.fleet.approximate_fleet import refresh_following_approximate_fleets
-        from api.analytics.fleet.compute_services import FleetComputeServices
 
         if not isinstance(services, FleetComputeServices):
             raise TypeError("fleet later-file refresh requires FleetComputeServices")
@@ -645,7 +628,6 @@ class FleetPersistencePolicy:
         turn: TurnInfo,
     ) -> Callable[[], None] | None:
         """Write an empty final ledger. Does not wait on scores or a prior fleet."""
-        from api.analytics.fleet.compute_services import resolve_fleet_services
         from api.analytics.fleet.eliminated_player import (
             eliminated_empty_fleet_ledger,
             eliminated_fleet_provenance,
@@ -673,8 +655,6 @@ class FleetPersistencePolicy:
         return put_result.deferred_notification
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -689,8 +669,6 @@ class FleetPersistencePolicy:
         )
 
     def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return 0
         services = resolve_fleet_services(ctx)
@@ -723,8 +701,6 @@ def _refuse_stale_fleet_epoch(
     orchestrator would either retry that write or teach the generic
     orchestrator to read a fleet field.
     """
-    from api.errors import DiscardedWorkRefused, ValidationError
-
     expected = result_wire.get("playerInvalidationGeneration")
     if isinstance(expected, bool) or not isinstance(expected, int):
         raise ValidationError("fleet persist wire requires integer playerInvalidationGeneration")
@@ -755,12 +731,6 @@ def _observation_merge_generation(
     generation are loaded only when the wire carries a submission root: with
     no root, neither value changes the decision.
     """
-    from api.analytics.fleet.off_mode_catch_up import (
-        off_mode_persist_decision,
-        open_turn_on_wire,
-        wire_is_catch_up_hop,
-    )
-
     if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
         raise ValueError("fleet observation merge requires concrete player_id and turn")
     open_turn = open_turn_on_wire(result_wire)

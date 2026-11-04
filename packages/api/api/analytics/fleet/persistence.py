@@ -33,6 +33,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.errors import NotFoundError, ValidationError
+from api.services.game_service import read_backfill_earlier_turns
 from api.storage.base import StorageBackend
 
 OnSnapshotPersistedCallback = Callable[[int, int, int], None]
@@ -424,8 +425,6 @@ class FleetSnapshotPersistenceService:
 
     def backfill_earlier_turns_enabled(self, game_id: int) -> bool:
         """Read Backfill earlier turns. A missing record is off."""
-        from api.analytics.fleet.off_mode_catch_up import read_backfill_earlier_turns
-
         return read_backfill_earlier_turns(self._storage, game_id)
 
     def evidence_mark(
