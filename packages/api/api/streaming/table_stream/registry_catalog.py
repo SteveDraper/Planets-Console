@@ -1,8 +1,8 @@
-"""Catalog of generic table-stream registries for diagnostics introspection."""
+"""Catalog of generic table-stream registries for diagnostics and live-stream queries."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from typing import Any, Protocol
 
 from api.streaming.table_stream.registry import TableStreamRegistry
@@ -42,20 +42,47 @@ def register_table_stream_registry(
     _registry_entries.append((analytic_id, registry, binding_wire))
 
 
-def active_table_stream_bindings() -> tuple[dict[str, Any], ...]:
-    """Return active stream bindings from every registered table-stream registry."""
+def _registered_table_stream_entries() -> list[_RegistryEntry]:
     from api.streaming.table_stream.registry_bootstrap import (
         ensure_table_stream_registries_registered,
     )
 
     ensure_table_stream_registries_registered()
+    return _registry_entries
+
+
+def active_table_stream_bindings() -> tuple[dict[str, Any], ...]:
+    """Return active stream bindings from every registered table-stream registry."""
     bindings: list[dict[str, Any]] = []
-    for analytic_id, registry, binding_wire in _registry_entries:
+    for analytic_id, registry, binding_wire in _registered_table_stream_entries():
         for scope in registry.list_active_scopes():
             wire = binding_wire(scope)
             wire["analyticId"] = analytic_id
             bindings.append(wire)
     return tuple(bindings)
+
+
+def active_table_stream_turns(
+    game_id: int,
+    perspective: int,
+    analytic_ids: Collection[str],
+) -> frozenset[int]:
+    """Turns with a live table stream for this game, perspective, and analytics.
+
+    Registries are registered before the scan. Each scope exposes ``game_id``,
+    ``perspective``, and ``turn_number``. An analytic id with no registry
+    contributes no turns. The same turn on more than one analytic is returned
+    once.
+    """
+    wanted = frozenset(analytic_ids)
+    turns: set[int] = set()
+    for analytic_id, registry, _binding_wire in _registered_table_stream_entries():
+        if analytic_id not in wanted:
+            continue
+        for scope in registry.list_active_scopes():
+            if scope.game_id == game_id and scope.perspective == perspective:
+                turns.add(scope.turn_number)
+    return frozenset(turns)
 
 
 def reset_table_stream_registry_catalog_for_tests() -> None:

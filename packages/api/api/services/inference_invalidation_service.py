@@ -22,6 +22,7 @@ from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.streaming.table_stream.registry_catalog import active_table_stream_turns
 
 _OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
 
@@ -165,15 +166,7 @@ class InferenceInvalidationService:
         return turns_to_reschedule
 
     def _live_scores_turns(self, game_id: int, perspective: int) -> frozenset[int]:
-        from api.analytics.military_score_inference.inference_table_stream_registry import (
-            get_inference_table_stream_registry,
-        )
-
-        return frozenset(
-            scope.turn_number
-            for scope in get_inference_table_stream_registry().list_active_scopes()
-            if scope.game_id == game_id and scope.perspective == perspective
-        )
+        return active_table_stream_turns(game_id, perspective, (SCORES_ANALYTIC_ID,))
 
     def _recompute_turns_after_evidence(
         self,

@@ -205,16 +205,12 @@ def off_mode_prior_needs_catch_up(
 
 def live_fleet_and_scores_turns(game_id: int, perspective: int) -> frozenset[int]:
     """Host turns that already have a live fleet or scoreboard table stream."""
-    from api.analytics.fleet.fleet_table_stream_registry import get_fleet_table_stream_registry
-    from api.analytics.military_score_inference.inference_table_stream_registry import (
-        get_inference_table_stream_registry,
-    )
+    from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+    from api.streaming.table_stream.registry_catalog import active_table_stream_turns
 
-    turns: set[int] = set()
-    for scope in get_fleet_table_stream_registry().list_active_scopes():
-        if scope.game_id == game_id and scope.perspective == perspective:
-            turns.add(scope.turn_number)
-    for scope in get_inference_table_stream_registry().list_active_scopes():
-        if scope.game_id == game_id and scope.perspective == perspective:
-            turns.add(scope.turn_number)
-    return frozenset(turns)
+    return active_table_stream_turns(
+        game_id,
+        perspective,
+        (FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID),
+    )
