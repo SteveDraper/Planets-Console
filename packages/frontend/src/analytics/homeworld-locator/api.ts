@@ -130,17 +130,5 @@ export async function fetchHomeworldFleetAgeRefetch(
   if (!response.ok) {
     await throwBffHttpErrorFromResponse(response, endpointLabel)
   }
-  const raw: unknown = await response.json()
-  if (
-    raw == null ||
-    typeof raw !== 'object' ||
-    typeof (raw as { epoch?: unknown }).epoch !== 'number'
-  ) {
-    throw new Error(`${endpointLabel}: invalid fleet-age refetch notice`)
-  }
-  const fromTurn = (raw as { fromTurn?: unknown }).fromTurn
-  if (fromTurn != null && typeof fromTurn !== 'number') {
-    throw new Error(`${endpointLabel}: invalid fleet-age refetch notice`)
-  }
-  return { epoch: (raw as { epoch: number }).epoch, fromTurn: fromTurn ?? null }
+  return response.json()
 }
