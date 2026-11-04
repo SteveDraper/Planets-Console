@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
-from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
+from api.analytics.fleet.compute_orchestration import (
+    FleetPersistencePolicy,
+    build_fleet_materialization_leg_job_wire,
+)
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
-from api.analytics.fleet.off_mode_catch_up import (
-    note_off_mode_open,
-    off_mode_open_turn,
-)
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
     FleetAcquisitionLedger,
@@ -28,7 +27,8 @@ from api.compute.dag import plan_compute_dag
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.registry import build_compute_registry
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
-from api.exceptions import FleetStampRefused
+from api.compute.wire import DependencyOutputs
+from api.exceptions import FleetScoresEvidenceOpenError, FleetStampRefused
 from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
 from api.services.game_service import backfill_earlier_turns_store_key
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -109,6 +109,35 @@ def _planned_keys(ctx, analytic_id, turn, player_id):
     return {(node.scope.analytic_id, node.scope.turn) for node in planned}
 
 
+def _open_fields(open_turn: int, turn: int) -> dict[str, object]:
+    return {"openTurn": open_turn, "catchUp": turn < open_turn}
+
+
+def _install_open_root(game_id: int, perspective: int, player_id: int, turn: int):
+    """In-flight submission root whose open turn is ``turn``."""
+    from api.compute import runtime as compute_runtime
+
+    orchestrator = compute_runtime.peek_compute_orchestrator()
+    if orchestrator is None:
+        orchestrator = ComputeOrchestrator(compute_registry={})
+        compute_runtime._process_orchestrator = orchestrator
+    scope = ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=game_id,
+        perspective=perspective,
+        turn=turn,
+        player_id=player_id,
+    )
+    node = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="waiting_deps",
+        open_turn=turn,
+    )
+    orchestrator.nodes[scope] = node
+    return node
+
+
 def test_stale_open_refreshes_back_through_the_mark_and_skips_scoreboard(sample_turn):
     host, ctx = _ctx_at(sample_turn, 40)
     player_id = first_player_id(host)
@@ -146,7 +175,6 @@ def test_absent_mark_does_not_walk_backward(sample_turn):
     planned = _planned_keys(ctx, FLEET_ANALYTIC_ID, 10, player_id)
 
     assert planned == {(FLEET_ANALYTIC_ID, 10)}
-    assert off_mode_open_turn(ctx.game_id, ctx.perspective, player_id) == 10
 
 
 def test_later_turn_uses_matching_fleet_and_does_not_invent_earlier_turns(sample_turn):
@@ -188,7 +216,6 @@ def test_homeworld_open_does_not_start_the_catch_up(sample_turn):
 
     assert dependencies
     assert all(dependency.analytic_id == HOMEWORLD_ANALYTIC_ID for dependency in dependencies)
-    assert off_mode_open_turn(ctx.game_id, ctx.perspective, player_id) is None
 
 
 def test_catch_up_hop_stamps_and_open_turn_keeps_its_generation(sample_turn):
@@ -205,7 +232,6 @@ def test_catch_up_hop_stamps_and_open_turn_keeps_its_generation(sample_turn):
         applies_from=38,
     )
     _store_generation(persistence, ctx.game_id, ctx.perspective, 40, player_id, 1, ship_id=40)
-    note_off_mode_open(ctx.game_id, ctx.perspective, player_id, 40)
     policy = FleetPersistencePolicy()
 
     policy.persist(
@@ -217,7 +243,11 @@ def test_catch_up_hop_stamps_and_open_turn_keeps_its_generation(sample_turn):
             turn=39,
             player_id=player_id,
         ),
-        {"fleetPersistLeg": "observation", "playerInvalidationGeneration": 0},
+        {
+            "fleetPersistLeg": "observation",
+            "playerInvalidationGeneration": 0,
+            **_open_fields(40, 39),
+        },
     )
     policy.persist(
         ctx,
@@ -228,7 +258,11 @@ def test_catch_up_hop_stamps_and_open_turn_keeps_its_generation(sample_turn):
             turn=40,
             player_id=player_id,
         ),
-        {"fleetPersistLeg": "observation", "playerInvalidationGeneration": 0},
+        {
+            "fleetPersistLeg": "observation",
+            "playerInvalidationGeneration": 0,
+            **_open_fields(40, 40),
+        },
     )
 
     hop = persistence.get_ledger(ctx.game_id, ctx.perspective, 39, player_id)
@@ -254,7 +288,6 @@ def test_opening_turn_does_not_rewrite_a_later_turn(sample_turn):
         applies_from=40,
     )
     _store_generation(persistence, ctx.game_id, ctx.perspective, 41, player_id, 1, ship_id=411)
-    note_off_mode_open(ctx.game_id, ctx.perspective, player_id, 40)
     policy = FleetPersistencePolicy()
     callback = policy.persist(
         ctx,
@@ -265,7 +298,11 @@ def test_opening_turn_does_not_rewrite_a_later_turn(sample_turn):
             turn=40,
             player_id=player_id,
         ),
-        {"fleetPersistLeg": "observation", "playerInvalidationGeneration": 0},
+        {
+            "fleetPersistLeg": "observation",
+            "playerInvalidationGeneration": 0,
+            **_open_fields(40, 40),
+        },
     )
     assert callback is not None
     callback()
@@ -273,7 +310,6 @@ def test_opening_turn_does_not_rewrite_a_later_turn(sample_turn):
     later = persistence.get_ledger(ctx.game_id, ctx.perspective, 41, player_id)
     assert later is not None
     assert later.ledger.records[0].record_id == "ship-411"
-    assert off_mode_open_turn(ctx.game_id, ctx.perspective, player_id) == 40
 
 
 def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
@@ -290,7 +326,7 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
         applies_from=40,
     )
     _store_generation(persistence, ctx.game_id, ctx.perspective, 40, player_id, 3, ship_id=40)
-    note_off_mode_open(ctx.game_id, ctx.perspective, player_id, 40)
+    root = _install_open_root(ctx.game_id, ctx.perspective, player_id, 40)
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
@@ -301,7 +337,7 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
     stamped = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
     assert stamped == FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
     assert persistence.get_ledger(ctx.game_id, ctx.perspective, 40, player_id) is not None
-    assert off_mode_open_turn(ctx.game_id, ctx.perspective, player_id) is None
+    assert root.open_turn_consumed is True
 
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
 
@@ -315,7 +351,6 @@ def test_first_scoreboard_persist_sets_generation_one(sample_turn):
     player_id = first_player_id(sample_turn)
     services = ctx.export_services[FLEET_ANALYTIC_ID]
     persistence = services.persistence
-    note_off_mode_open(ctx.game_id, ctx.perspective, player_id, 10)
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
@@ -413,7 +448,7 @@ def test_bump_drops_offscreen_hops_and_refuses_an_executing_step():
         game_id=1,
         perspective=1,
         player_id=7,
-        shell_turn=40,
+        shell_turns=frozenset({40}),
         live_turns=frozenset(),
     )
 
@@ -438,7 +473,7 @@ def test_bump_wakes_the_shell_and_leaves_a_later_turn_on_disk(sample_turn, monke
     persistence = services.persistence
     _store_generation(persistence, ctx.game_id, ctx.perspective, 4, player_id, 1, ship_id=4)
     _store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 1, ship_id=5)
-    note_off_mode_open(ctx.game_id, ctx.perspective, player_id, 4)
+    _install_open_root(ctx.game_id, ctx.perspective, player_id, 4)
     rescheduled: list[int] = []
     woken: list[int] = []
 
@@ -495,7 +530,6 @@ def test_backfill_on_keeps_the_final_prior_dependency(sample_turn):
 def test_catch_up_hop_finalization_does_not_read_the_scoreboard(sample_turn, monkeypatch):
     host, ctx = _ctx_at(sample_turn, 40)
     player_id = first_player_id(host)
-    note_off_mode_open(ctx.game_id, ctx.perspective, player_id, 40)
 
     def fail_scoreboard(*_args, **_kwargs):
         raise AssertionError("catch-up hop read the stored scoreboard")
@@ -517,7 +551,128 @@ def test_catch_up_hop_finalization_does_not_read_the_scoreboard(sample_turn, mon
         {
             "fleetPersistLeg": "finalization",
             "persistedLedgerWire": persisted_fleet_ledger_to_json(_ledger(player_id, ship_id=39)),
+            **_open_fields(40, 39),
         },
     )
 
     assert callback is None
+
+
+def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
+    """A later live stream does not steal the submission the user opened.
+
+    Turn 41 is a later turn: it is not the open, its scoreboard is not the
+    catch-up that stamps, and opening 40 does not rewrite it. Turn 40's own
+    scoreboard solve is still required, and that persist stamps.
+    """
+    from api.analytics.fleet.exports import fleet_ensure_dependencies_for
+    from api.analytics.fleet.fleet_table_stream_registry import (
+        get_fleet_table_stream_registry,
+        reset_fleet_table_stream_registry_for_tests,
+    )
+    from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+    from api.analytics.fleet.off_mode_catch_up import live_fleet_and_scores_turns
+    from api.analytics.scores.ensure_dependencies import resolve_scores_ensure_dependencies
+
+    host, ctx = _ctx_at(sample_turn, 41)
+    player_id = first_player_id(host)
+    services = ctx.export_services[FLEET_ANALYTIC_ID]
+    persistence = services.persistence
+    _mark_at(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=3,
+        applies_from=40,
+    )
+    _store_generation(persistence, ctx.game_id, ctx.perspective, 40, player_id, 3, ship_id=40)
+    _store_generation(persistence, ctx.game_id, ctx.perspective, 41, player_id, 1, ship_id=411)
+
+    later_scope = FleetTableStreamScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn_number=41,
+    )
+
+    class _LaterStream:
+        stream_token = "turn-41"
+
+    get_fleet_table_stream_registry().attach(later_scope, _LaterStream())
+    try:
+        assert 41 in live_fleet_and_scores_turns(ctx.game_id, ctx.perspective)
+        export_41 = ExportScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=41,
+            player_id=player_id,
+        )
+        fleet_ensure_dependencies_for(ctx, export_41)
+        resolve_scores_ensure_dependencies(ctx, export_41)
+        _install_open_root(ctx.game_id, ctx.perspective, player_id, 41)
+
+        scope_40 = ComputeScope(
+            analytic_id=FLEET_ANALYTIC_ID,
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=40,
+            player_id=player_id,
+        )
+        wire = build_fleet_materialization_leg_job_wire(
+            scope_40,
+            dependency_outputs=DependencyOutputs(),
+            ctx=ctx,
+            open_turn=40,
+        )
+        assert wire["openTurn"] == 40
+        assert wire["catchUp"] is False
+
+        root_40 = _install_open_root(ctx.game_id, ctx.perspective, player_id, 40)
+        invalidation = InferenceInvalidationService(
+            InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+            fleet_persistence=persistence,
+        )
+        invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
+        assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == (
+            FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
+        )
+        assert root_40.open_turn_consumed is True
+
+        policy = FleetPersistencePolicy()
+        callback = policy.persist(
+            ctx,
+            scope_40,
+            {
+                "fleetPersistLeg": "observation",
+                "playerInvalidationGeneration": persistence.player_invalidation_generation(
+                    ctx.game_id,
+                    ctx.perspective,
+                    player_id,
+                ),
+                **_open_fields(40, 40),
+            },
+        )
+        assert callback is not None
+        callback()
+        later = persistence.get_ledger(ctx.game_id, ctx.perspective, 41, player_id)
+        assert later is not None
+        assert later.ledger.records[0].record_id == "ship-411"
+
+        scheduled = False
+        try:
+            policy.persist(
+                ctx,
+                scope_40,
+                {
+                    "fleetPersistLeg": "finalization",
+                    "persistedLedgerWire": persisted_fleet_ledger_to_json(
+                        _ledger(player_id, ship_id=40)
+                    ),
+                    **_open_fields(40, 40),
+                },
+            )
+        except FleetScoresEvidenceOpenError:
+            scheduled = True
+        assert scheduled
+    finally:
+        reset_fleet_table_stream_registry_for_tests()

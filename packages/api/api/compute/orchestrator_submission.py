@@ -19,6 +19,20 @@ if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
 
 
+def submission_open_turn(request: ComputeRequest) -> int | None:
+    """Root turn carried onto every node this submission plans.
+
+    An explicit ``request.open_turn`` wins so a resubmitted hop keeps the root
+    it was planned under. Otherwise the request scope's turn is the root.
+    """
+    if request.open_turn is not None:
+        return request.open_turn
+    turn = request.scope.turn
+    if isinstance(turn, bool) or not isinstance(turn, int):
+        return None
+    return turn
+
+
 def prepare_compute_request_dependency_chain(
     request: ComputeRequest,
     *,
@@ -135,6 +149,7 @@ class OrchestratorSubmissionMixin:
             bundle=bundle,
             priority_band=request.priority_band,
             entry_step_kind=request.step_kind,
+            open_turn=submission_open_turn(request),
         )
         for node in self._nodes.values():
             self._refresh_node_readiness(node)
@@ -184,7 +199,10 @@ class OrchestratorSubmissionMixin:
         Do not recreate on abort itself -- that would fight an in-flight cancel.
         Caller holds the orchestrator lock; submits run after release.
         """
-        to_recreate: dict[ComputeScope, tuple[OrchestrationBundle, ComputePriorityBand]] = {}
+        to_recreate: dict[
+            ComputeScope,
+            tuple[OrchestrationBundle, ComputePriorityBand, int | None],
+        ] = {}
         seen: set[ComputeScope] = set()
         stack = [node]
         while stack:
@@ -204,20 +222,25 @@ class OrchestratorSubmissionMixin:
                     bundle = dependency.bundle if dependency.bundle is not None else node.bundle
                     if bundle is None:
                         continue
-                    to_recreate[dependency_scope] = (bundle, node.priority_band)
+                    to_recreate[dependency_scope] = (
+                        bundle,
+                        node.priority_band,
+                        dependency.open_turn,
+                    )
                 elif dependency.state == "waiting_deps":
                     stack.append(dependency)
         if not to_recreate:
             return
 
         def _recreate() -> None:
-            for scope, (bundle, priority_band) in to_recreate.items():
+            for scope, (bundle, priority_band, open_turn) in to_recreate.items():
                 self.submit(
                     ComputeRequest(
                         scope=scope,
                         priority_band=priority_band,
                         force_fresh=True,
                         bundle=bundle,
+                        open_turn=open_turn,
                     )
                 )
 
@@ -272,6 +295,7 @@ class OrchestratorSubmissionMixin:
         bundle: OrchestrationBundle,
         priority_band: ComputePriorityBand,
         entry_step_kind: str | None = None,
+        open_turn: int | None = None,
     ) -> None:
         export_scope = compute_scope_to_export_scope(root_scope)
         ctx = self._ctx_for_bundle(bundle)
@@ -303,6 +327,7 @@ class OrchestratorSubmissionMixin:
                 bundle=bundle,
                 priority_band=priority_band,
                 entry_step_kind=entry_step_kind if planned.scope == root_scope else None,
+                open_turn=open_turn,
             )
         if root_scope not in self._nodes:
             self._nodes[root_scope] = ComputeNodeRun(
@@ -312,6 +337,7 @@ class OrchestratorSubmissionMixin:
                 priority_band=priority_band,
                 execution_generation=self._allocate_execution_generation(),
                 bundle=bundle,
+                open_turn=open_turn,
             )
 
     def _register_planned_node(
@@ -321,6 +347,7 @@ class OrchestratorSubmissionMixin:
         bundle: OrchestrationBundle,
         priority_band: ComputePriorityBand,
         entry_step_kind: str | None = None,
+        open_turn: int | None = None,
     ) -> None:
         if planned.scope in self._nodes:
             return
@@ -336,6 +363,7 @@ class OrchestratorSubmissionMixin:
             profile_step_index=profile_step_index,
             execution_generation=self._allocate_execution_generation(),
             bundle=bundle,
+            open_turn=open_turn,
         )
         self._nodes[planned.scope] = node
 

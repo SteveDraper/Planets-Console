@@ -196,6 +196,7 @@ class OrchestratorStepExecutionMixin:
                 dependency_outputs=pending.dependency_outputs,
                 ctx=ctx,
                 node_result_wire=node.result_wire,
+                open_turn=node.open_turn,
             )
         except BaseException as exc:
             with self._condition:
@@ -266,6 +267,7 @@ class OrchestratorStepExecutionMixin:
                         dependency_outputs=submission.dependency_outputs,
                         ctx=ctx,
                         node_result_wire=node.result_wire,
+                        open_turn=node.open_turn,
                     )
                     with self._condition:
                         if node.state != "running":

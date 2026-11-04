@@ -97,6 +97,8 @@ class BuildStepJobWireKwargs(TypedDict, total=False):
     dependency_outputs: DependencyOutputs
     ctx: AnalyticQueryContext | None
     node_result_wire: object | None
+    # Root turn of the submission that owns this node, including on earlier hops.
+    open_turn: int | None
 
 
 # Orchestration plane: scope + dependency outputs -> serializable job payload.

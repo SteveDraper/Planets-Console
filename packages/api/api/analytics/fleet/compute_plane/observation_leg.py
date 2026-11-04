@@ -27,6 +27,12 @@ def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
         payload["playerInvalidationGeneration"] = epoch
     if job_wire.get("eliminatedAtTurn") is True:
         payload["eliminatedAtTurn"] = True
+    # Copied here so this worker does not import the catch-up module (FastAPI).
+    open_turn = job_wire.get("openTurn")
+    if isinstance(open_turn, int) and not isinstance(open_turn, bool):
+        payload["openTurn"] = open_turn
+        if job_wire.get("catchUp") is True:
+            payload["catchUp"] = True
     return StepResult(
         outcome="persist",
         persist_then_continue=True,

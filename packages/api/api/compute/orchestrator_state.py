@@ -37,6 +37,9 @@ class ComputeRequest:
     force_fresh: bool = False
     bundle: OrchestrationBundle | None = None
     ctx: AnalyticQueryContext | None = None
+    # Root turn of this submission. None uses ``scope.turn`` when that axis is concrete.
+    # A resubmitted hop passes the root it was planned under.
+    open_turn: int | None = None
 
     def resolved_bundle(self) -> OrchestrationBundle | None:
         """Return the caller-supplied bundle, or build one from ``ctx`` for convenience."""
@@ -142,6 +145,11 @@ class ComputeNodeRun:
     # The worker may finish; persist and stamp are refused, and the step is
     # not retried onto the new mark.
     discard_without_stamp: bool = False
+    # Root turn of the submission that planned this node. Earlier hops keep that
+    # root rather than their own turn.
+    open_turn: int | None = None
+    # The one-shot for this root has already been applied. Hops leave this false.
+    open_turn_consumed: bool = False
 
     @property
     def is_terminal(self) -> bool:

@@ -17,8 +17,11 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reschedule_all_inference_rows,
     reschedule_inference_row,
 )
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+
+_OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
 
 
 class InferenceInvalidationService:
@@ -154,24 +157,32 @@ class InferenceInvalidationService:
             return None
         if self._fleet_persistence.backfill_earlier_turns_enabled(game_id):
             return None
-        from api.analytics.fleet.off_mode_catch_up import (
-            live_fleet_and_scores_turns,
-            off_mode_open_turn,
-        )
+        from api.analytics.fleet.off_mode_catch_up import live_fleet_and_scores_turns
         from api.compute.runtime import peek_compute_orchestrator
 
         live_turns = live_fleet_and_scores_turns(game_id, perspective)
-        shell_turn = off_mode_open_turn(game_id, perspective, player_id)
-        recompute = {turn for turn in live_turns if turn >= host_turn}
-        if shell_turn is not None and shell_turn >= host_turn:
-            recompute.add(shell_turn)
         orchestrator = peek_compute_orchestrator()
+        # Shell turns are the roots of in-flight fleet and scores submissions.
+        # A live table stream is not itself an open: turn 41 streaming while
+        # the user opened 40 stays a later turn.
+        shell_turns = (
+            frozenset()
+            if orchestrator is None
+            else orchestrator.in_flight_root_open_turns(
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                analytic_ids=_OPEN_TURN_ANALYTICS,
+            )
+        )
+        recompute = {turn for turn in live_turns if turn >= host_turn}
+        recompute.update(turn for turn in shell_turns if turn >= host_turn)
         if orchestrator is not None:
             orchestrator.discard_bumped_player_work(
                 game_id=game_id,
                 perspective=perspective,
                 player_id=player_id,
-                shell_turn=shell_turn,
+                shell_turns=shell_turns,
                 live_turns=live_turns,
             )
         return recompute
@@ -202,21 +213,19 @@ class InferenceInvalidationService:
         A catch-up persist of the turn already being refreshed writes the
         current mark and does not increment it. The first persist on an absent
         mark sets generation 1. Any other persist bumps the mark and leaves
-        ledger files in place. Either persist of the registered open ends that
-        open, after a bump has already chosen which turns to recompute.
+        ledger files in place. The matching in-flight submission root is
+        consumed either way, after a bump has already chosen which turns to
+        recompute.
         """
-        from api.analytics.fleet.off_mode_catch_up import clear_off_mode_open, off_mode_open_turn
-
-        open_turn = None
-        if self._fleet_persistence is not None:
-            open_turn = off_mode_open_turn(game_id, perspective, player_id)
+        open_turn = self._unconsumed_submission_open(game_id, perspective, player_id, host_turn)
         if self._fleet_persistence is not None and self._scoreboard_persist_stamps(
             game_id,
             perspective,
             host_turn,
             player_id,
+            open_turn=open_turn,
         ):
-            clear_off_mode_open(game_id, perspective, player_id)
+            self._consume_submission_open(game_id, perspective, player_id, host_turn)
             return
         self.on_inference_evidence_updated(
             game_id,
@@ -226,7 +235,51 @@ class InferenceInvalidationService:
             durable=True,
         )
         if open_turn is not None and host_turn == open_turn:
-            clear_off_mode_open(game_id, perspective, player_id)
+            self._consume_submission_open(game_id, perspective, player_id, host_turn)
+
+    def _unconsumed_submission_open(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        host_turn: int,
+    ) -> int | None:
+        """The in-flight submission root when this host turn is that root and still one-shot."""
+        from api.compute.runtime import peek_compute_orchestrator
+
+        orchestrator = peek_compute_orchestrator()
+        if orchestrator is None:
+            return None
+        opens = orchestrator.in_flight_root_open_turns(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            analytic_ids=_OPEN_TURN_ANALYTICS,
+            unconsumed_only=True,
+        )
+        if host_turn not in opens:
+            return None
+        return host_turn
+
+    def _consume_submission_open(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        open_turn: int,
+    ) -> None:
+        from api.compute.runtime import peek_compute_orchestrator
+
+        orchestrator = peek_compute_orchestrator()
+        if orchestrator is None:
+            return
+        orchestrator.consume_open_turn_roots(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            open_turn=open_turn,
+            analytic_ids=_OPEN_TURN_ANALYTICS,
+        )
 
     def _scoreboard_persist_stamps(
         self,
@@ -234,17 +287,16 @@ class InferenceInvalidationService:
         perspective: int,
         host_turn: int,
         player_id: int,
+        *,
+        open_turn: int | None,
     ) -> bool:
-        from api.analytics.fleet.off_mode_catch_up import (
-            off_mode_open_turn,
-            scoreboard_persist_stamps_current_mark,
-        )
+        from api.analytics.fleet.off_mode_catch_up import scoreboard_persist_stamps_current_mark
 
         if self._fleet_persistence is None:
             return False
         return scoreboard_persist_stamps_current_mark(
             backfill_enabled=self._fleet_persistence.backfill_earlier_turns_enabled(game_id),
-            open_turn=off_mode_open_turn(game_id, perspective, player_id),
+            open_turn=open_turn,
             host_turn=host_turn,
             mark=self._fleet_persistence.evidence_mark(game_id, perspective, player_id),
         )

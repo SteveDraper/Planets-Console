@@ -192,16 +192,6 @@ _SLOW_TEST_NAMES = frozenset(
 )
 
 
-@pytest.fixture(autouse=True)
-def _reset_off_mode_catch_up():
-    """An off-mode open is process-wide. One test must not leave it for the next."""
-    from api.analytics.fleet.off_mode_catch_up import reset_off_mode_catch_up_for_tests
-
-    reset_off_mode_catch_up_for_tests()
-    yield
-    reset_off_mode_catch_up_for_tests()
-
-
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if item.name in _SLOW_TEST_NAMES:

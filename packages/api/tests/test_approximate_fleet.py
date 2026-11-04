@@ -978,7 +978,7 @@ def test_later_file_refresh_and_final_commit_fail_closed() -> None:
     persisted = _prior(player_id, [])
 
     with pytest.raises(TypeError, match="FleetComputeServices"):
-        policy._refresh_following_callback(object(), concrete, 0)
+        policy._refresh_following_callback(object(), concrete, 0, None)
     with pytest.raises(TypeError, match="FleetComputeServices"):
         policy._commit_living_final(
             object(),
@@ -988,7 +988,7 @@ def test_later_file_refresh_and_final_commit_fail_closed() -> None:
             player_invalidation_generation=0,
         )
     with pytest.raises(ValueError, match="concrete turn"):
-        policy._refresh_following_callback(services, wildcard_turn, 0)
+        policy._refresh_following_callback(services, wildcard_turn, 0, None)
     with pytest.raises(ValueError, match="concrete turn"):
         policy._commit_living_final(
             services,

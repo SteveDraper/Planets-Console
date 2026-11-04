@@ -21,7 +21,6 @@ from api.analytics.fleet.export_scope import ledgers_for_scope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.fleet.off_mode_catch_up import (
     ledger_matches_evidence_mark,
-    note_off_mode_open,
     off_mode_prior_needs_catch_up,
 )
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
@@ -69,7 +68,6 @@ def fleet_ensure_dependencies_for(
     services = lookup_fleet_compute_services(ctx)
     if services is None or services.persistence.backfill_earlier_turns_enabled(scope.game_id):
         return ENSURE_DEPENDENCIES
-    note_off_mode_open(scope.game_id, scope.perspective, scope.player_id, scope.turn)
     return _off_mode_fleet_dependencies(ctx, scope, services)
 
 

@@ -7,14 +7,17 @@ turn's own scoreboard still runs. A catch-up persist of that turn stamps the
 current mark. A scoreboard persist that carries new information for a later
 turn bumps the mark and leaves ledger files in place.
 
+The open turn is the root of the submission the user opens. The orchestrator
+copies it onto every node of that plan, and fleet job wires carry ``openTurn``
+plus ``catchUp``. Dependency resolution does not record it.
+
 The homeworld locator does not call this module, so opening it does not start
 the walk.
 """
 
 from __future__ import annotations
 
-import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from api.analytics.fleet.types import FleetEvidenceMark, PersistedFleetLedger
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -25,42 +28,53 @@ from api.services.game_service import backfill_earlier_turns_store_key
 from api.services.storage_json import require_dict
 from api.storage.base import StorageBackend
 
-_lock = threading.Lock()
-# One in-flight off-mode open per player. The root turn is the highest scope
-# the dependency walk has seen. Earlier hops are catch-up; this turn is not.
-_open_turn_by_player: dict[tuple[int, int, int], int] = {}
 
-
-def reset_off_mode_catch_up_for_tests() -> None:
-    """Drop in-flight open turns. Tests must not leak a shell into the next case."""
-    with _lock:
-        _open_turn_by_player.clear()
-
-
-def note_off_mode_open(
-    game_id: int,
-    perspective: int,
-    player_id: int,
+def off_mode_job_wire_fields(
+    *,
+    open_turn: int | None,
     turn: int,
+    backfill_enabled: bool,
+) -> dict[str, object]:
+    """``openTurn`` and ``catchUp`` for one fleet job.
+
+    Empty when this submit is not an off-mode open. ``catchUp`` is true for an
+    earlier hop of that open. The open turn itself is false.
+    """
+    if backfill_enabled or open_turn is None:
+        return {}
+    return {"openTurn": open_turn, "catchUp": turn < open_turn}
+
+
+def apply_off_mode_job_wire_fields(
+    wire: dict[str, object],
+    *,
+    open_turn: int | None,
+    turn: int,
+    backfill_enabled: bool,
 ) -> None:
-    """Record the shell turn for one player. A higher turn replaces a lower one."""
-    key = (game_id, perspective, player_id)
-    with _lock:
-        current = _open_turn_by_player.get(key)
-        if current is None or turn > current:
-            _open_turn_by_player[key] = turn
+    """Replace any open-turn fields on ``wire`` from the submission root."""
+    wire.pop("openTurn", None)
+    wire.pop("catchUp", None)
+    wire.update(
+        off_mode_job_wire_fields(
+            open_turn=open_turn,
+            turn=turn,
+            backfill_enabled=backfill_enabled,
+        )
+    )
 
 
-def off_mode_open_turn(game_id: int, perspective: int, player_id: int) -> int | None:
-    """Shell turn of the in-flight off-mode open, or None when no open is registered."""
-    with _lock:
-        return _open_turn_by_player.get((game_id, perspective, player_id))
+def open_turn_on_wire(result_wire: Mapping[str, object]) -> int | None:
+    """Submission root carried on a fleet job or persist payload."""
+    value = result_wire.get("openTurn")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
-def clear_off_mode_open(game_id: int, perspective: int, player_id: int) -> None:
-    """Drop the in-flight open after its scoreboard stamps or its final fleet lands."""
-    with _lock:
-        _open_turn_by_player.pop((game_id, perspective, player_id), None)
+def wire_is_catch_up_hop(result_wire: Mapping[str, object]) -> bool:
+    """True when this payload is an earlier hop of the submission open."""
+    return result_wire.get("catchUp") is True
 
 
 def read_backfill_earlier_turns(storage: StorageBackend, game_id: int) -> bool:

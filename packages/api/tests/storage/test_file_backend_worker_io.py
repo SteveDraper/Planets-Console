@@ -28,7 +28,6 @@ from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_
 from api.compute.scope import ComputeScope
 from api.compute.wire import DependencyOutputs
 from api.serialization.inference_row_persistence import PersistedInferenceRow
-from api.services.game_service import backfill_earlier_turns_store_key
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.file import FileStorageBackend
 from tests.file_backend_io_accounting import (
@@ -183,16 +182,16 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
     prior_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER - 1, player_id)
     ledger_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
     mark_key = persistence.evidence_mark_key(GAME_ID, PERSPECTIVE, player_id)
-    backfill_key = backfill_earlier_turns_store_key(GAME_ID)
-    assert counts.protocol_counts() == {"get": 5, "put": 1, "list": 0, "delete": 0}, (
+    # This payload has no openTurn, so persist does not consult the backfill setting.
+    assert counts.protocol_counts() == {"get": 3, "put": 1, "list": 0, "delete": 0}, (
         counts.protocol_counts(),
         counts.get_keys,
         counts.list_prefixes,
     )
-    assert counts.get_keys == [prior_key, backfill_key, ledger_key, mark_key, backfill_key]
+    assert counts.get_keys == [prior_key, ledger_key, mark_key]
     assert counts.json_load_calls == 0
     assert counts.json_dump_calls == 1
-    assert counts.open_read_calls == 5
+    assert counts.open_read_calls == 3
     assert counts.open_write_calls == 1
     assert counts.list_calls == 0
 

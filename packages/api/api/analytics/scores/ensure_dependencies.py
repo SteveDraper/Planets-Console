@@ -8,10 +8,7 @@ from __future__ import annotations
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
-from api.analytics.fleet.off_mode_catch_up import (
-    note_off_mode_open,
-    off_mode_prior_needs_catch_up,
-)
+from api.analytics.fleet.off_mode_catch_up import off_mode_prior_needs_catch_up
 
 OFF_MODE_PRIOR_FLEET: tuple[EnsureDependency, ...] = (
     EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="stamped"),
@@ -39,7 +36,6 @@ def resolve_scores_ensure_dependencies(
     turn = ctx.load_turn(scope.turn)
     if turn is None:
         return ()
-    note_off_mode_open(scope.game_id, scope.perspective, scope.player_id, scope.turn)
     prior = services.persistence.get_ledger(
         scope.game_id,
         scope.perspective,

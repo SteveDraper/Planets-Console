@@ -72,6 +72,7 @@ def build_fleet_observation_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    open_turn: int | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg."""
@@ -79,6 +80,7 @@ def build_fleet_observation_leg_job_wire(
         scope,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        open_turn=open_turn,
     )
 
 
@@ -87,6 +89,7 @@ def build_fleet_materialization_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    open_turn: int | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg.
@@ -111,22 +114,24 @@ def build_fleet_materialization_leg_job_wire(
 
     player_id = scope.player_id
     if fleet_player_eliminated_at_turn(turn, player_id):
-        return _eliminated_fleet_job_wire(scope, player_id=player_id, ctx=ctx)
+        wire = _eliminated_fleet_job_wire(scope, player_id=player_id, ctx=ctx)
+    else:
+        from api.analytics.fleet.compute_services import resolve_fleet_services
 
-    from api.analytics.fleet.compute_services import resolve_fleet_services
-
-    services = resolve_fleet_services(ctx)
-    return {
-        "gameId": scope.game_id,
-        "perspective": scope.perspective,
-        "playerId": player_id,
-        "materializeTurn": scope.turn,
-        "playerInvalidationGeneration": services.persistence.player_invalidation_generation(
-            scope.game_id,
-            scope.perspective,
-            player_id,
-        ),
-    }
+        services = resolve_fleet_services(ctx)
+        wire = {
+            "gameId": scope.game_id,
+            "perspective": scope.perspective,
+            "playerId": player_id,
+            "materializeTurn": scope.turn,
+            "playerInvalidationGeneration": services.persistence.player_invalidation_generation(
+                scope.game_id,
+                scope.perspective,
+                player_id,
+            ),
+        }
+    _stamp_submission_open(wire, scope, ctx, open_turn)
+    return wire
 
 
 def _eliminated_fleet_job_wire(
@@ -160,12 +165,49 @@ def _eliminated_fleet_job_wire(
     }
 
 
+def _concrete_open_turn(open_turn: int | None) -> int | None:
+    if isinstance(open_turn, bool) or not isinstance(open_turn, int):
+        return None
+    return open_turn
+
+
+def _stamp_submission_open(
+    wire: dict[str, Any],
+    scope: ComputeScope,
+    ctx: AnalyticQueryContext | None,
+    open_turn: int | None,
+) -> None:
+    """Write the submission root onto a fleet job wire.
+
+    No concrete open leaves the wire without those fields and does not read
+    storage. The backfill setting is read only when a root is being stamped.
+    """
+    if ctx is None or not isinstance(scope.turn, int):
+        return
+    concrete = _concrete_open_turn(open_turn)
+    if concrete is None:
+        wire.pop("openTurn", None)
+        wire.pop("catchUp", None)
+        return
+    from api.analytics.fleet.compute_services import resolve_fleet_services
+    from api.analytics.fleet.off_mode_catch_up import apply_off_mode_job_wire_fields
+
+    services = resolve_fleet_services(ctx)
+    apply_off_mode_job_wire_fields(
+        wire,
+        open_turn=concrete,
+        turn=scope.turn,
+        backfill_enabled=services.persistence.backfill_earlier_turns_enabled(scope.game_id),
+    )
+
+
 def build_fleet_finalization_leg_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
     node_result_wire: object | None = None,
+    open_turn: int | None = None,
 ) -> dict[str, Any]:
     """Pass the observation continue wire into the inline finalization leg."""
     del dependency_outputs
@@ -183,6 +225,7 @@ def build_fleet_finalization_leg_job_wire(
                 scope.player_id,
             )
         )
+    _stamp_submission_open(payload, scope, ctx, open_turn)
     return payload
 
 
@@ -363,7 +406,7 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
-            evidence_generation=_kept_open_turn_generation(services, scope),
+            evidence_generation=_kept_open_turn_generation(services, scope, result_wire),
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         if eliminated:
@@ -375,10 +418,13 @@ class FleetPersistencePolicy:
             player_id=scope.player_id,
             persisted=put_result.stored,
         )
+        from api.analytics.fleet.off_mode_catch_up import open_turn_on_wire
+
         return self._refresh_following_callback(
             services,
             scope,
             player_invalidation_generation,
+            open_turn_on_wire(result_wire),
         )
 
     def _persist_finalization(
@@ -420,7 +466,9 @@ class FleetPersistencePolicy:
 
         if fleet_player_eliminated_at_turn(turn, scope.player_id):
             return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
-        if _is_off_mode_catch_up_hop(services, scope):
+        from api.analytics.fleet.off_mode_catch_up import wire_is_catch_up_hop
+
+        if wire_is_catch_up_hop(result_wire):
             # Observation already merged the refreshed prior. Do not read this
             # turn's stored scoreboard and do not schedule a solve.
             return None
@@ -530,11 +578,13 @@ class FleetPersistencePolicy:
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         scores_notification = put_result.deferred_notification
+        from api.analytics.fleet.off_mode_catch_up import open_turn_on_wire
+
         refresh = self._refresh_following_callback(
             services,
             scope,
             player_invalidation_generation,
-            clear_open_after_refresh=True,
+            open_turn_on_wire(result_wire),
         )
 
         def _after_final_save() -> None:
@@ -549,22 +599,17 @@ class FleetPersistencePolicy:
         services: FleetComputeServices,
         scope: ComputeScope,
         player_invalidation_generation: int,
-        *,
-        clear_open_after_refresh: bool = False,
+        open_turn: int | None,
     ) -> Callable[[], None]:
         """Replace later approximate files from the ledger this persist just saved.
 
         ``player_invalidation_generation`` is the epoch captured at the start of
-        that persist, before the ledger put. The observation merge of the open
-        turn leaves the registered open in place so its scoreboard persist can
-        stamp. Finalization clears it after the refreshed prior is folded.
+        that persist, before the ledger put. ``open_turn`` is the submission
+        root on the job wire. The walk stops after that turn, so a later turn
+        stays on disk.
         """
         from api.analytics.fleet.approximate_fleet import refresh_following_approximate_fleets
         from api.analytics.fleet.compute_services import FleetComputeServices
-        from api.analytics.fleet.off_mode_catch_up import (
-            clear_off_mode_open,
-            off_mode_open_turn,
-        )
 
         if not isinstance(services, FleetComputeServices):
             raise TypeError("fleet later-file refresh requires FleetComputeServices")
@@ -575,9 +620,7 @@ class FleetPersistencePolicy:
         player_id = scope.player_id
         saved_turn = scope.turn
         generation = player_invalidation_generation
-        backfill_enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
-        open_turn = off_mode_open_turn(scope.game_id, scope.perspective, player_id)
-        stop_after_turn = open_turn if not backfill_enabled and open_turn is not None else None
+        stop_after_turn = open_turn
 
         def _refresh() -> None:
             refresh_following_approximate_fleets(
@@ -591,13 +634,6 @@ class FleetPersistencePolicy:
                 inference_materialization=services.inference_materialization,
                 stop_after_turn=stop_after_turn,
             )
-            if (
-                clear_open_after_refresh
-                and not backfill_enabled
-                and open_turn is not None
-                and saved_turn == open_turn
-            ):
-                clear_off_mode_open(scope.game_id, scope.perspective, player_id)
 
         return _refresh
 
@@ -691,33 +727,23 @@ def _refuse_stale_fleet_epoch(
     )
 
 
-def _is_off_mode_catch_up_hop(services: FleetComputeServices, scope: ComputeScope) -> bool:
-    """True for an earlier hop of an off-mode open. The open turn itself is false."""
-    from api.analytics.fleet.off_mode_catch_up import off_mode_open_turn
-
-    if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
-        return False
-    if services.persistence.backfill_earlier_turns_enabled(scope.game_id):
-        return False
-    open_turn = off_mode_open_turn(scope.game_id, scope.perspective, scope.player_id)
-    return open_turn is not None and scope.turn < open_turn
-
-
-def _kept_open_turn_generation(services: FleetComputeServices, scope: ComputeScope) -> int | None:
+def _kept_open_turn_generation(
+    services: FleetComputeServices,
+    scope: ComputeScope,
+    result_wire: dict[str, object],
+) -> int | None:
     """Generation to keep on the open turn's merge. None stamps the current mark.
 
     A catch-up hop has no scoreboard solve coming, so it stamps. The open turn
     keeps the generation already on the file until its own scoreboard is stored.
     A missing file stays at generation 0 so the merge does not look complete.
     """
-    from api.analytics.fleet.off_mode_catch_up import off_mode_open_turn
+    from api.analytics.fleet.off_mode_catch_up import open_turn_on_wire, wire_is_catch_up_hop
 
     if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
         return None
-    if services.persistence.backfill_earlier_turns_enabled(scope.game_id):
-        return None
-    open_turn = off_mode_open_turn(scope.game_id, scope.perspective, scope.player_id)
-    if open_turn is None or scope.turn != open_turn:
+    open_turn = open_turn_on_wire(result_wire)
+    if wire_is_catch_up_hop(result_wire) or open_turn is None or scope.turn != open_turn:
         return None
     stored = services.persistence.get_ledger(
         scope.game_id,

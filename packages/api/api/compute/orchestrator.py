@@ -266,11 +266,13 @@ class ComputeOrchestrator(
             node_scope = node.scope
             ctx = self._ctx_for_node(node)
             node_result_wire = node.result_wire
+            open_turn = node.open_turn
         job_wire = builder(
             node_scope,
             dependency_outputs=dependency_outputs,
             ctx=ctx,
             node_result_wire=node_result_wire,
+            open_turn=open_turn,
         )
         return run_step(job_wire)
 
@@ -361,29 +363,86 @@ class ComputeOrchestrator(
                     self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
 
+    def in_flight_root_open_turns(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+        unconsumed_only: bool = False,
+    ) -> frozenset[int]:
+        """Root turns of in-flight submissions for one player.
+
+        A root is a non-terminal node whose scope turn equals the submission
+        ``open_turn`` copied onto it at plan time. Hops keep that same
+        ``open_turn`` but their own turn is earlier, so they are not roots.
+        """
+        turns: set[int] = set()
+        with self._condition:
+            for scope, node in self._nodes.items():
+                if node.is_terminal or node.open_turn is None:
+                    continue
+                if unconsumed_only and node.open_turn_consumed:
+                    continue
+                if scope.analytic_id not in analytic_ids:
+                    continue
+                if scope.game_id != game_id or scope.perspective != perspective:
+                    continue
+                if scope.player_id != player_id or not isinstance(scope.turn, int):
+                    continue
+                if scope.turn == node.open_turn:
+                    turns.add(node.open_turn)
+        return frozenset(turns)
+
+    def consume_open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        open_turn: int,
+        analytic_ids: frozenset[str],
+    ) -> None:
+        """Record that the one-shot for this submission root has been applied.
+
+        Hops keep ``open_turn`` so a later job for the same walk still sees the
+        shell. The root stays addressable for recompute; ``open_turn_consumed``
+        is what a second persist of that root reads.
+        """
+        with self._condition:
+            for scope, node in self._nodes.items():
+                if scope.analytic_id not in analytic_ids:
+                    continue
+                if scope.game_id != game_id or scope.perspective != perspective:
+                    continue
+                if scope.player_id != player_id or scope.turn != open_turn:
+                    continue
+                if node.open_turn == open_turn:
+                    node.open_turn_consumed = True
+
     def discard_bumped_player_work(
         self,
         *,
         game_id: int,
         perspective: int,
         player_id: int,
-        shell_turn: int | None,
+        shell_turns: frozenset[int],
         live_turns: frozenset[int],
     ) -> None:
         """Drop in-flight fleet and scoreboard work that must not stamp a new mark.
 
-        The shell turn and any later turn with a live table stream stay so a
-        fresh submit can recompute them. A hop that is not the shell and has
-        no live stream is dropped when it has not started. A step already
-        executing there finishes the worker and does not persist or stamp.
+        Each shell turn, and any later turn with a live table stream, stays so a
+        fresh submit can recompute it. A hop that is not a shell and has no live
+        stream is dropped when it has not started. A step already executing
+        there finishes the worker and does not persist or stamp.
         """
         from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
         from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
         from api.exceptions import FleetStampRefused
 
         recompute_turns = set(live_turns)
-        if shell_turn is not None:
-            recompute_turns.add(shell_turn)
+        recompute_turns.update(shell_turns)
         watched = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
         with self._condition:
             for scope, node in list(self._nodes.items()):
