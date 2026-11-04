@@ -28,10 +28,13 @@ from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.registry import build_compute_registry
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
-from api.exceptions import FleetScoresEvidenceOpenError, FleetStampRefused
+from api.exceptions import DiscardedWorkRefused, FleetScoresEvidenceOpenError
 from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
 from api.services.game_service import backfill_earlier_turns_store_key
-from api.services.inference_invalidation_service import InferenceInvalidationService
+from api.services.inference_invalidation_service import (
+    InferenceInvalidationService,
+    discard_bumped_player_work,
+)
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -397,7 +400,7 @@ def test_late_persist_is_refused(sample_turn):
             ),
             {"fleetPersistLeg": "observation", "playerInvalidationGeneration": 0},
         )
-    except FleetStampRefused:
+    except DiscardedWorkRefused:
         refused = True
     else:
         refused = False
@@ -444,7 +447,8 @@ def test_bump_drops_offscreen_hops_and_refuses_an_executing_step():
     )
     orchestrator._ready_queue.append(ready)
 
-    orchestrator.discard_bumped_player_work(
+    discard_bumped_player_work(
+        orchestrator,
         game_id=1,
         perspective=1,
         player_id=7,

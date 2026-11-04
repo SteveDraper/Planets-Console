@@ -18,10 +18,47 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reschedule_inference_row,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.orchestrator import ComputeOrchestrator
+from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 _OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
+
+
+def discard_bumped_player_work(
+    orchestrator: ComputeOrchestrator,
+    *,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+    shell_turns: frozenset[int],
+    live_turns: frozenset[int],
+) -> None:
+    """Drop in-flight fleet and scoreboard work that must not stamp a new mark.
+
+    A shell turn, and any turn with a live table stream, is left alone when it
+    is already executing so that work can still stamp. The same turn is failed
+    when it has not started, so a fresh submit can recompute it. Every other
+    in-flight turn for this player is dropped: a step that has not started
+    fails now, and a step already executing finishes without persisting or
+    stamping.
+    """
+    recompute_turns = set(live_turns)
+    recompute_turns.update(shell_turns)
+
+    def should_discard(scope: ComputeScope, node: ComputeNodeRun) -> bool:
+        if scope.analytic_id not in _OPEN_TURN_ANALYTICS:
+            return False
+        if scope.game_id != game_id or scope.perspective != perspective:
+            return False
+        if scope.player_id != player_id or not isinstance(scope.turn, int):
+            return False
+        if scope.turn in recompute_turns:
+            return node.state != "running"
+        return True
+
+    orchestrator.discard_matching_work(should_discard)
 
 
 class InferenceInvalidationService:
@@ -178,7 +215,8 @@ class InferenceInvalidationService:
         recompute = {turn for turn in live_turns if turn >= host_turn}
         recompute.update(turn for turn in shell_turns if turn >= host_turn)
         if orchestrator is not None:
-            orchestrator.discard_bumped_player_work(
+            discard_bumped_player_work(
+                orchestrator,
                 game_id=game_id,
                 perspective=perspective,
                 player_id=player_id,

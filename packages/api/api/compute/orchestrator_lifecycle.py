@@ -188,14 +188,12 @@ class OrchestratorLifecycleMixin:
         return False
 
     def _fail_discarded_stamp(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Finish an off-screen step without persisting or retrying onto the new mark."""
-        from api.exceptions import FleetStampRefused
+        """Finish a discarded step without persisting or retrying."""
+        from api.exceptions import DiscardedWorkRefused
 
         self._fail_node(
             node,
-            FleetStampRefused(
-                "off-screen step does not persist or stamp the new fleet evidence mark"
-            ),
+            DiscardedWorkRefused("discarded step does not persist or stamp the new evidence mark"),
         )
 
     def _after_step_success(

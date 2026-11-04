@@ -129,11 +129,11 @@ class FleetGapFillEpochInvalidated(CoreAPIError):
     http_error: int = 409
 
 
-class FleetStampRefused(CoreAPIError):
-    """A fleet or scoreboard persist built from the previous evidence mark must not stamp.
+class DiscardedWorkRefused(CoreAPIError):
+    """In-flight work must not persist or stamp the new evidence mark.
 
-    The mark moved, or the step is an off-screen hop a bump dropped. The write
-    does not land and the worker does not stamp the new generation.
+    The mark moved, or a bump discarded the step before it could stamp. The
+    write does not land and the worker does not stamp the new generation.
     """
 
     http_error: int = 409

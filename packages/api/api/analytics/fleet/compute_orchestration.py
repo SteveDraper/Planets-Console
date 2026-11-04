@@ -707,7 +707,7 @@ def _refuse_stale_fleet_epoch(
     result_wire: dict[str, object],
 ) -> None:
     """Refuse a persist whose job was built before the evidence epoch moved."""
-    from api.exceptions import FleetStampRefused
+    from api.exceptions import DiscardedWorkRefused
 
     if not isinstance(scope.player_id, int):
         return
@@ -721,7 +721,7 @@ def _refuse_stale_fleet_epoch(
     )
     if current == expected:
         return
-    raise FleetStampRefused(
+    raise DiscardedWorkRefused(
         f"fleet persist refused for game {scope.game_id} perspective {scope.perspective} "
         f"player {scope.player_id} turn {scope.turn}: in-flight work cannot stamp the new mark"
     )

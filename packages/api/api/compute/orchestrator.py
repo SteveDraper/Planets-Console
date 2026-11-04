@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -421,57 +421,30 @@ class ComputeOrchestrator(
                 if node.open_turn == open_turn:
                     node.open_turn_consumed = True
 
-    def discard_bumped_player_work(
+    def discard_matching_work(
         self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        shell_turns: frozenset[int],
-        live_turns: frozenset[int],
+        should_discard: Callable[[ComputeScope, ComputeNodeRun], bool],
     ) -> None:
-        """Drop in-flight fleet and scoreboard work that must not stamp a new mark.
+        """Discard queued matches and refuse persist on matches already running.
 
-        Each shell turn, and any later turn with a live table stream, stays so a
-        fresh submit can recompute it. A hop that is not a shell and has no live
-        stream is dropped when it has not started. A step already executing
-        there finishes the worker and does not persist or stamp.
+        ``should_discard`` runs under the orchestrator lock for each non-terminal
+        node and must not re-enter the orchestrator. A match that is not running
+        is failed and leaves the ready queue. A match that is running finishes
+        its worker; persist and stamp are refused and the step is not retried.
         """
-        from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-        from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-        from api.exceptions import FleetStampRefused
+        from api.exceptions import DiscardedWorkRefused
 
-        recompute_turns = set(live_turns)
-        recompute_turns.update(shell_turns)
-        watched = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
         with self._condition:
             for scope, node in list(self._nodes.items()):
-                if scope.analytic_id not in watched:
-                    continue
-                if scope.game_id != game_id or scope.perspective != perspective:
-                    continue
-                if scope.player_id != player_id or not isinstance(scope.turn, int):
-                    continue
-                if node.is_terminal:
-                    continue
-                if scope.turn in recompute_turns:
-                    if node.state == "running":
-                        continue
-                    self._fail_node(
-                        node,
-                        FleetStampRefused(
-                            "in-flight work built from the previous prior was discarded"
-                        ),
-                    )
+                if node.is_terminal or not should_discard(scope, node):
                     continue
                 if node.state == "running":
                     node.discard_without_stamp = True
                     continue
-                self._dequeue_ready(scope)
                 self._fail_node(
                     node,
-                    FleetStampRefused(
-                        "bump dropped an off-screen hop that had not started executing"
+                    DiscardedWorkRefused(
+                        "in-flight work was discarded before it started executing"
                     ),
                 )
 
