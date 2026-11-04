@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from api.analytics.homeworld_locator.constants import ATTRIBUTION_INFERRED
+from api.analytics.homeworld_locator.fleet_age_input import FleetAgeInputStamp
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_POSSIBLE,
     HomeworldSingleStarbasePromotion,
@@ -79,6 +80,29 @@ class HomeworldEvidenceAggregate:
     """Machine location provenances accumulated through this turn (not UI asserts)."""
     evidence_algorithm_version: int = 0
     """``HOMEWORLD_EVIDENCE_ALGORITHM_VERSION`` at last refine write; 0 = pre-version."""
+    fleet_age_input_stamp: FleetAgeInputStamp | None = None
+    """Build-turn maps read from roster ledger files at this turn.
+
+    ``None`` means this aggregate was written before stamps existed.
+    A player entry with ``missing`` is a file that was not on disk.
+    """
+    prior_fleet_age_input_stamp: FleetAgeInputStamp | None = None
+    """Fleet-age stamp of the prior aggregate this turn was refined from.
+
+    The baseline floor has no prior stamp.
+    """
+    evidence_revision: int = 0
+    """Increments each time this turn's aggregate is written.
+
+    A later turn stores the revision it refined from. Rewriting an earlier
+    turn bumps that revision, so every later turn stays unsatisfied until it
+    is refined again even when its own fleet-age stamp did not change.
+    """
+    prior_evidence_revision: int | None = None
+    """``evidence_revision`` of the prior aggregate at refine time.
+
+    ``None`` on the baseline floor.
+    """
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()
@@ -159,6 +183,7 @@ def empty_candidate_view(*, inactive_reason: str | None = None) -> HomeworldCand
 
 
 __all__ = [
+    "FleetAgeInputStamp",
     "HomeworldBaselineEnsureResult",
     "HomeworldCandidateRecord",
     "HomeworldCandidateView",

@@ -79,7 +79,7 @@ EnsureDependencyQuality = Literal["observation", "final"]
 
 # ``"same"`` -- copy parent player_id (including None).
 # ``"all"`` -- expand to one concrete player scope per roster player at the
-# dependency turn (homeworld → final fleet@N for every seat).
+# dependency turn.
 # ``None`` -- force child player_id=None (unscoped).
 EnsureDependencyPlayerId = Literal["same", "all"]
 

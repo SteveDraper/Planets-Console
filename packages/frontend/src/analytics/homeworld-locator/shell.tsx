@@ -1,5 +1,8 @@
-import { HomeworldLocatorTile } from './HomeworldLocatorTile'
+import { shellLivedStream } from '../shellLivedStream'
 import { sidebarTileChrome, type ShellAnalyticChrome } from '../shellAnalyticRegistry'
+import { HomeworldFleetAgeRefetchFrame } from './HomeworldFleetAgeRefetchFrame'
+import { HomeworldLocatorTile } from './HomeworldLocatorTile'
+import { useHomeworldFleetAgeRefetch } from './useHomeworldFleetAgeRefetch'
 
 export const homeworldLocatorShellAnalytic: ShellAnalyticChrome = {
   renderSidebar(ctx) {
@@ -14,4 +17,8 @@ export const homeworldLocatorShellAnalytic: ShellAnalyticChrome = {
   availability(gameInfo) {
     return gameInfo?.homeworldInactiveReason ?? null
   },
+  stream: shellLivedStream({
+    hook: useHomeworldFleetAgeRefetch,
+    Provider: HomeworldFleetAgeRefetchFrame,
+  }),
 }

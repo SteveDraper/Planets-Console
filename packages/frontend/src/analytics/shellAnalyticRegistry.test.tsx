@@ -113,7 +113,7 @@ describe('shell analytic registry', () => {
 
   it('records fleet as shell-lived and scores as tile-lived', () => {
     const shellLived = shellLivedStreamRegistrations()
-    expect(shellLived.map((row) => row.analyticId)).toEqual(['fleet'])
+    expect(shellLived.map((row) => row.analyticId)).toEqual(['fleet', 'homeworld-locator'])
     expect(shellLived[0]?.stream.Mount).toEqual(expect.any(Function))
     expect(shellAnalyticRegistrationFor(SCORES_ANALYTIC_ID)?.stream?.lifetime).toBe('tile')
   })

@@ -463,6 +463,21 @@ class CoreClient:
             )
         )
 
+    def fleet_age_refetch_notice(
+        self,
+        game_id: int,
+        perspective: int,
+        *,
+        after_epoch: int,
+    ) -> dict[str, int | None]:
+        return self._invoke(
+            lambda: self._analytics.fleet_age_refetch_notice(
+                game_id,
+                perspective,
+                after_epoch=after_epoch,
+            )
+        )
+
     def refresh_homeworld_locator(
         self,
         game_id: int,

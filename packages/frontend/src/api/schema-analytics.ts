@@ -180,6 +180,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analytics/homeworld-locator/fleet-age-refetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Homeworld Fleet Age Refetch
+         * @description Epoch of on-disk fleet build-turn identity changes since ``afterEpoch``.
+         *
+         *     Does not ensure homeworld or fleet. The locator uses this to refetch a shown
+         *     shell at or after ``fromTurn``.
+         */
+        get: operations["get_homeworld_fleet_age_refetch_analytics_homeworld_locator_fleet_age_refetch_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analytics/homeworld-locator/refresh": {
         parameters: {
             query?: never;
@@ -284,6 +307,22 @@ export interface components {
          * @enum {string}
          */
         FlareConnectionMode: "off" | "include" | "only";
+        /**
+         * FleetAgeRefetchNoticeResponse
+         * @description Epoch of on-disk build-turn identity changes and the earliest changed turn.
+         */
+        FleetAgeRefetchNoticeResponse: {
+            /**
+             * Epoch
+             * @description Monotonic count of build-turn identity changes for this game.
+             */
+            epoch: number;
+            /**
+             * Fromturn
+             * @description Earliest turn whose build-turn identity changed after afterEpoch. Null when the epoch has not moved. 1 when the retained window no longer holds the changes.
+             */
+            fromTurn?: number | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -741,6 +780,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_homeworld_fleet_age_refetch_analytics_homeworld_locator_fleet_age_refetch_get: {
+        parameters: {
+            query: {
+                gameId: number;
+                perspective: number;
+                afterEpoch?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetAgeRefetchNoticeResponse"];
                 };
             };
             /** @description Validation Error */

@@ -158,7 +158,7 @@ def _export_services(
     services,
     turns: dict[int, TurnInfo],
 ) -> dict[str, object]:
-    """Homeworld + fleet export services with final fleet ledgers for dependency walk."""
+    """Homeworld services plus on-disk fleet ledgers for fleet-age stamps."""
     shell_turn = turns[max(turns)]
     fleet_services = build_ephemeral_fleet_compute_services(
         shell_turn,
@@ -886,7 +886,6 @@ def test_export_catalog_declares_self_chain() -> None:
     assert EXPORT_CATALOG.analytic_id == ANALYTIC_ID
     assert EXPORT_CATALOG.ensure_dependencies == (
         EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
-        EnsureDependency(analytic_id="fleet", turn_delta=0, player_id="all", quality="final"),
     )
 
 

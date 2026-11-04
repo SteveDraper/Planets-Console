@@ -14,6 +14,12 @@ from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
+from api.analytics.homeworld_locator.fleet_age_refetch import (
+    fleet_age_refetch_notice as read_fleet_age_refetch_notice,
+)
+from api.analytics.homeworld_locator.fleet_age_refetch import (
+    note_fleet_age_identity_changed,
+)
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
@@ -75,6 +81,8 @@ class TurnAnalyticService:
             self._fleet_persistence = fleet_persistence
         else:
             self._fleet_persistence = FleetSnapshotPersistenceService(storage)
+        if self._fleet_persistence.on_fleet_age_identity_changed is None:
+            self._fleet_persistence.on_fleet_age_identity_changed = note_fleet_age_identity_changed
         if homeworld_persistence is not None:
             self._homeworld_persistence = homeworld_persistence
         else:
@@ -645,6 +653,21 @@ class TurnAnalyticService:
             sector_index=sector_index,
             owner_slot=owner_slot,
         )
+
+    def fleet_age_refetch_notice(
+        self,
+        game_id: int,
+        perspective: int,
+        *,
+        after_epoch: int,
+    ) -> dict[str, int | None]:
+        """Build-turn identity changes after ``after_epoch``. Does not ensure or wake fleet."""
+        notice = read_fleet_age_refetch_notice(
+            game_id,
+            perspective,
+            after_epoch=after_epoch,
+        )
+        return {"epoch": notice.epoch, "fromTurn": notice.from_turn}
 
     def refresh_homeworld_locator(
         self,

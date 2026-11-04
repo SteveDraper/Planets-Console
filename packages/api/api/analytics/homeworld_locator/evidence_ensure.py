@@ -2,14 +2,17 @@
 
 Multi-turn gap-fill is owned by export/orchestrator DAG unwind
 (``ENSURE_DEPENDENCIES`` self-chain). This module advances at most one turn.
+Each turn reads on-disk fleet ledgers for ship ages. A stamp mismatch leaves
+the stored aggregate in place until that turn is refined again.
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.homeworld_locator.compute_services import HomeworldLocatorComputeServices
 from api.analytics.homeworld_locator.constants import HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
 from api.analytics.homeworld_locator.evidence_refine import (
@@ -24,6 +27,7 @@ from api.analytics.homeworld_locator.evidence_refine_report import (
 from api.analytics.homeworld_locator.evidence_refine_timing_history import (
     record_evidence_refine_report,
 )
+from api.analytics.homeworld_locator.fleet_age_input import read_fleet_age_input_stamp
 from api.analytics.homeworld_locator.location_evidence import (
     baseline_profile_location_provenances,
     definite_candidate_planet_ids,
@@ -52,25 +56,94 @@ def evidence_aggregate_at_shell_turn(
     )
 
 
-def evidence_refined_through_shell(
-    services: HomeworldLocatorComputeServices,
+def prior_evidence_turn(turn: TurnInfo, *, baseline_turn: int) -> int | None:
+    """Prior aggregate turn for ``turn``, or None on the baseline floor."""
+    shell = turn.settings.turn
+    if shell <= baseline_turn:
+        return None
+    ensure_floor = accelerated_ensure_floor(turn.settings, shell)
+    prior = shell - 1
+    if prior < ensure_floor or prior < baseline_turn:
+        return baseline_turn
+    return prior
+
+
+def _fleet_age_inputs_match(
+    aggregate: HomeworldEvidenceAggregate,
     *,
     baseline_turn: int,
-    shell_turn: int,
+    services: HomeworldLocatorComputeServices,
+    fleet_persistence: FleetSnapshotPersistenceService | None,
+    turn: TurnInfo,
 ) -> bool:
-    aggregate = evidence_aggregate_at_shell_turn(
-        services,
-        baseline_turn=baseline_turn,
-        shell_turn=shell_turn,
-    )
-    if aggregate is None:
+    if aggregate.turn != turn.settings.turn:
         return False
     if aggregate.baseline_turn != baseline_turn:
         return False
     if aggregate.evidence_algorithm_version != HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
         return False
-    target_turn = shell_turn if shell_turn > baseline_turn else baseline_turn
-    return aggregate.turn == target_turn
+    stamp = read_fleet_age_input_stamp(
+        fleet_persistence,
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn=turn,
+    )
+    return aggregate.fleet_age_input_stamp == stamp
+
+
+def evidence_refined_through_shell(
+    services: HomeworldLocatorComputeServices,
+    *,
+    baseline_turn: int,
+    shell_turn: int,
+    fleet_persistence: FleetSnapshotPersistenceService | None = None,
+) -> bool:
+    """True when ``shell_turn`` and every prior refine turn still match their files.
+
+    A turn matches when its baseline, evidence algorithm version, and fleet-age
+    input stamp match, and it was refined from the prior aggregate's current
+    stamp. The stored aggregate is left in place when this returns False.
+    """
+    cursor = shell_turn if shell_turn > baseline_turn else baseline_turn
+    while True:
+        turn = services.load_turn(cursor)
+        if turn is None:
+            return False
+        aggregate = services.persistence.get_evidence_aggregate(
+            services.game_id,
+            services.perspective,
+            cursor,
+        )
+        if aggregate is None or not _fleet_age_inputs_match(
+            aggregate,
+            baseline_turn=baseline_turn,
+            services=services,
+            fleet_persistence=fleet_persistence,
+            turn=turn,
+        ):
+            return False
+        prior_turn = prior_evidence_turn(turn, baseline_turn=baseline_turn)
+        if prior_turn is None:
+            return True
+        prior = services.persistence.get_evidence_aggregate(
+            services.game_id,
+            services.perspective,
+            prior_turn,
+        )
+        # A game turn that was never stored is not a fleet-age re-read. The chain
+        # continues at the baseline floor when that floor is the stored prior.
+        if prior is None and prior_turn != baseline_turn and services.load_turn(prior_turn) is None:
+            prior = services.persistence.get_evidence_aggregate(
+                services.game_id,
+                services.perspective,
+                baseline_turn,
+            )
+            prior_turn = baseline_turn
+        if prior is None or aggregate.prior_fleet_age_input_stamp != prior.fleet_age_input_stamp:
+            return False
+        if aggregate.prior_evidence_revision != prior.evidence_revision:
+            return False
+        cursor = prior_turn
 
 
 def _floor_prior_for_algorithm_rewrite(
@@ -102,14 +175,15 @@ def ensure_evidence_floor_algorithm_current(
     services: HomeworldLocatorComputeServices,
     *,
     baseline_turn: int,
-    fleet_built_turns: Mapping[int, int] | None = None,
+    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> bool:
-    """Rewrite+persist the baseline floor when ``evidenceAlgorithmVersion`` is stale.
+    """Rewrite+persist the baseline floor when its algorithm version or fleet-age stamp is stale.
 
     Sole owner of floor algorithm rewrites (export DAG skips ensuring turn 1 as
     a refine node; new floors accumulate ownership inside baseline write).
     Clears sticky ownership before re-accumulate, then stamps the current
-    version. Returns True when a rewrite was persisted.
+    version and the on-disk fleet-age input. Returns True when a rewrite was persisted.
+    Does not delete later-turn aggregates.
     """
     state = services.persistence.get_game_state(services.game_id)
     if state is None:
@@ -126,15 +200,24 @@ def ensure_evidence_floor_algorithm_current(
     )
     if floor is None:
         raise ValidationError("homeworld floor evidence aggregate missing before algorithm rewrite")
-    if floor.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION:
-        return False
 
     turn = services.load_turn(baseline_turn)
     if turn is None:
         raise ValidationError(
             f"homeworld baseline turn {baseline_turn} is not stored; "
-            "required to rewrite stale evidenceAlgorithmVersion"
+            "required to rewrite stale evidenceAlgorithmVersion or fleet-age input stamp"
         )
+    stamp = read_fleet_age_input_stamp(
+        fleet_persistence,
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn=turn,
+    )
+    if (
+        floor.evidence_algorithm_version == HOMEWORLD_EVIDENCE_ALGORITHM_VERSION
+        and floor.fleet_age_input_stamp == stamp
+    ):
+        return False
 
     candidate_ids = candidate_planet_ids_from_records(state.candidates)
     planets_by_id = {planet.id: planet for planet in turn.planets}
@@ -148,12 +231,20 @@ def ensure_evidence_floor_algorithm_current(
         candidate_planet_ids_set=candidate_ids,
         planets_by_id=planets_by_id,
         load_turn=services.load_turn,
-        fleet_built_turns=fleet_built_turns,
+        fleet_age_input_stamp=stamp,
+        existing_evidence_revision=floor.evidence_revision,
+    )
+    # The floor has no prior refine turn. Drop the link refine copied off the
+    # cleared floor so a later turn records this floor's own stamp.
+    floor_aggregate = replace(
+        computed.aggregate,
+        prior_fleet_age_input_stamp=None,
+        prior_evidence_revision=None,
     )
     services.persistence.put_evidence_aggregate(
         services.game_id,
         services.perspective,
-        computed.aggregate,
+        floor_aggregate,
     )
     return True
 
@@ -175,7 +266,7 @@ def compute_homeworld_evidence_refine_step(
     services: HomeworldLocatorComputeServices,
     *,
     turn: TurnInfo,
-    fleet_built_turns: Mapping[int, int] | None = None,
+    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> HomeworldEvidenceAggregate:
     """Compute one refine step for ``turn`` without persisting.
 
@@ -191,7 +282,7 @@ def compute_homeworld_evidence_refine_step(
     return compute_homeworld_evidence_refine_step_detailed(
         services,
         turn=turn,
-        fleet_built_turns=fleet_built_turns,
+        fleet_persistence=fleet_persistence,
     ).aggregate
 
 
@@ -199,7 +290,7 @@ def compute_homeworld_evidence_refine_step_detailed(
     services: HomeworldLocatorComputeServices,
     *,
     turn: TurnInfo,
-    fleet_built_turns: Mapping[int, int] | None = None,
+    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> EvidenceRefineStepResult:
     """Like :func:`compute_homeworld_evidence_refine_step`` with timing payload.
 
@@ -221,6 +312,7 @@ def compute_homeworld_evidence_refine_step_detailed(
         services,
         baseline_turn=baseline_turn,
         shell_turn=shell,
+        fleet_persistence=fleet_persistence,
     ):
         aggregate = evidence_aggregate_at_shell_turn(
             services,
@@ -250,6 +342,23 @@ def compute_homeworld_evidence_refine_step_detailed(
                 f"expected {HOMEWORLD_EVIDENCE_ALGORITHM_VERSION} "
                 "(call ensure_evidence_floor_algorithm_current first)"
             )
+        floor_turn = turn if shell == baseline_turn else services.load_turn(baseline_turn)
+        if floor_turn is None:
+            raise ValidationError(
+                f"homeworld baseline turn {baseline_turn} is not stored; "
+                "required to check the fleet-age input stamp"
+            )
+        floor_stamp = read_fleet_age_input_stamp(
+            fleet_persistence,
+            game_id=services.game_id,
+            perspective=services.perspective,
+            turn=floor_turn,
+        )
+        if floor.fleet_age_input_stamp != floor_stamp:
+            raise ValidationError(
+                "homeworld floor evidence aggregate fleet-age input stamp does not match "
+                "the ledger files (call ensure_evidence_floor_algorithm_current first)"
+            )
         return EvidenceRefineStepResult(
             aggregate=floor,
             computed=False,
@@ -278,10 +387,37 @@ def compute_homeworld_evidence_refine_step_detailed(
             f"evidenceAlgorithmVersion {prior.evidence_algorithm_version}; "
             f"expected {HOMEWORLD_EVIDENCE_ALGORITHM_VERSION}"
         )
+    prior_turn_info = services.load_turn(prior_turn)
+    if prior_turn_info is None:
+        raise ValidationError(
+            f"homeworld evidence aggregate before turn {shell} requires stored turn {prior_turn}"
+        )
+    prior_stamp = read_fleet_age_input_stamp(
+        fleet_persistence,
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn=prior_turn_info,
+    )
+    if prior.fleet_age_input_stamp != prior_stamp:
+        raise ValidationError(
+            f"homeworld evidence aggregate before turn {shell} has a fleet-age input "
+            "stamp that does not match the ledger files"
+        )
 
     candidate_ids = candidate_planet_ids_from_records(state.candidates)
     planets_by_id = {planet.id: planet for planet in turn.planets}
+    stamp = read_fleet_age_input_stamp(
+        fleet_persistence,
+        game_id=services.game_id,
+        perspective=services.perspective,
+        turn=turn,
+    )
 
+    existing = services.persistence.get_evidence_aggregate(
+        services.game_id,
+        services.perspective,
+        shell,
+    )
     computed = refine_homeworld_evidence_aggregate(
         prior,
         turn=turn,
@@ -289,7 +425,8 @@ def compute_homeworld_evidence_refine_step_detailed(
         candidate_planet_ids_set=candidate_ids,
         planets_by_id=planets_by_id,
         load_turn=services.load_turn,
-        fleet_built_turns=fleet_built_turns,
+        fleet_age_input_stamp=stamp,
+        existing_evidence_revision=0 if existing is None else existing.evidence_revision,
     )
     return EvidenceRefineStepResult(
         aggregate=computed.aggregate,
@@ -335,14 +472,15 @@ def ensure_homeworld_evidence_refined(
     *,
     shell_turn: TurnInfo,
     game_state_baseline_turn: int,
-    fleet_built_turns: Mapping[int, int] | None = None,
+    fleet_persistence: FleetSnapshotPersistenceService | None = None,
 ) -> HomeworldEvidenceAggregate:
     """Ensure evidence at the shell turn via a single refine step, then persist.
 
     Prior-turn gap-fill must already have run via ``ENSURE_DEPENDENCIES`` unwind.
     ``game_state_baseline_turn`` must match the durable game-global baseline.
-    ``fleet_built_turns`` should be loaded from final fleet ledgers after ENSURE
-    (scoreboard max-age remains the per-ship fallback when a ship id is absent).
+    Ship ages are read from each roster player's on-disk ledger at this turn,
+    including an approximate or generation-behind file. A missing file contributes
+    no ages.
     """
     state = services.persistence.get_game_state(services.game_id)
     if state is None:
@@ -357,6 +495,7 @@ def ensure_homeworld_evidence_refined(
         services,
         baseline_turn=game_state_baseline_turn,
         shell_turn=shell,
+        fleet_persistence=fleet_persistence,
     ):
         aggregate = evidence_aggregate_at_shell_turn(
             services,
@@ -370,13 +509,13 @@ def ensure_homeworld_evidence_refined(
     ensure_evidence_floor_algorithm_current(
         services,
         baseline_turn=game_state_baseline_turn,
-        fleet_built_turns=fleet_built_turns,
+        fleet_persistence=fleet_persistence,
     )
 
     step = compute_homeworld_evidence_refine_step_detailed(
         services,
         turn=shell_turn,
-        fleet_built_turns=fleet_built_turns,
+        fleet_persistence=fleet_persistence,
     )
     persist_ms = 0.0
     if step.computed:

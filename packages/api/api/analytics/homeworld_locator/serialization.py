@@ -8,6 +8,10 @@ from api.analytics.homeworld_locator.constants import (
     ATTRIBUTION_INFERRED,
     ATTRIBUTION_USER_ASSERTED,
 )
+from api.analytics.homeworld_locator.fleet_age_input import (
+    FleetAgeInputStamp,
+    FleetAgePlayerStamp,
+)
 from api.analytics.homeworld_locator.models import (
     CONFIDENCE_DEFINITE,
     CONFIDENCE_POSSIBLE,
@@ -540,6 +544,71 @@ def _owner_possible_sectors_from_json(
     return tuple(sorted(rows, key=lambda row: row[0]))
 
 
+def _fleet_age_player_stamp_to_json(player: FleetAgePlayerStamp) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "playerId": player.player_id,
+        "missing": player.missing,
+    }
+    if not player.missing:
+        payload["builtTurns"] = [
+            [ship_id, built_turn] for ship_id, built_turn in player.built_turns
+        ]
+    return payload
+
+
+def _fleet_age_input_stamp_to_json(stamp: FleetAgeInputStamp) -> list[dict[str, Any]]:
+    return [_fleet_age_player_stamp_to_json(player) for player in stamp.players]
+
+
+def _fleet_age_player_stamp_from_json(data: object) -> FleetAgePlayerStamp:
+    if not isinstance(data, dict):
+        raise ValidationError("homeworld fleetAgeInputStamp entries must be objects")
+    player_id = data.get("playerId")
+    if isinstance(player_id, bool) or not isinstance(player_id, int) or player_id < 1:
+        raise ValidationError("homeworld fleetAgeInputStamp.playerId must be an int >= 1")
+    missing = data.get("missing")
+    if not isinstance(missing, bool):
+        raise ValidationError("homeworld fleetAgeInputStamp.missing must be a boolean")
+    built_raw = data.get("builtTurns", [])
+    if missing:
+        if "builtTurns" in data:
+            raise ValidationError(
+                "homeworld fleetAgeInputStamp missing file must not include builtTurns"
+            )
+        return FleetAgePlayerStamp(player_id=player_id, missing=True)
+    if not isinstance(built_raw, list):
+        raise ValidationError("homeworld fleetAgeInputStamp.builtTurns must be an array")
+    built_turns: list[tuple[int, int]] = []
+    for pair in built_raw:
+        if (
+            not isinstance(pair, list)
+            or len(pair) != 2
+            or isinstance(pair[0], bool)
+            or isinstance(pair[1], bool)
+            or not isinstance(pair[0], int)
+            or not isinstance(pair[1], int)
+        ):
+            raise ValidationError(
+                "homeworld fleetAgeInputStamp.builtTurns entries must be [shipId, builtTurn] ints"
+            )
+        built_turns.append((pair[0], pair[1]))
+    return FleetAgePlayerStamp(
+        player_id=player_id,
+        missing=False,
+        built_turns=tuple(sorted(built_turns)),
+    )
+
+
+def _fleet_age_input_stamp_from_json(data: object, *, field_name: str) -> FleetAgeInputStamp:
+    if not isinstance(data, list):
+        raise ValidationError(f"homeworld {field_name} must be a JSON array")
+    players = [_fleet_age_player_stamp_from_json(entry) for entry in data]
+    player_ids = [player.player_id for player in players]
+    if len(player_ids) != len(set(player_ids)):
+        raise ValidationError(f"homeworld {field_name} playerId values must be unique")
+    return FleetAgeInputStamp(players=tuple(sorted(players, key=lambda player: player.player_id)))
+
+
 def homeworld_evidence_aggregate_to_json(
     aggregate: HomeworldEvidenceAggregate,
 ) -> dict[str, Any]:
@@ -571,6 +640,18 @@ def homeworld_evidence_aggregate_to_json(
         ]
     if aggregate.evidence_algorithm_version > 0:
         payload["evidenceAlgorithmVersion"] = aggregate.evidence_algorithm_version
+    if aggregate.fleet_age_input_stamp is not None:
+        payload["fleetAgeInputStamp"] = _fleet_age_input_stamp_to_json(
+            aggregate.fleet_age_input_stamp
+        )
+    if aggregate.prior_fleet_age_input_stamp is not None:
+        payload["priorFleetAgeInputStamp"] = _fleet_age_input_stamp_to_json(
+            aggregate.prior_fleet_age_input_stamp
+        )
+    if aggregate.evidence_revision:
+        payload["evidenceRevision"] = aggregate.evidence_revision
+    if aggregate.prior_evidence_revision is not None:
+        payload["priorEvidenceRevision"] = aggregate.prior_evidence_revision
     if aggregate.layout_prior_algorithm_version is not None:
         payload["layoutPriorSelection"] = _layout_prior_selection_to_json(aggregate)
     return payload
@@ -647,6 +728,39 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         raise ValidationError(
             "homeworld evidence aggregate evidenceAlgorithmVersion must be an int >= 0"
         )
+    revision_raw = data.get("evidenceRevision", 0)
+    if isinstance(revision_raw, bool) or not isinstance(revision_raw, int) or revision_raw < 0:
+        raise ValidationError("homeworld evidence aggregate evidenceRevision must be an int >= 0")
+    prior_revision_raw = data.get("priorEvidenceRevision")
+    prior_evidence_revision: int | None
+    if prior_revision_raw is None:
+        prior_evidence_revision = None
+    elif (
+        isinstance(prior_revision_raw, int)
+        and not isinstance(prior_revision_raw, bool)
+        and prior_revision_raw >= 0
+    ):
+        prior_evidence_revision = prior_revision_raw
+    else:
+        raise ValidationError(
+            "homeworld evidence aggregate priorEvidenceRevision must be an int >= 0 when present"
+        )
+
+    fleet_age_raw = data.get("fleetAgeInputStamp")
+    fleet_age_input_stamp = (
+        None
+        if fleet_age_raw is None
+        else _fleet_age_input_stamp_from_json(fleet_age_raw, field_name="fleetAgeInputStamp")
+    )
+    prior_fleet_age_raw = data.get("priorFleetAgeInputStamp")
+    prior_fleet_age_input_stamp = (
+        None
+        if prior_fleet_age_raw is None
+        else _fleet_age_input_stamp_from_json(
+            prior_fleet_age_raw,
+            field_name="priorFleetAgeInputStamp",
+        )
+    )
 
     return HomeworldEvidenceAggregate(
         turn=turn,
@@ -661,6 +775,10 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
             field_name="homeworld evidence aggregate locationProvenances",
         ),
         evidence_algorithm_version=version_raw,
+        fleet_age_input_stamp=fleet_age_input_stamp,
+        prior_fleet_age_input_stamp=prior_fleet_age_input_stamp,
+        evidence_revision=revision_raw,
+        prior_evidence_revision=prior_evidence_revision,
         layout_prior_algorithm_version=selection_version,
         layout_prior_input_fingerprint=selection_fingerprint,
         layout_prior_evidence_lambda=selection_evidence_lambda,

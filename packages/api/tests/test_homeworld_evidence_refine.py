@@ -94,7 +94,6 @@ def _floor_aggregate() -> HomeworldEvidenceAggregate:
 def test_export_catalog_declares_self_chain() -> None:
     assert EXPORT_CATALOG.ensure_dependencies == (
         EnsureDependency(analytic_id=ANALYTIC_ID, turn_delta=-1, player_id="same"),
-        EnsureDependency(analytic_id="fleet", turn_delta=0, player_id="all", quality="final"),
     )
 
 
@@ -540,11 +539,14 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
         from api.analytics.homeworld_locator.evidence_ensure import (
             ensure_homeworld_evidence_refined,
         )
-        from api.analytics.homeworld_locator.exports import _fleet_built_turns_after_ensure
+        from api.analytics.homeworld_locator.fleet_age_input import (
+            fleet_persistence_from_context,
+        )
 
         turn = ctx.load_turn(scope.turn)
         assert turn is not None
         resolved = resolve_homeworld_services(ctx)
+        fleet_persistence = fleet_persistence_from_context(ctx)
         baseline_result = ensure_homeworld_baseline(ctx, shell_turn=turn)
         for refine_turn_number in range(
             baseline_result.game_state.baseline_turn,
@@ -556,11 +558,7 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
                 resolved,
                 shell_turn=refine_turn,
                 game_state_baseline_turn=baseline_result.game_state.baseline_turn,
-                fleet_built_turns=_fleet_built_turns_after_ensure(
-                    ctx,
-                    refine_turn,
-                    resolved,
-                ),
+                fleet_persistence=fleet_persistence,
             )
         return True
 
@@ -612,15 +610,6 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
         _baseline_state(turn_one.settings, _candidate(10)),
         _floor_aggregate(),
     )
-    persistence.put_evidence_aggregate(
-        628580,
-        1,
-        HomeworldEvidenceAggregate(
-            turn=3,
-            baseline_turn=1,
-            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
-        ),
-    )
     ctx = make_analytic_compute_context(
         turns[4],
         load_turn=lambda n: turns.get(n),
@@ -629,6 +618,44 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
         perspective=services.perspective,
         ensure_turn=ensure_turn,
     ).exports
+    from api.analytics.homeworld_locator.fleet_age_input import (
+        fleet_persistence_from_context,
+        read_fleet_age_input_stamp,
+    )
+
+    fleet_persistence = fleet_persistence_from_context(ctx)
+    floor_stamp = read_fleet_age_input_stamp(
+        fleet_persistence,
+        game_id=628580,
+        perspective=1,
+        turn=turns[1],
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        replace(
+            _floor_aggregate(),
+            fleet_age_input_stamp=floor_stamp,
+            prior_fleet_age_input_stamp=None,
+        ),
+    )
+    persistence.put_evidence_aggregate(
+        628580,
+        1,
+        HomeworldEvidenceAggregate(
+            turn=3,
+            baseline_turn=1,
+            evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
+            fleet_age_input_stamp=read_fleet_age_input_stamp(
+                fleet_persistence,
+                game_id=628580,
+                perspective=1,
+                turn=turns[3],
+            ),
+            prior_fleet_age_input_stamp=floor_stamp,
+            prior_evidence_revision=0,
+        ),
+    )
 
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=4))
     assert fetch_calls == []
@@ -1262,7 +1289,6 @@ def test_floor_algorithm_rewrite_clears_sticky_ownership(persistence) -> None:
         ensure_evidence_floor_algorithm_current(
             services,
             baseline_turn=1,
-            fleet_built_turns={},
         )
         is True
     )
@@ -1327,7 +1353,6 @@ def test_floor_algorithm_rewrite_backfills_baseline_profile_before_od_demotion(
         ensure_evidence_floor_algorithm_current(
             services,
             baseline_turn=1,
-            fleet_built_turns={},
         )
         is True
     )
@@ -1350,65 +1375,6 @@ def test_floor_algorithm_rewrite_backfills_baseline_profile_before_od_demotion(
     by_planet = {row.planet_id: row for row in derived}
     assert by_planet[10].confidence_tier == CONFIDENCE_DEFINITE
     assert by_planet[20].confidence_tier == CONFIDENCE_POSSIBLE
-
-
-def test_fleet_built_turns_from_final_ledgers_merges_known_ages(sample_turn) -> None:
-    """Sync ensure source: final on-disk ledgers supply ship_id -> built_turn."""
-    from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
-    from api.analytics.fleet.types import (
-        FleetAcquisitionLedger,
-        FleetFieldKnown,
-        FleetMaterializationProvenance,
-        FleetShipRecord,
-        FleetShipRecordFields,
-        PersistedFleetLedger,
-    )
-    from api.analytics.homeworld_locator.fleet_built_turns import (
-        fleet_built_turns_from_final_ledgers,
-    )
-    from api.analytics.turn_roster import iter_turn_players
-
-    fleet_services = build_ephemeral_fleet_compute_services(
-        sample_turn,
-        game_id=sample_turn.game.id,
-        perspective=1,
-        stored_turns={sample_turn.settings.turn: sample_turn},
-    )
-    player_ids = [player.id for player in iter_turn_players(sample_turn)]
-    assert player_ids
-    owner = player_ids[0]
-    fleet_services.persistence.put_ledger(
-        fleet_services.game_id,
-        fleet_services.perspective,
-        sample_turn.settings.turn,
-        owner,
-        PersistedFleetLedger(
-            ledger=FleetAcquisitionLedger(
-                player_id=owner,
-                records=[
-                    FleetShipRecord(
-                        record_id="rec-42",
-                        fields=FleetShipRecordFields(
-                            ship_id=FleetFieldKnown(42),
-                            built_turn=FleetFieldKnown(7),
-                        ),
-                    ),
-                ],
-            ),
-            provenance=FleetMaterializationProvenance(
-                turn_evidence_at_n=True,
-                prior_ledger_at_n_minus_1=True,
-            ),
-        ),
-    )
-    built = fleet_built_turns_from_final_ledgers(
-        fleet_services.persistence,
-        game_id=fleet_services.game_id,
-        perspective=fleet_services.perspective,
-        turn_number=sample_turn.settings.turn,
-        player_ids=player_ids,
-    )
-    assert built[42] == 7
 
 
 def test_stale_prior_evidence_algorithm_version_raises(persistence) -> None:

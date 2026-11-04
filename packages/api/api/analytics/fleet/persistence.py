@@ -12,7 +12,11 @@ from api.analytics.fleet.constants import (
     FLEET_EVIDENCE_MARK_SEGMENT,
     FLEET_MATERIALIZATION_VERSION,
 )
-from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
+from api.analytics.fleet.field_constraints import known_ship_built_turns
+from api.analytics.fleet.ledger_persisted_event import (
+    FleetAgeIdentityChanged,
+    FleetLedgerPersistedEvent,
+)
 from api.analytics.fleet.serialization import (
     fleet_evidence_mark_from_json,
     fleet_evidence_mark_to_json,
@@ -32,9 +36,17 @@ from api.storage.base import StorageBackend
 
 OnSnapshotPersistedCallback = Callable[[int, int, int], None]
 OnLedgerPersistedCallback = Callable[[FleetLedgerPersistedEvent], None]
+OnFleetAgeIdentityChangedCallback = Callable[[FleetAgeIdentityChanged], None]
 DeferredNotification = Callable[[], None]
 
 _ABSENT_EVIDENCE_MARK = FleetEvidenceMark()
+
+
+def _built_turn_identity(persisted: PersistedFleetLedger | None) -> dict[int, int] | None:
+    """Known ship_id -> built_turn map, or None when the ledger file is absent."""
+    if persisted is None:
+        return None
+    return known_ship_built_turns(persisted.ledger.records)
 
 
 @dataclass(frozen=True)
@@ -155,10 +167,12 @@ class FleetSnapshotPersistenceService:
         *,
         on_snapshot_persisted: OnSnapshotPersistedCallback | None = None,
         on_ledger_persisted: OnLedgerPersistedCallback | None = None,
+        on_fleet_age_identity_changed: OnFleetAgeIdentityChangedCallback | None = None,
     ) -> None:
         self._storage = storage
         self._on_snapshot_persisted = on_snapshot_persisted
         self._on_ledger_persisted = on_ledger_persisted
+        self._on_fleet_age_identity_changed = on_fleet_age_identity_changed
         # Player-scoped: fleet compute / gap-fill coherence across turns.
         self._invalidation_generation: dict[tuple[int, int, int], int] = {}
         # Turn-scoped: scores@N epoch tracks fleet@(N-1) only.
@@ -247,6 +261,14 @@ class FleetSnapshotPersistenceService:
                 prior_was_ensure_final=prior_was_ensure_final,
                 persisted=to_store,
             )
+            self._notify_fleet_age_identity_if_changed(
+                game_id,
+                perspective,
+                turn_number,
+                player_id,
+                prior=prior,
+                current=to_store,
+            )
             if defer_ledger_persisted_notification:
                 return PutLedgerResult(stored=to_store, deferred_notification=notification)
             if notification is not None:
@@ -306,8 +328,17 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         player_id: int,
     ) -> None:
+        prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
         self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
         self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
+        self._notify_fleet_age_identity_if_changed(
+            game_id,
+            perspective,
+            turn_number,
+            player_id,
+            prior=prior,
+            current=None,
+        )
 
     def list_ledger_player_ids(
         self,
@@ -391,8 +422,7 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
     ) -> None:
         for player_id in self._list_player_ids(game_id, perspective, turn_number):
-            self._unlink_player_ledger(game_id, perspective, turn_number, player_id)
-            self._forget_ledger_turn(game_id, perspective, player_id, turn_number)
+            self.delete_ledger(game_id, perspective, turn_number, player_id)
 
     def evidence_mark(
         self,
@@ -616,6 +646,46 @@ class FleetSnapshotPersistenceService:
     @on_ledger_persisted.setter
     def on_ledger_persisted(self, callback: OnLedgerPersistedCallback | None) -> None:
         self._on_ledger_persisted = callback
+
+    @property
+    def on_fleet_age_identity_changed(self) -> OnFleetAgeIdentityChangedCallback | None:
+        return self._on_fleet_age_identity_changed
+
+    @on_fleet_age_identity_changed.setter
+    def on_fleet_age_identity_changed(
+        self,
+        callback: OnFleetAgeIdentityChangedCallback | None,
+    ) -> None:
+        self._on_fleet_age_identity_changed = callback
+
+    def _notify_fleet_age_identity_if_changed(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        player_id: int,
+        *,
+        prior: PersistedFleetLedger | None,
+        current: PersistedFleetLedger | None,
+    ) -> None:
+        """Notify when the on-disk ship_id -> built_turn map is created, removed, or edited.
+
+        A missing file is distinct from a ledger whose known built turns are empty.
+        Other ledger field edits do not notify. This is not the ensure-final side channel.
+        """
+        if _built_turn_identity(prior) == _built_turn_identity(current):
+            return
+        callback = self._on_fleet_age_identity_changed
+        if callback is None:
+            return
+        callback(
+            FleetAgeIdentityChanged(
+                game_id=game_id,
+                perspective=perspective,
+                turn=turn_number,
+                player_id=player_id,
+            )
+        )
 
     def _bump_durable_evidence_mark(
         self,

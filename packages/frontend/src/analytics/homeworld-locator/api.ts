@@ -106,3 +106,41 @@ export async function postHomeworldLocatorRefresh(
   )
   return parseHomeworldMutationResponse(response, endpointLabel)
 }
+
+export type FleetAgeRefetchNotice =
+  components['schemas']['FleetAgeRefetchNoticeResponse']
+
+/** Epoch of on-disk fleet build-turn identity changes. Does not ensure. */
+export async function fetchHomeworldFleetAgeRefetch(
+  scope: Pick<AnalyticShellScope, 'gameId' | 'perspective'>,
+  afterEpoch: number
+): Promise<FleetAgeRefetchNotice> {
+  const params = new URLSearchParams({
+    gameId: scope.gameId,
+    perspective: String(scope.perspective),
+    afterEpoch: String(afterEpoch),
+  })
+  const path = `/bff/analytics/${encodeURIComponent(HOMEWORLD_LOCATOR_ANALYTIC_ID)}/fleet-age-refetch`
+  const endpointLabel = `GET ${path}`
+  const response = await bffRequest(
+    `${path}?${params.toString()}`,
+    { cache: 'no-store' },
+    endpointLabel
+  )
+  if (!response.ok) {
+    await throwBffHttpErrorFromResponse(response, endpointLabel)
+  }
+  const raw: unknown = await response.json()
+  if (
+    raw == null ||
+    typeof raw !== 'object' ||
+    typeof (raw as { epoch?: unknown }).epoch !== 'number'
+  ) {
+    throw new Error(`${endpointLabel}: invalid fleet-age refetch notice`)
+  }
+  const fromTurn = (raw as { fromTurn?: unknown }).fromTurn
+  if (fromTurn != null && typeof fromTurn !== 'number') {
+    throw new Error(`${endpointLabel}: invalid fleet-age refetch notice`)
+  }
+  return { epoch: (raw as { epoch: number }).epoch, fromTurn: fromTurn ?? null }
+}
