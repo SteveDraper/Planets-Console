@@ -636,7 +636,6 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
         replace(
             _floor_aggregate(),
             fleet_age_input_stamp=floor_stamp,
-            prior_fleet_age_input_stamp=None,
         ),
     )
     persistence.put_evidence_aggregate(
@@ -652,8 +651,6 @@ def test_export_ensure_ignores_holes_below_an_already_refined_prior_turn(persist
                 perspective=1,
                 turn=turns[3],
             ),
-            prior_fleet_age_input_stamp=floor_stamp,
-            prior_evidence_revision=0,
         ),
     )
 

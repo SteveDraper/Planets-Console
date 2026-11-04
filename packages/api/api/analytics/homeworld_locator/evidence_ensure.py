@@ -216,19 +216,11 @@ def ensure_evidence_floor_algorithm_current(
         planets_by_id=planets_by_id,
         load_turn=services.load_turn,
         fleet_age_input_stamp=stamp,
-        existing_evidence_revision=floor.evidence_revision,
-    )
-    # The floor has no prior refine turn. Drop the link refine copied off the
-    # cleared floor so a later turn records this floor's own stamp.
-    floor_aggregate = replace(
-        computed.aggregate,
-        prior_fleet_age_input_stamp=None,
-        prior_evidence_revision=None,
     )
     services.persistence.put_evidence_aggregate(
         services.game_id,
         services.perspective,
-        floor_aggregate,
+        computed.aggregate,
     )
     services.persistence.advance_fleet_age_stale_marker(
         services.game_id,
@@ -393,11 +385,6 @@ def compute_homeworld_evidence_refine_step_detailed(
     candidate_ids = candidate_planet_ids_from_records(state.candidates)
     planets_by_id = {planet.id: planet for planet in turn.planets}
 
-    existing = services.persistence.get_evidence_aggregate(
-        services.game_id,
-        services.perspective,
-        shell,
-    )
     computed = refine_homeworld_evidence_aggregate(
         prior,
         turn=turn,
@@ -406,7 +393,6 @@ def compute_homeworld_evidence_refine_step_detailed(
         planets_by_id=planets_by_id,
         load_turn=services.load_turn,
         fleet_age_input_stamp=stamp,
-        existing_evidence_revision=0 if existing is None else existing.evidence_revision,
     )
     return EvidenceRefineStepResult(
         aggregate=computed.aggregate,

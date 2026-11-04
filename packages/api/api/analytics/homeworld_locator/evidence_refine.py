@@ -74,7 +74,6 @@ def refine_homeworld_evidence_aggregate(
     planets_by_id: Mapping[int, Planet],
     load_turn: Callable[[int], TurnInfo | None],
     fleet_age_input_stamp: FleetAgeInputStamp | None = None,
-    existing_evidence_revision: int = 0,
 ) -> EvidenceRefineComputeResult:
     """Advance the durable evidence aggregate by one turn of observations.
 
@@ -177,9 +176,6 @@ def refine_homeworld_evidence_aggregate(
         location_provenances=location_provenances,
         evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
         fleet_age_input_stamp=stamp,
-        prior_fleet_age_input_stamp=prior.fleet_age_input_stamp,
-        evidence_revision=existing_evidence_revision + 1,
-        prior_evidence_revision=prior.evidence_revision,
     )
     total_ms = (time.perf_counter() - total_t0) * 1000.0
     return EvidenceRefineComputeResult(

@@ -106,23 +106,6 @@ class HomeworldEvidenceAggregate:
     ``None`` means this aggregate was written before stamps existed.
     A player entry with ``missing`` is a file that was not on disk.
     """
-    prior_fleet_age_input_stamp: FleetAgeInputStamp | None = None
-    """Fleet-age stamp of the prior aggregate this turn was refined from.
-
-    The baseline floor has no prior stamp.
-    """
-    evidence_revision: int = 0
-    """Increments each time this turn's aggregate is written.
-
-    A later turn stores the revision it refined from. Rewriting an earlier
-    turn bumps that revision, so every later turn stays unsatisfied until it
-    is refined again even when its own fleet-age stamp did not change.
-    """
-    prior_evidence_revision: int | None = None
-    """``evidence_revision`` of the prior aggregate at refine time.
-
-    ``None`` on the baseline floor.
-    """
     # Shell-turn layout-prior selection only; absent until first candidate-view materialize.
     layout_prior_algorithm_version: int | None = None
     layout_prior_input_fingerprint: tuple[tuple[int, str, int | None], ...] = ()

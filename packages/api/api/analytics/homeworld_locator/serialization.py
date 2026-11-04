@@ -600,13 +600,13 @@ def _fleet_age_player_stamp_from_json(data: object) -> FleetAgePlayerStamp:
     )
 
 
-def _fleet_age_input_stamp_from_json(data: object, *, field_name: str) -> FleetAgeInputStamp:
+def _fleet_age_input_stamp_from_json(data: object) -> FleetAgeInputStamp:
     if not isinstance(data, list):
-        raise ValidationError(f"homeworld {field_name} must be a JSON array")
+        raise ValidationError("homeworld fleetAgeInputStamp must be a JSON array")
     players = [_fleet_age_player_stamp_from_json(entry) for entry in data]
     player_ids = [player.player_id for player in players]
     if len(player_ids) != len(set(player_ids)):
-        raise ValidationError(f"homeworld {field_name} playerId values must be unique")
+        raise ValidationError("homeworld fleetAgeInputStamp playerId values must be unique")
     return FleetAgeInputStamp(players=tuple(sorted(players, key=lambda player: player.player_id)))
 
 
@@ -664,14 +664,6 @@ def homeworld_evidence_aggregate_to_json(
         payload["fleetAgeInputStamp"] = _fleet_age_input_stamp_to_json(
             aggregate.fleet_age_input_stamp
         )
-    if aggregate.prior_fleet_age_input_stamp is not None:
-        payload["priorFleetAgeInputStamp"] = _fleet_age_input_stamp_to_json(
-            aggregate.prior_fleet_age_input_stamp
-        )
-    if aggregate.evidence_revision:
-        payload["evidenceRevision"] = aggregate.evidence_revision
-    if aggregate.prior_evidence_revision is not None:
-        payload["priorEvidenceRevision"] = aggregate.prior_evidence_revision
     if aggregate.layout_prior_algorithm_version is not None:
         payload["layoutPriorSelection"] = _layout_prior_selection_to_json(aggregate)
     return payload
@@ -748,38 +740,10 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         raise ValidationError(
             "homeworld evidence aggregate evidenceAlgorithmVersion must be an int >= 0"
         )
-    revision_raw = data.get("evidenceRevision", 0)
-    if isinstance(revision_raw, bool) or not isinstance(revision_raw, int) or revision_raw < 0:
-        raise ValidationError("homeworld evidence aggregate evidenceRevision must be an int >= 0")
-    prior_revision_raw = data.get("priorEvidenceRevision")
-    prior_evidence_revision: int | None
-    if prior_revision_raw is None:
-        prior_evidence_revision = None
-    elif (
-        isinstance(prior_revision_raw, int)
-        and not isinstance(prior_revision_raw, bool)
-        and prior_revision_raw >= 0
-    ):
-        prior_evidence_revision = prior_revision_raw
-    else:
-        raise ValidationError(
-            "homeworld evidence aggregate priorEvidenceRevision must be an int >= 0 when present"
-        )
 
     fleet_age_raw = data.get("fleetAgeInputStamp")
     fleet_age_input_stamp = (
-        None
-        if fleet_age_raw is None
-        else _fleet_age_input_stamp_from_json(fleet_age_raw, field_name="fleetAgeInputStamp")
-    )
-    prior_fleet_age_raw = data.get("priorFleetAgeInputStamp")
-    prior_fleet_age_input_stamp = (
-        None
-        if prior_fleet_age_raw is None
-        else _fleet_age_input_stamp_from_json(
-            prior_fleet_age_raw,
-            field_name="priorFleetAgeInputStamp",
-        )
+        None if fleet_age_raw is None else _fleet_age_input_stamp_from_json(fleet_age_raw)
     )
 
     return HomeworldEvidenceAggregate(
@@ -796,9 +760,6 @@ def homeworld_evidence_aggregate_from_json(data: dict[str, Any]) -> HomeworldEvi
         ),
         evidence_algorithm_version=version_raw,
         fleet_age_input_stamp=fleet_age_input_stamp,
-        prior_fleet_age_input_stamp=prior_fleet_age_input_stamp,
-        evidence_revision=revision_raw,
-        prior_evidence_revision=prior_evidence_revision,
         layout_prior_algorithm_version=selection_version,
         layout_prior_input_fingerprint=selection_fingerprint,
         layout_prior_evidence_lambda=selection_evidence_lambda,

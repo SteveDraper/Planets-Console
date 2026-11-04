@@ -107,7 +107,7 @@ def _floor_aggregate_with_baseline_ownership(
         ),
         evidence_algorithm_version=HOMEWORLD_EVIDENCE_ALGORITHM_VERSION,
     )
-    refined = refine_homeworld_evidence_aggregate(
+    return refine_homeworld_evidence_aggregate(
         stub,
         turn=baseline_turn_info,
         candidates=candidates,
@@ -121,11 +121,6 @@ def _floor_aggregate_with_baseline_ownership(
             turn=baseline_turn_info,
         ),
     ).aggregate
-    return replace(
-        refined,
-        prior_fleet_age_input_stamp=None,
-        prior_evidence_revision=None,
-    )
 
 
 def _durable_viewpoint_perspective(
