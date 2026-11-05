@@ -10,7 +10,10 @@ from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OpenTu
 from api.compute.orchestrator_state import NodeState
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
-from api.services.inference_invalidation_service import preferred_unconsumed_root_backfill
+from api.services.inference_invalidation_service import (
+    preferred_unconsumed_root_backfill,
+    resolve_durable_scores_evidence,
+)
 
 _ANALYTICS = frozenset({"alpha", "beta"})
 
@@ -241,6 +244,89 @@ def test_preferred_unconsumed_root_backfill_lets_the_caller_choose():
         )
         is None
     )
+
+
+def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record():
+    """Stamp reads the carried root. Wake reads the current record and the claim snapshot."""
+    fleet = OpenTurnRoot(
+        analytic_id=FLEET_ANALYTIC_ID,
+        open_turn=40,
+        backfill_earlier_turns=True,
+        consumed=False,
+    )
+    scores = OpenTurnRoot(
+        analytic_id=SCORES_ANALYTIC_ID,
+        open_turn=40,
+        backfill_earlier_turns=False,
+        consumed=False,
+    )
+    preferred = resolve_durable_scores_evidence(
+        (fleet, scores),
+        host_turn=40,
+        wake_backfill=False,
+        live_turns=frozenset({40}),
+    )
+    assert preferred.decision_backfill is False
+    assert preferred.wake_backfill is False
+    assert preferred.chosen is not None
+    assert preferred.chosen.limited is not None
+
+    early_shell = OpenTurnRoot(
+        analytic_id=FLEET_ANALYTIC_ID,
+        open_turn=39,
+        backfill_earlier_turns=True,
+        consumed=False,
+    )
+    evidence = resolve_durable_scores_evidence(
+        (early_shell, scores),
+        host_turn=40,
+        wake_backfill=False,
+        live_turns=frozenset({39, 40}),
+    )
+    assert evidence.open_turn == 40
+    assert evidence.decision_backfill is False
+    assert evidence.wake_backfill is False
+    assert evidence.chosen is not None
+    limited = evidence.chosen.limited
+    assert limited is not None
+    assert limited.shell_turns == frozenset({39, 40})
+    assert limited.live_turns == frozenset({39, 40})
+    assert limited.turns == frozenset({40})
+
+    # The current record wakes every known turn even when the carried choice is off.
+    woken = resolve_durable_scores_evidence(
+        (scores,),
+        host_turn=40,
+        wake_backfill=True,
+        live_turns=frozenset(),
+    )
+    assert woken.decision_backfill is False
+    assert woken.wake_backfill is True
+    assert woken.chosen is not None
+    assert woken.chosen.limited is None
+
+    consumed = OpenTurnRoot(
+        analytic_id=SCORES_ANALYTIC_ID,
+        open_turn=40,
+        backfill_earlier_turns=True,
+        consumed=True,
+    )
+    absent = resolve_durable_scores_evidence(
+        (consumed,),
+        host_turn=40,
+        wake_backfill=True,
+        live_turns=frozenset({40}),
+    )
+    assert absent.open_turn is None
+    assert absent.decision_backfill is None
+    assert absent.wake_backfill is True
+    assert absent.chosen is None
+    carried = preferred_unconsumed_root_backfill(
+        (consumed,),
+        host_turn=40,
+        preferred_analytic_id=SCORES_ANALYTIC_ID,
+    )
+    assert carried is None
 
 
 def test_claim_open_turn_roots_consumes_under_one_lock_and_keeps_the_preimage():

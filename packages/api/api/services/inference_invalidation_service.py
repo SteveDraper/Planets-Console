@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.fleet.compute_orchestration import wake_fleet_scope
@@ -53,6 +54,22 @@ def preferred_unconsumed_root_backfill(
     return found
 
 
+def _carried_scores_backfill(
+    roots: tuple[OpenTurnRoot, ...],
+    *,
+    host_turn: int,
+) -> bool | None:
+    """Backfill choice carried by the unconsumed root at ``host_turn``.
+
+    None when no such root exists. A scores root wins over a fleet root.
+    """
+    return preferred_unconsumed_root_backfill(
+        roots,
+        host_turn=host_turn,
+        preferred_analytic_id=SCORES_ANALYTIC_ID,
+    )
+
+
 def _player_submission_roots(
     orchestrator: ComputeOrchestrator | None,
     game_id: int,
@@ -70,6 +87,33 @@ def _player_submission_roots(
         player_id=player_id,
         analytic_ids=_OPEN_TURN_ANALYTICS,
         turn=turn,
+    )
+
+
+def _claim_player_open_roots(
+    *,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+    open_turn: int,
+    consume: Callable[[tuple[OpenTurnRoot, ...]], bool],
+) -> tuple[OpenTurnRoot, ...]:
+    """In-flight roots, consuming ``open_turn`` when ``consume`` says so.
+
+    No orchestrator yields an empty snapshot. ``consume`` runs under the
+    orchestrator lock and must not re-enter it. The snapshot is the state
+    from before that consume.
+    """
+    orchestrator = peek_compute_orchestrator()
+    if orchestrator is None:
+        return ()
+    return orchestrator.claim_open_turn_roots(
+        game_id=game_id,
+        perspective=perspective,
+        player_id=player_id,
+        open_turn=open_turn,
+        analytic_ids=_OPEN_TURN_ANALYTICS,
+        consume=consume,
     )
 
 
@@ -145,6 +189,68 @@ def _limited_recompute_turns(
         turns=frozenset(turns),
         shell_turns=shell_turns,
         live_turns=live_turns,
+    )
+
+
+@dataclass(frozen=True)
+class _DurableScoresEvidence:
+    """One durable scores persist, split by which backfill each step uses.
+
+    Stamp versus bump uses the carried submission choice: ``decision_backfill``
+    and ``open_turn``. Both are None when this host turn has no unconsumed
+    root, and that persist cannot stamp.
+
+    ``wake_backfill`` is the current backfill record. It chooses which turns
+    wake after a bump or first persist. It does not classify the mark.
+
+    ``chosen`` is the recompute snapshot taken from the claim, while that root
+    was still unconsumed. None when ``open_turn`` is None; the wake then
+    chooses turns itself.
+    """
+
+    open_turn: int | None
+    decision_backfill: bool | None
+    wake_backfill: bool
+    chosen: _ChosenRecompute | None
+
+
+def resolve_durable_scores_evidence(
+    roots: tuple[OpenTurnRoot, ...],
+    *,
+    host_turn: int,
+    wake_backfill: bool,
+    live_turns: frozenset[int],
+) -> _DurableScoresEvidence:
+    """Carried submission choice and the current backfill record.
+
+    ``open_turn`` is set exactly when ``_carried_scores_backfill`` finds an
+    unconsumed root, which is also when that root is consumed. ``live_turns``
+    is the pre-claim stream scan. It is unused when ``wake_backfill`` is on,
+    because that setting wakes every known turn.
+    """
+    carried = _carried_scores_backfill(roots, host_turn=host_turn)
+    if carried is None:
+        return _DurableScoresEvidence(
+            open_turn=None,
+            decision_backfill=None,
+            wake_backfill=wake_backfill,
+            chosen=None,
+        )
+    if wake_backfill:
+        chosen = _ChosenRecompute(limited=None)
+    else:
+        chosen = _ChosenRecompute(
+            limited=_limited_recompute_turns(
+                host_turn=host_turn,
+                live_turns=live_turns,
+                shell_turns=frozenset(root.open_turn for root in roots),
+            )
+        )
+    return _DurableScoresEvidence(
+        open_turn=host_turn,
+        decision_backfill=carried,
+        wake_backfill=wake_backfill,
+        chosen=chosen,
     )
 
 
@@ -264,6 +370,9 @@ class InferenceInvalidationService:
                     live_turns=limited.live_turns,
                 )
         turns_to_wake = turns_to_reschedule if limited is None else limited.turns
+        live_scores_turns = (
+            self._live_scores_turns(game_id, perspective) if limited is not None else frozenset()
+        )
         for fleet_turn in sorted(turns_to_wake):
             stream_woke = reschedule_fleet_table_player(
                 FleetTableStreamScope(
@@ -273,11 +382,7 @@ class InferenceInvalidationService:
                 ),
                 player_id,
             )
-            if (
-                limited is not None
-                and fleet_turn in limited.turns
-                and fleet_turn in self._live_scores_turns(game_id, perspective)
-            ):
+            if limited is not None and fleet_turn in live_scores_turns:
                 reschedule_inference_row(self._scope(game_id, perspective, fleet_turn), player_id)
             if stream_woke:
                 continue
@@ -368,99 +473,90 @@ class InferenceInvalidationService:
     ) -> None:
         """Durable scores evidence.
 
-        ``off_mode_persist_decision`` classifies this persist. A stamp leaves
-        the mark unchanged. First persist and bump both advance it through
-        durable evidence update: an absent mark becomes generation 1, and an
-        existing mark increments. Ledger files stay in place. An unconsumed
-        submission root at this host turn is read and consumed under one
-        orchestrator lock. A stamp consumes and returns. A bump chooses
-        recompute turns from that read, while the shell is still unconsumed,
-        and then the lock consumes the root. A host turn with no unconsumed
-        root does not consume.
+        Classify with ``off_mode_persist_decision``, then stamp or wake.
+        A stamp leaves the mark unchanged. First persist and bump both advance
+        it: an absent mark becomes generation 1, and an existing mark increments.
+        Ledger files stay in place.
+
+        ``_DurableScoresEvidence`` holds the split between those steps. The
+        carried submission choice classifies stamp versus bump. The current
+        backfill record chooses which turns wake. An unconsumed root at this
+        host turn is consumed under one orchestrator lock. A bump that had
+        that root wakes from the recompute snapshot taken with the claim. A
+        host turn with no unconsumed root does not consume, and the wake
+        chooses turns after the claim.
         """
-        fleet = self._fleet_persistence
-        current = fleet.backfill_earlier_turns_enabled(game_id) if fleet is not None else None
-        mark = fleet.evidence_mark(game_id, perspective, player_id) if fleet is not None else None
-        # Live turns are read before the claim. The claim callback must not
-        # re-enter the orchestrator, and a stream scan takes its own locks.
-        live_turns = (
-            active_table_stream_turns(game_id, perspective, _OPEN_TURN_ANALYTICS)
-            if current is False
-            else frozenset()
-        )
-        stamp = False
-        chosen: _ChosenRecompute | None = None
 
         def consume_root(roots: tuple[OpenTurnRoot, ...]) -> bool:
-            nonlocal stamp, chosen
-            carried = preferred_unconsumed_root_backfill(
-                roots,
-                host_turn=host_turn,
-                preferred_analytic_id=SCORES_ANALYTIC_ID,
-            )
-            if carried is None:
-                return False
-            if fleet is None or mark is None:
-                return True
-            # This call classifies the mark. It is not a fleet merge, so the
-            # catch-up flag is false and the stored generation is unused.
-            # An in-flight submission keeps the choice it started with.
-            decision = off_mode_persist_decision(
-                backfill_enabled=carried,
-                open_turn=host_turn,
-                is_catch_up=False,
-                host_turn=host_turn,
-                mark=mark,
-                stored_generation=None,
-            )
-            if decision.mark_persist is MarkPersist.STAMP:
-                stamp = True
-                return True
-            shell_turns = frozenset(root.open_turn for root in roots)
-            if current is True:
-                chosen = _ChosenRecompute(limited=None)
-            else:
-                chosen = _ChosenRecompute(
-                    limited=_limited_recompute_turns(
-                        host_turn=host_turn,
-                        live_turns=live_turns,
-                        shell_turns=shell_turns,
-                    )
-                )
-            return True
+            return _carried_scores_backfill(roots, host_turn=host_turn) is not None
 
-        orchestrator = peek_compute_orchestrator()
-        if orchestrator is None:
-            consume_root(())
-        else:
-            orchestrator.claim_open_turn_roots(
+        fleet = self._fleet_persistence
+        if fleet is None:
+            # No fleet service: no mark to classify and no fleet to wake.
+            # An unconsumed root is still consumed so the one-shot cannot apply again.
+            _claim_player_open_roots(
                 game_id=game_id,
                 perspective=perspective,
                 player_id=player_id,
                 open_turn=host_turn,
-                analytic_ids=_OPEN_TURN_ANALYTICS,
                 consume=consume_root,
             )
-        if stamp:
             return
-        if chosen is not None:
-            self._update_fleet_after_evidence(
+
+        wake_backfill = fleet.backfill_earlier_turns_enabled(game_id)
+        mark = fleet.evidence_mark(game_id, perspective, player_id)
+        # Live turns are read before the claim. The claim callback must not
+        # re-enter the orchestrator, and a stream scan takes its own locks.
+        live_turns = (
+            active_table_stream_turns(game_id, perspective, _OPEN_TURN_ANALYTICS)
+            if not wake_backfill
+            else frozenset()
+        )
+        roots = _claim_player_open_roots(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            open_turn=host_turn,
+            consume=consume_root,
+        )
+        evidence = resolve_durable_scores_evidence(
+            roots,
+            host_turn=host_turn,
+            wake_backfill=wake_backfill,
+            live_turns=live_turns,
+        )
+        # The carried choice classifies the mark. Catch-up and the stored
+        # generation stay unset; they do not change this classification.
+        # An absent carried choice leaves the open turn unset, so this cannot stamp.
+        carried = evidence.decision_backfill
+        decision = off_mode_persist_decision(
+            backfill_enabled=False if carried is None else carried,
+            open_turn=evidence.open_turn,
+            is_catch_up=False,
+            host_turn=host_turn,
+            mark=mark,
+            stored_generation=None,
+        )
+        if decision.mark_persist is MarkPersist.STAMP:
+            return
+        if evidence.chosen is None:
+            self.on_inference_evidence_updated(
                 game_id,
                 perspective,
                 host_turn,
                 player_id,
                 durable=True,
-                backfill_earlier_turns=current,
-                chosen=chosen,
+                backfill_earlier_turns=evidence.wake_backfill,
             )
             return
-        self.on_inference_evidence_updated(
+        self._update_fleet_after_evidence(
             game_id,
             perspective,
             host_turn,
             player_id,
             durable=True,
-            backfill_earlier_turns=current,
+            backfill_earlier_turns=evidence.wake_backfill,
+            chosen=evidence.chosen,
         )
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:
