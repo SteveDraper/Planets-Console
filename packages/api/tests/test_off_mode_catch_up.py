@@ -18,6 +18,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
 from api.exceptions import DiscardedWorkRefused
 from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
@@ -281,8 +282,7 @@ def test_scores_root_backfill_wins_and_a_later_turn_does_not_consume(sample_turn
         scope=scores_scope,
         dependency_scopes=(),
         state="waiting_deps",
-        open_turn=40,
-        backfill_earlier_turns=True,
+        submission_open=SubmissionOpen(open_turn=40, backfill_earlier_turns=True),
     )
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
@@ -321,7 +321,10 @@ def test_root_bump_wakes_the_shell_chosen_before_consume(
     store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 2, ship_id=5)
     store_generation(persistence, ctx.game_id, ctx.perspective, 6, player_id, 2, ship_id=6)
     root = install_submission_root(ctx.game_id, ctx.perspective, player_id, 4)
-    root.backfill_earlier_turns = True
+    root.submission_open = SubmissionOpen(
+        open_turn=root.submission_open.open_turn,
+        backfill_earlier_turns=True,
+    )
     woken: list[int] = []
 
     def spy_reschedule(_scope, _player_id):

@@ -35,6 +35,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs, StepResult
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
@@ -78,12 +79,23 @@ def _apply_fleet_resolution_to_row_run(
         ladder_state.prior_fleet_records = resolution.records
 
 
+def _carried_backfill(submission_open: SubmissionOpen | None) -> bool | None:
+    """Backfill choice for a walk that still accepts an unresolved value.
+
+    None means the caller did not carry a submission open. The walk resolves
+    that itself.
+    """
+    if submission_open is None:
+        return None
+    return submission_open.backfill_earlier_turns
+
+
 def build_scores_materialize_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    backfill_earlier_turns: bool | None = None,
+    submission_open: SubmissionOpen | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Materialize scores export tree on the orchestration plane."""
@@ -101,7 +113,7 @@ def build_scores_materialize_job_wire(
         ctx,
         export_scope,
         overlay_ensure=False,
-        backfill_earlier_turns=backfill_earlier_turns,
+        backfill_earlier_turns=_carried_backfill(submission_open),
     )
     tree = materialize_scores_export_tree(ctx, export_scope)
     return {"exportTree": tree}
@@ -112,7 +124,7 @@ def build_scores_tier_solve_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    backfill_earlier_turns: bool | None = None,
+    submission_open: SubmissionOpen | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
@@ -155,7 +167,7 @@ def build_scores_tier_solve_job_wire(
             ctx,
             export_scope,
             overlay_ensure=False,
-            backfill_earlier_turns=backfill_earlier_turns,
+            backfill_earlier_turns=_carried_backfill(submission_open),
         )
         run = get_row_run_for_scope(scope)
     if run is None:
@@ -187,7 +199,7 @@ def build_scores_tier_solve_job_wire(
             turn=turn,
             dependency_outputs=dependency_outputs,
             overlay_ensure=False,
-            backfill_earlier_turns=backfill_earlier_turns,
+            backfill_earlier_turns=_carried_backfill(submission_open),
         )
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
 

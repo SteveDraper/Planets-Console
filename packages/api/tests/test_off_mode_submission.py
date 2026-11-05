@@ -24,6 +24,7 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
 from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
 from api.exceptions import FleetScoresEvidenceOpenError
 from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
@@ -107,7 +108,7 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
             scope_40,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
-            open_turn=40,
+            submission_open=SubmissionOpen(open_turn=40),
         )
         assert wire["openTurn"] == 40
         assert wire["catchUp"] is False
@@ -223,8 +224,8 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
         player_id=player_id,
     )
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_40))
-    assert orchestrator.nodes[scope_39].open_turn == 40
-    assert orchestrator.nodes[scope_40].open_turn == 40
+    assert orchestrator.nodes[scope_39].submission_open.open_turn == 40
+    assert orchestrator.nodes[scope_40].submission_open.open_turn == 40
 
     for scope in list(orchestrator.nodes):
         orchestrator.abort_scope(scope, ComputeScopeAbortedError("cancelled"))
@@ -247,7 +248,7 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
     captured_before_reopen = len(wires)
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_39, force_fresh=True))
     reopened = orchestrator.nodes[scope_39]
-    assert reopened.open_turn == 39
+    assert reopened.submission_open.open_turn == 39
     assert reopened.open_turn_consumed is False
     assert frozenset(
         root.open_turn
@@ -342,7 +343,9 @@ def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn, monk
     }
     assert fleet_turns >= {8, 9, 10}
     assert reads == [ctx.game_id]
-    assert all(node.backfill_earlier_turns is False for node in orchestrator.nodes.values())
+    assert all(
+        node.submission_open.backfill_earlier_turns is False for node in orchestrator.nodes.values()
+    )
     assert wires
     assert all(
         isinstance(wire, dict) and wire.get("backfillEarlierTurns") is False for wire in wires
@@ -357,7 +360,7 @@ def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn, monk
         backfill_earlier_turns_store_key(ctx.game_id),
         backfill_earlier_turns_document(True),
     )
-    assert orchestrator.nodes[scope].backfill_earlier_turns is False
+    assert orchestrator.nodes[scope].submission_open.backfill_earlier_turns is False
     assert reads == [ctx.game_id]
 
 
@@ -436,7 +439,7 @@ def test_second_open_schedules_no_hop_when_priors_are_on_the_mark(sample_turn):
     first, first_wires = submit(open_turn)
     assert _fleet_turns(first, player_id) == {38, 39, 40, open_turn}
     assert all(node.scope.analytic_id == FLEET_ANALYTIC_ID for node in first.nodes.values())
-    assert all(node.open_turn == open_turn for node in first.nodes.values())
+    assert all(node.submission_open.open_turn == open_turn for node in first.nodes.values())
     leaf = next(
         wire
         for wire in first_wires

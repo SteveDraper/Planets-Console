@@ -18,6 +18,7 @@ from api.compute.dag import plan_compute_dag
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.registry import build_compute_registry
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
+from api.compute.submission_open import SubmissionOpen
 
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.fleet_exports_helpers import host_turn_at
@@ -129,7 +130,7 @@ def install_submission_root(game_id: int, perspective: int, player_id: int, turn
         scope=scope,
         dependency_scopes=(),
         state="waiting_deps",
-        open_turn=turn,
+        submission_open=SubmissionOpen(open_turn=turn),
     )
     orchestrator.nodes[scope] = node
     return node

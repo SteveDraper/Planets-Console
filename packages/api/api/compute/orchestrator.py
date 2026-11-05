@@ -278,15 +278,13 @@ class ComputeOrchestrator(
             node_scope = node.scope
             ctx = self._ctx_for_node(node)
             node_result_wire = node.result_wire
-            open_turn = node.open_turn
-            backfill_earlier_turns = node.backfill_earlier_turns
+            submission_open = node.submission_open
         job_wire = builder(
             node_scope,
             dependency_outputs=dependency_outputs,
             ctx=ctx,
             node_result_wire=node_result_wire,
-            open_turn=open_turn,
-            backfill_earlier_turns=backfill_earlier_turns,
+            submission_open=submission_open,
         )
         return run_step(job_wire)
 
@@ -513,15 +511,16 @@ class ComputeOrchestrator(
             analytic_ids=analytic_ids,
             turn=turn,
         ):
-            if node.is_terminal or node.open_turn is None:
+            open_turn = node.submission_open.open_turn
+            if node.is_terminal or open_turn is None:
                 continue
-            if scope.turn != node.open_turn:
+            if scope.turn != open_turn:
                 continue
             roots.append(
                 OpenTurnRoot(
                     analytic_id=scope.analytic_id,
-                    open_turn=node.open_turn,
-                    backfill_earlier_turns=node.backfill_earlier_turns,
+                    open_turn=open_turn,
+                    backfill_earlier_turns=node.submission_open.backfill_earlier_turns,
                     consumed=node.open_turn_consumed,
                 )
             )
@@ -544,7 +543,7 @@ class ComputeOrchestrator(
             analytic_ids=analytic_ids,
             turn=open_turn,
         ):
-            if node.open_turn == open_turn:
+            if node.submission_open.open_turn == open_turn:
                 node.open_turn_consumed = True
 
     def discard_matching_work(

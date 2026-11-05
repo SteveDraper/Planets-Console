@@ -16,40 +16,55 @@ from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun, Comput
 from api.compute.pools import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
+from api.compute.submission_open import SubmissionOpen
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
 
 
-def submission_open_turn(request: ComputeRequest) -> int | None:
-    """Root turn carried onto every node this submission plans.
-
-    An explicit ``request.open_turn`` wins so a resubmitted hop keeps the root
-    it was planned under. Otherwise the request scope's turn is the root.
-    """
-    if request.open_turn is not None:
-        return request.open_turn
-    turn = request.scope.turn
+def _concrete_scope_turn(turn: object) -> int | None:
     if isinstance(turn, bool) or not isinstance(turn, int):
         return None
     return turn
 
 
-def resolve_submission_backfill(request: ComputeRequest) -> tuple[ComputeRequest, bool]:
-    """Return the request carrying Backfill earlier turns, and that boolean.
+def submission_open_turn(request: ComputeRequest) -> int | None:
+    """Root turn carried onto every node this submission plans.
 
-    A request that already carries the choice is unchanged. Otherwise the
-    record is read once. A request with no query context keeps the default off.
+    An explicit ``request.submission_open.open_turn`` wins so a resubmitted hop
+    keeps the root it was planned under. Otherwise the request scope's turn is
+    the root.
     """
-    carried = request.backfill_earlier_turns
+    carried = request.submission_open
+    if carried is not None and carried.open_turn is not None:
+        return carried.open_turn
+    return _concrete_scope_turn(request.scope.turn)
+
+
+def resolve_submission_open(request: ComputeRequest) -> tuple[ComputeRequest, SubmissionOpen]:
+    """Return the request carrying its submission open, and that value.
+
+    A request that already carries a backfill choice keeps it. Otherwise the
+    record is read once. A request with no query context keeps backfill off.
+    The open turn is the explicit root when present, otherwise the scope turn.
+    """
+    open_turn = submission_open_turn(request)
+    carried = request.submission_open
     if carried is not None:
-        return request, carried
+        resolved = SubmissionOpen(
+            open_turn=open_turn,
+            backfill_earlier_turns=carried.backfill_earlier_turns,
+        )
+        if resolved == carried:
+            return request, resolved
+        return replace(request, submission_open=resolved), resolved
     bundle = request.resolved_bundle()
     if bundle is None:
         enabled = False
     else:
         enabled = backfill_earlier_turns_for_context(bundle.query_context)
-    return replace(request, backfill_earlier_turns=enabled), enabled
+    resolved = SubmissionOpen(open_turn=open_turn, backfill_earlier_turns=enabled)
+    return replace(request, submission_open=resolved), resolved
 
 
 def prepare_compute_request_dependency_chain(
@@ -81,13 +96,13 @@ class OrchestratorSubmissionMixin:
 
     def submit(self: ComputeOrchestrator, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""
-        request, backfill_earlier_turns = resolve_submission_backfill(request)
+        request, submission_open = resolve_submission_open(request)
         bundle = request.resolved_bundle()
         if bundle is not None:
             prepare_compute_request_dependency_chain(
                 request,
                 ctx=self._ctx_for_bundle(bundle),
-                backfill_earlier_turns=backfill_earlier_turns,
+                backfill_earlier_turns=submission_open.backfill_earlier_turns,
             )
         with self._condition:
             submission = self._submit_locked(request, wake_if_parked_only=False)
@@ -100,7 +115,7 @@ class OrchestratorSubmissionMixin:
         """Atomically wake a soft-parked scope, or no-op for every other state."""
         if not request.force_fresh:
             raise ValueError("wake_if_parked requires force_fresh=True")
-        request, _backfill_earlier_turns = resolve_submission_backfill(request)
+        request, _submission_open = resolve_submission_open(request)
         with self._condition:
             submission = self._submit_locked(request, wake_if_parked_only=True)
         return None if submission is None else self._finish_submission(submission)
@@ -119,7 +134,7 @@ class OrchestratorSubmissionMixin:
         | None
     ):
         """Apply one submission under the orchestrator lock."""
-        request, _backfill_earlier_turns = resolve_submission_backfill(request)
+        request, _submission_open = resolve_submission_open(request)
         scope = request.scope
         existing = self._nodes.get(scope)
         if wake_if_parked_only and (existing is None or existing.state != "parked"):
@@ -169,16 +184,15 @@ class OrchestratorSubmissionMixin:
         """Plan a fresh scope and select its first dispatchable work."""
         scope = request.scope
         bundle = self._require_bundle(request)
-        backfill_earlier_turns = request.backfill_earlier_turns
-        if not isinstance(backfill_earlier_turns, bool):
-            raise RuntimeError("submission backfill is resolved before planning")
+        submission_open = request.submission_open
+        if submission_open is None:
+            raise RuntimeError("submission open is resolved before planning")
         self._plan_and_register(
             scope,
             bundle=bundle,
             priority_band=request.priority_band,
             entry_step_kind=request.step_kind,
-            open_turn=submission_open_turn(request),
-            backfill_earlier_turns=backfill_earlier_turns,
+            submission_open=submission_open,
         )
         for node in self._nodes.values():
             self._refresh_node_readiness(node)
@@ -230,7 +244,7 @@ class OrchestratorSubmissionMixin:
         """
         to_recreate: dict[
             ComputeScope,
-            tuple[OrchestrationBundle, ComputePriorityBand, int | None, bool],
+            tuple[OrchestrationBundle, ComputePriorityBand, SubmissionOpen],
         ] = {}
         seen: set[ComputeScope] = set()
         stack = [node]
@@ -254,8 +268,7 @@ class OrchestratorSubmissionMixin:
                     to_recreate[dependency_scope] = (
                         bundle,
                         node.priority_band,
-                        dependency.open_turn,
-                        dependency.backfill_earlier_turns,
+                        dependency.submission_open,
                     )
                 elif dependency.state == "waiting_deps":
                     stack.append(dependency)
@@ -263,20 +276,14 @@ class OrchestratorSubmissionMixin:
             return
 
         def _recreate() -> None:
-            for scope, (
-                bundle,
-                priority_band,
-                open_turn,
-                backfill_earlier_turns,
-            ) in to_recreate.items():
+            for scope, (bundle, priority_band, submission_open) in to_recreate.items():
                 self.submit(
                     ComputeRequest(
                         scope=scope,
                         priority_band=priority_band,
                         force_fresh=True,
                         bundle=bundle,
-                        open_turn=open_turn,
-                        backfill_earlier_turns=backfill_earlier_turns,
+                        submission_open=submission_open,
                     )
                 )
 
@@ -317,7 +324,9 @@ class OrchestratorSubmissionMixin:
         open_turn = submission_open_turn(request)
         if open_turn is None or node.scope.turn != open_turn:
             return
-        node.open_turn = open_turn
+        if node.submission_open.open_turn == open_turn:
+            return
+        node.submission_open = replace(node.submission_open, open_turn=open_turn)
 
     def _maybe_adopt_priority(
         self: ComputeOrchestrator,
@@ -347,8 +356,7 @@ class OrchestratorSubmissionMixin:
         bundle: OrchestrationBundle,
         priority_band: ComputePriorityBand,
         entry_step_kind: str | None = None,
-        open_turn: int | None = None,
-        backfill_earlier_turns: bool = False,
+        submission_open: SubmissionOpen,
     ) -> None:
         export_scope = compute_scope_to_export_scope(root_scope)
         ctx = self._ctx_for_bundle(bundle)
@@ -358,7 +366,7 @@ class OrchestratorSubmissionMixin:
             export_scope,
             compute_registry=self._compute_registry,
             force_root=force_root_for_entry_step(entry_step_kind),
-            backfill_earlier_turns=backfill_earlier_turns,
+            backfill_earlier_turns=submission_open.backfill_earlier_turns,
         )
         self.turn_cache.prefetch_planned_nodes(
             planned_nodes,
@@ -381,8 +389,7 @@ class OrchestratorSubmissionMixin:
                 bundle=bundle,
                 priority_band=priority_band,
                 entry_step_kind=entry_step_kind if planned.scope == root_scope else None,
-                open_turn=open_turn,
-                backfill_earlier_turns=backfill_earlier_turns,
+                submission_open=submission_open,
             )
         if root_scope not in self._nodes:
             self._nodes[root_scope] = ComputeNodeRun(
@@ -392,8 +399,7 @@ class OrchestratorSubmissionMixin:
                 priority_band=priority_band,
                 execution_generation=self._allocate_execution_generation(),
                 bundle=bundle,
-                open_turn=open_turn,
-                backfill_earlier_turns=backfill_earlier_turns,
+                submission_open=submission_open,
             )
 
     def _register_planned_node(
@@ -403,8 +409,7 @@ class OrchestratorSubmissionMixin:
         bundle: OrchestrationBundle,
         priority_band: ComputePriorityBand,
         entry_step_kind: str | None = None,
-        open_turn: int | None = None,
-        backfill_earlier_turns: bool = False,
+        submission_open: SubmissionOpen,
     ) -> None:
         if planned.scope in self._nodes:
             return
@@ -420,8 +425,7 @@ class OrchestratorSubmissionMixin:
             profile_step_index=profile_step_index,
             execution_generation=self._allocate_execution_generation(),
             bundle=bundle,
-            open_turn=open_turn,
-            backfill_earlier_turns=backfill_earlier_turns,
+            submission_open=submission_open,
         )
         self._nodes[planned.scope] = node
 

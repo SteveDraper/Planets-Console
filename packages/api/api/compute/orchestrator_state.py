@@ -13,6 +13,7 @@ from api.compute.errors import ComputeWaitTimeoutError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.pools import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
+from api.compute.submission_open import SubmissionOpen
 
 NodeState = Literal[
     "waiting_deps",
@@ -37,12 +38,10 @@ class ComputeRequest:
     force_fresh: bool = False
     bundle: OrchestrationBundle | None = None
     ctx: AnalyticQueryContext | None = None
-    # Root turn of this submission. None uses ``scope.turn`` when that axis is concrete.
-    # A resubmitted hop passes the root it was planned under.
-    open_turn: int | None = None
-    # Backfill earlier turns as of this submission. None is resolved once at entry.
-    # A resubmitted hop passes the value the walk started with.
-    backfill_earlier_turns: bool | None = None
+    # Root turn and backfill choice. None until submission entry resolves it.
+    # A resubmitted hop passes the pair it was planned under. An explicit open
+    # turn on that pair wins over the scope turn.
+    submission_open: SubmissionOpen | None = None
 
     def resolved_bundle(self) -> OrchestrationBundle | None:
         """Return the caller-supplied bundle, or build one from ``ctx`` for convenience."""
@@ -148,13 +147,12 @@ class ComputeNodeRun:
     # The worker may finish; persist and stamp are refused, and the step is
     # not retried.
     discard_without_stamp: bool = False
-    # Root turn of the submission that planned this node. A later submission
-    # that roots at this scope replaces it. Other hops keep the planned root.
-    open_turn: int | None = None
+    # Root turn and backfill choice of the submission that planned this node.
+    # A later submission that roots at this scope replaces the open turn and
+    # keeps this backfill choice.
+    submission_open: SubmissionOpen = field(default_factory=SubmissionOpen)
     # The one-shot for this root has already been applied. Hops leave this false.
     open_turn_consumed: bool = False
-    # Backfill earlier turns for the submission that planned this node.
-    backfill_earlier_turns: bool = False
 
     @property
     def is_terminal(self) -> bool:

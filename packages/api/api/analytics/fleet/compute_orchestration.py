@@ -27,6 +27,7 @@ from api.compute.scope import (
     ScopeKeySpec,
     compute_scope_to_export_scope,
 )
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
@@ -73,13 +74,25 @@ def _fleet_prior_turn(
     return scope.turn - 1
 
 
+def _open_turn_and_backfill(
+    submission_open: SubmissionOpen | None,
+) -> tuple[int | None, bool | None]:
+    """Open turn and backfill for ``stamp_submission_open``.
+
+    A missing submission open leaves both unset so a direct builder call does
+    not invent a root. A carried pair is written as-is.
+    """
+    if submission_open is None:
+        return None, None
+    return submission_open.open_turn, submission_open.backfill_earlier_turns
+
+
 def build_fleet_observation_leg_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    open_turn: int | None = None,
-    backfill_earlier_turns: bool | None = None,
+    submission_open: SubmissionOpen | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg."""
@@ -87,8 +100,7 @@ def build_fleet_observation_leg_job_wire(
         scope,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
-        open_turn=open_turn,
-        backfill_earlier_turns=backfill_earlier_turns,
+        submission_open=submission_open,
     )
 
 
@@ -97,8 +109,7 @@ def build_fleet_materialization_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    open_turn: int | None = None,
-    backfill_earlier_turns: bool | None = None,
+    submission_open: SubmissionOpen | None = None,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg.
@@ -137,6 +148,7 @@ def build_fleet_materialization_leg_job_wire(
                 player_id,
             ),
         }
+    open_turn, backfill_earlier_turns = _open_turn_and_backfill(submission_open)
     stamp_submission_open(
         wire,
         scope,
@@ -181,8 +193,7 @@ def build_fleet_finalization_leg_job_wire(
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
     node_result_wire: object | None = None,
-    open_turn: int | None = None,
-    backfill_earlier_turns: bool | None = None,
+    submission_open: SubmissionOpen | None = None,
 ) -> dict[str, Any]:
     """Pass the observation continue wire into the inline finalization leg."""
     del dependency_outputs
@@ -199,6 +210,7 @@ def build_fleet_finalization_leg_job_wire(
         scope.perspective,
         scope.player_id,
     )
+    open_turn, backfill_earlier_turns = _open_turn_and_backfill(submission_open)
     stamp_submission_open(
         payload,
         scope,

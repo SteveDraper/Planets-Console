@@ -9,6 +9,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import NodeState
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.services.inference_invalidation_service import preferred_unconsumed_root_backfill
 
 _ANALYTICS = frozenset({"alpha", "beta"})
@@ -38,9 +39,11 @@ def _put(
         scope=scope,
         dependency_scopes=(),
         state=state,
-        open_turn=open_turn,
+        submission_open=SubmissionOpen(
+            open_turn=open_turn,
+            backfill_earlier_turns=backfill,
+        ),
         open_turn_consumed=consumed,
-        backfill_earlier_turns=backfill,
     )
     return scope
 
@@ -80,8 +83,7 @@ def test_open_turn_roots_returns_each_in_flight_root():
     orchestrator.nodes[wild] = ComputeNodeRun(
         scope=wild,
         dependency_scopes=(),
-        open_turn=40,
-        backfill_earlier_turns=True,
+        submission_open=SubmissionOpen(open_turn=40, backfill_earlier_turns=True),
     )
 
     assert _roots(orchestrator) == (

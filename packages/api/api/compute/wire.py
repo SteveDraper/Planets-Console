@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack
 from api.analytics.exports.jsonpath import resolve_jsonpath
 from api.compute.persistence import PersistDependencyRecovery
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
@@ -97,10 +98,8 @@ class BuildStepJobWireKwargs(TypedDict, total=False):
     dependency_outputs: DependencyOutputs
     ctx: AnalyticQueryContext | None
     node_result_wire: object | None
-    # Root turn of the submission that owns this node, including on earlier hops.
-    open_turn: int | None
-    # Backfill earlier turns for the submission that owns this node.
-    backfill_earlier_turns: bool
+    # Root turn and backfill choice of the submission that owns this node.
+    submission_open: SubmissionOpen
 
 
 # Orchestration plane: scope + dependency outputs -> serializable job payload.

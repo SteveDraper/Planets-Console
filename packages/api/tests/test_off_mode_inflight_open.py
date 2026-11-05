@@ -25,6 +25,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
 from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
 from api.exceptions import FleetScoresEvidenceOpenError
 from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
@@ -101,7 +102,7 @@ def _submit(orchestrator: ComputeOrchestrator, ctx, player_id: int, turn: int) -
 
 def _fleet_open_turns(orchestrator: ComputeOrchestrator, player_id: int) -> dict[int, int | None]:
     return {
-        node.scope.turn: node.open_turn
+        node.scope.turn: node.submission_open.open_turn
         for node in orchestrator.nodes.values()
         if node.scope.analytic_id == FLEET_ANALYTIC_ID
         and node.scope.player_id == player_id
@@ -119,13 +120,12 @@ def _wire_for(captured: list[tuple[ComputeScope, object]], turn: int) -> dict[st
     return matches[0]
 
 
-def _observation_wire(ctx, scope: ComputeScope, *, open_turn: int | None, backfill: bool):
+def _observation_wire(ctx, scope: ComputeScope, submission_open: SubmissionOpen):
     return build_fleet_materialization_leg_job_wire(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
-        open_turn=open_turn,
-        backfill_earlier_turns=backfill,
+        submission_open=submission_open,
     )
 
 
@@ -170,7 +170,9 @@ def test_later_open_joins_hops_and_keeps_the_earlier_root(sample_turn):
     assert orchestrator.nodes[_scope(ctx, player_id, 39)] is node_39
     assert orchestrator.nodes[scope_40] is node_40
     assert _fleet_open_turns(orchestrator, player_id) == {38: 40, 39: 40, 40: 40, 41: 41}
-    assert all(node.backfill_earlier_turns is False for node in orchestrator.nodes.values())
+    assert all(
+        node.submission_open.backfill_earlier_turns is False for node in orchestrator.nodes.values()
+    )
     assert _wire_for(captured, 38)["openTurn"] == 40
     assert frozenset(
         root.open_turn
@@ -184,12 +186,7 @@ def test_later_open_joins_hops_and_keeps_the_earlier_root(sample_turn):
     later = persistence.get_ledger(ctx.game_id, ctx.perspective, 41, player_id)
     assert later is not None and later.ledger.records[0].record_id == "ship-411"
 
-    planned = _observation_wire(
-        ctx,
-        scope_40,
-        open_turn=node_40.open_turn,
-        backfill=node_40.backfill_earlier_turns,
-    )
+    planned = _observation_wire(ctx, scope_40, node_40.submission_open)
     assert planned["openTurn"] == 40
     assert planned["catchUp"] is False
     _assert_scoreboard_stamps(orchestrator, ctx, persistence, player_id, 40)
@@ -218,8 +215,8 @@ def test_reopening_the_same_turn_leaves_the_running_open(sample_turn):
     _submit(orchestrator, ctx, player_id, 40)
     assert orchestrator.nodes[scope_40] is node
     assert node.state == "running"
-    assert node.open_turn == 40
-    assert node.backfill_earlier_turns is False
+    assert node.submission_open.open_turn == 40
+    assert node.submission_open.backfill_earlier_turns is False
     assert _fleet_open_turns(orchestrator, player_id) == {40: 40}
     assert len(captured) == captured_count
 
@@ -252,7 +249,9 @@ def test_opening_a_catch_up_hop_adopts_it_as_the_open(sample_turn):
     _submit(orchestrator, ctx, player_id, 40)
     node_40 = orchestrator.nodes[scope_40]
     assert _fleet_open_turns(orchestrator, player_id) == {38: 41, 39: 41, 40: 40, 41: 41}
-    assert all(node.backfill_earlier_turns is False for node in orchestrator.nodes.values())
+    assert all(
+        node.submission_open.backfill_earlier_turns is False for node in orchestrator.nodes.values()
+    )
     assert _wire_for(captured, 38)["catchUp"] is True
     assert frozenset(
         root.open_turn
@@ -264,12 +263,7 @@ def test_opening_a_catch_up_hop_adopts_it_as_the_open(sample_turn):
         )
     ) == frozenset({40, 41})
 
-    planned = _observation_wire(
-        ctx,
-        scope_40,
-        open_turn=node_40.open_turn,
-        backfill=node_40.backfill_earlier_turns,
-    )
+    planned = _observation_wire(ctx, scope_40, node_40.submission_open)
     assert planned["openTurn"] == 40
     assert planned["catchUp"] is False
     assert planned["backfillEarlierTurns"] is False
@@ -324,8 +318,8 @@ def test_running_hop_keeps_its_wire_and_the_next_leg_adopts_the_open(sample_turn
 
     _submit(orchestrator, ctx, player_id, 40)
     assert orchestrator.nodes[scope_40] is node_40
-    assert node_40.open_turn == 40
-    assert node_40.backfill_earlier_turns is False
+    assert node_40.submission_open.open_turn == 40
+    assert node_40.submission_open.backfill_earlier_turns is False
     assert baked["openTurn"] == 41
     assert baked["catchUp"] is True
     assert len(captured) == 1
@@ -340,8 +334,7 @@ def test_running_hop_keeps_its_wire_and_the_next_leg_adopts_the_open(sample_turn
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
         node_result_wire=baked,
-        open_turn=node_40.open_turn,
-        backfill_earlier_turns=node_40.backfill_earlier_turns,
+        submission_open=node_40.submission_open,
     )
     assert final["openTurn"] == 40
     assert final["catchUp"] is False
