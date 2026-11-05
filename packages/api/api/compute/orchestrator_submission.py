@@ -67,6 +67,11 @@ def resolve_submission_open(request: ComputeRequest) -> tuple[ComputeRequest, Su
     return replace(request, submission_open=resolved), resolved
 
 
+def _is_parked_node(node: ComputeNodeRun | None) -> bool:
+    """Whether ``wake_if_parked`` may wake this node."""
+    return node is not None and node.state == "parked"
+
+
 def prepare_compute_request_dependency_chain(
     request: ComputeRequest,
     *,
@@ -112,9 +117,16 @@ class OrchestratorSubmissionMixin:
         self: ComputeOrchestrator,
         request: ComputeRequest,
     ) -> ComputeHandle | None:
-        """Atomically wake a soft-parked scope, or no-op for every other state."""
+        """Atomically wake a soft-parked scope, or no-op for every other state.
+
+        A scope that is not parked returns before the backfill record is read.
+        The wake re-checks that state under the same lock hold as the mutation.
+        """
         if not request.force_fresh:
             raise ValueError("wake_if_parked requires force_fresh=True")
+        with self._condition:
+            if not _is_parked_node(self._nodes.get(request.scope)):
+                return None
         request, _submission_open = resolve_submission_open(request)
         with self._condition:
             submission = self._submit_locked(request, wake_if_parked_only=True)
@@ -133,11 +145,20 @@ class OrchestratorSubmissionMixin:
         ]
         | None
     ):
-        """Apply one submission under the orchestrator lock."""
-        request, submission_open = resolve_submission_open(request)
+        """Apply one submission under the orchestrator lock.
+
+        ``request.submission_open`` is already resolved. Callers run
+        ``resolve_submission_open`` before taking this lock, so this method
+        does not read the backfill record.
+        """
+        submission_open = request.submission_open
+        if submission_open is None:
+            raise RuntimeError(
+                "ComputeRequest.submission_open must be resolved before the orchestrator lock"
+            )
         scope = request.scope
         existing = self._nodes.get(scope)
-        if wake_if_parked_only and (existing is None or existing.state != "parked"):
+        if wake_if_parked_only and not _is_parked_node(existing):
             return None
 
         pending_inline: tuple[PendingInlineExecution, ...] = ()

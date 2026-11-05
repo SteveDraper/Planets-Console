@@ -12,6 +12,7 @@ from api.compute.orchestrator_submission import (
     prepare_compute_request_dependency_chain,
     resolve_submission_open,
 )
+from api.compute.submission_open import SubmissionOpen
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -95,10 +96,10 @@ class OrchestratorEnsureMixin:
                 unsatisfied.append((index, request))
 
         if unsatisfied:
-            resolved_unsatisfied: list[tuple[int, ComputeRequest]] = []
-            for index, request in unsatisfied:
-                request, submission_open = resolve_submission_open(request)
-                resolved_unsatisfied.append((index, request))
+            resolved_unsatisfied: list[tuple[int, ComputeRequest, SubmissionOpen]] = [
+                (index, *resolve_submission_open(request)) for index, request in unsatisfied
+            ]
+            for _index, request, submission_open in resolved_unsatisfied:
                 bundle = request.resolved_bundle()
                 if bundle is not None:
                     prepare_compute_request_dependency_chain(
@@ -106,11 +107,10 @@ class OrchestratorEnsureMixin:
                         ctx=self._ctx_for_bundle(bundle),
                         backfill_earlier_turns=submission_open.backfill_earlier_turns,
                     )
-            unsatisfied = resolved_unsatisfied
             pending_inline: list[PendingInlineExecution] = []
             pending_pool: list[PendingPoolSubmission] = []
             with self._condition:
-                for index, request in unsatisfied:
+                for index, request, _submission_open in resolved_unsatisfied:
                     existing = self._nodes.get(request.scope)
                     # Hollow terminal: durable gone, node still complete/failed. Drop so
                     # default force_fresh=False can plan fresh work (F1). Leave non-terminal

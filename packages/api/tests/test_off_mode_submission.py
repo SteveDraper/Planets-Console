@@ -23,6 +23,7 @@ from api.analytics.scores.ensure_dependencies import resolve_scores_ensure_depen
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
+from api.compute.orchestrator_submission import resolve_submission_open
 from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
@@ -367,6 +368,48 @@ def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn, monk
     )
     assert orchestrator.nodes[scope].submission_open.backfill_earlier_turns is False
     assert reads == [ctx.game_id]
+
+
+def test_locked_submit_does_not_resolve_again_and_idle_wake_skips_the_read(
+    sample_turn, monkeypatch
+):
+    """Resolution happens once before the lock. An idle wake does not resolve."""
+    host, ctx = context_at_turn(sample_turn, 10)
+    player_id = first_player_id(host)
+    scope = ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=10,
+        player_id=player_id,
+    )
+    calls: list[ComputeRequest] = []
+    real = resolve_submission_open
+
+    def counting(request: ComputeRequest) -> tuple[ComputeRequest, SubmissionOpen]:
+        calls.append(request)
+        return real(request)
+
+    monkeypatch.setattr(
+        "api.compute.orchestrator_submission.resolve_submission_open",
+        counting,
+    )
+    orchestrator = ComputeOrchestrator(
+        compute_registry=FLEET_SCORES_REGISTRY,
+        pool_submitter=lambda _node, _step, *, job_wire=None, run_step=None: None,
+    )
+
+    absent = orchestrator.wake_if_parked(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
+    assert absent is None
+    assert calls == []
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    assert len(calls) == 1
+
+    calls.clear()
+    not_parked = orchestrator.wake_if_parked(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
+    assert not_parked is None
+    assert calls == []
 
 
 def _fleet_turns(orchestrator: ComputeOrchestrator, player_id: int) -> set[int]:
