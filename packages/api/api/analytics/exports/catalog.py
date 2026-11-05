@@ -26,7 +26,7 @@ class EnsureDependenciesFor(Protocol):
     """Resolve ensure edges for one scope.
 
     ``backfill_earlier_turns`` is the choice already resolved for this walk or
-    submission. None means this call is the one read.
+    submission.
     """
 
     def __call__(
@@ -34,7 +34,7 @@ class EnsureDependenciesFor(Protocol):
         ctx: AnalyticQueryContext,
         scope: ExportScope,
         *,
-        backfill_earlier_turns: bool | None = None,
+        backfill_earlier_turns: bool,
     ) -> tuple[EnsureDependency, ...]: ...
 
 
@@ -63,7 +63,7 @@ class AnalyticExportCatalog:
         ctx: AnalyticQueryContext,
         scope: ExportScope,
         *,
-        backfill_earlier_turns: bool | None = None,
+        backfill_earlier_turns: bool,
     ) -> tuple[EnsureDependency, ...]:
         """Dependencies the ensure walk and DAG plan enqueue for this scope.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
@@ -79,15 +80,14 @@ def _apply_fleet_resolution_to_row_run(
         ladder_state.prior_fleet_records = resolution.records
 
 
-def _carried_backfill(submission_open: SubmissionOpen | None) -> bool | None:
-    """Backfill choice for a walk that still accepts an unresolved value.
-
-    None means the caller did not carry a submission open. The walk resolves
-    that itself.
-    """
-    if submission_open is None:
-        return None
-    return submission_open.backfill_earlier_turns
+def _backfill_choice(
+    ctx: AnalyticQueryContext,
+    submission_open: SubmissionOpen | None,
+) -> bool:
+    """Carried submission choice, or one read when this wire has no submission."""
+    if submission_open is not None:
+        return submission_open.backfill_earlier_turns
+    return backfill_earlier_turns_for_context(ctx)
 
 
 def build_scores_materialize_job_wire(
@@ -113,7 +113,7 @@ def build_scores_materialize_job_wire(
         ctx,
         export_scope,
         overlay_ensure=False,
-        backfill_earlier_turns=_carried_backfill(submission_open),
+        backfill_earlier_turns=_backfill_choice(ctx, submission_open),
     )
     tree = materialize_scores_export_tree(ctx, export_scope)
     return {"exportTree": tree}
@@ -156,6 +156,7 @@ def build_scores_tier_solve_job_wire(
     if horwasp_skip is not None:
         return horwasp_skip
 
+    backfill_earlier_turns = _backfill_choice(ctx, submission_open)
     run = get_row_run_for_scope(scope)
     ensure_satisfied = True
     if run is None:
@@ -167,7 +168,7 @@ def build_scores_tier_solve_job_wire(
             ctx,
             export_scope,
             overlay_ensure=False,
-            backfill_earlier_turns=_carried_backfill(submission_open),
+            backfill_earlier_turns=backfill_earlier_turns,
         )
         run = get_row_run_for_scope(scope)
     if run is None:
@@ -199,7 +200,7 @@ def build_scores_tier_solve_job_wire(
             turn=turn,
             dependency_outputs=dependency_outputs,
             overlay_ensure=False,
-            backfill_earlier_turns=_carried_backfill(submission_open),
+            backfill_earlier_turns=backfill_earlier_turns,
         )
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
 

@@ -155,7 +155,9 @@ def test_discard_matching_work_uses_the_player_scan():
         turn="*",
         player_id=7,
     )
-    orchestrator.nodes[wild] = ComputeNodeRun(scope=wild, dependency_scopes=(), state="ready")
+    orchestrator.nodes[wild] = ComputeNodeRun(
+        scope=wild, dependency_scopes=(), state="ready", submission_open=SubmissionOpen()
+    )
     orchestrator._ready_queue.append(ready)
 
     orchestrator.discard_matching_work(

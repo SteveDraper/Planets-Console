@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from unittest.mock import patch
 
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import EnsureDependency, ExportScope
 from api.analytics.fleet.compute_services import turn_chain_through
@@ -413,7 +414,13 @@ def test_probe_and_walk_report_fleet_depends_on_prior_turn_final_fleet(sample_tu
     )
     assert fleet_step.status == "not_persisted"
 
-    walk = walk_dependency_tree(ctx, "fleet", scope, visiting=set())
+    walk = walk_dependency_tree(
+        ctx,
+        "fleet",
+        scope,
+        visiting=set(),
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+    )
     assert walk.turn_unavailable is None
     walk_keys = [(step.analytic_id, step.turn) for step in walk.missing_steps]
     assert walk_keys == [("fleet", turn_number)]

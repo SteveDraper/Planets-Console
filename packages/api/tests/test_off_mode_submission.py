@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import is_export_scope_ensure_satisfied
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_orchestration import (
@@ -93,8 +94,12 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
             turn=41,
             player_id=player_id,
         )
-        fleet_ensure_dependencies_for(ctx, export_41)
-        resolve_scores_ensure_dependencies(ctx, export_41)
+        fleet_ensure_dependencies_for(
+            ctx, export_41, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+        )
+        resolve_scores_ensure_dependencies(
+            ctx, export_41, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+        )
         install_submission_root(ctx.game_id, ctx.perspective, player_id, 41)
 
         scope_40 = ComputeScope(

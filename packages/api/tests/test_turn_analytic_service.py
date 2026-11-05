@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.errors import NotFoundError
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
@@ -233,6 +234,7 @@ class TestTurnAnalytics:
                 turn=3,
                 player_id=player_id,
             ),
+            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
         )
         assert fetched == [2]
 

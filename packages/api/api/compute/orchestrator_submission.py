@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import prepare_dependency_chain_turns
-from api.analytics.off_mode import backfill_earlier_turns_for_context
 from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_compute_dag
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
@@ -71,7 +71,7 @@ def prepare_compute_request_dependency_chain(
     request: ComputeRequest,
     *,
     ctx: AnalyticQueryContext | None = None,
-    backfill_earlier_turns: bool | None = None,
+    backfill_earlier_turns: bool,
 ) -> None:
     """Fetch missing ENSURE_DEPENDENCIES turns before DAG plan (no orchestrator lock).
 
@@ -134,7 +134,7 @@ class OrchestratorSubmissionMixin:
         | None
     ):
         """Apply one submission under the orchestrator lock."""
-        request, _submission_open = resolve_submission_open(request)
+        request, submission_open = resolve_submission_open(request)
         scope = request.scope
         existing = self._nodes.get(scope)
         if wake_if_parked_only and (existing is None or existing.state != "parked"):
@@ -168,14 +168,21 @@ class OrchestratorSubmissionMixin:
                     request=request,
                 )
                 self._replace_terminal_node(existing)
-                handle, pending_inline, pending_pool = self._plan_submission_locked(request)
+                handle, pending_inline, pending_pool = self._plan_submission_locked(
+                    request,
+                    submission_open,
+                )
         else:
-            handle, pending_inline, pending_pool = self._plan_submission_locked(request)
+            handle, pending_inline, pending_pool = self._plan_submission_locked(
+                request,
+                submission_open,
+            )
         return handle, pending_inline, pending_pool
 
     def _plan_submission_locked(
         self: ComputeOrchestrator,
         request: ComputeRequest,
+        submission_open: SubmissionOpen,
     ) -> tuple[
         ComputeHandle,
         tuple[PendingInlineExecution, ...],
@@ -184,9 +191,6 @@ class OrchestratorSubmissionMixin:
         """Plan a fresh scope and select its first dispatchable work."""
         scope = request.scope
         bundle = self._require_bundle(request)
-        submission_open = request.submission_open
-        if submission_open is None:
-            raise RuntimeError("submission open is resolved before planning")
         self._plan_and_register(
             scope,
             bundle=bundle,

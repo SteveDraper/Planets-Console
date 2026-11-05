@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -116,6 +117,7 @@ def test_homeworld_open_does_not_start_the_catch_up(sample_turn):
             turn=40,
             player_id=player_id,
         ),
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
     )
 
     assert dependencies
@@ -487,16 +489,20 @@ def test_bump_drops_offscreen_hops_and_refuses_an_executing_step():
         turn=40,
         player_id=7,
     )
-    orchestrator.nodes[ready] = ComputeNodeRun(scope=ready, dependency_scopes=(), state="ready")
+    orchestrator.nodes[ready] = ComputeNodeRun(
+        scope=ready, dependency_scopes=(), state="ready", submission_open=SubmissionOpen()
+    )
     orchestrator.nodes[running] = ComputeNodeRun(
         scope=running,
         dependency_scopes=(),
         state="running",
+        submission_open=SubmissionOpen(),
     )
     orchestrator.nodes[shell] = ComputeNodeRun(
         scope=shell,
         dependency_scopes=(),
         state="waiting_deps",
+        submission_open=SubmissionOpen(),
     )
     orchestrator._ready_queue.append(ready)
 

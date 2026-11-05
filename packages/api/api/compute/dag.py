@@ -49,7 +49,7 @@ def plan_compute_dag(
     *,
     compute_registry: Mapping[str, AnalyticComputeRegistration],
     force_root: bool = False,
-    backfill_earlier_turns: bool | None = None,
+    backfill_earlier_turns: bool,
 ) -> tuple[PlannedComputeNode, ...]:
     """Plan compute nodes and dependency edges from ENSURE_DEPENDENCIES walk.
 
@@ -64,11 +64,6 @@ def plan_compute_dag(
         visiting=set(),
         force_root=force_root,
         backfill_earlier_turns=backfill_earlier_turns,
-    )
-    carried_backfill = (
-        backfill_earlier_turns
-        if backfill_earlier_turns is not None
-        else walk_result.backfill_earlier_turns
     )
     if walk_result.turn_unavailable is not None:
         missing = walk_result.unavailable_turn
@@ -102,7 +97,7 @@ def plan_compute_dag(
         for dependency in catalog.applicable_ensure_dependencies(
             ctx,
             pending_scope,
-            backfill_earlier_turns=carried_backfill,
+            backfill_earlier_turns=backfill_earlier_turns,
         ):
             turn_floor = ensure_dependency_turn_floor(ctx, pending_scope)
             for dependency_export_scope in dependency_scopes_for(ctx, pending_scope, dependency):

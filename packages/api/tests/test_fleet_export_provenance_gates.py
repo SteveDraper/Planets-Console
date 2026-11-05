@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from unittest.mock import patch
 
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
@@ -193,6 +194,7 @@ def test_probe_fleet_at_8_lists_missing_scores_5_6_7_with_partial_ledgers(
             player_id=player_id,
         ),
         visiting=set(),
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
     )
     walk_fleet_turns = sorted(
         step.turn

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
@@ -103,6 +104,7 @@ def planned_scope_keys(ctx, analytic_id, turn, player_id):
         compute_scope_to_export_scope(scope),
         compute_registry=FLEET_SCORES_REGISTRY,
         force_root=True,
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
     )
     return {(node.scope.analytic_id, node.scope.turn) for node in planned}
 

@@ -60,9 +60,6 @@ class DependencyWalkResult:
     pending_ensure: list[tuple[str, ExportScope, AnalyticExportCatalog]] = field(
         default_factory=list,
     )
-    # Set once this walk resolves Backfill earlier turns. None when the walk
-    # returns before any ensure edge, so a satisfied root does not read storage.
-    backfill_earlier_turns: bool | None = None
 
 
 def walk_dependency_tree(
@@ -72,7 +69,7 @@ def walk_dependency_tree(
     *,
     visiting: set[tuple[str, ExportScope]],
     force_root: bool = False,
-    backfill_earlier_turns: bool | None = None,
+    backfill_earlier_turns: bool,
 ) -> DependencyWalkResult:
     result = DependencyWalkResult()
     seen_pending: set[tuple[str, ExportScope]] = set()
@@ -91,12 +88,6 @@ def walk_dependency_tree(
             return result
         if not force_root and not _dependency_needs_processing(ctx, analytic_id, scope, catalog):
             return result
-
-        if backfill_earlier_turns is None:
-            from api.analytics.off_mode import backfill_earlier_turns_for_context
-
-            backfill_earlier_turns = backfill_earlier_turns_for_context(ctx)
-        result.backfill_earlier_turns = backfill_earlier_turns
 
         for dependency in catalog.applicable_ensure_dependencies(
             ctx,

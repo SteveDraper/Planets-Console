@@ -27,6 +27,7 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.transport.inference_stream import (
     stream_inference_ndjson,
 )
@@ -293,6 +294,7 @@ def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
                             state="ready",
                             step_index=1,
                             profile_step_index=1,
+                            submission_open=SubmissionOpen(),
                         ),
                         other_root_scope: ComputeNodeRun(
                             scope=other_root_scope,
@@ -300,6 +302,7 @@ def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
                             state="ready",
                             step_index=0,
                             profile_step_index=1,
+                            submission_open=SubmissionOpen(),
                         ),
                     },
                     "observers": type(

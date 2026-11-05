@@ -6,6 +6,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.durable_turn_evidence import (
     is_durable_turn_evidence_row_status,
@@ -359,7 +360,12 @@ def test_stealth_ensure_does_not_schedule(sample_turn, persistence) -> None:
         "api.analytics.scores.exports.schedule_inference_row",
         side_effect=AssertionError("stealth must not schedule tier_solve"),
     ):
-        assert admit_scores_export_work(ctx, scope) is True
+        assert (
+            admit_scores_export_work(
+                ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+            )
+            is True
+        )
     stream_scope = InferenceStreamScope(
         game_id=GAME_ID,
         perspective=stealth.player.id,
@@ -396,7 +402,12 @@ def test_admit_scores_export_persists_skip_immediate_admission(sample_turn, pers
         "api.analytics.scores.exports.schedule_inference_row",
         side_effect=AssertionError("skip ImmediateRowAdmission must not schedule tier_solve"),
     ):
-        assert admit_scores_export_work(ctx, scope) is True
+        assert (
+            admit_scores_export_work(
+                ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+            )
+            is True
+        )
     stream_scope = InferenceStreamScope(
         game_id=GAME_ID,
         perspective=owner_id,

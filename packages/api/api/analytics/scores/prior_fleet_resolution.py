@@ -16,7 +16,6 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.off_mode import ledger_matches_evidence_mark
-from api.analytics.off_mode_prior_dependency import backfill_is_enabled
 from api.compute.scope import WILDCARD, ComputeScope, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -70,7 +69,7 @@ def resolve_prior_fleet_for_scores(
     turn: TurnInfo,
     dependency_outputs: DependencyOutputs | None = None,
     overlay_ensure: bool = False,
-    backfill_earlier_turns: bool | None = None,
+    backfill_earlier_turns: bool,
 ) -> PriorTurnFleetTorpResolution:
     """Resolve prior-turn fleet torp overlay for scores wire build and ensure admit.
 
@@ -138,8 +137,8 @@ def resolve_prior_fleet_for_scores(
         load_from_disk=load_prior_from_disk,
         is_ensure_final=prior_is_ensure_final,
     )
-    # An ensure-final prior is the overlay in either mode, and reading the
-    # backfill setting would touch storage the dependency wire already replaced.
+    # An ensure-final prior is the overlay in either mode. The resolved
+    # backfill choice does not change that overlay.
     if (
         prior_persisted is not None
         and prior_turn is not None
@@ -150,13 +149,10 @@ def resolve_prior_fleet_for_scores(
             prior_export_scope,
             prior_turn=prior_turn,
         )
-    # Missing fleet services cannot read the setting. Keep the overlay path so a
-    # provenance-final ledger is not admitted, and so a missing prior stays unavailable.
-    if fleet_services is not None and not backfill_is_enabled(
-        fleet_services,
-        game_id,
-        backfill_earlier_turns,
-    ):
+    # Missing fleet services cannot read the evidence mark. Keep the overlay
+    # path so a provenance-final ledger is not admitted, and so a missing prior
+    # stays unavailable.
+    if fleet_services is not None and not backfill_earlier_turns:
         if prior_persisted is not None and prior_turn is not None:
             mark = fleet_services.persistence.evidence_mark(
                 game_id,

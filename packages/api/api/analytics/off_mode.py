@@ -30,10 +30,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from api.analytics.export_context import AnalyticQueryContext
+from typing import Any
 
 from api.analytics.fleet.types import (
     STAMP_CURRENT_EVIDENCE_MARK,
@@ -46,24 +43,6 @@ from api.exceptions import ValidationError
 from api.models.game import GameSettings, TurnInfo
 
 BACKFILL_EARLIER_TURNS_WIRE_FIELD = "backfillEarlierTurns"
-
-
-def backfill_earlier_turns_for_context(ctx: AnalyticQueryContext) -> bool:
-    """Read Backfill earlier turns once for the game on this query context.
-
-    Missing fleet services have no record to read. The caller still decides
-    what a missing service bundle means for its edge.
-
-    Fleet services are imported on the call. This module is imported by the
-    observation leg inside a subinterpreter, and a module-level import of
-    those services pulls the export context and the transport stack.
-    """
-    from api.analytics.fleet.injected_services import lookup_fleet_compute_services
-
-    services = lookup_fleet_compute_services(ctx)
-    if services is None:
-        return False
-    return services.persistence.backfill_earlier_turns_enabled(ctx.game_id)
 
 
 def off_mode_job_wire_fields(

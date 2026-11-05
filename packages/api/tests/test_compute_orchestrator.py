@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.export_types import ExportScope
 from api.analytics.exports.empty import empty_export_catalog_for
@@ -20,6 +21,7 @@ from api.compute import (
     plan_compute_dag,
 )
 from api.compute.profile import ComputeBackend
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
@@ -195,6 +197,7 @@ def test_plan_compute_dag_orders_diamond_dependencies(sample_turn):
         ROOT_ID,
         export_scope,
         compute_registry=compute_registry,
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
     )
 
     planned_ids = [node.scope.analytic_id for node in planned]
@@ -425,6 +428,7 @@ def test_abort_scope_does_not_abort_replacement_execution(sample_turn):
         dependency_scopes=(),
         state="running",
         execution_generation=2,
+        submission_open=SubmissionOpen(),
     )
     orchestrator._nodes[scope] = replacement
 
@@ -1379,6 +1383,7 @@ def test_scope_outcome_listener_receives_park_snapshot_after_node_wakes(sample_t
         state="parked",
         execution_generation=17,
         result_wire={"outcome": "soft"},
+        submission_open=SubmissionOpen(),
     )
     with orchestrator._condition:
         orchestrator._observers.notify_scope_outcome(node)
@@ -2087,18 +2092,21 @@ def test_recreate_aborted_dependencies_enqueues_shared_dep_once(sample_turn):
         state="failed",
         error=abort_error,
         bundle=bundle,
+        submission_open=SubmissionOpen(),
     )
     branch_b = ComputeNodeRun(
         scope=branch_b_scope,
         dependency_scopes=(shared_scope,),
         state="waiting_deps",
         bundle=bundle,
+        submission_open=SubmissionOpen(),
     )
     branch_c = ComputeNodeRun(
         scope=branch_c_scope,
         dependency_scopes=(shared_scope,),
         state="waiting_deps",
         bundle=bundle,
+        submission_open=SubmissionOpen(),
     )
     root = ComputeNodeRun(
         scope=root_scope,
@@ -2106,6 +2114,7 @@ def test_recreate_aborted_dependencies_enqueues_shared_dep_once(sample_turn):
         state="waiting_deps",
         bundle=bundle,
         priority_band="stream_attached",
+        submission_open=SubmissionOpen(),
     )
 
     orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())

@@ -21,6 +21,7 @@ from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
 
 from tests.scores_exports_helpers import minimal_stream_query_context
@@ -155,6 +156,7 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn):
                     state="ready",
                     step_index=1,
                     profile_step_index=1,
+                    submission_open=SubmissionOpen(),
                 )
             }
             self.dispatch_calls = 0

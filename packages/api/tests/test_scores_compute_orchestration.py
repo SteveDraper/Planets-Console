@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
@@ -66,6 +67,7 @@ from api.compute import (
     compute_scope_to_export_scope,
 )
 from api.compute.dag import plan_compute_dag
+from api.compute.submission_open import SubmissionOpen
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 from tests.export_chain_test_fixtures import (
@@ -590,7 +592,15 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
 
     # Leaf admit (not orchestration-plane ensure): accelerated-window cheap terminal
     # must close evidence without planning a prior-turn fleet DAG.
-    assert admit_scores_export_work(ctx, export_scope, overlay_ensure=False) is True
+    assert (
+        admit_scores_export_work(
+            ctx,
+            export_scope,
+            overlay_ensure=False,
+            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        )
+        is True
+    )
     assert is_scores_export_ensure_satisfied(ctx, export_scope) is True
     assert get_row_run_for_scope(scope) is None
 
@@ -693,7 +703,15 @@ def test_missing_full_alliance_row_restores_skip_instead_of_tier_solve_invariant
         player_id=player_id,
     )
 
-    assert admit_scores_export_work(ctx, export_scope, overlay_ensure=False) is True
+    assert (
+        admit_scores_export_work(
+            ctx,
+            export_scope,
+            overlay_ensure=False,
+            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        )
+        is True
+    )
     stored = persistence.get_row(GAME_ID, perspective(turn_2), 2, player_id)
     assert stored is not None
     assert stored.status == STATUS_FULL_ALLIANCE
@@ -1429,6 +1447,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
         ),
         dependency_scopes=(scope,),
         state="waiting_deps",
+        submission_open=SubmissionOpen(),
     )
     assert orchestrator._deps_complete(dependent) is False
 
@@ -1573,6 +1592,7 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
         compute_scope_to_export_scope(scope),
         compute_registry=build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION)),
         force_root=True,
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
     )
     planned_by_scope = {node.scope: node for node in planned}
 
@@ -1668,6 +1688,7 @@ def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -
         profile_step_index=1,
         step_index=1,
         bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
+        submission_open=SubmissionOpen(),
     )
     orchestrator._nodes[scope] = waiting
 
@@ -1740,6 +1761,7 @@ def test_enqueue_without_stream_token_wakes_parked_scores_node(
         profile_step_index=1,
         step_index=1,
         bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
+        submission_open=SubmissionOpen(),
     )
     orchestrator._nodes[scope] = parked
 

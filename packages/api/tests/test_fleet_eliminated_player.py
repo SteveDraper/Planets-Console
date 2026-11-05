@@ -6,6 +6,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_orchestration import (
@@ -105,7 +106,13 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         stored_turns={turn_number: turn},
     )
     scope = _scope(turn, player_id)
-    walk = walk_dependency_tree(ctx, _FLEET, scope, visiting=set())
+    walk = walk_dependency_tree(
+        ctx,
+        _FLEET,
+        scope,
+        visiting=set(),
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+    )
     assert walk.turn_unavailable is None
     pending_turns = [
         (analytic_id, pending.turn) for analytic_id, pending, _catalog in walk.pending_ensure
@@ -117,6 +124,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         _FLEET,
         scope,
         compute_registry=COMPUTE_REGISTRY,
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
     )
     assert len(planned) == 1
     assert planned[0].dependency_scopes == ()
@@ -313,7 +321,13 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
         stored_turns={23: turn},
     )
     enable_backfill_earlier_turns(ctx)
-    walk = walk_dependency_tree(ctx, _FLEET, _scope(turn, player_id), visiting=set())
+    walk = walk_dependency_tree(
+        ctx,
+        _FLEET,
+        _scope(turn, player_id),
+        visiting=set(),
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+    )
     assert walk.turn_unavailable == "turn_not_stored"
     assert walk.unavailable_turn == 22
 
@@ -356,7 +370,13 @@ def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):
         stored_turns={90: turn},
     )
     enable_backfill_earlier_turns(ctx)
-    walk = walk_dependency_tree(ctx, _FLEET, _scope(turn, player_id), visiting=set())
+    walk = walk_dependency_tree(
+        ctx,
+        _FLEET,
+        _scope(turn, player_id),
+        visiting=set(),
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+    )
     assert walk.turn_unavailable == "turn_not_stored"
     assert walk.unavailable_turn == 89
 

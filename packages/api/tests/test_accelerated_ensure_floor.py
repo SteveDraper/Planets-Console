@@ -12,6 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.chain import (
@@ -95,7 +96,14 @@ def test_scores_ensure_walk_skips_missing_turn_below_accelerated_floor(sample_tu
         player_id=player_id,
     )
 
-    walk = walk_dependency_tree(ctx, "scores", scope, visiting=set(), force_root=True)
+    walk = walk_dependency_tree(
+        ctx,
+        "scores",
+        scope,
+        visiting=set(),
+        force_root=True,
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+    )
 
     assert walk.turn_unavailable is None
     pending_turns = {(analytic_id, scope.turn) for analytic_id, scope, _ in walk.pending_ensure}
@@ -118,7 +126,14 @@ def test_scores_ensure_walk_at_first_reliable_turn_skips_prior_fleet(sample_turn
         player_id=player_id,
     )
 
-    walk = walk_dependency_tree(ctx, "scores", scope, visiting=set(), force_root=True)
+    walk = walk_dependency_tree(
+        ctx,
+        "scores",
+        scope,
+        visiting=set(),
+        force_root=True,
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+    )
 
     assert walk.turn_unavailable is None
     pending_turns = {(analytic_id, scope.turn) for analytic_id, scope, _ in walk.pending_ensure}

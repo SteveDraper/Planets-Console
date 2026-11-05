@@ -20,6 +20,7 @@ from api.analytics.fleet.types import (
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -107,6 +108,7 @@ def _bind_own_dag_fleet_persist(
                         scope=scores_scope,
                         dependency_scopes=(fleet_scope,) if depends_on_fleet else (),
                         state=scores_state,
+                        submission_open=SubmissionOpen(),
                     ),
                     fleet_scope: ComputeNodeRun(
                         scope=fleet_scope,
@@ -115,6 +117,7 @@ def _bind_own_dag_fleet_persist(
                         result_wire={
                             "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
                         },
+                        submission_open=SubmissionOpen(),
                     ),
                 }
             ),
@@ -474,6 +477,7 @@ def test_fleet_ledger_persist_skips_reschedule_for_cold_own_dag_without_stream(
                 scope=scores_scope,
                 dependency_scopes=(fleet_scope,),
                 state="waiting_deps",
+                submission_open=SubmissionOpen(),
             ),
             fleet_scope: ComputeNodeRun(
                 scope=fleet_scope,
@@ -482,6 +486,7 @@ def test_fleet_ledger_persist_skips_reschedule_for_cold_own_dag_without_stream(
                 result_wire={
                     "persistedLedgerWire": persisted_fleet_ledger_to_json(persisted),
                 },
+                submission_open=SubmissionOpen(),
             ),
         }
     )
@@ -551,6 +556,7 @@ def test_fleet_ledger_persist_reschedules_for_external_persist_while_waiting_on_
                         scope=scores_scope,
                         dependency_scopes=(fleet_scope,),
                         state="waiting_deps",
+                        submission_open=SubmissionOpen(),
                     ),
                 }
             ),
@@ -700,12 +706,14 @@ def test_fleet_ledger_persist_skips_when_stream_wire_lacks_version_stamp(
                         scope=scores_scope,
                         dependency_scopes=(fleet_scope,),
                         state="waiting_deps",
+                        submission_open=SubmissionOpen(),
                     ),
                     fleet_scope: ComputeNodeRun(
                         scope=fleet_scope,
                         dependency_scopes=(),
                         state="complete",
                         result_wire={"persistedLedgerWire": wire},
+                        submission_open=SubmissionOpen(),
                     ),
                 }
             ),
@@ -768,11 +776,13 @@ def test_fleet_ledger_persist_reschedules_for_external_persist_while_stream_flee
                         scope=scores_scope,
                         dependency_scopes=(fleet_scope,),
                         state="waiting_deps",
+                        submission_open=SubmissionOpen(),
                     ),
                     fleet_scope: ComputeNodeRun(
                         scope=fleet_scope,
                         dependency_scopes=(),
                         state="running",
+                        submission_open=SubmissionOpen(),
                     ),
                 }
             ),
@@ -1008,11 +1018,13 @@ def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(samp
         scope=fleet_scope,
         dependency_scopes=(),
         state="waiting_deps",
+        submission_open=SubmissionOpen(),
     )
     waiting_scores = ComputeNodeRun(
         scope=scores_scope,
         dependency_scopes=(fleet_scope,),
         state="waiting_deps",
+        submission_open=SubmissionOpen(),
     )
     orchestrator._nodes[fleet_scope] = waiting_fleet
     orchestrator._nodes[scores_scope] = waiting_scores
@@ -1029,11 +1041,13 @@ def test_waiting_deps_fleet_leaves_dependents_waiting_failed_fleet_cascades(samp
         dependency_scopes=(),
         state="failed",
         error=fleet_failure,
+        submission_open=SubmissionOpen(),
     )
     cascade_scores = ComputeNodeRun(
         scope=scores_scope,
         dependency_scopes=(fleet_scope,),
         state="waiting_deps",
+        submission_open=SubmissionOpen(),
     )
     orchestrator._nodes[fleet_scope] = failed_fleet
     orchestrator._nodes[scores_scope] = cascade_scores

@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import (
     DependencyWalkResult,
     walk_dependency_tree,
@@ -282,6 +283,7 @@ class AnalyticQueryContext:
             analytic_id,
             resolved_prep.scope,
             catch_ensure_cycle=catch_ensure_cycle,
+            backfill_earlier_turns=backfill_earlier_turns_for_context(self),
         )
         if not isinstance(walk_outcome, DependencyWalkResult):
             return walk_outcome
@@ -299,7 +301,7 @@ class AnalyticQueryContext:
         *,
         catch_ensure_cycle: bool = False,
         force_root: bool = False,
-        backfill_earlier_turns: bool | None = None,
+        backfill_earlier_turns: bool,
     ) -> DependencyWalkResult | UnavailableReason:
         try:
             walk_result = walk_dependency_tree(
@@ -388,7 +390,7 @@ class AnalyticQueryContext:
         scope: ExportScope,
         *,
         force_root: bool = False,
-        backfill_earlier_turns: bool | None = None,
+        backfill_earlier_turns: bool,
     ) -> UnavailableReason | None:
         """Return walk-time unavailability without running ensure work.
 

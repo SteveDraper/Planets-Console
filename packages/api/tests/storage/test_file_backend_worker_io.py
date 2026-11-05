@@ -385,6 +385,7 @@ def test_scores_resolve_prior_skips_disk_when_dependency_outputs_has_final_prior
             turn=sample_turn,
             dependency_outputs=outputs,
             overlay_ensure=False,
+            backfill_earlier_turns=False,
         )
 
     prior_fleet_key = persistence.ledger_prefix(GAME_ID, PERSPECTIVE, prior_turn)

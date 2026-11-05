@@ -10,6 +10,7 @@ from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import ComputeCompletionHistory
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 
 
 def _recorder(
@@ -61,7 +62,9 @@ def test_record_finish_uses_ready_cache_not_live_orchestrator_snapshot() -> None
         turn=8,
         player_id=3,
     )
-    node = ComputeNodeRun(scope=scope, dependency_scopes=(), step_index=1)
+    node = ComputeNodeRun(
+        scope=scope, dependency_scopes=(), step_index=1, submission_open=SubmissionOpen()
+    )
 
     recorder.record_finish(
         shell,
@@ -125,7 +128,9 @@ def test_listener_gauges_use_last_known_global_queue_depth() -> None:
         turn=8,
         player_id=3,
     )
-    node = ComputeNodeRun(scope=scope, dependency_scopes=(), step_index=0)
+    node = ComputeNodeRun(
+        scope=scope, dependency_scopes=(), step_index=0, submission_open=SubmissionOpen()
+    )
 
     recorder.record(
         shell,

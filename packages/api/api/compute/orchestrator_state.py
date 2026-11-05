@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -147,10 +147,11 @@ class ComputeNodeRun:
     # The worker may finish; persist and stamp are refused, and the step is
     # not retried.
     discard_without_stamp: bool = False
+    _: KW_ONLY
     # Root turn and backfill choice of the submission that planned this node.
     # A later submission that roots at this scope replaces the open turn and
     # keeps this backfill choice.
-    submission_open: SubmissionOpen = field(default_factory=SubmissionOpen)
+    submission_open: SubmissionOpen
     # The one-shot for this root has already been applied. Hops leave this false.
     open_turn_consumed: bool = False
 

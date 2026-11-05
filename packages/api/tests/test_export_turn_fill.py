@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_turn_fill import (
     fill_missing_dependency_chain_turns,
     missing_dependency_chain_turns,
@@ -159,7 +160,13 @@ def test_prepare_force_root_controls_fill_on_satisfied_root(
     scope = _fleet_scope(ctx, 3, player_id)
     ctx.mark_scope_ensured("fleet", scope)
 
-    prepare_dependency_chain_turns(ctx, "fleet", scope, force_root=force_root)
+    prepare_dependency_chain_turns(
+        ctx,
+        "fleet",
+        scope,
+        force_root=force_root,
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+    )
 
     assert requested == expected_fetched
     if force_root:
@@ -169,6 +176,7 @@ def test_prepare_force_root_controls_fill_on_satisfied_root(
             scope,
             compute_registry=COMPUTE_REGISTRY,
             force_root=True,
+            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
         )
         assert planned
 
@@ -193,6 +201,7 @@ def test_prepare_fetches_holes_then_fleet_walk_succeeds(sample_turn):
         ctx,
         "fleet",
         _fleet_scope(ctx, 3, player_id),
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
     )
 
     assert requested == [2]
@@ -202,6 +211,7 @@ def test_prepare_fetches_holes_then_fleet_walk_succeeds(sample_turn):
         _fleet_scope(ctx, 3, player_id),
         compute_registry=COMPUTE_REGISTRY,
         force_root=True,
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
     )
     assert planned
 
@@ -220,6 +230,7 @@ def test_prepare_raises_when_login_hook_is_missing(sample_turn):
             ctx,
             "fleet",
             _fleet_scope(ctx, 3, first_player_id(sample_turn)),
+            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
         )
 
 
@@ -236,7 +247,12 @@ def test_prepare_uses_ctx_ensure_turn_when_argument_omitted(sample_turn):
 
     ctx = _fleet_prepare_context(turns)
     ctx.ensure_turn = ensure_turn
-    prepare_dependency_chain_turns(ctx, "fleet", _fleet_scope(ctx, 3, first_player_id(sample_turn)))
+    prepare_dependency_chain_turns(
+        ctx,
+        "fleet",
+        _fleet_scope(ctx, 3, first_player_id(sample_turn)),
+        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+    )
     assert requested == [2]
 
 
@@ -255,6 +271,7 @@ def test_plan_compute_dag_raises_validation_error_when_hole_remains(sample_turn)
             _fleet_scope(ctx, 3, first_player_id(sample_turn)),
             compute_registry=COMPUTE_REGISTRY,
             force_root=True,
+            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
         )
 
 

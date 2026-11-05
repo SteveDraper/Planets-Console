@@ -21,6 +21,7 @@ from api.compute.orchestrator import ComputeNodeRun
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 
 
 @contextmanager
@@ -98,6 +99,7 @@ def _set_scope_node(
         state=state,
         priority_band=priority_band,
         **kwargs,
+        submission_open=SubmissionOpen(),
     )
     orchestrator._nodes[scope] = node
     return node

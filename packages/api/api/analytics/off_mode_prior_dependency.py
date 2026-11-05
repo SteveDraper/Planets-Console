@@ -21,17 +21,6 @@ OFF_MODE_PRIOR_FLEET: tuple[EnsureDependency, ...] = (
 )
 
 
-def backfill_is_enabled(
-    services: FleetComputeServices,
-    game_id: int,
-    carried: bool | None,
-) -> bool:
-    """Carried submission choice, or one storage read when this call has none."""
-    if carried is not None:
-        return carried
-    return services.persistence.backfill_earlier_turns_enabled(game_id)
-
-
 def off_mode_prior_dependency(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
