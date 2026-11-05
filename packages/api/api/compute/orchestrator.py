@@ -425,28 +425,51 @@ class ComputeOrchestrator(
         records whether the one-shot for that root has already been applied.
         Callers decide which analytic's root wins when several match.
         """
-        roots: list[OpenTurnRoot] = []
         with self._condition:
-            for scope, node in self._nodes_for_player(
+            return self._collect_open_turn_roots(
                 game_id=game_id,
                 perspective=perspective,
                 player_id=player_id,
                 analytic_ids=analytic_ids,
                 turn=turn,
-            ):
-                if node.is_terminal or node.open_turn is None:
-                    continue
-                if scope.turn != node.open_turn:
-                    continue
-                roots.append(
-                    OpenTurnRoot(
-                        analytic_id=scope.analytic_id,
-                        open_turn=node.open_turn,
-                        backfill_earlier_turns=node.backfill_earlier_turns,
-                        consumed=node.open_turn_consumed,
-                    )
+            )
+
+    def claim_open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        open_turn: int,
+        analytic_ids: frozenset[str],
+        consume: Callable[[tuple[OpenTurnRoot, ...]], bool],
+    ) -> tuple[OpenTurnRoot, ...]:
+        """Read this player's in-flight roots and maybe consume one open.
+
+        ``consume`` runs under the orchestrator lock. It sees every in-flight
+        root for the player, including roots that are already consumed, and
+        returns whether the one-shot at ``open_turn`` is applied before the
+        lock is released. It must not re-enter the orchestrator. The returned
+        snapshot is the state from before that consume, so the caller can
+        still count a shell it is about to close. A later claim sees
+        ``consumed`` on that root.
+        """
+        with self._condition:
+            roots = self._collect_open_turn_roots(
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                analytic_ids=analytic_ids,
+            )
+            if consume(roots):
+                self._mark_open_turn_consumed(
+                    game_id=game_id,
+                    perspective=perspective,
+                    player_id=player_id,
+                    open_turn=open_turn,
+                    analytic_ids=analytic_ids,
                 )
-        return tuple(roots)
+            return roots
 
     def consume_open_turn_roots(
         self,
@@ -464,15 +487,65 @@ class ComputeOrchestrator(
         is what a second persist of that root reads.
         """
         with self._condition:
-            for _scope, node in self._nodes_for_player(
+            self._mark_open_turn_consumed(
                 game_id=game_id,
                 perspective=perspective,
                 player_id=player_id,
+                open_turn=open_turn,
                 analytic_ids=analytic_ids,
-                turn=open_turn,
-            ):
-                if node.open_turn == open_turn:
-                    node.open_turn_consumed = True
+            )
+
+    def _collect_open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+        turn: int | None = None,
+    ) -> tuple[OpenTurnRoot, ...]:
+        """In-flight roots. Caller holds the orchestrator lock."""
+        roots: list[OpenTurnRoot] = []
+        for scope, node in self._nodes_for_player(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            analytic_ids=analytic_ids,
+            turn=turn,
+        ):
+            if node.is_terminal or node.open_turn is None:
+                continue
+            if scope.turn != node.open_turn:
+                continue
+            roots.append(
+                OpenTurnRoot(
+                    analytic_id=scope.analytic_id,
+                    open_turn=node.open_turn,
+                    backfill_earlier_turns=node.backfill_earlier_turns,
+                    consumed=node.open_turn_consumed,
+                )
+            )
+        return tuple(roots)
+
+    def _mark_open_turn_consumed(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        open_turn: int,
+        analytic_ids: frozenset[str],
+    ) -> None:
+        """Mark the one-shot at ``open_turn``. Caller holds the orchestrator lock."""
+        for _scope, node in self._nodes_for_player(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            analytic_ids=analytic_ids,
+            turn=open_turn,
+        ):
+            if node.open_turn == open_turn:
+                node.open_turn_consumed = True
 
     def discard_matching_work(
         self,

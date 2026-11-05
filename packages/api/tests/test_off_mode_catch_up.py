@@ -16,6 +16,7 @@ from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_A
 from api.analytics.homeworld_locator.exports import EXPORT_CATALOG as HOMEWORLD_EXPORT_CATALOG
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.exceptions import DiscardedWorkRefused
@@ -246,6 +247,125 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
     bumped = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
     assert bumped.evidence_generation == 4
     assert persistence.get_ledger(ctx.game_id, ctx.perspective, 40, player_id) is not None
+
+
+def test_scores_root_backfill_wins_and_a_later_turn_does_not_consume(sample_turn):
+    """The scores root's carried backfill classifies the persist.
+
+    Fleet carrying backfill off would stamp. Scores carrying it on bumps, and
+    both roots are consumed. A later host turn is not that root, so it leaves
+    a fresh open unconsumed.
+    """
+    _host, ctx = context_at_turn(sample_turn, 40)
+    player_id = first_player_id(sample_turn)
+    persistence = ctx.export_services[FLEET_ANALYTIC_ID].persistence
+    write_evidence_mark(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=3,
+        applies_from=40,
+    )
+    fleet = install_submission_root(ctx.game_id, ctx.perspective, player_id, 40)
+    orchestrator = peek_compute_orchestrator()
+    assert orchestrator is not None
+    scores_scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=40,
+        player_id=player_id,
+    )
+    orchestrator.nodes[scores_scope] = ComputeNodeRun(
+        scope=scores_scope,
+        dependency_scopes=(),
+        state="waiting_deps",
+        open_turn=40,
+        backfill_earlier_turns=True,
+    )
+    invalidation = InferenceInvalidationService(
+        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        fleet_persistence=persistence,
+    )
+
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
+
+    bumped = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
+    assert bumped.evidence_generation == 4
+    assert fleet.open_turn_consumed is True
+    assert orchestrator.nodes[scores_scope].open_turn_consumed is True
+
+    fresh = install_submission_root(ctx.game_id, ctx.perspective, player_id, 42)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 41, player_id)
+    assert fresh.open_turn_consumed is False
+
+
+def test_root_bump_wakes_the_shell_chosen_before_consume(
+    sample_turn,
+    monkeypatch,
+):
+    """A bump of the open root still wakes that shell after the claim consumes it."""
+    host, ctx = context_at_turn(sample_turn, 6)
+    player_id = first_player_id(host)
+    persistence = ctx.export_services[FLEET_ANALYTIC_ID].persistence
+    write_evidence_mark(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=2,
+        applies_from=4,
+    )
+    store_generation(persistence, ctx.game_id, ctx.perspective, 4, player_id, 2, ship_id=4)
+    store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 2, ship_id=5)
+    store_generation(persistence, ctx.game_id, ctx.perspective, 6, player_id, 2, ship_id=6)
+    root = install_submission_root(ctx.game_id, ctx.perspective, player_id, 4)
+    root.backfill_earlier_turns = True
+    woken: list[int] = []
+
+    def spy_reschedule(_scope, _player_id):
+        return False
+
+    def spy_wake(scope, **_kwargs):
+        woken.append(scope.turn)
+        return True
+
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
+        spy_reschedule,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.wake_fleet_scope",
+        spy_wake,
+    )
+    live_scope = FleetTableStreamScope(
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn_number=5,
+    )
+
+    class _LiveStream:
+        stream_token = "turn-5"
+
+    get_fleet_table_stream_registry().attach(live_scope, _LiveStream())
+    invalidation = InferenceInvalidationService(
+        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        fleet_persistence=persistence,
+    )
+    try:
+        invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 4, player_id)
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+
+    assert root.open_turn_consumed is True
+    bumped = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
+    assert bumped.evidence_generation == 3
+    assert 4 in woken
+    assert 5 in woken
+    assert 6 not in woken
+    untouched = persistence.get_ledger(ctx.game_id, ctx.perspective, 6, player_id)
+    assert untouched is not None and untouched.ledger.records[0].record_id == "ship-6"
 
 
 def test_first_scoreboard_persist_sets_generation_one(sample_turn):

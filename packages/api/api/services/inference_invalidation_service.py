@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from api.analytics.fleet.compute_orchestration import wake_fleet_scope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_stream_registry import reschedule_fleet_table_player
@@ -106,6 +108,46 @@ def discard_bumped_player_work(
     )
 
 
+@dataclass(frozen=True)
+class _LimitedRecompute:
+    """Shell and live turns a durable bump recomputes while backfill is off.
+
+    ``turns`` are those sets restricted to the evidence host turn and later.
+    Discard uses the unfiltered sets: a shell or live turn before the evidence
+    host turn is still in-flight work for this player.
+    """
+
+    turns: frozenset[int]
+    shell_turns: frozenset[int]
+    live_turns: frozenset[int]
+
+
+@dataclass(frozen=True)
+class _ChosenRecompute:
+    """Recompute choice made while the submission root was still unconsumed.
+
+    ``limited`` is None when every known turn wakes.
+    """
+
+    limited: _LimitedRecompute | None
+
+
+def _limited_recompute_turns(
+    *,
+    host_turn: int,
+    live_turns: frozenset[int],
+    shell_turns: frozenset[int],
+) -> _LimitedRecompute:
+    """Turns to wake, plus the sets discard uses, for one durable bump."""
+    turns = {turn for turn in live_turns if turn >= host_turn}
+    turns.update(turn for turn in shell_turns if turn >= host_turn)
+    return _LimitedRecompute(
+        turns=frozenset(turns),
+        shell_turns=shell_turns,
+        live_turns=live_turns,
+    )
+
+
 class InferenceInvalidationService:
     def __init__(
         self,
@@ -162,6 +204,33 @@ class InferenceInvalidationService:
         table streams reschedule in place; otherwise ``force_fresh`` submit
         replaces a terminal that is no longer ensure-final.
         """
+        return self._update_fleet_after_evidence(
+            game_id,
+            perspective,
+            host_turn,
+            player_id,
+            durable=durable,
+            backfill_earlier_turns=backfill_earlier_turns,
+            chosen=None,
+        )
+
+    def _update_fleet_after_evidence(
+        self,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
+        *,
+        durable: bool,
+        backfill_earlier_turns: bool | None,
+        chosen: _ChosenRecompute | None,
+    ) -> set[int]:
+        """Invalidate, discard a limited bump, and wake fleet.
+
+        ``chosen`` is the recompute decision when the caller already made it.
+        None means this method chooses. A limited choice discards in-flight
+        work that must not stamp the new mark; waking every known turn does not.
+        """
         if self._fleet_persistence is None:
             return set()
         turns_to_reschedule = self._fleet_persistence.invalidate_player_ledgers_from_turn(
@@ -171,18 +240,30 @@ class InferenceInvalidationService:
             player_id,
             durable=durable,
         )
-        recompute_turns = self._recompute_turns_after_evidence(
-            game_id,
-            perspective,
-            player_id,
-            host_turn,
-            durable=durable,
-            backfill_earlier_turns=backfill_earlier_turns,
+        limited = (
+            chosen.limited
+            if chosen is not None
+            else self._recompute_turns_after_evidence(
+                game_id,
+                perspective,
+                player_id,
+                host_turn,
+                durable=durable,
+                backfill_earlier_turns=backfill_earlier_turns,
+            )
         )
-        if recompute_turns is None:
-            turns_to_wake = turns_to_reschedule
-        else:
-            turns_to_wake = recompute_turns
+        if limited is not None:
+            orchestrator = peek_compute_orchestrator()
+            if orchestrator is not None:
+                discard_bumped_player_work(
+                    orchestrator,
+                    game_id=game_id,
+                    perspective=perspective,
+                    player_id=player_id,
+                    shell_turns=limited.shell_turns,
+                    live_turns=limited.live_turns,
+                )
+        turns_to_wake = turns_to_reschedule if limited is None else limited.turns
         for fleet_turn in sorted(turns_to_wake):
             stream_woke = reschedule_fleet_table_player(
                 FleetTableStreamScope(
@@ -193,8 +274,8 @@ class InferenceInvalidationService:
                 player_id,
             )
             if (
-                recompute_turns is not None
-                and fleet_turn in recompute_turns
+                limited is not None
+                and fleet_turn in limited.turns
                 and fleet_turn in self._live_scores_turns(game_id, perspective)
             ):
                 reschedule_inference_row(self._scope(game_id, perspective, fleet_turn), player_id)
@@ -223,7 +304,7 @@ class InferenceInvalidationService:
         *,
         durable: bool,
         backfill_earlier_turns: bool | None = None,
-    ) -> set[int] | None:
+    ) -> _LimitedRecompute | None:
         """Turns to wake after a durable bump while backfill is off.
 
         None means the existing wake-every-known-turn rule. A durable bump with
@@ -246,31 +327,23 @@ class InferenceInvalidationService:
             perspective,
             _OPEN_TURN_ANALYTICS,
         )
-        orchestrator = peek_compute_orchestrator()
         # Shell turns are the roots of in-flight fleet and scores submissions.
         # A live table stream is not itself an open: turn 41 streaming while
-        # the user opened 40 stays a later turn.
+        # the user opened 40 stays a later turn. A consumed root stays a shell.
         shell_turns = frozenset(
             root.open_turn
             for root in _player_submission_roots(
-                orchestrator,
+                peek_compute_orchestrator(),
                 game_id,
                 perspective,
                 player_id,
             )
         )
-        recompute = {turn for turn in live_turns if turn >= host_turn}
-        recompute.update(turn for turn in shell_turns if turn >= host_turn)
-        if orchestrator is not None:
-            discard_bumped_player_work(
-                orchestrator,
-                game_id=game_id,
-                perspective=perspective,
-                player_id=player_id,
-                shell_turns=shell_turns,
-                live_turns=live_turns,
-            )
-        return recompute
+        return _limited_recompute_turns(
+            host_turn=host_turn,
+            live_turns=live_turns,
+            shell_turns=shell_turns,
+        )
 
     def wire_fleet_invalidation_to_persistence(self) -> None:
         """Register fleet snapshot invalidation on inference row persistence writes."""
@@ -298,35 +371,89 @@ class InferenceInvalidationService:
         ``off_mode_persist_decision`` classifies this persist. A stamp leaves
         the mark unchanged. First persist and bump both advance it through
         durable evidence update: an absent mark becomes generation 1, and an
-        existing mark increments. Ledger files stay in place. The matching
-        in-flight submission root is consumed either way, after a bump has
-        already chosen which turns to recompute.
+        existing mark increments. Ledger files stay in place. An unconsumed
+        submission root at this host turn is read and consumed under one
+        orchestrator lock. A stamp consumes and returns. A bump chooses
+        recompute turns from that read, while the shell is still unconsumed,
+        and then the lock consumes the root. A host turn with no unconsumed
+        root does not consume.
         """
-        open_turn = self._unconsumed_submission_open(game_id, perspective, player_id, host_turn)
-        carried = self._carried_submission_backfill(game_id, perspective, player_id, host_turn)
-        current: bool | None = None
-        if carried is None and self._fleet_persistence is not None:
-            current = self._fleet_persistence.backfill_earlier_turns_enabled(game_id)
-        if self._fleet_persistence is not None:
+        fleet = self._fleet_persistence
+        current = fleet.backfill_earlier_turns_enabled(game_id) if fleet is not None else None
+        mark = fleet.evidence_mark(game_id, perspective, player_id) if fleet is not None else None
+        # Live turns are read before the claim. The claim callback must not
+        # re-enter the orchestrator, and a stream scan takes its own locks.
+        live_turns = (
+            active_table_stream_turns(game_id, perspective, _OPEN_TURN_ANALYTICS)
+            if current is False
+            else frozenset()
+        )
+        stamp = False
+        chosen: _ChosenRecompute | None = None
+
+        def consume_root(roots: tuple[OpenTurnRoot, ...]) -> bool:
+            nonlocal stamp, chosen
+            carried = preferred_unconsumed_root_backfill(
+                roots,
+                host_turn=host_turn,
+                preferred_analytic_id=SCORES_ANALYTIC_ID,
+            )
+            if carried is None:
+                return False
+            if fleet is None or mark is None:
+                return True
             # This call classifies the mark. It is not a fleet merge, so the
             # catch-up flag is false and the stored generation is unused.
-            # An in-flight submission keeps the choice it started with. A
-            # persist with no such submission uses the current record, read
-            # once for this event.
-            decision_backfill = current if carried is None else carried
+            # An in-flight submission keeps the choice it started with.
             decision = off_mode_persist_decision(
-                backfill_enabled=decision_backfill if decision_backfill is not None else False,
-                open_turn=open_turn,
+                backfill_enabled=carried,
+                open_turn=host_turn,
                 is_catch_up=False,
                 host_turn=host_turn,
-                mark=self._fleet_persistence.evidence_mark(game_id, perspective, player_id),
+                mark=mark,
                 stored_generation=None,
             )
             if decision.mark_persist is MarkPersist.STAMP:
-                self._consume_submission_open(game_id, perspective, player_id, host_turn)
-                return
-        if current is None and self._fleet_persistence is not None:
-            current = self._fleet_persistence.backfill_earlier_turns_enabled(game_id)
+                stamp = True
+                return True
+            shell_turns = frozenset(root.open_turn for root in roots)
+            if current is True:
+                chosen = _ChosenRecompute(limited=None)
+            else:
+                chosen = _ChosenRecompute(
+                    limited=_limited_recompute_turns(
+                        host_turn=host_turn,
+                        live_turns=live_turns,
+                        shell_turns=shell_turns,
+                    )
+                )
+            return True
+
+        orchestrator = peek_compute_orchestrator()
+        if orchestrator is None:
+            consume_root(())
+        else:
+            orchestrator.claim_open_turn_roots(
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                open_turn=host_turn,
+                analytic_ids=_OPEN_TURN_ANALYTICS,
+                consume=consume_root,
+            )
+        if stamp:
+            return
+        if chosen is not None:
+            self._update_fleet_after_evidence(
+                game_id,
+                perspective,
+                host_turn,
+                player_id,
+                durable=True,
+                backfill_earlier_turns=current,
+                chosen=chosen,
+            )
+            return
         self.on_inference_evidence_updated(
             game_id,
             perspective,
@@ -334,70 +461,6 @@ class InferenceInvalidationService:
             player_id,
             durable=True,
             backfill_earlier_turns=current,
-        )
-        if open_turn is not None and host_turn == open_turn:
-            self._consume_submission_open(game_id, perspective, player_id, host_turn)
-
-    def _unconsumed_submission_open(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        host_turn: int,
-    ) -> int | None:
-        """The in-flight submission root when this host turn is that root and still one-shot."""
-        roots = _player_submission_roots(
-            peek_compute_orchestrator(),
-            game_id,
-            perspective,
-            player_id,
-            turn=host_turn,
-        )
-        if any(not root.consumed for root in roots):
-            return host_turn
-        return None
-
-    def _carried_submission_backfill(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        host_turn: int,
-    ) -> bool | None:
-        """Setting the in-flight submission started with, when this turn is that root.
-
-        A scores root wins when more than one analytic has an unconsumed root
-        at this turn.
-        """
-        roots = _player_submission_roots(
-            peek_compute_orchestrator(),
-            game_id,
-            perspective,
-            player_id,
-            turn=host_turn,
-        )
-        return preferred_unconsumed_root_backfill(
-            roots,
-            host_turn=host_turn,
-            preferred_analytic_id=SCORES_ANALYTIC_ID,
-        )
-
-    def _consume_submission_open(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        open_turn: int,
-    ) -> None:
-        orchestrator = peek_compute_orchestrator()
-        if orchestrator is None:
-            return
-        orchestrator.consume_open_turn_roots(
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-            open_turn=open_turn,
-            analytic_ids=_OPEN_TURN_ANALYTICS,
         )
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:

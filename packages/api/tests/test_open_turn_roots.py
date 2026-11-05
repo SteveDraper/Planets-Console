@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
+import threading
+
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute import runtime as compute_runtime
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import NodeState
 from api.compute.scope import ComputeScope
-from api.services.inference_invalidation_service import (
-    InferenceInvalidationService,
-    preferred_unconsumed_root_backfill,
-)
-from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.storage.memory_asset import MemoryAssetBackend
+from api.services.inference_invalidation_service import preferred_unconsumed_root_backfill
 
 _ANALYTICS = frozenset({"alpha", "beta"})
 
@@ -243,29 +239,108 @@ def test_preferred_unconsumed_root_backfill_lets_the_caller_choose():
     )
 
 
-def test_carried_submission_backfill_prefers_the_scores_root():
+def test_claim_open_turn_roots_consumes_under_one_lock_and_keeps_the_preimage():
     orchestrator = ComputeOrchestrator(compute_registry={})
-    _put(
-        orchestrator,
-        FLEET_ANALYTIC_ID,
-        40,
+    root = _put(orchestrator, "alpha", 40, open_turn=40, backfill=True)
+    hop = _put(orchestrator, "alpha", 39, open_turn=40, backfill=True)
+    other = _put(orchestrator, "alpha", 41, open_turn=41)
+    seen: list[tuple[OpenTurnRoot, ...]] = []
+
+    def consume(roots: tuple[OpenTurnRoot, ...]) -> bool:
+        seen.append(roots)
+        assert any(not item.consumed and item.open_turn == 40 for item in roots)
+        return True
+
+    snapshot = orchestrator.claim_open_turn_roots(
+        game_id=1,
+        perspective=1,
+        player_id=7,
         open_turn=40,
-        backfill=False,
+        analytic_ids=_ANALYTICS,
+        consume=consume,
     )
-    _put(
-        orchestrator,
-        SCORES_ANALYTIC_ID,
-        40,
+
+    assert snapshot == seen[0]
+    assert any(item.open_turn == 40 and item.consumed is False for item in snapshot)
+    assert orchestrator.nodes[root].open_turn_consumed is True
+    assert orchestrator.nodes[hop].open_turn_consumed is False
+    assert orchestrator.nodes[other].open_turn_consumed is False
+
+    def second(roots: tuple[OpenTurnRoot, ...]) -> bool:
+        seen.append(roots)
+        assert all(item.consumed for item in roots if item.open_turn == 40)
+        assert any(not item.consumed and item.open_turn == 41 for item in roots)
+        return True
+
+    orchestrator.claim_open_turn_roots(
+        game_id=1,
+        perspective=1,
+        player_id=7,
         open_turn=40,
-        backfill=True,
+        analytic_ids=_ANALYTICS,
+        consume=second,
     )
-    service = InferenceInvalidationService(
-        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+    assert orchestrator.nodes[other].open_turn_consumed is False
+
+
+def test_claim_open_turn_roots_declines_without_consuming():
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    root = _put(orchestrator, "alpha", 40, open_turn=40)
+
+    snapshot = orchestrator.claim_open_turn_roots(
+        game_id=1,
+        perspective=1,
+        player_id=7,
+        open_turn=40,
+        analytic_ids=_ANALYTICS,
+        consume=lambda _roots: False,
     )
-    previous = compute_runtime._process_orchestrator
-    compute_runtime._process_orchestrator = orchestrator
-    try:
-        assert service._carried_submission_backfill(1, 1, 7, 40) is True
-        assert service._unconsumed_submission_open(1, 1, 7, 40) == 40
-    finally:
-        compute_runtime._process_orchestrator = previous
+
+    assert snapshot[0].consumed is False
+    assert orchestrator.nodes[root].open_turn_consumed is False
+
+
+def test_claim_open_turn_roots_blocks_a_second_claim_until_consume():
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    _put(orchestrator, "alpha", 40, open_turn=40)
+    entered = threading.Event()
+    second_snapshot: list[tuple[OpenTurnRoot, ...]] = []
+
+    def second_claim() -> None:
+        def observe(roots: tuple[OpenTurnRoot, ...]) -> bool:
+            second_snapshot.append(roots)
+            return False
+
+        entered.set()
+        orchestrator.claim_open_turn_roots(
+            game_id=1,
+            perspective=1,
+            player_id=7,
+            open_turn=40,
+            analytic_ids=_ANALYTICS,
+            consume=observe,
+        )
+
+    worker = threading.Thread(target=second_claim, daemon=True)
+
+    def first(roots: tuple[OpenTurnRoot, ...]) -> bool:
+        assert any(not item.consumed for item in roots)
+        worker.start()
+        assert entered.wait(timeout=1)
+        worker.join(timeout=0.2)
+        assert worker.is_alive()
+        return True
+
+    orchestrator.claim_open_turn_roots(
+        game_id=1,
+        perspective=1,
+        player_id=7,
+        open_turn=40,
+        analytic_ids=_ANALYTICS,
+        consume=first,
+    )
+    worker.join(timeout=1)
+
+    assert not worker.is_alive()
+    assert second_snapshot
+    assert all(item.consumed for item in second_snapshot[0] if item.open_turn == 40)
