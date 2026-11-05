@@ -19,7 +19,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.orchestrator import ComputeOrchestrator
+from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
@@ -27,6 +27,48 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns
 
 _OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
+
+
+def preferred_unconsumed_root_backfill(
+    roots: tuple[OpenTurnRoot, ...],
+    *,
+    host_turn: int,
+    preferred_analytic_id: str,
+) -> bool | None:
+    """Backfill choice of the unconsumed root at ``host_turn``.
+
+    None when no such root exists. ``preferred_analytic_id`` wins when more
+    than one analytic has an unconsumed root at that turn. When it does not,
+    the last other root in scan order supplies the choice.
+    """
+    found: bool | None = None
+    for root in roots:
+        if root.consumed or root.open_turn != host_turn:
+            continue
+        if root.analytic_id == preferred_analytic_id:
+            return root.backfill_earlier_turns
+        found = root.backfill_earlier_turns
+    return found
+
+
+def _player_submission_roots(
+    orchestrator: ComputeOrchestrator | None,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+    *,
+    turn: int | None = None,
+) -> tuple[OpenTurnRoot, ...]:
+    """In-flight fleet and scores submission roots for one player."""
+    if orchestrator is None:
+        return ()
+    return orchestrator.open_turn_roots(
+        game_id=game_id,
+        perspective=perspective,
+        player_id=player_id,
+        analytic_ids=_OPEN_TURN_ANALYTICS,
+        turn=turn,
+    )
 
 
 def discard_bumped_player_work(
@@ -51,17 +93,17 @@ def discard_bumped_player_work(
     recompute_turns.update(shell_turns)
 
     def should_discard(scope: ComputeScope, node: ComputeNodeRun) -> bool:
-        if scope.analytic_id not in _OPEN_TURN_ANALYTICS:
-            return False
-        if scope.game_id != game_id or scope.perspective != perspective:
-            return False
-        if scope.player_id != player_id or not isinstance(scope.turn, int):
-            return False
         if scope.turn in recompute_turns:
             return node.state != "running"
         return True
 
-    orchestrator.discard_matching_work(should_discard)
+    orchestrator.discard_matching_work(
+        should_discard,
+        game_id=game_id,
+        perspective=perspective,
+        player_id=player_id,
+        analytic_ids=_OPEN_TURN_ANALYTICS,
+    )
 
 
 class InferenceInvalidationService:
@@ -208,14 +250,13 @@ class InferenceInvalidationService:
         # Shell turns are the roots of in-flight fleet and scores submissions.
         # A live table stream is not itself an open: turn 41 streaming while
         # the user opened 40 stays a later turn.
-        shell_turns = (
-            frozenset()
-            if orchestrator is None
-            else orchestrator.in_flight_root_open_turns(
-                game_id=game_id,
-                perspective=perspective,
-                player_id=player_id,
-                analytic_ids=_OPEN_TURN_ANALYTICS,
+        shell_turns = frozenset(
+            root.open_turn
+            for root in _player_submission_roots(
+                orchestrator,
+                game_id,
+                perspective,
+                player_id,
             )
         )
         recompute = {turn for turn in live_turns if turn >= host_turn}
@@ -305,19 +346,16 @@ class InferenceInvalidationService:
         host_turn: int,
     ) -> int | None:
         """The in-flight submission root when this host turn is that root and still one-shot."""
-        orchestrator = peek_compute_orchestrator()
-        if orchestrator is None:
-            return None
-        opens = orchestrator.in_flight_root_open_turns(
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-            analytic_ids=_OPEN_TURN_ANALYTICS,
-            unconsumed_only=True,
+        roots = _player_submission_roots(
+            peek_compute_orchestrator(),
+            game_id,
+            perspective,
+            player_id,
+            turn=host_turn,
         )
-        if host_turn not in opens:
-            return None
-        return host_turn
+        if any(not root.consumed for root in roots):
+            return host_turn
+        return None
 
     def _carried_submission_backfill(
         self,
@@ -326,16 +364,21 @@ class InferenceInvalidationService:
         player_id: int,
         host_turn: int,
     ) -> bool | None:
-        """Setting the in-flight submission started with, when this turn is that root."""
-        orchestrator = peek_compute_orchestrator()
-        if orchestrator is None:
-            return None
-        return orchestrator.unconsumed_root_backfill(
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
+        """Setting the in-flight submission started with, when this turn is that root.
+
+        A scores root wins when more than one analytic has an unconsumed root
+        at this turn.
+        """
+        roots = _player_submission_roots(
+            peek_compute_orchestrator(),
+            game_id,
+            perspective,
+            player_id,
+            turn=host_turn,
+        )
+        return preferred_unconsumed_root_backfill(
+            roots,
             host_turn=host_turn,
-            analytic_ids=_OPEN_TURN_ANALYTICS,
             preferred_analytic_id=SCORES_ANALYTIC_ID,
         )
 

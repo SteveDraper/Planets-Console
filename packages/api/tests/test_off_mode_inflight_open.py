@@ -172,11 +172,14 @@ def test_later_open_joins_hops_and_keeps_the_earlier_root(sample_turn):
     assert _fleet_open_turns(orchestrator, player_id) == {38: 40, 39: 40, 40: 40, 41: 41}
     assert all(node.backfill_earlier_turns is False for node in orchestrator.nodes.values())
     assert _wire_for(captured, 38)["openTurn"] == 40
-    assert orchestrator.in_flight_root_open_turns(
-        game_id=ctx.game_id,
-        perspective=ctx.perspective,
-        player_id=player_id,
-        analytic_ids=frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID}),
+    assert frozenset(
+        root.open_turn
+        for root in orchestrator.open_turn_roots(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            player_id=player_id,
+            analytic_ids=frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID}),
+        )
     ) == frozenset({40, 41})
     later = persistence.get_ledger(ctx.game_id, ctx.perspective, 41, player_id)
     assert later is not None and later.ledger.records[0].record_id == "ship-411"
@@ -251,11 +254,14 @@ def test_opening_a_catch_up_hop_adopts_it_as_the_open(sample_turn):
     assert _fleet_open_turns(orchestrator, player_id) == {38: 41, 39: 41, 40: 40, 41: 41}
     assert all(node.backfill_earlier_turns is False for node in orchestrator.nodes.values())
     assert _wire_for(captured, 38)["catchUp"] is True
-    assert orchestrator.in_flight_root_open_turns(
-        game_id=ctx.game_id,
-        perspective=ctx.perspective,
-        player_id=player_id,
-        analytic_ids=frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID}),
+    assert frozenset(
+        root.open_turn
+        for root in orchestrator.open_turn_roots(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            player_id=player_id,
+            analytic_ids=frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID}),
+        )
     ) == frozenset({40, 41})
 
     planned = _observation_wire(

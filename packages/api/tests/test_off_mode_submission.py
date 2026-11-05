@@ -230,11 +230,14 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
         orchestrator.abort_scope(scope, ComputeScopeAbortedError("cancelled"))
 
     assert (
-        orchestrator.in_flight_root_open_turns(
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            player_id=player_id,
-            analytic_ids=_OPEN_TURN_ANALYTICS,
+        frozenset(
+            root.open_turn
+            for root in orchestrator.open_turn_roots(
+                game_id=ctx.game_id,
+                perspective=ctx.perspective,
+                player_id=player_id,
+                analytic_ids=_OPEN_TURN_ANALYTICS,
+            )
         )
         == frozenset()
     )
@@ -246,11 +249,14 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
     reopened = orchestrator.nodes[scope_39]
     assert reopened.open_turn == 39
     assert reopened.open_turn_consumed is False
-    assert orchestrator.in_flight_root_open_turns(
-        game_id=ctx.game_id,
-        perspective=ctx.perspective,
-        player_id=player_id,
-        analytic_ids=_OPEN_TURN_ANALYTICS,
+    assert frozenset(
+        root.open_turn
+        for root in orchestrator.open_turn_roots(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            player_id=player_id,
+            analytic_ids=_OPEN_TURN_ANALYTICS,
+        )
     ) == frozenset({39})
     reopened_wires = [
         wire
