@@ -990,6 +990,7 @@ def test_later_file_refresh_and_final_commit_fail_closed() -> None:
             {},
             persisted,
             player_invalidation_generation=0,
+            open_turn=None,
         )
     with pytest.raises(ValueError, match="concrete turn"):
         policy._refresh_following_callback(services, wildcard_turn, 0, None)
@@ -1000,4 +1001,5 @@ def test_later_file_refresh_and_final_commit_fail_closed() -> None:
             {},
             persisted,
             player_invalidation_generation=0,
+            open_turn=None,
         )

@@ -516,7 +516,7 @@ class FleetPersistencePolicy:
         persisted: PersistedFleetLedger,
         *,
         player_invalidation_generation: int,
-        open_turn: int | None = None,
+        open_turn: int | None,
     ) -> Callable[[], None]:
         """Store a living final ledger, then wake scores and later approximate files."""
         if not isinstance(services, FleetComputeServices):
@@ -560,8 +560,8 @@ class FleetPersistencePolicy:
 
         ``player_invalidation_generation`` is the epoch captured at the start of
         that persist, before the ledger put. ``open_turn`` is the submission
-        root on the job wire. The walk stops after that turn, so a later turn
-        stays on disk.
+        root on the job wire. The walk stops after that turn when it is set,
+        and continues through later turns when it is None.
         """
         from api.analytics.fleet.approximate_fleet import refresh_following_approximate_fleets
 
@@ -574,7 +574,6 @@ class FleetPersistencePolicy:
         player_id = scope.player_id
         saved_turn = scope.turn
         generation = player_invalidation_generation
-        stop_after_turn = open_turn
 
         def _refresh() -> None:
             refresh_following_approximate_fleets(
@@ -586,7 +585,7 @@ class FleetPersistencePolicy:
                 player_invalidation_generation=generation,
                 load_turn=services.load_turn,
                 inference_materialization=services.inference_materialization,
-                stop_after_turn=stop_after_turn,
+                stop_after_turn=open_turn,
             )
 
         return _refresh

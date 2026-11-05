@@ -167,7 +167,7 @@ def refresh_following_approximate_fleets(
     player_invalidation_generation: int,
     load_turn: Callable[[int], TurnInfo | None],
     inference_materialization: FleetInferenceMaterialization | None,
-    stop_after_turn: int | None = None,
+    stop_after_turn: int | None,
 ) -> None:
     """Replace each later approximate file from the ledger just saved.
 
@@ -178,7 +178,8 @@ def refresh_following_approximate_fleets(
     file stop applies before the rebuild. A stop does not raise and does not
     roll back puts already stored. Does not create the missing turn. A
     terminal same-turn scoreboard writes the replacement; otherwise the copy
-    stays approximate.
+    stays approximate. ``stop_after_turn`` ends the walk after that turn.
+    None walks every later approximate file.
     """
     from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
     from api.analytics.fleet.fleet_table_stream_scheduler import publish_saved_host_turn_ledger

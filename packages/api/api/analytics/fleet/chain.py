@@ -478,8 +478,10 @@ def _refresh_later_files_after_living_save(
     """Replace later approximate files from a living ledger just stored at ``saved_turn``.
 
     ``player_invalidation_generation`` is the epoch captured for that save.
-    An eliminated empty ledger is not a prior for that replacement. Callers
-    that returned a cache hit without writing must not call this.
+    There is no submission ceiling, so the walk continues through every later
+    approximate file. An eliminated empty ledger is not a prior for that
+    replacement. Callers that returned a cache hit without writing must not
+    call this.
     """
     if saved.provenance.eliminated_at_turn:
         return
@@ -492,6 +494,7 @@ def _refresh_later_files_after_living_save(
         player_invalidation_generation=player_invalidation_generation,
         load_turn=load_turn,
         inference_materialization=inference_materialization,
+        stop_after_turn=None,
     )
 
 

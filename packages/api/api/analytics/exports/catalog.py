@@ -22,7 +22,7 @@ ProbeEnsureSatisfiedFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 ProbeInProgressFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 
 
-class EnsureDependenciesFor(Protocol):
+class EnsureDependenciesForFn(Protocol):
     """Resolve ensure edges for one scope.
 
     ``backfill_earlier_turns`` is the choice already resolved for this walk or
@@ -36,9 +36,6 @@ class EnsureDependenciesFor(Protocol):
         *,
         backfill_earlier_turns: bool,
     ) -> tuple[EnsureDependency, ...]: ...
-
-
-EnsureDependenciesForFn = EnsureDependenciesFor
 
 
 @dataclass(frozen=True)

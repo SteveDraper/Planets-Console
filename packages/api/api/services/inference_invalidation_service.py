@@ -134,6 +134,9 @@ def discard_bumped_player_work(
     in-flight turn for this player is dropped: a step that has not started
     fails now, and a step already executing finishes without persisting or
     stamping.
+
+    The predicate runs under the orchestrator lock. It must not re-enter the
+    orchestrator and reads node state only.
     """
     recompute_turns = set(live_turns)
     recompute_turns.update(shell_turns)
