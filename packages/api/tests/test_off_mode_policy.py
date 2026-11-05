@@ -1,10 +1,11 @@
-"""Unit tests for off-mode persist decisions, prior-fleet relation, and job-wire parsing."""
+"""Unit tests for off-mode persist decisions, prior-fleet relation, and job wires."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 
 import pytest
+from api.analytics.fleet.off_mode_job_wire import stamp_submission_open
 from api.analytics.fleet.types import (
     STAMP_CURRENT_EVIDENCE_MARK,
     FleetAcquisitionLedger,
@@ -19,6 +20,8 @@ from api.analytics.off_mode import (
     off_mode_prior_relation,
     parse_off_mode_wire,
 )
+from api.compute.scope import WILDCARD, ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
 
 
@@ -402,3 +405,102 @@ def test_parse_off_mode_wire_rejects_wrong_types_and_catch_up_without_open_turn(
     ):
         with pytest.raises(ValidationError):
             parse_off_mode_wire(wire)
+
+
+def _fleet_scope(turn: int = 39) -> ComputeScope:
+    return ComputeScope(
+        analytic_id="fleet",
+        game_id=1,
+        perspective=1,
+        turn=turn,
+        player_id=7,
+    )
+
+
+def test_stamp_submission_open_copies_the_carried_open():
+    """A carried open is copied. No submission open clears openTurn and catchUp only."""
+    scope = _fleet_scope()
+    stale = {
+        "materializeTurn": 39,
+        "openTurn": 1,
+        "catchUp": True,
+        "backfillEarlierTurns": True,
+    }
+    cases = (
+        (
+            "direct call leaves a fresh wire without an open",
+            {"materializeTurn": 39},
+            None,
+            {"materializeTurn": 39},
+        ),
+        (
+            "direct call clears a stale open and leaves backfillEarlierTurns",
+            dict(stale),
+            None,
+            {"materializeTurn": 39, "backfillEarlierTurns": True},
+        ),
+        (
+            "backfill off writes the open and catch-up",
+            dict(stale),
+            SubmissionOpen(open_turn=40, backfill_earlier_turns=False),
+            {
+                "materializeTurn": 39,
+                "openTurn": 40,
+                "catchUp": True,
+                "backfillEarlierTurns": False,
+            },
+        ),
+        (
+            "backfill on clears the open",
+            dict(stale),
+            SubmissionOpen(open_turn=40, backfill_earlier_turns=True),
+            {"materializeTurn": 39, "backfillEarlierTurns": True},
+        ),
+        (
+            "a carried choice with no open turn still writes that choice",
+            dict(stale),
+            SubmissionOpen(open_turn=None, backfill_earlier_turns=False),
+            {"materializeTurn": 39, "backfillEarlierTurns": False},
+        ),
+    )
+    for name, wire, submission_open, expected in cases:
+        stamp_submission_open(wire, scope, submission_open)
+        assert wire == expected, name
+
+    root = {"materializeTurn": 40}
+    stamp_submission_open(
+        root,
+        _fleet_scope(turn=40),
+        SubmissionOpen(open_turn=40),
+    )
+    assert root == {
+        "materializeTurn": 40,
+        "openTurn": 40,
+        "catchUp": False,
+        "backfillEarlierTurns": False,
+    }
+
+
+def test_stamp_submission_open_rejects_a_bool_open_or_a_wildcard_turn():
+    """A bool is not a turn, and a rejected open leaves the wire unchanged."""
+    wire = {"openTurn": 1, "catchUp": True}
+    with pytest.raises(ValidationError, match="openTurn must be an integer"):
+        stamp_submission_open(
+            wire,
+            _fleet_scope(),
+            SubmissionOpen(open_turn=True),  # type: ignore[arg-type]
+        )
+    assert wire == {"openTurn": 1, "catchUp": True}
+
+    with pytest.raises(ValueError, match="concrete turn"):
+        stamp_submission_open(
+            {},
+            replace(_fleet_scope(), turn=WILDCARD),
+            SubmissionOpen(open_turn=40),
+        )
+    with pytest.raises(ValueError, match="concrete turn"):
+        stamp_submission_open(
+            {},
+            replace(_fleet_scope(), turn=True),  # type: ignore[arg-type]
+            SubmissionOpen(open_turn=40),
+        )

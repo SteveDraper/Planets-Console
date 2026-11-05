@@ -74,19 +74,6 @@ def _fleet_prior_turn(
     return scope.turn - 1
 
 
-def _open_turn_and_backfill(
-    submission_open: SubmissionOpen | None,
-) -> tuple[int | None, bool | None]:
-    """Open turn and backfill for ``stamp_submission_open``.
-
-    A missing submission open leaves both unset so a direct builder call does
-    not invent a root. A carried pair is written as-is.
-    """
-    if submission_open is None:
-        return None, None
-    return submission_open.open_turn, submission_open.backfill_earlier_turns
-
-
 def build_fleet_observation_leg_job_wire(
     scope: ComputeScope,
     *,
@@ -148,14 +135,7 @@ def build_fleet_materialization_leg_job_wire(
                 player_id,
             ),
         }
-    open_turn, backfill_earlier_turns = _open_turn_and_backfill(submission_open)
-    stamp_submission_open(
-        wire,
-        scope,
-        ctx,
-        open_turn,
-        backfill_earlier_turns=backfill_earlier_turns,
-    )
+    stamp_submission_open(wire, scope, submission_open)
     return wire
 
 
@@ -210,14 +190,7 @@ def build_fleet_finalization_leg_job_wire(
         scope.perspective,
         scope.player_id,
     )
-    open_turn, backfill_earlier_turns = _open_turn_and_backfill(submission_open)
-    stamp_submission_open(
-        payload,
-        scope,
-        ctx,
-        open_turn,
-        backfill_earlier_turns=backfill_earlier_turns,
-    )
+    stamp_submission_open(payload, scope, submission_open)
     return payload
 
 

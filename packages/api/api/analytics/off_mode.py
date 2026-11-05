@@ -47,43 +47,6 @@ from api.exceptions import ValidationError
 from api.models.game import GameSettings, TurnInfo
 
 BACKFILL_EARLIER_TURNS_WIRE_FIELD = "backfillEarlierTurns"
-
-
-def off_mode_job_wire_fields(
-    *,
-    open_turn: int | None,
-    turn: int,
-    backfill_enabled: bool,
-) -> dict[str, object]:
-    """``openTurn`` and ``catchUp`` for one fleet job.
-
-    Empty when this submit is not an off-mode open. ``catchUp`` is true for an
-    earlier hop of that open. The open turn itself is false.
-    """
-    if backfill_enabled or open_turn is None:
-        return {}
-    return {"openTurn": open_turn, "catchUp": turn < open_turn}
-
-
-def apply_off_mode_job_wire_fields(
-    wire: dict[str, object],
-    *,
-    open_turn: int | None,
-    turn: int,
-    backfill_enabled: bool,
-) -> None:
-    """Replace any open-turn fields on ``wire`` from the submission root."""
-    wire.pop("openTurn", None)
-    wire.pop("catchUp", None)
-    wire.update(
-        off_mode_job_wire_fields(
-            open_turn=open_turn,
-            turn=turn,
-            backfill_enabled=backfill_enabled,
-        )
-    )
-
-
 _OPEN_TURN_FIELD = "openTurn"
 _CATCH_UP_FIELD = "catchUp"
 _PLAYER_INVALIDATION_GENERATION_FIELD = "playerInvalidationGeneration"
@@ -99,6 +62,48 @@ def _require_json_bool(value: object, *, field: str) -> bool:
     if not isinstance(value, bool):
         raise ValidationError(f"{field} must be a boolean")
     return value
+
+
+def off_mode_job_wire_fields(
+    *,
+    open_turn: int | None,
+    turn: int,
+    backfill_enabled: bool,
+) -> dict[str, object]:
+    """``openTurn`` and ``catchUp`` for one fleet job.
+
+    Empty when this submit is not an off-mode open. ``catchUp`` is true for an
+    earlier hop of that open. The open turn itself is false. A bool is not a
+    turn.
+    """
+    if open_turn is not None:
+        open_turn = _require_json_int(open_turn, field=_OPEN_TURN_FIELD)
+    if open_turn is None or backfill_enabled:
+        return {}
+    return {_OPEN_TURN_FIELD: open_turn, _CATCH_UP_FIELD: turn < open_turn}
+
+
+def apply_off_mode_job_wire_fields(
+    wire: dict[str, object],
+    *,
+    open_turn: int | None,
+    turn: int,
+    backfill_enabled: bool,
+) -> None:
+    """Replace ``openTurn`` and ``catchUp`` on ``wire`` from the submission root.
+
+    The replacement is built first, so a rejected open turn leaves ``wire``
+    unchanged. Those two fields are then cleared and written only for an
+    off-mode open with backfill off.
+    """
+    fields = off_mode_job_wire_fields(
+        open_turn=open_turn,
+        turn=turn,
+        backfill_enabled=backfill_enabled,
+    )
+    wire.pop(_OPEN_TURN_FIELD, None)
+    wire.pop(_CATCH_UP_FIELD, None)
+    wire.update(fields)
 
 
 @dataclass(frozen=True)
