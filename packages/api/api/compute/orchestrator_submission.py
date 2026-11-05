@@ -293,6 +293,7 @@ class OrchestratorSubmissionMixin:
                 _node=node,
                 _condition=self._condition,
             )
+        self._adopt_rooted_open_turn(node, request)
         handle = ComputeHandle(
             scope=node.scope,
             _node=node,
@@ -302,6 +303,21 @@ class OrchestratorSubmissionMixin:
         node.waiters.append(handle)
         self._maybe_adopt_priority(node, request.priority_band)
         return handle
+
+    def _adopt_rooted_open_turn(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        request: ComputeRequest,
+    ) -> None:
+        """A submission that roots at this scope owns the node's open turn.
+
+        Joining any other in-flight node leaves the open it was planned with.
+        The backfill choice the node started with stays with it.
+        """
+        open_turn = submission_open_turn(request)
+        if open_turn is None or node.scope.turn != open_turn:
+            return
+        node.open_turn = open_turn
 
     def _maybe_adopt_priority(
         self: ComputeOrchestrator,

@@ -148,8 +148,8 @@ class ComputeNodeRun:
     # The worker may finish; persist and stamp are refused, and the step is
     # not retried.
     discard_without_stamp: bool = False
-    # Root turn of the submission that planned this node. Earlier hops keep that
-    # root rather than their own turn.
+    # Root turn of the submission that planned this node. A later submission
+    # that roots at this scope replaces it. Other hops keep the planned root.
     open_turn: int | None = None
     # The one-shot for this root has already been applied. Hops leave this false.
     open_turn_consumed: bool = False

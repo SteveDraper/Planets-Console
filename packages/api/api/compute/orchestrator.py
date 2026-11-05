@@ -377,9 +377,10 @@ class ComputeOrchestrator(
     ) -> frozenset[int]:
         """Root turns of in-flight submissions for one player.
 
-        A root is a non-terminal node whose scope turn equals the submission
-        ``open_turn`` copied onto it at plan time. Hops keep that same
-        ``open_turn`` but their own turn is earlier, so they are not roots.
+        A root is a non-terminal node whose scope turn equals its ``open_turn``.
+        That turn is copied on at plan time. A later submission that roots at
+        an in-flight hop adopts the node, so the hop becomes a root. Other hops
+        keep the open they were planned with and are not roots.
         """
         turns: set[int] = set()
         with self._condition:

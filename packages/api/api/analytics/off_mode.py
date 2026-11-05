@@ -8,8 +8,11 @@ table for that scoreboard and for the fleet merge: stamp, bump, or first
 persist, and the generation the open turn's merge keeps.
 
 The open turn is the root of the submission the user opens. The orchestrator
-copies it onto every node of that plan, and fleet job wires carry ``openTurn``
-plus ``catchUp``. Dependency resolution does not record the open turn.
+copies it onto every node of that plan. A later submission that roots at an
+in-flight scope adopts that node, so the open turn becomes this scope. A hop
+joined by a later walk keeps the open it was planned with. Fleet job wires
+carry ``openTurn`` plus ``catchUp`` from the node when the wire is built.
+Dependency resolution does not record the open turn.
 
 Backfill earlier turns is resolved once when a submission is entered and
 carried on that request, on every node of the plan, and on the fleet job wire
