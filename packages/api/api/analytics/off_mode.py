@@ -21,6 +21,10 @@ resubmit read the carried value. A walk that is not part of a submission reads
 the record once at the start of that walk. An accepted walk keeps the value it
 started with.
 
+``off_mode_prior_relation`` classifies the fleet one turn back as a hop, a
+ledger already on the mark, or a stop. The catch-up edge and the scores prior
+both read that classification.
+
 The homeworld locator does not call this module, so opening it does not start
 the walk. The stored record is read by the game service.
 """
@@ -266,6 +270,61 @@ def off_mode_persist_decision(
     )
 
 
+class PriorFleetRelation(StrEnum):
+    """Fleet at the prior turn against the player's evidence mark.
+
+    ``hop_needed`` is a stored turn behind the mark. ``on_mark`` is a stored
+    ledger already on the mark. ``stop`` does not hop and has no on-mark ledger.
+    """
+
+    HOP_NEEDED = "hop_needed"
+    ON_MARK = "on_mark"
+    STOP = "stop"
+
+
+def off_mode_prior_relation(
+    *,
+    turn_number: int,
+    settings: GameSettings,
+    load_prior_turn: Callable[[], TurnInfo | None],
+    prior_ledger: PersistedFleetLedger | None,
+    mark: FleetEvidenceMark,
+) -> PriorFleetRelation:
+    """Classify the fleet at ``turn_number - 1``.
+
+    ``load_prior_turn`` returns that host turn when it is stored, and None when
+    it is not. It runs only when stored-ness can change the result.
+
+    ``on_mark`` is a stored ledger already on the mark. A turn before
+    ``appliesFromTurn`` is on the mark when its ledger is stored. An absent
+    mark matches a stored ledger at generation 0.
+
+    ``hop_needed`` is a stored turn the mark applies to, whose ledger is missing
+    or behind the mark. That hop is a fleet merge, not a scoreboard solve.
+
+    ``stop`` is a prior below the ensure floor, an absent mark with no on-mark
+    ledger, a turn before ``appliesFromTurn`` with no stored ledger, or a turn
+    that is not stored.
+    """
+    prior_turn_number = turn_number - 1
+    if prior_turn_number < accelerated_ensure_floor(settings, turn_number):
+        return PriorFleetRelation.STOP
+
+    ledger_matches_mark = prior_ledger is not None and ledger_matches_evidence_mark(
+        prior_turn_number, prior_ledger, mark
+    )
+    cannot_hop = mark_is_absent(mark) or (
+        mark.applies_from_turn is not None and prior_turn_number < mark.applies_from_turn
+    )
+    if cannot_hop and not ledger_matches_mark:
+        return PriorFleetRelation.STOP
+    if load_prior_turn() is None:
+        return PriorFleetRelation.STOP
+    if ledger_matches_mark:
+        return PriorFleetRelation.ON_MARK
+    return PriorFleetRelation.HOP_NEEDED
+
+
 def off_mode_prior_needs_catch_up(
     *,
     turn_number: int,
@@ -274,22 +333,18 @@ def off_mode_prior_needs_catch_up(
     prior_ledger: PersistedFleetLedger | None,
     mark: FleetEvidenceMark,
 ) -> bool:
-    """Whether fleet at ``turn_number - 1`` is an off-mode catch-up hop.
+    """Whether the fleet at ``turn_number - 1`` is an off-mode catch-up hop.
 
-    Absent mark: no backward walk. Stop at a prior already on the current mark,
-    before ``appliesFromTurn``, or when that turn is not stored. A stored turn
-    that is behind the mark is a hop. The hop is a fleet merge, not a scoreboard
-    solve.
+    True only when ``off_mode_prior_relation`` is ``hop_needed``.
     """
-    prior_turn = turn_number - 1
-    if prior_turn < accelerated_ensure_floor(settings, turn_number):
-        return False
-    if mark_is_absent(mark):
-        return False
-    if mark.applies_from_turn is not None and prior_turn < mark.applies_from_turn:
-        return False
-    if load_turn(prior_turn) is None:
-        return False
-    if prior_ledger is not None and ledger_matches_evidence_mark(prior_turn, prior_ledger, mark):
-        return False
-    return True
+    prior_turn_number = turn_number - 1
+    return (
+        off_mode_prior_relation(
+            turn_number=turn_number,
+            settings=settings,
+            load_prior_turn=lambda: load_turn(prior_turn_number),
+            prior_ledger=prior_ledger,
+            mark=mark,
+        )
+        is PriorFleetRelation.HOP_NEEDED
+    )

@@ -1,9 +1,10 @@
 """Prior-fleet edge for off-mode catch-up.
 
-One edge and one ladder, shared by the fleet and scores ensure resolvers.
+Fleet and scores ensure resolvers share this edge. Whether that prior needs a
+hop is ``off_mode_prior_needs_catch_up``, which reads ``off_mode_prior_relation``.
 The hop is a fleet file brought onto the current evidence mark. It does not
 schedule a scoreboard solve. Resolvers still decide player scope, elimination,
-a missing turn, and whether backfill is on.
+and whether backfill is on.
 """
 
 from __future__ import annotations

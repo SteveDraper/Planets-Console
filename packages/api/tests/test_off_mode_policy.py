@@ -1,10 +1,24 @@
-"""Unit tests for off-mode persist decisions and job-wire parsing."""
+"""Unit tests for off-mode persist decisions, prior-fleet relation, and job-wire parsing."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
-from api.analytics.fleet.types import STAMP_CURRENT_EVIDENCE_MARK, FleetEvidenceMark
-from api.analytics.off_mode import MarkPersist, off_mode_persist_decision, parse_off_mode_wire
+from api.analytics.fleet.types import (
+    STAMP_CURRENT_EVIDENCE_MARK,
+    FleetAcquisitionLedger,
+    FleetEvidenceMark,
+    PersistedFleetLedger,
+)
+from api.analytics.off_mode import (
+    MarkPersist,
+    PriorFleetRelation,
+    off_mode_persist_decision,
+    off_mode_prior_needs_catch_up,
+    off_mode_prior_relation,
+    parse_off_mode_wire,
+)
 from api.errors import ValidationError
 
 
@@ -145,6 +159,217 @@ def test_off_mode_persist_decision_is_one_table():
         )
         assert decision.mark_persist is mark_persist, name
         assert decision.merge_generation == merge_generation, name
+
+
+def test_off_mode_prior_relation_classifies_stop_hop_and_on_mark(sample_turn):
+    """Floor, absent mark, appliesFromTurn, a missing turn, and the mark share one result."""
+    stored = sample_turn
+    normal = replace(sample_turn.settings, acceleratedturns=0)
+    accelerated = replace(sample_turn.settings, acceleratedturns=5)
+    absent = FleetEvidenceMark()
+    ranged = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
+
+    def ledger(generation: int) -> PersistedFleetLedger:
+        return PersistedFleetLedger(
+            ledger=FleetAcquisitionLedger(player_id=1),
+            evidence_generation=generation,
+        )
+
+    cases = (
+        (
+            "prior below the accelerated floor",
+            5,
+            accelerated,
+            True,
+            ledger(3),
+            FleetEvidenceMark(evidence_generation=3, applies_from_turn=4),
+            PriorFleetRelation.STOP,
+            False,
+        ),
+        (
+            "turn 1 has no prior",
+            1,
+            normal,
+            True,
+            ledger(3),
+            FleetEvidenceMark(evidence_generation=3, applies_from_turn=1),
+            PriorFleetRelation.STOP,
+            False,
+        ),
+        (
+            "first turn at the accelerated floor can hop",
+            6,
+            accelerated,
+            True,
+            ledger(1),
+            FleetEvidenceMark(evidence_generation=3, applies_from_turn=5),
+            PriorFleetRelation.HOP_NEEDED,
+            True,
+        ),
+        (
+            "absent mark and no ledger",
+            40,
+            normal,
+            True,
+            None,
+            absent,
+            PriorFleetRelation.STOP,
+            False,
+        ),
+        (
+            "absent mark and a generation-0 ledger on a stored turn",
+            40,
+            normal,
+            True,
+            ledger(0),
+            absent,
+            PriorFleetRelation.ON_MARK,
+            True,
+        ),
+        (
+            "absent mark and a generation-0 ledger when the turn is not stored",
+            40,
+            normal,
+            False,
+            ledger(0),
+            absent,
+            PriorFleetRelation.STOP,
+            True,
+        ),
+        (
+            "absent mark and a ledger behind generation 0",
+            40,
+            normal,
+            True,
+            ledger(2),
+            absent,
+            PriorFleetRelation.STOP,
+            False,
+        ),
+        (
+            "stored ledger before appliesFromTurn is on the mark",
+            40,
+            normal,
+            True,
+            ledger(1),
+            ranged,
+            PriorFleetRelation.ON_MARK,
+            True,
+        ),
+        (
+            "ledger before appliesFromTurn when the turn is not stored",
+            40,
+            normal,
+            False,
+            ledger(1),
+            ranged,
+            PriorFleetRelation.STOP,
+            True,
+        ),
+        (
+            "no ledger before appliesFromTurn",
+            40,
+            normal,
+            True,
+            None,
+            ranged,
+            PriorFleetRelation.STOP,
+            False,
+        ),
+        (
+            "turn not stored inside the mark range",
+            41,
+            normal,
+            False,
+            ledger(3),
+            ranged,
+            PriorFleetRelation.STOP,
+            True,
+        ),
+        (
+            "stored ledger on the mark",
+            41,
+            normal,
+            True,
+            ledger(3),
+            ranged,
+            PriorFleetRelation.ON_MARK,
+            True,
+        ),
+        (
+            "stored ledger behind the mark",
+            41,
+            normal,
+            True,
+            ledger(1),
+            ranged,
+            PriorFleetRelation.HOP_NEEDED,
+            True,
+        ),
+        (
+            "missing ledger inside the mark range",
+            41,
+            normal,
+            True,
+            None,
+            ranged,
+            PriorFleetRelation.HOP_NEEDED,
+            True,
+        ),
+        (
+            "mark with no appliesFromTurn matches its generation",
+            41,
+            normal,
+            True,
+            ledger(3),
+            FleetEvidenceMark(evidence_generation=3),
+            PriorFleetRelation.ON_MARK,
+            True,
+        ),
+        (
+            "mark with no appliesFromTurn and a ledger behind it",
+            41,
+            normal,
+            True,
+            ledger(1),
+            FleetEvidenceMark(evidence_generation=3),
+            PriorFleetRelation.HOP_NEEDED,
+            True,
+        ),
+    )
+    for (
+        name,
+        turn_number,
+        settings,
+        prior_stored,
+        prior_ledger,
+        mark,
+        expected,
+        reads_prior_turn,
+    ) in cases:
+        loaded = stored if prior_stored else None
+        calls: list[int] = []
+
+        def load_prior_turn(loaded=loaded, calls=calls):
+            calls.append(1)
+            return loaded
+
+        relation = off_mode_prior_relation(
+            turn_number=turn_number,
+            settings=settings,
+            load_prior_turn=load_prior_turn,
+            prior_ledger=prior_ledger,
+            mark=mark,
+        )
+        assert relation is expected, name
+        assert bool(calls) is reads_prior_turn, name
+        assert off_mode_prior_needs_catch_up(
+            turn_number=turn_number,
+            settings=settings,
+            load_turn=lambda _turn_number, loaded=loaded: loaded,
+            prior_ledger=prior_ledger,
+            mark=mark,
+        ) is (expected is PriorFleetRelation.HOP_NEEDED), name
 
 
 def test_parse_off_mode_wire_rejects_wrong_types_and_catch_up_without_open_turn():
