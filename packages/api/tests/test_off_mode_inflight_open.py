@@ -28,8 +28,10 @@ from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
 from api.exceptions import FleetScoresEvidenceOpenError
-from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
-from api.services.game_service import backfill_earlier_turns_store_key
+from api.serialization.backfill_earlier_turns import (
+    backfill_earlier_turns_document,
+    backfill_earlier_turns_store_key,
+)
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend

@@ -180,8 +180,10 @@ class TestTurnAnalytics:
         from api.analytics.export_turn_fill import prepare_dependency_chain_turns
         from api.analytics.export_types import ExportScope
         from api.analytics.turn_roster import iter_turn_players
-        from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
-        from api.services.game_service import backfill_earlier_turns_store_key
+        from api.serialization.backfill_earlier_turns import (
+            backfill_earlier_turns_document,
+            backfill_earlier_turns_store_key,
+        )
         from api.services.turn_analytic_service import TurnAnalyticService
         from api.storage.memory_asset import MemoryAssetBackend
 

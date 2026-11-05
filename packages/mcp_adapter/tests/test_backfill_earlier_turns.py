@@ -9,8 +9,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.errors import NotFoundError
-from api.serialization.backfill_earlier_turns import BACKFILL_EARLIER_TURNS_FIELD
-from api.services.game_service import GameService, backfill_earlier_turns_store_key
+from api.serialization.backfill_earlier_turns import (
+    BACKFILL_EARLIER_TURNS_FIELD,
+    backfill_earlier_turns_store_key,
+)
+from api.services.game_service import GameService
 from api.services.turn_load_service import TurnLoadService
 from api.services.viewpoint_eligibility import ViewpointEligibilityService
 from api.storage.memory_asset import MemoryAssetBackend

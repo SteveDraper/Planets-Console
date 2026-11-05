@@ -35,7 +35,7 @@ from api.analytics.fleet.types import (
     StampCurrentEvidenceMark,
 )
 from api.errors import NotFoundError, ValidationError
-from api.services.game_service import read_backfill_earlier_turns
+from api.serialization.backfill_earlier_turns import read_backfill_earlier_turns
 from api.storage.base import StorageBackend
 
 OnSnapshotPersistedCallback = Callable[[int, int, int], None]
@@ -445,7 +445,7 @@ class FleetSnapshotPersistenceService:
             self.delete_ledger(game_id, perspective, turn_number, player_id)
 
     def backfill_earlier_turns_enabled(self, game_id: int) -> bool:
-        """Read Backfill earlier turns. A missing record is off."""
+        """Read Backfill earlier turns through the storage this service holds."""
         return read_backfill_earlier_turns(self._storage, game_id)
 
     def evidence_mark(

@@ -22,8 +22,10 @@ from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
 from api.exceptions import DiscardedWorkRefused
-from api.serialization.backfill_earlier_turns import backfill_earlier_turns_document
-from api.services.game_service import backfill_earlier_turns_store_key
+from api.serialization.backfill_earlier_turns import (
+    backfill_earlier_turns_document,
+    backfill_earlier_turns_store_key,
+)
 from api.services.inference_invalidation_service import (
     InferenceInvalidationService,
     discard_bumped_player_work,

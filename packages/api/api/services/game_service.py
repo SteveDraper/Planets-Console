@@ -11,7 +11,8 @@ from api.models.game_info_operations import GameInfoUpdateOperation
 from api.planets_nu import PlanetsNuClient
 from api.serialization.backfill_earlier_turns import (
     backfill_earlier_turns_document,
-    backfill_earlier_turns_enabled,
+    backfill_earlier_turns_store_key,
+    read_backfill_earlier_turns,
 )
 from api.serialization.codecs import dataclass_deserialization_detail
 from api.serialization.game import game_info_from_json
@@ -25,27 +26,6 @@ from api.transport.sector_display import (
 )
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
-
-
-def backfill_earlier_turns_store_key(game_id: int) -> str:
-    """Storage path for the one Backfill earlier turns record of ``game_id``."""
-    return f"games/{game_id}/backfill-earlier-turns"
-
-
-def read_backfill_earlier_turns(storage: StorageBackend, game_id: int) -> bool:
-    """Return the stored Backfill earlier turns choice.
-
-    A missing record is off. A present record is decoded by the codec, so a
-    non-object or a malformed document is rejected. This read does not check
-    that the game exists and does not submit a walk.
-    """
-    try:
-        raw = storage.get(backfill_earlier_turns_store_key(game_id))
-    except NotFoundError:
-        return False
-    return backfill_earlier_turns_enabled(
-        require_dict(raw, f"backfill earlier turns for game {game_id}")
-    )
 
 
 # (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.

@@ -7,8 +7,12 @@ import pytest
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.config import ApiConfig, set_config
 from api.errors import NotFoundError, ValidationError
-from api.serialization.backfill_earlier_turns import BACKFILL_EARLIER_TURNS_FIELD
-from api.services.game_service import GameService, backfill_earlier_turns_store_key
+from api.serialization.backfill_earlier_turns import (
+    BACKFILL_EARLIER_TURNS_FIELD,
+    backfill_earlier_turns_store_key,
+    read_backfill_earlier_turns,
+)
+from api.services.game_service import GameService
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 from api.storage_factory import clear_backend_cache, get_storage
@@ -108,6 +112,29 @@ def test_malformed_record_is_rejected(service, storage):
     storage.put(key, {BACKFILL_EARLIER_TURNS_FIELD: True, "walkProgress": 1})
     with pytest.raises(ValidationError, match="only backfillEarlierTurns"):
         service.get_backfill_earlier_turns(_GAME_ID)
+
+
+def test_read_record_is_off_when_missing_and_rejects_a_bad_document():
+    storage = MemoryAssetBackend(initial={})
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is False
+    with pytest.raises(NotFoundError):
+        storage.get(backfill_earlier_turns_store_key(_GAME_ID))
+
+    key = backfill_earlier_turns_store_key(_GAME_ID)
+    storage.put(key, ["on"])
+    with pytest.raises(ValidationError, match="Expected JSON object"):
+        read_backfill_earlier_turns(storage, _GAME_ID)
+
+    storage.put(key, {BACKFILL_EARLIER_TURNS_FIELD: "yes"})
+    with pytest.raises(ValidationError, match="boolean"):
+        read_backfill_earlier_turns(storage, _GAME_ID)
+
+    storage.put(key, {BACKFILL_EARLIER_TURNS_FIELD: True, "walkProgress": 1})
+    with pytest.raises(ValidationError, match="only backfillEarlierTurns"):
+        read_backfill_earlier_turns(storage, _GAME_ID)
+
+    storage.put(key, {BACKFILL_EARLIER_TURNS_FIELD: True})
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is True
 
 
 def test_set_rejects_non_boolean_and_missing_game(service, storage):
