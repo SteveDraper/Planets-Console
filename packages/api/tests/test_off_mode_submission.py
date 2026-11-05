@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from api.analytics.export_dependency_walk import is_export_scope_ensure_satisfied
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_orchestration import (
     FleetPersistencePolicy,
@@ -352,3 +353,188 @@ def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn, monk
     )
     assert orchestrator.nodes[scope].backfill_earlier_turns is False
     assert reads == [ctx.game_id]
+
+
+def _fleet_turns(orchestrator: ComputeOrchestrator, player_id: int) -> set[int]:
+    return {
+        node.scope.turn
+        for node in orchestrator.nodes.values()
+        if node.scope.analytic_id == FLEET_ANALYTIC_ID
+        and node.scope.player_id == player_id
+        and isinstance(node.scope.turn, int)
+    }
+
+
+def test_second_open_schedules_no_hop_when_priors_are_on_the_mark(sample_turn):
+    """A finished catch-up hop is on the mark and still not ensure-final.
+
+    The first open of a stale turn submits fleet hops back through
+    ``appliesFromTurn``. After those hops stamp the mark, a second open of
+    that turn submits no earlier hop and does not rewrite those files.
+    Opening the turn after one of those hops submits that turn alone: its
+    prior is on the mark, so no earlier hop is planned. Ensure-final stays
+    false for every hop. The walk omits the hop because the prior is already
+    on the mark.
+    """
+    open_turn = 41
+    applies_from = 38
+    mark_generation = 4
+    hop_turns = (38, 39, 40)
+    host, ctx = context_at_turn(sample_turn, open_turn)
+    player_id = first_player_id(host)
+    persistence = ctx.export_services[FLEET_ANALYTIC_ID].persistence
+    write_evidence_mark(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=mark_generation,
+        applies_from=applies_from,
+    )
+    for turn in hop_turns:
+        store_generation(
+            persistence,
+            ctx.game_id,
+            ctx.perspective,
+            turn,
+            player_id,
+            1,
+            ship_id=turn,
+        )
+
+    def submit(turn: int) -> tuple[ComputeOrchestrator, list[object]]:
+        wires: list[object] = []
+
+        def capture(_node, _step, *, job_wire=None, run_step=None) -> None:
+            del run_step
+            wires.append(job_wire)
+
+        orchestrator = ComputeOrchestrator(
+            compute_registry=FLEET_SCORES_REGISTRY,
+            pool_submitter=capture,
+        )
+        orchestrator.submit(
+            ComputeRequest(
+                ctx=ctx,
+                scope=ComputeScope(
+                    analytic_id=FLEET_ANALYTIC_ID,
+                    game_id=ctx.game_id,
+                    perspective=ctx.perspective,
+                    turn=turn,
+                    player_id=player_id,
+                ),
+            )
+        )
+        return orchestrator, wires
+
+    first, first_wires = submit(open_turn)
+    assert _fleet_turns(first, player_id) == {38, 39, 40, open_turn}
+    assert all(node.scope.analytic_id == FLEET_ANALYTIC_ID for node in first.nodes.values())
+    assert all(node.open_turn == open_turn for node in first.nodes.values())
+    leaf = next(
+        wire
+        for wire in first_wires
+        if isinstance(wire, dict) and wire.get("materializeTurn") == applies_from
+    )
+    assert leaf["openTurn"] == open_turn
+    assert leaf["catchUp"] is True
+
+    policy = FleetPersistencePolicy()
+    epoch = persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id)
+    for turn in hop_turns:
+        scope = ComputeScope(
+            analytic_id=FLEET_ANALYTIC_ID,
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=turn,
+            player_id=player_id,
+        )
+        policy.persist(
+            ctx,
+            scope,
+            {
+                "fleetPersistLeg": "observation",
+                "playerInvalidationGeneration": epoch,
+                **open_turn_fields(open_turn, turn),
+            },
+        )
+        stored = persistence.get_ledger(ctx.game_id, ctx.perspective, turn, player_id)
+        assert stored is not None
+        finalization = policy.persist(
+            ctx,
+            scope,
+            {
+                "fleetPersistLeg": "finalization",
+                "persistedLedgerWire": persisted_fleet_ledger_to_json(stored),
+                "playerInvalidationGeneration": epoch,
+                **open_turn_fields(open_turn, turn),
+            },
+        )
+        assert finalization is None
+
+    catalog = ctx.export_registry[FLEET_ANALYTIC_ID]
+    hop_files = {}
+    for turn in hop_turns:
+        stored = persistence.get_ledger(ctx.game_id, ctx.perspective, turn, player_id)
+        assert stored is not None
+        assert stored.evidence_generation == mark_generation
+        assert stored.provenance.is_final is False
+        assert (
+            is_export_scope_ensure_satisfied(
+                ctx,
+                FLEET_ANALYTIC_ID,
+                ExportScope(
+                    game_id=ctx.game_id,
+                    perspective=ctx.perspective,
+                    turn=turn,
+                    player_id=player_id,
+                ),
+                catalog,
+                quality="final",
+            )
+            is False
+        )
+        hop_files[turn] = persisted_fleet_ledger_to_json(stored)
+
+    def assert_hop_files_unchanged() -> None:
+        for turn, payload in hop_files.items():
+            current = persistence.get_ledger(ctx.game_id, ctx.perspective, turn, player_id)
+            assert current is not None
+            assert persisted_fleet_ledger_to_json(current) == payload
+            assert current.evidence_generation == mark_generation
+
+    # Same turn again. Its prior is the on-mark hop at 40, which is not ensure-final.
+    reopened, reopened_wires = submit(open_turn)
+    reopened_root = ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=open_turn,
+        player_id=player_id,
+    )
+    assert _fleet_turns(reopened, player_id) == {open_turn}
+    assert reopened.nodes[reopened_root].dependency_scopes == ()
+    assert reopened_wires
+    assert all(
+        isinstance(wire, dict)
+        and wire.get("materializeTurn") == open_turn
+        and wire.get("catchUp") is False
+        for wire in reopened_wires
+    )
+    assert_hop_files_unchanged()
+
+    # Turn 40 is the turn after the on-mark hop at 39. Its own file stays put.
+    later, later_wires = submit(40)
+    assert _fleet_turns(later, player_id) == {40}
+    assert len(later.nodes) == 1
+    assert later_wires
+    assert all(
+        isinstance(wire, dict)
+        and wire.get("materializeTurn") == 40
+        and wire.get("catchUp") is False
+        for wire in later_wires
+    )
+    assert_hop_files_unchanged()
+    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == (
+        FleetEvidenceMark(evidence_generation=mark_generation, applies_from_turn=applies_from)
+    )
