@@ -22,21 +22,10 @@ def refuse_stale_fleet_epoch(
 ) -> None:
     """Refuse a fleet persist whose job epoch is not the player's current epoch.
 
-    ``playerInvalidationGeneration`` is required. A missing value is a
+    ``playerInvalidationGeneration`` is required. A missing value raises
     ``ValidationError``. A present non-integer is already rejected by
     ``parse_off_mode_wire``. When the player id is concrete and the current
     epoch differs, the write raises ``DiscardedWorkRefused``.
-
-    Orchestrator epoch retry and ``discard_without_stamp`` stay separate.
-    Epoch retry requeues a step when ``generation_at_submit`` has moved,
-    before persist runs. ``discard_without_stamp`` fails a running node the
-    bump predicate already chose, and it does not read this wire. Persist
-    runs after that check releases the orchestrator lock, and direct persist
-    callers never take the lock. This compare uses the generation captured
-    on the job wire. A mismatch fails the write instead of retrying, so a
-    job built for an old mark cannot stamp. Putting the compare in the
-    orchestrator would either retry that write or teach the generic
-    orchestrator to read a fleet field.
     """
     expected = fields.player_invalidation_generation
     if expected is None:

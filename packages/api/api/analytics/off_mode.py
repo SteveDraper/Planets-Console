@@ -183,28 +183,3 @@ def off_mode_prior_relation(
     if ledger_matches_mark:
         return PriorFleetRelation.ON_MARK
     return PriorFleetRelation.HOP_NEEDED
-
-
-def off_mode_prior_needs_catch_up(
-    *,
-    turn_number: int,
-    settings: GameSettings,
-    load_turn: Callable[[int], TurnInfo | None],
-    prior_ledger: PersistedFleetLedger | None,
-    mark: FleetEvidenceMark,
-) -> bool:
-    """Whether the fleet at ``turn_number - 1`` is an off-mode catch-up hop.
-
-    True only when ``off_mode_prior_relation`` is ``hop_needed``.
-    """
-    prior_turn_number = turn_number - 1
-    return (
-        off_mode_prior_relation(
-            turn_number=turn_number,
-            settings=settings,
-            load_prior_turn=lambda: load_turn(prior_turn_number),
-            prior_ledger=prior_ledger,
-            mark=mark,
-        )
-        is PriorFleetRelation.HOP_NEEDED
-    )

@@ -15,7 +15,7 @@ from api.analytics.fleet.injected_services import (
     FleetComputeServices,
     lookup_fleet_compute_services,
 )
-from api.analytics.off_mode import off_mode_prior_needs_catch_up
+from api.analytics.off_mode import PriorFleetRelation, off_mode_prior_relation
 from api.models.game import TurnInfo
 
 # Prior fleet only. Catch-up finalization does not solve that turn's scoreboard.
@@ -68,8 +68,9 @@ def _off_mode_prior_dependency(
     """Same prior-fleet edge when ``scope.turn - 1`` still needs a hop.
 
     Reads that prior ledger and the player's evidence mark, then applies
-    ``off_mode_prior_needs_catch_up``. Returns no edges when the prior does
-    not need a hop.
+    ``off_mode_prior_relation``. The prior host turn is loaded only when
+    stored-ness can change that result. Returns no edges when the prior is
+    not a hop.
     """
     prior = services.persistence.get_ledger(
         scope.game_id,
@@ -78,12 +79,17 @@ def _off_mode_prior_dependency(
         player_id,
     )
     mark = services.persistence.evidence_mark(scope.game_id, scope.perspective, player_id)
-    if not off_mode_prior_needs_catch_up(
+
+    def load_prior_turn() -> TurnInfo | None:
+        return ctx.load_turn(scope.turn - 1)
+
+    relation = off_mode_prior_relation(
         turn_number=scope.turn,
         settings=turn.settings,
-        load_turn=ctx.load_turn,
+        load_prior_turn=load_prior_turn,
         prior_ledger=prior,
         mark=mark,
-    ):
+    )
+    if relation is not PriorFleetRelation.HOP_NEEDED:
         return ()
     return OFF_MODE_PRIOR_FLEET

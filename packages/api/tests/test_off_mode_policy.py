@@ -17,7 +17,6 @@ from api.analytics.off_mode import (
     MarkPersist,
     PriorFleetRelation,
     off_mode_persist_decision,
-    off_mode_prior_needs_catch_up,
     off_mode_prior_relation,
 )
 from api.analytics.off_mode_wire import parse_off_mode_wire, stamp_submission_open
@@ -367,13 +366,6 @@ def test_off_mode_prior_relation_classifies_stop_hop_and_on_mark(sample_turn):
         )
         assert relation is expected, name
         assert bool(calls) is reads_prior_turn, name
-        assert off_mode_prior_needs_catch_up(
-            turn_number=turn_number,
-            settings=settings,
-            load_turn=lambda _turn_number, loaded=loaded: loaded,
-            prior_ledger=prior_ledger,
-            mark=mark,
-        ) is (expected is PriorFleetRelation.HOP_NEEDED), name
 
 
 def test_parse_off_mode_wire_rejects_wrong_types_and_catch_up_without_open_turn():
