@@ -8,7 +8,7 @@ later live turns. No unconsumed root defers that choice until the wake.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TypeAlias
@@ -21,6 +21,39 @@ from api.compute.scope import ComputeScope
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns_by_analytic
 
 _OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
+
+
+class _AbsentProcessOrchestrator:
+    """Stand-in when this process has not created an orchestrator.
+
+    A persist then has no in-flight fleet or scores work. Creating the real
+    orchestrator would start a worker pool, so root queries are empty and
+    discard is a no-op.
+    """
+
+    def open_turn_roots(self, *_args: object, **_kwargs: object) -> tuple[OpenTurnRoot, ...]:
+        return ()
+
+    def claim_open_turn_roots(self, *_args: object, **_kwargs: object) -> tuple[OpenTurnRoot, ...]:
+        return ()
+
+    def discard_matching_work(self, *_args: object, **_kwargs: object) -> None:
+        return
+
+
+_ABSENT_PROCESS_ORCHESTRATOR = _AbsentProcessOrchestrator()
+
+InFlightOrchestrator: TypeAlias = ComputeOrchestrator | _AbsentProcessOrchestrator
+OrchestratorResolver: TypeAlias = Callable[[], ComputeOrchestrator | None]
+
+
+def in_flight_orchestrator(
+    orchestrator: ComputeOrchestrator | None,
+) -> InFlightOrchestrator:
+    """Process orchestrator, or a stand-in when none exists yet."""
+    if orchestrator is None:
+        return _ABSENT_PROCESS_ORCHESTRATOR
+    return orchestrator
 
 
 def preferred_unconsumed_root_backfill(
@@ -46,14 +79,12 @@ def preferred_unconsumed_root_backfill(
 
 
 def _player_submission_roots(
-    orchestrator: ComputeOrchestrator | None,
+    orchestrator: InFlightOrchestrator,
     game_id: int,
     perspective: int,
     player_id: int,
 ) -> tuple[OpenTurnRoot, ...]:
     """In-flight fleet and scores submission roots for one player."""
-    if orchestrator is None:
-        return ()
     return orchestrator.open_turn_roots(
         game_id=game_id,
         perspective=perspective,
@@ -63,7 +94,7 @@ def _player_submission_roots(
 
 
 def claim_player_open_roots(
-    orchestrator: ComputeOrchestrator | None,
+    orchestrator: InFlightOrchestrator,
     *,
     game_id: int,
     perspective: int,
@@ -72,11 +103,8 @@ def claim_player_open_roots(
 ) -> tuple[OpenTurnRoot, ...]:
     """In-flight roots, consuming ``open_turn`` when an unconsumed root is there.
 
-    No orchestrator yields an empty snapshot. The snapshot is the state from
-    before that consume.
+    The snapshot is the state from before that consume.
     """
-    if orchestrator is None:
-        return ()
     return orchestrator.claim_open_turn_roots(
         game_id=game_id,
         perspective=perspective,
@@ -87,7 +115,7 @@ def claim_player_open_roots(
 
 
 def discard_bumped_player_work(
-    orchestrator: ComputeOrchestrator,
+    orchestrator: InFlightOrchestrator,
     *,
     game_id: int,
     perspective: int,
@@ -162,7 +190,7 @@ class WakeAllRecompute:
 
     def discard_bumped_work(
         self,
-        orchestrator: ComputeOrchestrator | None,
+        orchestrator: InFlightOrchestrator,
         *,
         game_id: int,
         perspective: int,
@@ -199,15 +227,13 @@ class LimitedRecompute:
 
     def discard_bumped_work(
         self,
-        orchestrator: ComputeOrchestrator | None,
+        orchestrator: InFlightOrchestrator,
         *,
         game_id: int,
         perspective: int,
         player_id: int,
     ) -> None:
         """Drop in-flight work that must not stamp the new mark."""
-        if orchestrator is None:
-            return
         discard_bumped_player_work(
             orchestrator,
             game_id=game_id,
@@ -269,7 +295,7 @@ def recompute_decision_at_wake(
     game_id: int,
     perspective: int,
     player_id: int,
-    orchestrator: ComputeOrchestrator | None,
+    orchestrator: InFlightOrchestrator,
 ) -> ResolvedRecompute:
     """Recompute choice when the claim did not snapshot one.
 

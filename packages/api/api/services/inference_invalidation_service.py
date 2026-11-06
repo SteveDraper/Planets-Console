@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING
-
 from api.analytics.fleet.compute_orchestration import wake_fleet_scope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_stream_registry import reschedule_fleet_table_player
@@ -21,19 +18,25 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reschedule_inference_row,
 )
 from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
-from api.analytics.off_mode_bump import (
+from api.compute.orchestrator import ComputeOrchestrator
+from api.compute.scope import ComputeScope
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.services.off_mode_bump import (
     DeferRecompute,
+    InFlightOrchestrator,
+    OrchestratorResolver,
     ResolvedRecompute,
     claim_player_open_roots,
+    in_flight_orchestrator,
     live_turns_for_limited_recompute,
     recompute_decision_at_wake,
     resolve_durable_scores_evidence,
 )
-from api.compute.scope import ComputeScope
-from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
-if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeOrchestrator
+
+def _no_process_orchestrator() -> ComputeOrchestrator | None:
+    """No orchestrator is wired, so none can be in flight."""
+    return None
 
 
 class InferenceInvalidationService:
@@ -43,19 +46,20 @@ class InferenceInvalidationService:
         scheduler: InferenceRowScheduler | None = None,
         *,
         fleet_persistence: FleetSnapshotPersistenceService | None = None,
-        orchestrator: Callable[[], ComputeOrchestrator | None] | None = None,
+        orchestrator: OrchestratorResolver = _no_process_orchestrator,
     ) -> None:
         self._persistence = persistence
         self._scheduler = scheduler
         self._fleet_persistence = fleet_persistence
         self._resolve_orchestrator = orchestrator
 
-    def _current_orchestrator(self) -> ComputeOrchestrator | None:
-        """Orchestrator supplied at construction, resolved now."""
-        resolve = self._resolve_orchestrator
-        if resolve is None:
-            return None
-        return resolve()
+    def _current_orchestrator(self) -> InFlightOrchestrator:
+        """Process orchestrator for this persist, or a stand-in when none exists.
+
+        The stand-in does not start a worker pool. It has no in-flight roots
+        and nothing to discard.
+        """
+        return in_flight_orchestrator(self._resolve_orchestrator())
 
     def _scheduler_instance(self) -> InferenceRowScheduler:
         if self._scheduler is not None:
@@ -156,7 +160,7 @@ class InferenceInvalidationService:
         *,
         resolved: ResolvedRecompute,
         turns_to_reschedule: set[int],
-        orchestrator: ComputeOrchestrator | None,
+        orchestrator: InFlightOrchestrator,
     ) -> None:
         """Wake fleet for an already-resolved recompute.
 

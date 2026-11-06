@@ -19,7 +19,6 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     get_inference_table_stream_registry,
     reset_inference_table_stream_registry_for_tests,
 )
-from api.analytics.off_mode_bump import discard_bumped_player_work
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.scope import ComputeScope
@@ -32,6 +31,7 @@ from api.serialization.backfill_earlier_turns import (
 )
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.services.off_mode_bump import discard_bumped_player_work
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fleet_exports_helpers import first_player_id

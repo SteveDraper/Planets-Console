@@ -5,18 +5,19 @@ from __future__ import annotations
 import threading
 
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.off_mode_bump import (
-    DeferRecompute,
-    LimitedRecompute,
-    WakeAllRecompute,
-    preferred_unconsumed_root_backfill,
-    resolve_durable_scores_evidence,
-)
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import NodeState
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
+from api.services.off_mode_bump import (
+    DeferRecompute,
+    LimitedRecompute,
+    WakeAllRecompute,
+    in_flight_orchestrator,
+    preferred_unconsumed_root_backfill,
+    resolve_durable_scores_evidence,
+)
 
 _ANALYTICS = frozenset({"alpha", "beta"})
 
@@ -349,7 +350,8 @@ def test_resolved_recompute_names_the_turns_it_wakes():
     wake_all = WakeAllRecompute()
     assert wake_all.turns_to_wake({4, 6}) == {4, 6}
     assert wake_all.live_scores_turns_to_wake({4, 6}) == frozenset()
-    wake_all.discard_bumped_work(None, game_id=1, perspective=1, player_id=7)
+    absent = in_flight_orchestrator(None)
+    wake_all.discard_bumped_work(absent, game_id=1, perspective=1, player_id=7)
 
     limited = LimitedRecompute(
         turns=frozenset({40}),
@@ -361,7 +363,7 @@ def test_resolved_recompute_names_the_turns_it_wakes():
     )
     assert limited.turns_to_wake({39, 40, 41}) == frozenset({40})
     assert limited.live_scores_turns_to_wake({39, 40, 41}) == frozenset({40})
-    limited.discard_bumped_work(None, game_id=1, perspective=1, player_id=7)
+    limited.discard_bumped_work(absent, game_id=1, perspective=1, player_id=7)
 
 
 def test_claim_open_turn_roots_returns_the_preimage_then_consumes_that_open():
