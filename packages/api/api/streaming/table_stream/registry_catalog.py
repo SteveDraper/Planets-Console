@@ -62,6 +62,28 @@ def active_table_stream_bindings() -> tuple[dict[str, Any], ...]:
     return tuple(bindings)
 
 
+def active_table_stream_turns_by_analytic(
+    game_id: int,
+    perspective: int,
+    analytic_ids: Collection[str],
+) -> dict[str, frozenset[int]]:
+    """Live table-stream turns for this game and perspective, split by analytic id.
+
+    One walk of the registered registries. An analytic id with no registry, or
+    a registered analytic with no matching scope, is absent. The same turn on
+    two analytics appears under each id.
+    """
+    wanted = frozenset(analytic_ids)
+    found: dict[str, set[int]] = {}
+    for analytic_id, registry, _binding_wire in _registered_table_stream_entries():
+        if analytic_id not in wanted:
+            continue
+        for scope in registry.list_active_scopes():
+            if scope.game_id == game_id and scope.perspective == perspective:
+                found.setdefault(analytic_id, set()).add(scope.turn_number)
+    return {analytic_id: frozenset(turns) for analytic_id, turns in found.items()}
+
+
 def active_table_stream_turns(
     game_id: int,
     perspective: int,
@@ -74,15 +96,8 @@ def active_table_stream_turns(
     contributes no turns. The same turn on more than one analytic is returned
     once.
     """
-    wanted = frozenset(analytic_ids)
-    turns: set[int] = set()
-    for analytic_id, registry, _binding_wire in _registered_table_stream_entries():
-        if analytic_id not in wanted:
-            continue
-        for scope in registry.list_active_scopes():
-            if scope.game_id == game_id and scope.perspective == perspective:
-                turns.add(scope.turn_number)
-    return frozenset(turns)
+    by_analytic = active_table_stream_turns_by_analytic(game_id, perspective, analytic_ids)
+    return frozenset().union(*by_analytic.values())
 
 
 def reset_table_stream_registry_catalog_for_tests() -> None:

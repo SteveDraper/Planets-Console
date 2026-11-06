@@ -29,10 +29,8 @@ from api.analytics.off_mode_bump import (
     recompute_decision_at_wake,
     resolve_durable_scores_evidence,
 )
-from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.streaming.table_stream.registry_catalog import active_table_stream_turns
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -104,7 +102,9 @@ class InferenceInvalidationService:
         replaces a terminal that is no longer ensure-final.
 
         The ledger bump runs first. The turns that wake are chosen after it,
-        from the current backfill record, roots, and live streams.
+        from the current backfill record, roots, and one live-stream scan.
+        A limited recompute reschedules scores rows for woken turns that this
+        scan recorded as scores.
         """
         fleet = self._fleet_persistence
         if fleet is None:
@@ -139,6 +139,13 @@ class InferenceInvalidationService:
             turns_to_reschedule=turns_to_reschedule,
             orchestrator=orchestrator,
         )
+        self._wake_scores_rows_for_recompute(
+            game_id,
+            perspective,
+            player_id,
+            resolved=resolved,
+            turns_to_reschedule=turns_to_reschedule,
+        )
         return turns_to_reschedule
 
     def _update_fleet_after_evidence(
@@ -162,11 +169,6 @@ class InferenceInvalidationService:
             perspective=perspective,
             player_id=player_id,
         )
-        live_scores_turns = (
-            self._live_scores_turns(game_id, perspective)
-            if resolved.reschedules_live_scores()
-            else frozenset()
-        )
         for fleet_turn in sorted(resolved.turns_to_wake(turns_to_reschedule)):
             stream_woke = reschedule_fleet_table_player(
                 FleetTableStreamScope(
@@ -176,8 +178,6 @@ class InferenceInvalidationService:
                 ),
                 player_id,
             )
-            if fleet_turn in live_scores_turns:
-                reschedule_inference_row(self._scope(game_id, perspective, fleet_turn), player_id)
             if stream_woke:
                 continue
             wake_fleet_scope(
@@ -190,8 +190,18 @@ class InferenceInvalidationService:
                 )
             )
 
-    def _live_scores_turns(self, game_id: int, perspective: int) -> frozenset[int]:
-        return active_table_stream_turns(game_id, perspective, (SCORES_ANALYTIC_ID,))
+    def _wake_scores_rows_for_recompute(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        *,
+        resolved: ResolvedRecompute,
+        turns_to_reschedule: set[int],
+    ) -> None:
+        """Reschedule scores rows for woken turns the recompute's scan recorded as scores."""
+        for turn in sorted(resolved.live_scores_turns_to_wake(turns_to_reschedule)):
+            reschedule_inference_row(self._scope(game_id, perspective, turn), player_id)
 
     def wire_fleet_invalidation_to_persistence(self) -> None:
         """Register fleet snapshot invalidation on inference row persistence writes."""
@@ -228,6 +238,7 @@ class InferenceInvalidationService:
         that root wakes from the recompute snapshot taken with the claim. A
         host turn with no unconsumed root does not consume. The ledger bump
         runs before that deferred choice reads current roots and live streams.
+        A limited recompute reschedules scores rows from the scan that chose it.
         """
         orchestrator = self._current_orchestrator()
         fleet = self._fleet_persistence
@@ -245,9 +256,9 @@ class InferenceInvalidationService:
 
         wake_backfill = fleet.backfill_earlier_turns_enabled(game_id)
         mark = fleet.evidence_mark(game_id, perspective, player_id)
-        # Live turns are the pre-claim stream scan used to choose the recompute.
-        # The scan takes its own locks, so it stays outside the claim.
-        live_turns = live_turns_for_limited_recompute(
+        # One pre-claim scan, split by analytic id. The scan takes its own
+        # locks, so it stays outside the claim.
+        live_turns_by_analytic = live_turns_for_limited_recompute(
             game_id,
             perspective,
             durable=True,
@@ -264,7 +275,7 @@ class InferenceInvalidationService:
             roots,
             host_turn=host_turn,
             wake_backfill=wake_backfill,
-            live_turns=live_turns,
+            live_turns_by_analytic=live_turns_by_analytic,
         )
         # The carried choice classifies the mark. Catch-up and the stored
         # generation stay unset; they do not change this classification.
@@ -307,6 +318,13 @@ class InferenceInvalidationService:
             resolved=resolved,
             turns_to_reschedule=turns_to_reschedule,
             orchestrator=orchestrator,
+        )
+        self._wake_scores_rows_for_recompute(
+            game_id,
+            perspective,
+            player_id,
+            resolved=resolved,
+            turns_to_reschedule=turns_to_reschedule,
         )
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:

@@ -275,7 +275,7 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
         (fleet, scores),
         host_turn=40,
         wake_backfill=False,
-        live_turns=frozenset({40}),
+        live_turns_by_analytic={FLEET_ANALYTIC_ID: frozenset({40})},
     )
     assert preferred.decision_backfill is False
     assert preferred.wake_backfill is False
@@ -291,7 +291,10 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
         (early_shell, scores),
         host_turn=40,
         wake_backfill=False,
-        live_turns=frozenset({39, 40}),
+        live_turns_by_analytic={
+            FLEET_ANALYTIC_ID: frozenset({39}),
+            SCORES_ANALYTIC_ID: frozenset({40}),
+        },
     )
     assert evidence.open_turn == 40
     assert evidence.decision_backfill is False
@@ -299,15 +302,19 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
     assert isinstance(evidence.recompute, LimitedRecompute)
     limited = evidence.recompute
     assert limited.shell_turns == frozenset({39, 40})
-    assert limited.live_turns == frozenset({39, 40})
+    assert limited.live_turns_by_analytic == {
+        FLEET_ANALYTIC_ID: frozenset({39}),
+        SCORES_ANALYTIC_ID: frozenset({40}),
+    }
     assert limited.turns == frozenset({40})
+    assert limited.live_scores_turns_to_wake(set()) == frozenset({40})
 
     # The current record wakes every known turn even when the carried choice is off.
     woken = resolve_durable_scores_evidence(
         (scores,),
         host_turn=40,
         wake_backfill=True,
-        live_turns=frozenset(),
+        live_turns_by_analytic={},
     )
     assert woken.decision_backfill is False
     assert woken.wake_backfill is True
@@ -323,7 +330,7 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
         (consumed,),
         host_turn=40,
         wake_backfill=True,
-        live_turns=frozenset({40}),
+        live_turns_by_analytic={SCORES_ANALYTIC_ID: frozenset({40})},
     )
     assert absent.open_turn is None
     assert absent.decision_backfill is None
@@ -341,16 +348,19 @@ def test_resolved_recompute_names_the_turns_it_wakes():
     """Wake-all uses the ledger bump. A limited choice uses the turns it stored."""
     wake_all = WakeAllRecompute()
     assert wake_all.turns_to_wake({4, 6}) == {4, 6}
-    assert wake_all.reschedules_live_scores() is False
+    assert wake_all.live_scores_turns_to_wake({4, 6}) == frozenset()
     wake_all.discard_bumped_work(None, game_id=1, perspective=1, player_id=7)
 
     limited = LimitedRecompute(
         turns=frozenset({40}),
         shell_turns=frozenset({39, 40}),
-        live_turns=frozenset({39, 40}),
+        live_turns_by_analytic={
+            FLEET_ANALYTIC_ID: frozenset({39}),
+            SCORES_ANALYTIC_ID: frozenset({40, 41}),
+        },
     )
     assert limited.turns_to_wake({39, 40, 41}) == frozenset({40})
-    assert limited.reschedules_live_scores() is True
+    assert limited.live_scores_turns_to_wake({39, 40, 41}) == frozenset({40})
     limited.discard_bumped_work(None, game_id=1, perspective=1, player_id=7)
 
 

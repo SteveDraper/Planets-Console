@@ -8,7 +8,9 @@ later live turns. No unconsumed root defers that choice until the wake.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TypeAlias
 
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -16,7 +18,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope
-from api.streaming.table_stream.registry_catalog import active_table_stream_turns
+from api.streaming.table_stream.registry_catalog import active_table_stream_turns_by_analytic
 
 _OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
 
@@ -133,15 +135,16 @@ def live_turns_for_limited_recompute(
     *,
     durable: bool,
     backfill_enabled: bool,
-) -> frozenset[int]:
-    """Live fleet and scores streams, or empty when the recompute will not use them.
+) -> dict[str, frozenset[int]]:
+    """Live fleet and scores streams by analytic id, or empty when unused.
 
-    The scan takes its own locks. Callers that claim a root run it before that
-    claim. Held admission and backfill on wake every known turn and do not scan.
+    One registry walk. Callers that claim a root run it before that claim,
+    because the scan takes its own locks. Held admission and backfill on wake
+    every known turn and do not scan.
     """
     if not _limits_recompute(durable=durable, backfill_enabled=backfill_enabled):
-        return frozenset()
-    return active_table_stream_turns(game_id, perspective, _OPEN_TURN_ANALYTICS)
+        return {}
+    return active_table_stream_turns_by_analytic(game_id, perspective, _OPEN_TURN_ANALYTICS)
 
 
 @dataclass(frozen=True)
@@ -168,9 +171,9 @@ class WakeAllRecompute:
         """In-flight fleet and scoreboard work stays."""
         return
 
-    def reschedules_live_scores(self) -> bool:
+    def live_scores_turns_to_wake(self, rescheduled: set[int]) -> frozenset[int]:
         """Scores rows stay on their own schedule."""
-        return False
+        return frozenset()
 
 
 @dataclass(frozen=True)
@@ -180,11 +183,15 @@ class LimitedRecompute:
     ``turns`` are those sets restricted to the evidence host turn and later.
     Discard uses the unfiltered sets: a shell or live turn before the evidence
     host turn is still in-flight work for this player.
+
+    ``live_turns_by_analytic`` is that bump's one live-stream scan, split by
+    analytic id. Discard and the turns to wake use every analytic. Scores
+    reschedule uses the scores id from this same scan.
     """
 
     turns: frozenset[int]
     shell_turns: frozenset[int]
-    live_turns: frozenset[int]
+    live_turns_by_analytic: Mapping[str, frozenset[int]]
 
     def turns_to_wake(self, rescheduled: set[int]) -> set[int] | frozenset[int]:
         """Shell and live turns at the evidence host turn and later."""
@@ -207,16 +214,22 @@ class LimitedRecompute:
             perspective=perspective,
             player_id=player_id,
             shell_turns=self.shell_turns,
-            live_turns=self.live_turns,
+            live_turns=_union_live_turns(self.live_turns_by_analytic),
         )
 
-    def reschedules_live_scores(self) -> bool:
-        """A live scores stream on a woken turn reschedules that scores row."""
-        return True
+    def live_scores_turns_to_wake(self, rescheduled: set[int]) -> frozenset[int]:
+        """Woken turns this scan recorded as live scores streams."""
+        scores_turns = self.live_turns_by_analytic.get(SCORES_ANALYTIC_ID, frozenset())
+        return frozenset(turn for turn in self.turns_to_wake(rescheduled) if turn in scores_turns)
 
 
 RecomputeDecision: TypeAlias = DeferRecompute | WakeAllRecompute | LimitedRecompute
 ResolvedRecompute: TypeAlias = WakeAllRecompute | LimitedRecompute
+
+
+def _union_live_turns(live_turns_by_analytic: Mapping[str, frozenset[int]]) -> frozenset[int]:
+    """Every turn in a per-analytic live-stream scan."""
+    return frozenset().union(*live_turns_by_analytic.values())
 
 
 def _assemble_recompute(
@@ -224,7 +237,7 @@ def _assemble_recompute(
     host_turn: int,
     durable: bool,
     backfill_enabled: bool,
-    live_turns: frozenset[int],
+    live_turns_by_analytic: Mapping[str, frozenset[int]],
     roots: tuple[OpenTurnRoot, ...],
 ) -> ResolvedRecompute:
     """Wake every known turn unless this is a durable bump with backfill off.
@@ -238,12 +251,13 @@ def _assemble_recompute(
     if not _limits_recompute(durable=durable, backfill_enabled=backfill_enabled):
         return WakeAllRecompute()
     shell_turns = frozenset(root.open_turn for root in roots)
+    live_turns = _union_live_turns(live_turns_by_analytic)
     turns = {turn for turn in live_turns if turn >= host_turn}
     turns.update(turn for turn in shell_turns if turn >= host_turn)
     return LimitedRecompute(
         turns=frozenset(turns),
         shell_turns=shell_turns,
-        live_turns=live_turns,
+        live_turns_by_analytic=MappingProxyType(dict(live_turns_by_analytic)),
     )
 
 
@@ -268,7 +282,7 @@ def recompute_decision_at_wake(
         host_turn=host_turn,
         durable=durable,
         backfill_enabled=backfill_enabled,
-        live_turns=live_turns_for_limited_recompute(
+        live_turns_by_analytic=live_turns_for_limited_recompute(
             game_id,
             perspective,
             durable=durable,
@@ -300,7 +314,8 @@ class DurableScoresEvidence:
 
     ``recompute`` is taken from the claim while that root was still unconsumed.
     ``DeferRecompute`` when ``open_turn`` is None; the wake then reads current
-    roots and live streams.
+    roots and live streams. A limited recompute keeps the per-analytic split
+    of the scan that chose it, and the scores wake reads that split.
     """
 
     open_turn: int | None
@@ -314,15 +329,15 @@ def resolve_durable_scores_evidence(
     *,
     host_turn: int,
     wake_backfill: bool,
-    live_turns: frozenset[int],
+    live_turns_by_analytic: Mapping[str, frozenset[int]],
 ) -> DurableScoresEvidence:
     """Carried submission choice and the current backfill record.
 
     ``open_turn`` is set exactly when an unconsumed root at ``host_turn``
     carries a backfill choice. A scores root wins over a fleet root. That is
-    also when that root is consumed. ``live_turns`` is the pre-claim stream
-    scan. It is unused when ``wake_backfill`` is on, because that setting
-    wakes every known turn.
+    also when that root is consumed. ``live_turns_by_analytic`` is the
+    pre-claim stream scan, split by analytic id. It is unused when
+    ``wake_backfill`` is on, because that setting wakes every known turn.
     """
     carried = preferred_unconsumed_root_backfill(
         roots,
@@ -344,7 +359,7 @@ def resolve_durable_scores_evidence(
             host_turn=host_turn,
             durable=True,
             backfill_enabled=wake_backfill,
-            live_turns=live_turns,
+            live_turns_by_analytic=live_turns_by_analytic,
             roots=roots,
         ),
     )

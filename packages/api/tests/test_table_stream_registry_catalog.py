@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.streaming.table_stream.registry_catalog import (
     active_table_stream_bindings,
     active_table_stream_turns,
+    active_table_stream_turns_by_analytic,
     reset_table_stream_registry_catalog_for_tests,
 )
 
@@ -107,6 +108,10 @@ def test_active_table_stream_turns_filters_game_perspective_and_analytic() -> No
     )
 
     assert active_table_stream_turns(10, 2, ("fleet", "scores")) == frozenset({8, 9, 4})
+    assert active_table_stream_turns_by_analytic(10, 2, ("fleet", "scores")) == {
+        "fleet": frozenset({8, 9}),
+        "scores": frozenset({9, 4}),
+    }
     assert active_table_stream_turns(10, 2, ("scores",)) == frozenset({9, 4})
     assert active_table_stream_turns(10, 2, ("fleet",)) == frozenset({8, 9})
     assert active_table_stream_turns(11, 2, ("fleet", "scores")) == frozenset({8})

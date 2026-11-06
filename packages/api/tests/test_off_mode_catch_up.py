@@ -14,6 +14,11 @@ from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import FleetEvidenceMark
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
 from api.analytics.homeworld_locator.exports import EXPORT_CATALOG as HOMEWORLD_EXPORT_CATALOG
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    get_inference_table_stream_registry,
+    reset_inference_table_stream_registry_for_tests,
+)
 from api.analytics.off_mode_bump import discard_bumped_player_work
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
@@ -601,6 +606,110 @@ def test_bump_recomputes_shell_and_live_turns_and_leaves_other_later_turns_on_di
     untouched = persistence.get_ledger(ctx.game_id, ctx.perspective, 6, player_id)
     assert live is not None and live.ledger.records[0].record_id == "ship-5"
     assert untouched is not None and untouched.ledger.records[0].record_id == "ship-6"
+
+
+def test_limited_bump_reschedules_scores_rows_from_the_same_live_scan(
+    sample_turn,
+    monkeypatch,
+):
+    """A limited bump walks live streams once and wakes scores only on that scan.
+
+    A fleet-only stream and a scores stream before the host turn do not
+    reschedule a scores row.
+    """
+    host, ctx = context_at_turn(sample_turn, 6)
+    player_id = first_player_id(host)
+    persistence = ctx.export_services[FLEET_ANALYTIC_ID].persistence
+    store_generation(persistence, ctx.game_id, ctx.perspective, 4, player_id, 1, ship_id=4)
+    store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 1, ship_id=5)
+    store_generation(persistence, ctx.game_id, ctx.perspective, 6, player_id, 1, ship_id=6)
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 4)
+    fleet_turns: list[int] = []
+    scores_turns: list[int] = []
+    list_calls = {"fleet": 0, "scores": 0}
+
+    def spy_fleet(scope, _player_id):
+        fleet_turns.append(scope.turn_number)
+        return False
+
+    def spy_scores(scope, _player_id):
+        scores_turns.append(scope.turn_number)
+        return True
+
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
+        spy_fleet,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.wake_fleet_scope",
+        lambda _scope, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_inference_row",
+        spy_scores,
+    )
+    reset_fleet_table_stream_registry_for_tests()
+    reset_inference_table_stream_registry_for_tests()
+    get_fleet_table_stream_registry().attach(
+        FleetTableStreamScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn_number=5,
+        ),
+        object(),
+    )
+    scores_registry = get_inference_table_stream_registry()
+    scores_registry.attach(
+        InferenceStreamScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn_number=3,
+        ),
+        object(),
+    )
+    scores_registry.attach(
+        InferenceStreamScope(
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn_number=6,
+        ),
+        object(),
+    )
+    fleet_registry = get_fleet_table_stream_registry()
+    fleet_list = fleet_registry.list_active_scopes
+    scores_list = scores_registry.list_active_scopes
+
+    def counting_fleet():
+        list_calls["fleet"] += 1
+        return fleet_list()
+
+    def counting_scores():
+        list_calls["scores"] += 1
+        return scores_list()
+
+    monkeypatch.setattr(fleet_registry, "list_active_scopes", counting_fleet)
+    monkeypatch.setattr(scores_registry, "list_active_scopes", counting_scores)
+    invalidation = InferenceInvalidationService(
+        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
+    )
+    try:
+        invalidation.on_inference_evidence_updated(
+            ctx.game_id,
+            ctx.perspective,
+            4,
+            player_id,
+            durable=True,
+        )
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+        reset_inference_table_stream_registry_for_tests()
+
+    assert fleet_turns == [4, 5, 6]
+    assert scores_turns == [6]
+    assert list_calls == {"fleet": 1, "scores": 1}
 
 
 def test_backfill_on_keeps_the_final_prior_dependency(sample_turn):
