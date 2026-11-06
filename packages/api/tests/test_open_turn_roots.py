@@ -5,15 +5,18 @@ from __future__ import annotations
 import threading
 
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.off_mode_bump import (
+    DeferRecompute,
+    LimitedRecompute,
+    WakeAllRecompute,
+    preferred_unconsumed_root_backfill,
+    resolve_durable_scores_evidence,
+)
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import NodeState
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
-from api.services.inference_invalidation_service import (
-    preferred_unconsumed_root_backfill,
-    resolve_durable_scores_evidence,
-)
 
 _ANALYTICS = frozenset({"alpha", "beta"})
 
@@ -276,8 +279,7 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
     )
     assert preferred.decision_backfill is False
     assert preferred.wake_backfill is False
-    assert preferred.chosen is not None
-    assert preferred.chosen.limited is not None
+    assert isinstance(preferred.recompute, LimitedRecompute)
 
     early_shell = OpenTurnRoot(
         analytic_id=FLEET_ANALYTIC_ID,
@@ -294,9 +296,8 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
     assert evidence.open_turn == 40
     assert evidence.decision_backfill is False
     assert evidence.wake_backfill is False
-    assert evidence.chosen is not None
-    limited = evidence.chosen.limited
-    assert limited is not None
+    assert isinstance(evidence.recompute, LimitedRecompute)
+    limited = evidence.recompute
     assert limited.shell_turns == frozenset({39, 40})
     assert limited.live_turns == frozenset({39, 40})
     assert limited.turns == frozenset({40})
@@ -310,8 +311,7 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
     )
     assert woken.decision_backfill is False
     assert woken.wake_backfill is True
-    assert woken.chosen is not None
-    assert woken.chosen.limited is None
+    assert isinstance(woken.recompute, WakeAllRecompute)
 
     consumed = OpenTurnRoot(
         analytic_id=SCORES_ANALYTIC_ID,
@@ -328,7 +328,7 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
     assert absent.open_turn is None
     assert absent.decision_backfill is None
     assert absent.wake_backfill is True
-    assert absent.chosen is None
+    assert isinstance(absent.recompute, DeferRecompute)
     carried = preferred_unconsumed_root_backfill(
         (consumed,),
         host_turn=40,

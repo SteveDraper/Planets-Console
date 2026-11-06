@@ -15,6 +15,7 @@ from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import FleetEvidenceMark
 from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_ANALYTIC_ID
 from api.analytics.homeworld_locator.exports import EXPORT_CATALOG as HOMEWORLD_EXPORT_CATALOG
+from api.analytics.off_mode_bump import discard_bumped_player_work
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.runtime import peek_compute_orchestrator
@@ -26,10 +27,7 @@ from api.serialization.backfill_earlier_turns import (
     backfill_earlier_turns_document,
     backfill_earlier_turns_store_key,
 )
-from api.services.inference_invalidation_service import (
-    InferenceInvalidationService,
-    discard_bumped_player_work,
-)
+from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
