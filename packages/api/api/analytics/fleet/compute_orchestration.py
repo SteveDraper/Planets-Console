@@ -9,7 +9,6 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.injected_services import FleetComputeServices, resolve_fleet_services
-from api.analytics.fleet.off_mode_job_wire import stamp_submission_open
 from api.analytics.fleet.off_mode_persist import (
     observation_merge_generation,
     refuse_stale_fleet_epoch,
@@ -19,7 +18,7 @@ from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.types import PersistedFleetLedger
-from api.analytics.off_mode import parse_off_mode_wire
+from api.analytics.off_mode_wire import parse_off_mode_wire, stamp_submission_open
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import (
     WILDCARD,

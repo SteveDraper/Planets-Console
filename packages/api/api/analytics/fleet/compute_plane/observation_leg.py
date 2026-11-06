@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from api.analytics.off_mode import copy_submission_open_fields
+from api.analytics.off_mode_wire import copy_submission_open_fields
 from api.compute.wire import StepResult
 
 FLEET_PERSIST_LEG_OBSERVATION = "observation"

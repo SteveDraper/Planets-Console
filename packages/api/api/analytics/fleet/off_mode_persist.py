@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.types import StampCurrentEvidenceMark
-from api.analytics.off_mode import OffModeWireFields, off_mode_persist_decision
+from api.analytics.off_mode import off_mode_persist_decision
+from api.analytics.off_mode_wire import OffModeWireFields
 from api.compute.scope import ComputeScope
 from api.exceptions import DiscardedWorkRefused, ValidationError
 

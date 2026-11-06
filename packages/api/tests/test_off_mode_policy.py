@@ -6,7 +6,6 @@ from dataclasses import replace
 
 import pytest
 from api.analytics.fleet.injected_services import FleetComputeServices
-from api.analytics.fleet.off_mode_job_wire import stamp_submission_open
 from api.analytics.fleet.off_mode_persist import observation_merge_generation
 from api.analytics.fleet.types import (
     STAMP_CURRENT_EVIDENCE_MARK,
@@ -20,8 +19,8 @@ from api.analytics.off_mode import (
     off_mode_persist_decision,
     off_mode_prior_needs_catch_up,
     off_mode_prior_relation,
-    parse_off_mode_wire,
 )
+from api.analytics.off_mode_wire import parse_off_mode_wire, stamp_submission_open
 from api.compute.scope import WILDCARD, ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError

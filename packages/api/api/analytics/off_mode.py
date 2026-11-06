@@ -31,10 +31,9 @@ the walk. The stored record is read by the game service.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
 
 from api.analytics.fleet.types import (
     STAMP_CURRENT_EVIDENCE_MARK,
@@ -43,109 +42,7 @@ from api.analytics.fleet.types import (
     StampCurrentEvidenceMark,
 )
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-from api.exceptions import ValidationError
 from api.models.game import GameSettings, TurnInfo
-
-BACKFILL_EARLIER_TURNS_WIRE_FIELD = "backfillEarlierTurns"
-OPEN_TURN_WIRE_FIELD = "openTurn"
-CATCH_UP_WIRE_FIELD = "catchUp"
-_PLAYER_INVALIDATION_GENERATION_FIELD = "playerInvalidationGeneration"
-
-
-def _require_json_int(value: object, *, field: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValidationError(f"{field} must be an integer")
-    return value
-
-
-def _require_json_bool(value: object, *, field: str) -> bool:
-    if not isinstance(value, bool):
-        raise ValidationError(f"{field} must be a boolean")
-    return value
-
-
-@dataclass(frozen=True)
-class OffModeWireFields:
-    """Off-mode fields on a fleet job wire or persist payload.
-
-    ``open_turn`` is None when the wire is not an off-mode open. ``catch_up``
-    is true only for an earlier hop of that open. ``backfill_earlier_turns``
-    is None when the wire does not carry the choice. ``player_invalidation_generation``
-    is None when the wire does not carry an epoch.
-    """
-
-    open_turn: int | None
-    catch_up: bool
-    backfill_earlier_turns: bool | None
-    player_invalidation_generation: int | None
-
-
-def parse_off_mode_wire(wire: Mapping[str, object]) -> OffModeWireFields:
-    """Read openTurn, catchUp, backfillEarlierTurns, and playerInvalidationGeneration.
-
-    A missing field keeps the meaning above. A present field of the wrong JSON
-    type is a ``ValidationError``. ``catchUp: true`` without ``openTurn`` is a
-    ``ValidationError``. Bool is not an integer.
-    """
-    if OPEN_TURN_WIRE_FIELD in wire:
-        open_turn = _require_json_int(wire[OPEN_TURN_WIRE_FIELD], field=OPEN_TURN_WIRE_FIELD)
-    else:
-        open_turn = None
-
-    if CATCH_UP_WIRE_FIELD in wire:
-        catch_up = _require_json_bool(wire[CATCH_UP_WIRE_FIELD], field=CATCH_UP_WIRE_FIELD)
-    else:
-        catch_up = False
-    if catch_up and open_turn is None:
-        raise ValidationError("catchUp requires openTurn")
-
-    if BACKFILL_EARLIER_TURNS_WIRE_FIELD in wire:
-        backfill_earlier_turns = _require_json_bool(
-            wire[BACKFILL_EARLIER_TURNS_WIRE_FIELD],
-            field=BACKFILL_EARLIER_TURNS_WIRE_FIELD,
-        )
-    else:
-        backfill_earlier_turns = None
-
-    if _PLAYER_INVALIDATION_GENERATION_FIELD in wire:
-        player_invalidation_generation = _require_json_int(
-            wire[_PLAYER_INVALIDATION_GENERATION_FIELD],
-            field=_PLAYER_INVALIDATION_GENERATION_FIELD,
-        )
-    else:
-        player_invalidation_generation = None
-
-    return OffModeWireFields(
-        open_turn=open_turn,
-        catch_up=catch_up,
-        backfill_earlier_turns=backfill_earlier_turns,
-        player_invalidation_generation=player_invalidation_generation,
-    )
-
-
-def copy_submission_open_fields(
-    job_wire: Mapping[str, Any],
-    payload: MutableMapping[str, Any],
-) -> None:
-    """Copy submission open fields and the job epoch onto a persist payload.
-
-    A wire without an integer open turn leaves ``openTurn`` and ``catchUp``
-    unset. ``catchUp`` is copied only together with that open turn. A carried
-    ``backfillEarlierTurns`` boolean is copied on its own, including when
-    backfill is on and the open turn is left off the wire. A carried integer
-    ``playerInvalidationGeneration`` is copied. A missing epoch stays off the
-    payload so persist can reject it.
-    """
-    fields = parse_off_mode_wire(job_wire)
-    if fields.backfill_earlier_turns is not None:
-        payload[BACKFILL_EARLIER_TURNS_WIRE_FIELD] = fields.backfill_earlier_turns
-    if fields.player_invalidation_generation is not None:
-        payload[_PLAYER_INVALIDATION_GENERATION_FIELD] = fields.player_invalidation_generation
-    if fields.open_turn is None:
-        return
-    payload[OPEN_TURN_WIRE_FIELD] = fields.open_turn
-    if fields.catch_up:
-        payload[CATCH_UP_WIRE_FIELD] = True
 
 
 def ledger_matches_evidence_mark(
