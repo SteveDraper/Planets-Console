@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import prepare_dependency_chain_turns
 from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_compute_dag
@@ -45,8 +44,9 @@ def resolve_submission_open(request: ComputeRequest) -> tuple[ComputeRequest, Su
     """Return the request carrying its submission open, and that value.
 
     A request that already carries a backfill choice keeps it. Otherwise the
-    record is read once. A request with no query context keeps backfill off.
-    The open turn is the explicit root when present, otherwise the scope turn.
+    query context's reader is called once. A request with no query context
+    keeps backfill off. The open turn is the explicit root when present,
+    otherwise the scope turn.
     """
     open_turn = submission_open_turn(request)
     carried = request.submission_open
@@ -62,7 +62,7 @@ def resolve_submission_open(request: ComputeRequest) -> tuple[ComputeRequest, Su
     if bundle is None:
         enabled = False
     else:
-        enabled = backfill_earlier_turns_for_context(bundle.query_context)
+        enabled = bundle.query_context.backfill_earlier_turns_enabled()
     resolved = SubmissionOpen(open_turn=open_turn, backfill_earlier_turns=enabled)
     return replace(request, submission_open=resolved), resolved
 

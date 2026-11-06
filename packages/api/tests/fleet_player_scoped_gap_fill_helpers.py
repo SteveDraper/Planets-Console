@@ -146,6 +146,7 @@ def ensure_fleet_export_gap_fill_context(
         load_turn=stored_turns.get,
         inference_materialization=fleet_services.inference_materialization,
     )
+    ctx.read_backfill_earlier_turns = fleet_persistence.backfill_earlier_turns_enabled
     scope = ExportScope(
         game_id=GAME_ID,
         perspective=persp,

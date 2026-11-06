@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, NoReturn, cast
 
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import (
     DependencyChainFillError,
@@ -228,7 +227,7 @@ def _prepare_homeworld_ensure_chain(
             ctx,
             ANALYTIC_ID,
             scope,
-            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
         )
     except DependencyChainFillError as error:
         if error.auto_fetch_unavailable or error.reason == "turn_fetch_failed":

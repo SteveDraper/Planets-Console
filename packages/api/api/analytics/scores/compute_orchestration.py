@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
@@ -87,7 +86,7 @@ def _backfill_choice(
     """Carried submission choice, or one read when this wire has no submission."""
     if submission_open is not None:
         return submission_open.backfill_earlier_turns
-    return backfill_earlier_turns_for_context(ctx)
+    return ctx.backfill_earlier_turns_enabled()
 
 
 def build_scores_materialize_job_wire(

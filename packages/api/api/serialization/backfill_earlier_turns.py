@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
+
 from api.errors import NotFoundError, ValidationError
 from api.storage.base import StorageBackend
 
@@ -45,3 +48,8 @@ def read_backfill_earlier_turns(storage: StorageBackend, game_id: int) -> bool:
     if not isinstance(raw, dict):
         raise ValidationError(f"Expected JSON object for {label}, got {type(raw).__name__}")
     return backfill_earlier_turns_enabled(raw)
+
+
+def backfill_earlier_turns_reader(storage: StorageBackend) -> Callable[[int], bool]:
+    """Bind ``read_backfill_earlier_turns`` to ``storage`` for one query context."""
+    return partial(read_backfill_earlier_turns, storage)

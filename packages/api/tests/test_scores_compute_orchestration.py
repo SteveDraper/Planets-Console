@@ -5,8 +5,10 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import (
+    backfill_earlier_turns_disabled,
+    make_analytic_query_context,
+)
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 from api.analytics.fleet.compute_services import (
@@ -233,6 +235,7 @@ def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
         },
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     player_id = sample_turn.scores[0].ownerid
     scope = _scores_scope(sample_turn, player_id)
@@ -597,7 +600,7 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
             ctx,
             export_scope,
             overlay_ensure=False,
-            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
         )
         is True
     )
@@ -708,7 +711,7 @@ def test_missing_full_alliance_row_restores_skip_instead_of_tier_solve_invariant
             ctx,
             export_scope,
             overlay_ensure=False,
-            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
         )
         is True
     )
@@ -1214,6 +1217,7 @@ def test_scores_persistence_policy_persist_delegates_to_inference_service(
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext(persistence=row_persistence)},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     policy = ScoresPersistencePolicy()
     row_complete = row_complete_with_summary(
@@ -1274,6 +1278,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     tier_registration = TurnAnalyticRegistration(
         catalog_entry=TurnAnalyticCatalogEntry(
@@ -1358,6 +1363,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     tier_registration = TurnAnalyticRegistration(
         catalog_entry=TurnAnalyticCatalogEntry(
@@ -1555,6 +1561,7 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
             _FLEET_ANALYTIC_ID: fleet_services,
         },
         ensure_turn=ensure_turn,
+        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
     enable_backfill_earlier_turns(leader_ctx)
     session = InferenceRowStreamSession(
@@ -1592,7 +1599,7 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
         compute_scope_to_export_scope(scope),
         compute_registry=build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION)),
         force_root=True,
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
     planned_by_scope = {node.scope: node for node in planned}
 

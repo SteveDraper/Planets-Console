@@ -6,7 +6,6 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
@@ -150,7 +149,7 @@ def test_ensure_invalidates_materialized_tree_cache(sample_turn, persistence):
     assert tree_before["meta"]["searchStatus"] == "not_started"
 
     admit_scores_export_work(
-        ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+        ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
     )
 
     tree_after = ctx._materialize_tree("scores", scope, catalog)
@@ -231,7 +230,7 @@ def test_ensure_prior_turn_schedules_inference_row_without_sync_solve(sample_tur
     ):
         assert (
             admit_scores_export_work(
-                ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+                ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
             )
             is True
         )
@@ -262,7 +261,7 @@ def test_ensure_prior_turn_scheduler_passes_fleet_torp_input_status(sample_turn,
         side_effect=capture_and_schedule,
     ):
         admit_scores_export_work(
-            ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+            ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
         )
 
     assert captured.get("fleet_torp_input_status") == "applied"
@@ -297,7 +296,7 @@ def test_ensure_prior_turn_no_schedule_when_already_persisted(sample_turn, persi
     ) as mock_schedule:
         assert (
             admit_scores_export_work(
-                ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+                ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
             )
             is True
         )
@@ -322,7 +321,7 @@ def test_probe_after_prior_turn_admit_omits_missing_step(sample_turn, persistenc
             ctx,
             scope,
             overlay_ensure=True,
-            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
         )
         is True
     )
@@ -365,7 +364,7 @@ def test_ensure_player_not_found_records_ephemeral_without_schedule(sample_turn,
     ) as mock_schedule:
         assert (
             admit_scores_export_work(
-                ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+                ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
             )
             is True
         )
@@ -419,7 +418,7 @@ def test_ensure_no_prior_turn_records_ephemeral_without_schedule(sample_turn, pe
     ) as mock_schedule:
         assert (
             admit_scores_export_work(
-                ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+                ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
             )
             is True
         )
@@ -473,7 +472,7 @@ def test_ensure_cheap_terminal_persist_does_not_notify_row_persisted(
 
     assert (
         admit_scores_export_work(
-            ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+            ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
         )
         is True
     )
@@ -501,7 +500,7 @@ def test_ensure_schedules_inference_row_on_current_turn(sample_turn, persistence
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
 
     admit_scores_export_work(
-        ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+        ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
     )
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is not None
@@ -537,7 +536,7 @@ def test_ensure_current_turn_scheduler_passes_fleet_torp_input_status(
         side_effect=capture_and_schedule,
     ):
         admit_scores_export_work(
-            ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+            ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
         )
 
     assert captured.get("fleet_torp_input_status") == "applied"
@@ -569,7 +568,7 @@ def test_ensure_no_op_when_row_already_scheduled(sample_turn, persistence):
         player_id=player_id,
     )
     admit_scores_export_work(
-        ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+        ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
     )
 
     run_after = scheduler.row_run_for_player(stream_scope, player_id)
@@ -602,7 +601,7 @@ def test_ensure_no_op_when_row_persisted_stopped(sample_turn, persistence):
     )
 
     admit_scores_export_work(
-        ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+        ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
     )
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is None
@@ -704,7 +703,7 @@ def test_ensure_no_op_when_row_persisted(sample_turn, persistence):
     )
 
     admit_scores_export_work(
-        ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+        ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
     )
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is None

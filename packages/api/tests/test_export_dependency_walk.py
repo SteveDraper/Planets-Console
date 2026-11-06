@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.exports.catalog import AnalyticExportCatalog
@@ -46,7 +45,7 @@ def test_walk_uses_is_ensure_satisfied_when_present(sample_turn):
         catalog.analytic_id,
         scope,
         visiting=set(),
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
 
     assert result.missing_steps == []
@@ -72,7 +71,7 @@ def test_walk_falls_back_to_is_persisted_without_is_ensure_satisfied(sample_turn
         catalog.analytic_id,
         scope,
         visiting=set(),
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
 
     assert result.missing_steps == []
@@ -98,7 +97,7 @@ def test_walk_reports_missing_when_neither_hook_satisfied(sample_turn):
         catalog.analytic_id,
         scope,
         visiting=set(),
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
 
     assert len(result.missing_steps) == 1
@@ -149,7 +148,7 @@ def test_walk_includes_unsatisfied_turn_one_despite_prior_turn_dep(sample_turn):
         catalog.analytic_id,
         scope,
         visiting=set(),
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
 
     assert result.turn_unavailable is None

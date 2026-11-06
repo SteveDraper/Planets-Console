@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from api.analytics import export_context as export_context_module
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_types import ExportScopeOverrides
 from api.compute import export_ensure as export_ensure_module
 
@@ -70,7 +69,7 @@ def test_query_registered_analytic_uses_orchestrator_ensure(sample_turn, persist
             ctx,
             scope,
             overlay_ensure=True,
-            backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
         )
 
     with patch.object(

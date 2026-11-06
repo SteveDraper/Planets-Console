@@ -6,7 +6,6 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.durable_turn_evidence import (
     is_durable_turn_evidence_row_status,
@@ -362,7 +361,7 @@ def test_stealth_ensure_does_not_schedule(sample_turn, persistence) -> None:
     ):
         assert (
             admit_scores_export_work(
-                ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+                ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
             )
             is True
         )
@@ -404,7 +403,7 @@ def test_admit_scores_export_persists_skip_immediate_admission(sample_turn, pers
     ):
         assert (
             admit_scores_export_work(
-                ctx, scope, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+                ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
             )
             is True
         )

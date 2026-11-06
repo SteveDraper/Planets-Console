@@ -663,6 +663,7 @@ def _query_context_for_services(
         export_services=export_services,
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
+        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
 
 

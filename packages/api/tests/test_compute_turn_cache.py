@@ -295,6 +295,7 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
+        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
     enable_backfill_earlier_turns(ctx)
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
@@ -379,6 +380,7 @@ def test_pool_fleet_observation_leg_does_not_fill_worker_turn_cache(sample_turn)
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
+        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
     enable_backfill_earlier_turns(ctx)
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))

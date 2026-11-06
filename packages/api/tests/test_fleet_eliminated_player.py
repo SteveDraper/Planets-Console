@@ -6,7 +6,6 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_orchestration import (
@@ -111,7 +110,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         _FLEET,
         scope,
         visiting=set(),
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
     assert walk.turn_unavailable is None
     pending_turns = [
@@ -124,7 +123,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         _FLEET,
         scope,
         compute_registry=COMPUTE_REGISTRY,
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
     assert len(planned) == 1
     assert planned[0].dependency_scopes == ()
@@ -326,7 +325,7 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
         _FLEET,
         _scope(turn, player_id),
         visiting=set(),
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
     assert walk.turn_unavailable == "turn_not_stored"
     assert walk.unavailable_turn == 22
@@ -375,7 +374,7 @@ def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):
         _FLEET,
         _scope(turn, player_id),
         visiting=set(),
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
     assert walk.turn_unavailable == "turn_not_stored"
     assert walk.unavailable_turn == 89

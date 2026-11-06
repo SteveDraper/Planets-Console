@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
+from api.analytics.export_context import (
+    AnalyticQueryContext,
+    backfill_earlier_turns_disabled,
+    make_analytic_query_context,
+)
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.registry import merge_export_registry
 from api.analytics.options import TurnAnalyticsOptions
@@ -56,6 +60,7 @@ def make_fixture_query_context(
         load_turn=load_turn,
         export_registry=registry,
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
 
 

@@ -122,6 +122,7 @@ def time_observation_persist_jobs(
                 load_turn=load_turn,
             )
         },
+        storage=storage,
     )
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,

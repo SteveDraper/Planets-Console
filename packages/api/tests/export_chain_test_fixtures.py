@@ -104,6 +104,7 @@ def export_chain_query_context(
         },
         game_id=GAME_ID,
         perspective=perspective_id,
+        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
     if seed_fleet_prerequisites_for is not None:
         seed_fleet_unwind_through(

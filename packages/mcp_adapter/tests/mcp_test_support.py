@@ -6,7 +6,10 @@ import asyncio
 from collections.abc import Callable, Mapping
 from unittest.mock import MagicMock
 
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import (
+    backfill_earlier_turns_disabled,
+    make_analytic_query_context,
+)
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import GameInfo
@@ -58,6 +61,7 @@ def stub_turn_analytic_service(turn_load_service: TurnLoadService) -> MagicMock:
             game_id=game_id,
             perspective=perspective,
             export_registry=export_registry,
+            read_backfill_earlier_turns=backfill_earlier_turns_disabled,
         )
 
     analytics.export_query_context.side_effect = export_query_context

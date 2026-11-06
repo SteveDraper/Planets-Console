@@ -7,7 +7,10 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import (
+    backfill_earlier_turns_disabled,
+    make_analytic_query_context,
+)
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_rows import schedule_inference_row
@@ -136,6 +139,7 @@ def scores_query_context(
         export_services={
             "scores": scores_services,
         },
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
 
 
@@ -151,6 +155,7 @@ def minimal_stream_query_context(
         TurnAnalyticsOptions(),
         game_id=game_id,
         perspective=perspective,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
 
 

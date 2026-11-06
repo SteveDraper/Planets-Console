@@ -63,6 +63,7 @@ class TurnAnalyticService:
             from api.storage_factory import get_storage
 
             storage = get_storage()
+        self._storage = storage
         if hull_catalog_masks is not None:
             self._hull_catalog_masks = hull_catalog_masks
         else:
@@ -132,6 +133,7 @@ class TurnAnalyticService:
             export_registry=export_registry,
             export_services=self._turn_export_services(game_id, perspective),
             ensure_turn=self._ensure_turn_loader(game_id, perspective, username),
+            storage=self._storage,
         )
         return turn, ctx
 

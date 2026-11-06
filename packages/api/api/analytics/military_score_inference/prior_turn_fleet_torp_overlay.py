@@ -201,6 +201,9 @@ def _load_prior_turn_fleet_snapshot(
                 perspective=fleet_services.perspective,
                 load_turn=load_turn,
                 export_services=export_services,
+                read_backfill_earlier_turns=(
+                    fleet_services.persistence.backfill_earlier_turns_enabled
+                ),
             )
         if not ensure_fleet_export(ctx, scope):
             return None

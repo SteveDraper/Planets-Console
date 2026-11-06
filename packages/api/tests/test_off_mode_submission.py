@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_dependency_walk import is_export_scope_ensure_satisfied
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_orchestration import (
@@ -16,7 +15,6 @@ from api.analytics.fleet.fleet_table_stream_registry import (
     reset_fleet_table_stream_registry_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import FleetEvidenceMark
 from api.analytics.off_mode_prior_dependency import off_mode_ensure_dependencies
@@ -98,10 +96,10 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
             player_id=player_id,
         )
         fleet_ensure_dependencies_for(
-            ctx, export_41, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+            ctx, export_41, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
         )
         off_mode_ensure_dependencies(
-            ctx, export_41, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
+            ctx, export_41, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
         )
         install_submission_root(ctx.game_id, ctx.perspective, player_id, 41)
 
@@ -296,7 +294,7 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
     assert later is not None and later.ledger.records[0].record_id == "ship-40"
 
 
-def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn, monkeypatch):
+def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn):
     """A multi-hop submit reads the record once. Nodes and the job wire carry it.
 
     An accepted walk keeps that value after the stored record changes.
@@ -314,17 +312,13 @@ def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn, monk
         applies_from=8,
     )
     reads: list[int] = []
-    real = FleetSnapshotPersistenceService.backfill_earlier_turns_enabled
+    real_reader = ctx.read_backfill_earlier_turns
 
-    def counting(self, game_id: int) -> bool:
+    def counting(game_id: int) -> bool:
         reads.append(game_id)
-        return real(self, game_id)
+        return real_reader(game_id)
 
-    monkeypatch.setattr(
-        FleetSnapshotPersistenceService,
-        "backfill_earlier_turns_enabled",
-        counting,
-    )
+    ctx.read_backfill_earlier_turns = counting
     scope = ComputeScope(
         analytic_id=FLEET_ANALYTIC_ID,
         game_id=ctx.game_id,

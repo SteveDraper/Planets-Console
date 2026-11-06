@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.export_types import ExportScope
 from api.analytics.exports.empty import empty_export_catalog_for
@@ -197,7 +196,7 @@ def test_plan_compute_dag_orders_diamond_dependencies(sample_turn):
         ROOT_ID,
         export_scope,
         compute_registry=compute_registry,
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
 
     planned_ids = [node.scope.analytic_id for node in planned]

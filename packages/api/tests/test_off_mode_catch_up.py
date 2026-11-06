@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from api.analytics.backfill_choice import backfill_earlier_turns_for_context
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -117,7 +116,7 @@ def test_homeworld_open_does_not_start_the_catch_up(sample_turn):
             turn=40,
             player_id=player_id,
         ),
-        backfill_earlier_turns=backfill_earlier_turns_for_context(ctx),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
 
     assert dependencies
