@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
 from api.analytics.fleet.compute_orchestration import wake_fleet_scope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_stream_registry import reschedule_fleet_table_player
@@ -29,10 +32,12 @@ from api.analytics.off_mode_bump import (
     resolve_durable_scores_evidence,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns
+
+if TYPE_CHECKING:
+    from api.compute.orchestrator import ComputeOrchestrator
 
 
 class InferenceInvalidationService:
@@ -42,10 +47,19 @@ class InferenceInvalidationService:
         scheduler: InferenceRowScheduler | None = None,
         *,
         fleet_persistence: FleetSnapshotPersistenceService | None = None,
+        orchestrator: Callable[[], ComputeOrchestrator | None] | None = None,
     ) -> None:
         self._persistence = persistence
         self._scheduler = scheduler
         self._fleet_persistence = fleet_persistence
+        self._resolve_orchestrator = orchestrator
+
+    def _current_orchestrator(self) -> ComputeOrchestrator | None:
+        """Orchestrator supplied at construction, resolved now."""
+        resolve = self._resolve_orchestrator
+        if resolve is None:
+            return None
+        return resolve()
 
     def _scheduler_instance(self) -> InferenceRowScheduler:
         if self._scheduler is not None:
@@ -99,6 +113,7 @@ class InferenceInvalidationService:
             durable=durable,
             backfill_earlier_turns=backfill_earlier_turns,
             decision=DeferRecompute(),
+            orchestrator=self._current_orchestrator(),
         )
 
     def _update_fleet_after_evidence(
@@ -111,6 +126,7 @@ class InferenceInvalidationService:
         durable: bool,
         backfill_earlier_turns: bool | None,
         decision: RecomputeDecision,
+        orchestrator: ComputeOrchestrator | None,
     ) -> set[int]:
         """Invalidate, discard a limited bump, and wake fleet.
 
@@ -141,11 +157,11 @@ class InferenceInvalidationService:
                 game_id=game_id,
                 perspective=perspective,
                 player_id=player_id,
+                orchestrator=orchestrator,
             )
         else:
             resolved = decision
         if isinstance(resolved, LimitedRecompute):
-            orchestrator = peek_compute_orchestrator()
             if orchestrator is not None:
                 discard_bumped_player_work(
                     orchestrator,
@@ -223,11 +239,13 @@ class InferenceInvalidationService:
         host turn with no unconsumed root does not consume, and the wake
         chooses turns after the claim.
         """
+        orchestrator = self._current_orchestrator()
         fleet = self._fleet_persistence
         if fleet is None:
             # No fleet service: no mark to classify and no fleet to wake.
             # An unconsumed root is still consumed so the one-shot cannot apply again.
             claim_player_open_roots(
+                orchestrator,
                 game_id=game_id,
                 perspective=perspective,
                 player_id=player_id,
@@ -246,6 +264,7 @@ class InferenceInvalidationService:
             backfill_enabled=wake_backfill,
         )
         roots = claim_player_open_roots(
+            orchestrator,
             game_id=game_id,
             perspective=perspective,
             player_id=player_id,
@@ -279,6 +298,7 @@ class InferenceInvalidationService:
             durable=True,
             backfill_earlier_turns=evidence.wake_backfill,
             decision=evidence.recompute,
+            orchestrator=orchestrator,
         )
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:

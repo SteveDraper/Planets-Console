@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
-from api.compute.orchestrator_state import ComputeHandle, ComputeRequest
+from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
 from api.compute.orchestrator_submission import (
     prepare_compute_request_dependency_chain,
     resolve_submission_open,
 )
-from api.compute.submission_open import SubmissionOpen
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -96,28 +95,30 @@ class OrchestratorEnsureMixin:
                 unsatisfied.append((index, request))
 
         if unsatisfied:
-            resolved_unsatisfied: list[tuple[int, ComputeRequest, SubmissionOpen]] = [
-                (index, *resolve_submission_open(request)) for index, request in unsatisfied
+            resolved_unsatisfied: list[tuple[int, ResolvedComputeRequest]] = [
+                (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
-            for _index, request, submission_open in resolved_unsatisfied:
+            for _index, resolved in resolved_unsatisfied:
+                request = resolved.request
                 bundle = request.resolved_bundle()
                 if bundle is not None:
                     prepare_compute_request_dependency_chain(
                         request,
                         ctx=self._ctx_for_bundle(bundle),
-                        backfill_earlier_turns=submission_open.backfill_earlier_turns,
+                        backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
                     )
             pending_inline: list[PendingInlineExecution] = []
             pending_pool: list[PendingPoolSubmission] = []
             with self._condition:
-                for index, request, _submission_open in resolved_unsatisfied:
+                for index, resolved in resolved_unsatisfied:
+                    request = resolved.request
                     existing = self._nodes.get(request.scope)
                     # Hollow terminal: durable gone, node still complete/failed. Drop so
                     # default force_fresh=False can plan fresh work (F1). Leave non-terminal
                     # nodes alone for attach / singleflight; parked wake stays explicit.
                     if existing is not None and existing.is_terminal and not request.force_fresh:
                         self._replace_terminal_node(existing)
-                    submission = self._submit_locked(request, wake_if_parked_only=False)
+                    submission = self._submit_locked(resolved, wake_if_parked_only=False)
                     if submission is None:
                         raise RuntimeError(
                             "ensure submit_locked returned None without wake_if_parked_only"

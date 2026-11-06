@@ -11,7 +11,12 @@ from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
-from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun, ComputeRequest
+from api.compute.orchestrator_state import (
+    ComputeHandle,
+    ComputeNodeRun,
+    ComputeRequest,
+    ResolvedComputeRequest,
+)
 from api.compute.pools import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
@@ -40,13 +45,14 @@ def submission_open_turn(request: ComputeRequest) -> int | None:
     return _concrete_scope_turn(request.scope.turn)
 
 
-def resolve_submission_open(request: ComputeRequest) -> tuple[ComputeRequest, SubmissionOpen]:
-    """Return the request carrying its submission open, and that value.
+def resolve_submission_open(request: ComputeRequest) -> ResolvedComputeRequest:
+    """Return the request carrying its submission open.
 
     A request that already carries a backfill choice keeps it. Otherwise the
     query context's reader is called once. A request with no query context
     keeps backfill off. The open turn is the explicit root when present,
-    otherwise the scope turn.
+    otherwise the scope turn. When the carried open already matches, the
+    same request object is wrapped.
     """
     open_turn = submission_open_turn(request)
     carried = request.submission_open
@@ -55,16 +61,19 @@ def resolve_submission_open(request: ComputeRequest) -> tuple[ComputeRequest, Su
             open_turn=open_turn,
             backfill_earlier_turns=carried.backfill_earlier_turns,
         )
-        if resolved == carried:
-            return request, resolved
-        return replace(request, submission_open=resolved), resolved
+        if resolved != carried:
+            request = replace(request, submission_open=resolved)
+        return ResolvedComputeRequest(request=request, submission_open=resolved)
     bundle = request.resolved_bundle()
     if bundle is None:
         enabled = False
     else:
         enabled = bundle.query_context.backfill_earlier_turns_enabled()
     resolved = SubmissionOpen(open_turn=open_turn, backfill_earlier_turns=enabled)
-    return replace(request, submission_open=resolved), resolved
+    return ResolvedComputeRequest(
+        request=replace(request, submission_open=resolved),
+        submission_open=resolved,
+    )
 
 
 def _is_parked_node(node: ComputeNodeRun | None) -> bool:
@@ -101,16 +110,17 @@ class OrchestratorSubmissionMixin:
 
     def submit(self: ComputeOrchestrator, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""
-        request, submission_open = resolve_submission_open(request)
+        resolved = resolve_submission_open(request)
+        request = resolved.request
         bundle = request.resolved_bundle()
         if bundle is not None:
             prepare_compute_request_dependency_chain(
                 request,
                 ctx=self._ctx_for_bundle(bundle),
-                backfill_earlier_turns=submission_open.backfill_earlier_turns,
+                backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
             )
         with self._condition:
-            submission = self._submit_locked(request, wake_if_parked_only=False)
+            submission = self._submit_locked(resolved, wake_if_parked_only=False)
         return self._finish_submission(submission)
 
     def wake_if_parked(
@@ -127,14 +137,14 @@ class OrchestratorSubmissionMixin:
         with self._condition:
             if not _is_parked_node(self._nodes.get(request.scope)):
                 return None
-        request, _submission_open = resolve_submission_open(request)
+        resolved = resolve_submission_open(request)
         with self._condition:
-            submission = self._submit_locked(request, wake_if_parked_only=True)
+            submission = self._submit_locked(resolved, wake_if_parked_only=True)
         return None if submission is None else self._finish_submission(submission)
 
     def _submit_locked(
         self: ComputeOrchestrator,
-        request: ComputeRequest,
+        resolved: ResolvedComputeRequest,
         *,
         wake_if_parked_only: bool,
     ) -> (
@@ -147,15 +157,11 @@ class OrchestratorSubmissionMixin:
     ):
         """Apply one submission under the orchestrator lock.
 
-        ``request.submission_open`` is already resolved. Callers run
-        ``resolve_submission_open`` before taking this lock, so this method
+        ``resolved.submission_open`` is the open for this submission. Callers
+        run ``resolve_submission_open`` before taking this lock, so this method
         does not read the backfill record.
         """
-        submission_open = request.submission_open
-        if submission_open is None:
-            raise RuntimeError(
-                "ComputeRequest.submission_open must be resolved before the orchestrator lock"
-            )
+        request = resolved.request
         scope = request.scope
         existing = self._nodes.get(scope)
         if wake_if_parked_only and not _is_parked_node(existing):
@@ -180,7 +186,7 @@ class OrchestratorSubmissionMixin:
                         self._refresh_node_readiness(existing)
                         if existing.state == "waiting_deps":
                             self._schedule_recreate_aborted_dependencies(existing)
-                handle = self._attach_to_existing(existing, request)
+                handle = self._attach_to_existing(existing, resolved)
                 pending_inline, pending_pool = self._dispatch()
             else:
                 self._emit_force_fresh_lifecycle(
@@ -189,27 +195,22 @@ class OrchestratorSubmissionMixin:
                     request=request,
                 )
                 self._replace_terminal_node(existing)
-                handle, pending_inline, pending_pool = self._plan_submission_locked(
-                    request,
-                    submission_open,
-                )
+                handle, pending_inline, pending_pool = self._plan_submission_locked(resolved)
         else:
-            handle, pending_inline, pending_pool = self._plan_submission_locked(
-                request,
-                submission_open,
-            )
+            handle, pending_inline, pending_pool = self._plan_submission_locked(resolved)
         return handle, pending_inline, pending_pool
 
     def _plan_submission_locked(
         self: ComputeOrchestrator,
-        request: ComputeRequest,
-        submission_open: SubmissionOpen,
+        resolved: ResolvedComputeRequest,
     ) -> tuple[
         ComputeHandle,
         tuple[PendingInlineExecution, ...],
         tuple[PendingPoolSubmission, ...],
     ]:
         """Plan a fresh scope and select its first dispatchable work."""
+        request = resolved.request
+        submission_open = resolved.submission_open
         scope = request.scope
         bundle = self._require_bundle(request)
         self._plan_and_register(
@@ -317,7 +318,7 @@ class OrchestratorSubmissionMixin:
     def _attach_to_existing(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
-        request: ComputeRequest,
+        resolved: ResolvedComputeRequest,
     ) -> ComputeHandle:
         if node.is_terminal:
             return ComputeHandle(
@@ -325,7 +326,7 @@ class OrchestratorSubmissionMixin:
                 _node=node,
                 _condition=self._condition,
             )
-        self._adopt_rooted_open_turn(node, request)
+        self._adopt_rooted_open_turn(node, resolved)
         handle = ComputeHandle(
             scope=node.scope,
             _node=node,
@@ -333,20 +334,21 @@ class OrchestratorSubmissionMixin:
             _condition=self._condition,
         )
         node.waiters.append(handle)
-        self._maybe_adopt_priority(node, request.priority_band)
+        self._maybe_adopt_priority(node, resolved.request.priority_band)
         return handle
 
     def _adopt_rooted_open_turn(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
-        request: ComputeRequest,
+        resolved: ResolvedComputeRequest,
     ) -> None:
         """A submission that roots at this scope owns the node's open turn.
 
         Joining any other in-flight node leaves the open it was planned with.
-        The backfill choice the node started with stays with it.
+        The backfill choice the node started with stays with it. The open turn
+        is the one already resolved onto this submission.
         """
-        open_turn = submission_open_turn(request)
+        open_turn = resolved.submission_open.open_turn
         if open_turn is None or node.scope.turn != open_turn:
             return
         if node.submission_open.open_turn == open_turn:

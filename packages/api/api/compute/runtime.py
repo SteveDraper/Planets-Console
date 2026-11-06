@@ -17,8 +17,10 @@ _process_orchestrator: ComputeOrchestrator | None = None
 def peek_compute_orchestrator() -> ComputeOrchestrator | None:
     """Return the process orchestrator when one already exists.
 
-    Does not create the singleton. A mark bump uses this to drop in-flight hops
-    without starting a worker pool from a persist that has no orchestrator yet.
+    Does not create the singleton. Inference invalidation receives this
+    resolver from the composition root and calls it when a persist needs to
+    drop in-flight hops. A persist with no orchestrator yet does not start
+    a worker pool.
     """
     return _process_orchestrator
 

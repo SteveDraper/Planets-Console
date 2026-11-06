@@ -19,6 +19,7 @@ from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.batch_compute import ensure_table_map_compute
+from api.compute.runtime import peek_compute_orchestrator
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import LoginCredentialsRequiredError, NotFoundError, UpstreamPlanetsError
 from api.models.game import TurnInfo
@@ -86,6 +87,7 @@ class TurnAnalyticService:
             self._inference_invalidation = InferenceInvalidationService(
                 self._inference_persistence,
                 fleet_persistence=self._fleet_persistence,
+                orchestrator=peek_compute_orchestrator,
             )
             self._inference_invalidation.wire_fleet_invalidation_to_persistence()
             self._inference_invalidation.wire_scores_invalidation_to_fleet_persistence()

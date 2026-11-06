@@ -21,8 +21,8 @@ from api.analytics.off_mode_prior_dependency import off_mode_ensure_dependencies
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
+from api.compute.orchestrator_state import ResolvedComputeRequest
 from api.compute.orchestrator_submission import resolve_submission_open
-from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
@@ -101,7 +101,8 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
         off_mode_ensure_dependencies(
             ctx, export_41, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
         )
-        install_submission_root(ctx.game_id, ctx.perspective, player_id, 41)
+        orchestrator = ComputeOrchestrator(compute_registry={})
+        install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 41)
 
         scope_40 = ComputeScope(
             analytic_id=FLEET_ANALYTIC_ID,
@@ -119,10 +120,11 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
         assert wire["openTurn"] == 40
         assert wire["catchUp"] is False
 
-        root_40 = install_submission_root(ctx.game_id, ctx.perspective, player_id, 40)
+        root_40 = install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 40)
         invalidation = InferenceInvalidationService(
             InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             fleet_persistence=persistence,
+            orchestrator=lambda: orchestrator,
         )
         invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
         assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == (
@@ -188,8 +190,6 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
     cancelled, an independent open of that turn carries its own root, its
     scoreboard persist stamps, and the cancelled turn's file stays on disk.
     """
-    from api.compute import runtime as compute_runtime
-
     host, ctx = context_at_turn(sample_turn, 40)
     player_id = first_player_id(host)
     services = ctx.export_services[FLEET_ANALYTIC_ID]
@@ -275,16 +275,12 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
         wire.get("openTurn") == 39 and wire.get("catchUp") is False for wire in reopened_wires
     )
 
-    previous = peek_compute_orchestrator()
-    compute_runtime._process_orchestrator = orchestrator
-    try:
-        invalidation = InferenceInvalidationService(
-            InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-            fleet_persistence=persistence,
-        )
-        invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 39, player_id)
-    finally:
-        compute_runtime._process_orchestrator = previous
+    invalidation = InferenceInvalidationService(
+        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
+    )
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 39, player_id)
 
     assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == (
         FleetEvidenceMark(evidence_generation=4, applies_from_turn=38)
@@ -382,7 +378,7 @@ def test_locked_submit_does_not_resolve_again_and_idle_wake_skips_the_read(
     calls: list[ComputeRequest] = []
     real = resolve_submission_open
 
-    def counting(request: ComputeRequest) -> tuple[ComputeRequest, SubmissionOpen]:
+    def counting(request: ComputeRequest) -> ResolvedComputeRequest:
         calls.append(request)
         return real(request)
 

@@ -15,7 +15,6 @@ from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import ComputeNodeRun
-from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns
 
@@ -62,6 +61,7 @@ def _player_submission_roots(
 
 
 def claim_player_open_roots(
+    orchestrator: ComputeOrchestrator | None,
     *,
     game_id: int,
     perspective: int,
@@ -73,7 +73,6 @@ def claim_player_open_roots(
     No orchestrator yields an empty snapshot. The snapshot is the state from
     before that consume.
     """
-    orchestrator = peek_compute_orchestrator()
     if orchestrator is None:
         return ()
     return orchestrator.claim_open_turn_roots(
@@ -209,6 +208,7 @@ def recompute_decision_at_wake(
     game_id: int,
     perspective: int,
     player_id: int,
+    orchestrator: ComputeOrchestrator | None,
 ) -> ResolvedRecompute:
     """Recompute choice when the claim did not snapshot one.
 
@@ -229,7 +229,7 @@ def recompute_decision_at_wake(
         ),
         roots=(
             _player_submission_roots(
-                peek_compute_orchestrator(),
+                orchestrator,
                 game_id,
                 perspective,
                 player_id,

@@ -17,7 +17,6 @@ from api.analytics.homeworld_locator.exports import EXPORT_CATALOG as HOMEWORLD_
 from api.analytics.off_mode_bump import discard_bumped_player_work
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
-from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
@@ -231,10 +230,12 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
         applies_from=40,
     )
     store_generation(persistence, ctx.game_id, ctx.perspective, 40, player_id, 3, ship_id=40)
-    root = install_submission_root(ctx.game_id, ctx.perspective, player_id, 40)
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    root = install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 40)
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
     )
 
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
@@ -269,9 +270,8 @@ def test_scores_root_backfill_wins_and_a_later_turn_does_not_consume(sample_turn
         generation=3,
         applies_from=40,
     )
-    fleet = install_submission_root(ctx.game_id, ctx.perspective, player_id, 40)
-    orchestrator = peek_compute_orchestrator()
-    assert orchestrator is not None
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    fleet = install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 40)
     scores_scope = ComputeScope(
         analytic_id=SCORES_ANALYTIC_ID,
         game_id=ctx.game_id,
@@ -288,6 +288,7 @@ def test_scores_root_backfill_wins_and_a_later_turn_does_not_consume(sample_turn
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
     )
 
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
@@ -297,7 +298,7 @@ def test_scores_root_backfill_wins_and_a_later_turn_does_not_consume(sample_turn
     assert fleet.open_turn_consumed is True
     assert orchestrator.nodes[scores_scope].open_turn_consumed is True
 
-    fresh = install_submission_root(ctx.game_id, ctx.perspective, player_id, 42)
+    fresh = install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 42)
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 41, player_id)
     assert fresh.open_turn_consumed is False
 
@@ -321,7 +322,8 @@ def test_root_bump_wakes_the_shell_chosen_before_consume(
     store_generation(persistence, ctx.game_id, ctx.perspective, 4, player_id, 2, ship_id=4)
     store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 2, ship_id=5)
     store_generation(persistence, ctx.game_id, ctx.perspective, 6, player_id, 2, ship_id=6)
-    root = install_submission_root(ctx.game_id, ctx.perspective, player_id, 4)
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    root = install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 4)
     root.submission_open = SubmissionOpen(
         open_turn=root.submission_open.open_turn,
         backfill_earlier_turns=True,
@@ -356,6 +358,7 @@ def test_root_bump_wakes_the_shell_chosen_before_consume(
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
     )
     try:
         invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 4, player_id)
@@ -543,7 +546,8 @@ def test_bump_recomputes_shell_and_live_turns_and_leaves_other_later_turns_on_di
     store_generation(persistence, ctx.game_id, ctx.perspective, 4, player_id, 1, ship_id=4)
     store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 1, ship_id=5)
     store_generation(persistence, ctx.game_id, ctx.perspective, 6, player_id, 1, ship_id=6)
-    install_submission_root(ctx.game_id, ctx.perspective, player_id, 4)
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 4)
     rescheduled: list[int] = []
     woken: list[int] = []
 
@@ -576,6 +580,7 @@ def test_bump_recomputes_shell_and_live_turns_and_leaves_other_later_turns_on_di
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
     )
     try:
         invalidation.on_inference_evidence_updated(

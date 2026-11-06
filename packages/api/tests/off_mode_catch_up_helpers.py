@@ -117,14 +117,14 @@ def open_turn_fields(open_turn: int, turn: int) -> dict[str, object]:
     }
 
 
-def install_submission_root(game_id: int, perspective: int, player_id: int, turn: int):
-    """In-flight submission root whose open turn is ``turn``."""
-    from api.compute import runtime as compute_runtime
-
-    orchestrator = compute_runtime.peek_compute_orchestrator()
-    if orchestrator is None:
-        orchestrator = ComputeOrchestrator(compute_registry={})
-        compute_runtime._process_orchestrator = orchestrator
+def install_submission_root(
+    orchestrator: ComputeOrchestrator,
+    game_id: int,
+    perspective: int,
+    player_id: int,
+    turn: int,
+):
+    """In-flight submission root on ``orchestrator`` whose open turn is ``turn``."""
     scope = ComputeScope(
         analytic_id=FLEET_ANALYTIC_ID,
         game_id=game_id,

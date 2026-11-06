@@ -52,6 +52,20 @@ class ComputeRequest:
         return None
 
 
+@dataclass(frozen=True)
+class ResolvedComputeRequest:
+    """Submission whose open is already resolved.
+
+    Orchestrator methods that run under the lock take this type.
+    ``submission_open`` is required, so an unresolved request cannot cross
+    that boundary. ``request`` is the public submission the open was resolved
+    from, including a resubmitted hop that already carried one.
+    """
+
+    request: ComputeRequest
+    submission_open: SubmissionOpen
+
+
 @dataclass
 class ComputeHandle:
     """Caller-visible orchestrator handle for one submission."""

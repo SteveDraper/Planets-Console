@@ -8,6 +8,7 @@ from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersiste
 from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
 )
+from api.compute.runtime import peek_compute_orchestrator
 from api.compute.turn_cache import get_process_turn_info_cache
 from api.concepts.homeworld_layout import homeworld_settings_fingerprint
 from api.models.game import GameInfo
@@ -45,6 +46,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
         inference_persistence,
         scheduler=None,
         fleet_persistence=fleet_persistence,
+        orchestrator=peek_compute_orchestrator,
     )
     inference_invalidation.wire_fleet_invalidation_to_persistence()
     inference_invalidation.wire_scores_invalidation_to_fleet_persistence()

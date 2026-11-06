@@ -23,7 +23,6 @@ from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import FleetEvidenceMark
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
-from api.compute.runtime import peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
@@ -132,17 +131,11 @@ def _observation_wire(ctx, scope: ComputeScope, submission_open: SubmissionOpen)
 
 
 def _assert_scoreboard_stamps(orchestrator, ctx, persistence, player_id: int, turn: int) -> None:
-    from api.compute import runtime as compute_runtime
-
-    previous = peek_compute_orchestrator()
-    compute_runtime._process_orchestrator = orchestrator
-    try:
-        InferenceInvalidationService(
-            InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-            fleet_persistence=persistence,
-        ).on_scores_row_persisted(ctx.game_id, ctx.perspective, turn, player_id)
-    finally:
-        compute_runtime._process_orchestrator = previous
+    InferenceInvalidationService(
+        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
+    ).on_scores_row_persisted(ctx.game_id, ctx.perspective, turn, player_id)
     assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == _MARK
 
 

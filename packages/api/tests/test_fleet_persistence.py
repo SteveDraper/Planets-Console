@@ -26,6 +26,7 @@ from api.analytics.fleet.types import (
     FleetTurnSnapshot,
     PersistedFleetLedger,
 )
+from api.compute.runtime import peek_compute_orchestrator
 from api.errors import ConflictError, NotFoundError, ValidationError
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -652,6 +653,7 @@ def _wired_fleet_inference_services(memory_backend):
     invalidation = InferenceInvalidationService(
         inference_persistence,
         fleet_persistence=fleet_persistence,
+        orchestrator=peek_compute_orchestrator,
     )
     invalidation.wire_fleet_invalidation_to_persistence()
     from api.analytics.military_score_inference.inference_scheduler import (
