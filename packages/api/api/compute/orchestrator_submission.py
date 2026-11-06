@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import prepare_dependency_chain_turns
 from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_compute_dag
-from api.compute.errors import ComputeScopeAbortedError
+from api.compute.errors import ComputeScopeAbortedError, UnresolvedSubmissionOpenError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.orchestrator_state import (
@@ -49,10 +49,10 @@ def resolve_submission_open(request: ComputeRequest) -> ResolvedComputeRequest:
     """Return the request carrying its submission open.
 
     A request that already carries a backfill choice keeps it. Otherwise the
-    query context's reader is called once. A request with no query context
-    keeps backfill off. The open turn is the explicit root when present,
-    otherwise the scope turn. When the carried open already matches, the
-    same request object is wrapped.
+    query context's reader is called once. A request with no bundle cannot
+    supply that reader and raises ``UnresolvedSubmissionOpenError``. The open
+    turn is the explicit root when present, otherwise the scope turn. When
+    the carried open already matches, the same request object is wrapped.
     """
     open_turn = submission_open_turn(request)
     carried = request.submission_open
@@ -66,9 +66,11 @@ def resolve_submission_open(request: ComputeRequest) -> ResolvedComputeRequest:
         return ResolvedComputeRequest(request=request, submission_open=resolved)
     bundle = request.resolved_bundle()
     if bundle is None:
-        enabled = False
-    else:
-        enabled = bundle.query_context.backfill_earlier_turns_enabled()
+        raise UnresolvedSubmissionOpenError(
+            "ComputeRequest has no submission open and no orchestration bundle "
+            "to read the backfill choice"
+        )
+    enabled = bundle.query_context.backfill_earlier_turns_enabled()
     resolved = SubmissionOpen(open_turn=open_turn, backfill_earlier_turns=enabled)
     return ResolvedComputeRequest(
         request=replace(request, submission_open=resolved),

@@ -79,6 +79,7 @@ from tests.export_chain_test_fixtures import (
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
 from tests.scores_exports_helpers import minimal_stream_query_context
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET_ANALYTIC_ID = "fleet"
 
@@ -247,6 +248,7 @@ def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert job_wire.get("runId") is not None
     assert get_row_run_for_scope(scope) is not None
@@ -291,6 +293,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
                 scope,
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
+                submission_open=explicit_submission_open(),
             )
 
     put_persisted_row(
@@ -310,6 +313,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert skip_wire["runId"] is None
     assert skip_wire["evidenceClosed"] is True
@@ -388,6 +392,7 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
     assert wire["runId"] == run.run_id
     assert wire["gameId"] == scope.game_id
@@ -474,6 +479,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
                 scope,
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
+                submission_open=explicit_submission_open(),
             )
 
 
@@ -524,6 +530,7 @@ def test_build_scores_tier_solve_job_wire_raises_when_ensure_satisfied_without_a
                 scope,
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
+                submission_open=explicit_submission_open(),
             )
 
 
@@ -617,6 +624,7 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
         for _ in range(3)
     ]
@@ -728,6 +736,7 @@ def test_missing_full_alliance_row_restores_skip_instead_of_tier_solve_invariant
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert skip_wire["runId"] is None
     assert skip_wire["evidenceClosed"] is True
@@ -821,6 +830,7 @@ def test_horwasp_tier_solve_closes_evidence_before_solve_work(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
 
     assert skip_wire["runId"] is None
@@ -875,6 +885,7 @@ def test_historical_materialize_schedules_row_run_for_tier_solve(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
         mock_inference.assert_not_called()
 
@@ -885,6 +896,7 @@ def test_historical_materialize_schedules_row_run_for_tier_solve(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert tier_wire.get("runId") is not None
 
@@ -939,6 +951,7 @@ def test_historical_materialize_skips_tier_when_already_persisted(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
         mock_schedule.assert_not_called()
 
@@ -946,6 +959,7 @@ def test_historical_materialize_skips_tier_when_already_persisted(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert tier_wire["runId"] is None
     assert tier_wire["evidenceClosed"] is True
@@ -992,6 +1006,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
         mock_inference.assert_not_called()
         mock_put_row.assert_not_called()
@@ -1003,6 +1018,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert tier_wire.get("runId") is not None
 
@@ -1067,6 +1083,7 @@ def test_build_scores_tier_solve_job_wire_uses_fleet_dependency_output(sample_tu
         _scores_scope(host_turn, player_id),
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
 
     assert run.session.fleet_torp_input_status == "applied"
@@ -1147,6 +1164,7 @@ def test_scores_tier_wire_stale_dependency_prior_must_not_override_final_disk(
         _scores_scope(host_turn, player_id),
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
 
     assert run.session.fleet_torp_input_status == "applied"

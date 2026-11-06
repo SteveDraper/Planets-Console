@@ -79,22 +79,12 @@ def _apply_fleet_resolution_to_row_run(
         ladder_state.prior_fleet_records = resolution.records
 
 
-def _backfill_choice(
-    ctx: AnalyticQueryContext,
-    submission_open: SubmissionOpen | None,
-) -> bool:
-    """Carried submission choice, or one read when this wire has no submission."""
-    if submission_open is not None:
-        return submission_open.backfill_earlier_turns
-    return ctx.backfill_earlier_turns_enabled()
-
-
 def build_scores_materialize_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    submission_open: SubmissionOpen | None = None,
+    submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Materialize scores export tree on the orchestration plane."""
@@ -112,7 +102,7 @@ def build_scores_materialize_job_wire(
         ctx,
         export_scope,
         overlay_ensure=False,
-        backfill_earlier_turns=_backfill_choice(ctx, submission_open),
+        backfill_earlier_turns=submission_open.backfill_earlier_turns,
     )
     tree = materialize_scores_export_tree(ctx, export_scope)
     return {"exportTree": tree}
@@ -123,7 +113,7 @@ def build_scores_tier_solve_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    submission_open: SubmissionOpen | None = None,
+    submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
@@ -155,7 +145,7 @@ def build_scores_tier_solve_job_wire(
     if horwasp_skip is not None:
         return horwasp_skip
 
-    backfill_earlier_turns = _backfill_choice(ctx, submission_open)
+    backfill_earlier_turns = submission_open.backfill_earlier_turns
     run = get_row_run_for_scope(scope)
     ensure_satisfied = True
     if run is None:

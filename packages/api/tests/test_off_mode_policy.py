@@ -420,7 +420,7 @@ def _fleet_scope(turn: int = 39) -> ComputeScope:
 
 
 def test_stamp_submission_open_copies_the_carried_open():
-    """A carried open is copied. No submission open clears openTurn and catchUp only."""
+    """A carried open is copied onto the wire, replacing a stale open."""
     scope = _fleet_scope()
     stale = {
         "materializeTurn": 39,
@@ -429,18 +429,6 @@ def test_stamp_submission_open_copies_the_carried_open():
         "backfillEarlierTurns": True,
     }
     cases = (
-        (
-            "direct call leaves a fresh wire without an open",
-            {"materializeTurn": 39},
-            None,
-            {"materializeTurn": 39},
-        ),
-        (
-            "direct call clears a stale open and leaves backfillEarlierTurns",
-            dict(stale),
-            None,
-            {"materializeTurn": 39, "backfillEarlierTurns": True},
-        ),
         (
             "backfill off writes the open and catch-up",
             dict(stale),

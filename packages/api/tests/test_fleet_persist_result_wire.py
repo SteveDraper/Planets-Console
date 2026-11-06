@@ -48,6 +48,7 @@ from tests.scores_exports_helpers import (
     ship_build_domain,
     ship_build_wire,
 )
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET_ANALYTIC_ID = "fleet"
 
@@ -473,6 +474,7 @@ def test_observation_persist_keeps_option_sets_from_the_stored_prior(sample_turn
         scope_n1,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert "priorLedgerWire" not in job_wire
     assert "baselineLedgerWire" not in job_wire
@@ -549,6 +551,7 @@ def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
         scope_n1,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert "priorLedgerWire" not in job_wire
     observed = run_fleet_observation_leg(job_wire)

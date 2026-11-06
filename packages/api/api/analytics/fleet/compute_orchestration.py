@@ -79,7 +79,7 @@ def build_fleet_observation_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    submission_open: SubmissionOpen | None = None,
+    submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg."""
@@ -96,7 +96,7 @@ def build_fleet_materialization_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
-    submission_open: SubmissionOpen | None = None,
+    submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg.
@@ -173,7 +173,7 @@ def build_fleet_finalization_leg_job_wire(
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
     node_result_wire: object | None = None,
-    submission_open: SubmissionOpen | None = None,
+    submission_open: SubmissionOpen,
 ) -> dict[str, Any]:
     """Pass the observation continue wire into the inline finalization leg."""
     del dependency_outputs

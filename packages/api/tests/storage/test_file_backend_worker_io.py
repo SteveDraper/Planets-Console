@@ -47,6 +47,7 @@ from tests.file_backend_io_accounting import (
 )
 from tests.file_storage_helpers import open_file_storage_backend
 from tests.scores_exports_helpers import first_player_id
+from tests.submission_open_helpers import explicit_submission_open
 
 WORKER_COUNT = 8
 FILE_MIX_ITERS = 400
@@ -322,6 +323,7 @@ def test_observation_job_wire_does_not_read_a_stored_prior(tmp_path, sample_turn
             scope,
             dependency_outputs=outputs,
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
 
     assert "priorLedgerWire" not in wire

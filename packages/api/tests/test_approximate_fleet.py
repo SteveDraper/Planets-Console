@@ -49,6 +49,7 @@ from api.errors import FleetScoresEvidenceOpenError
 from api.models.enums import PlayerStatus
 
 from tests.fleet_fixtures import single_ship_turn
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET = "fleet"
 
@@ -184,6 +185,7 @@ def _write_observation(services, ctx, turn, player_id: int):
         _scope(services, turn, player_id),
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     observed = run_fleet_observation_leg(job_wire)
     assert observed.payload is not None
@@ -320,6 +322,7 @@ def test_observation_persist_folds_the_prior_stored_at_write_time() -> None:
         _scope(services, turn, player_id),
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert "priorLedgerWire" not in job_wire
     assert "baselineLedgerWire" not in job_wire
@@ -918,6 +921,7 @@ def test_eliminated_player_is_not_an_approximate_fleet(sample_turn) -> None:
         _scope(services, turn, player_id),
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert job_wire["eliminatedAtTurn"] is True
     observed = run_fleet_observation_leg(job_wire)

@@ -22,23 +22,20 @@ from api.compute.submission_open import SubmissionOpen
 def stamp_submission_open(
     wire: dict[str, Any],
     scope: ComputeScope,
-    submission_open: SubmissionOpen | None,
+    submission_open: SubmissionOpen,
 ) -> None:
     """Write one submission open onto a fleet job wire.
 
     The carried open is copied as resolved. ``openTurn`` and ``catchUp`` are
     present only when backfill is off and the open turn is set. ``catchUp`` is
     true for an earlier hop of that open and false on the open turn itself.
-    No submission open clears those two fields and does not write
-    ``backfillEarlierTurns``.
+    ``backfillEarlierTurns`` is the carried choice.
     """
     turn = scope.turn
     if isinstance(turn, bool) or not isinstance(turn, int):
         raise ValueError("fleet job wire requires concrete turn")
     wire.pop(OPEN_TURN_WIRE_FIELD, None)
     wire.pop(CATCH_UP_WIRE_FIELD, None)
-    if submission_open is None:
-        return
     wire[BACKFILL_EARLIER_TURNS_WIRE_FIELD] = submission_open.backfill_earlier_turns
     open_turn = submission_open.open_turn
     if open_turn is None or submission_open.backfill_earlier_turns:

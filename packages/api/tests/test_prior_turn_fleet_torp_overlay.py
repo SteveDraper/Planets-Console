@@ -26,6 +26,7 @@ from api.analytics.options import TurnAnalyticsOptions
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
+from tests.submission_open_helpers import explicit_submission_open
 
 
 def test_prior_fleet_max_tech_for_admission_applied_returns_copy():
@@ -361,6 +362,7 @@ def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, per
         ),
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
 
     assert run.session.fleet_torp_input_status == "applied"

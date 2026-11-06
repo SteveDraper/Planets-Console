@@ -31,6 +31,7 @@ from tests.export_chain_test_fixtures import (
     export_chain_query_context,
 )
 from tests.scores_exports_helpers import first_player_id, perspective
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET = "fleet"
 
@@ -150,6 +151,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
             ),
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
     assert "priorLedgerWire" not in job_wire
     assert "baselineLedgerWire" not in job_wire
@@ -299,6 +301,7 @@ def test_eliminated_job_wire_reads_the_player_epoch(sample_turn, persistence):
         ),
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert job_wire["eliminatedAtTurn"] is True
     assert job_wire["playerInvalidationGeneration"] == expected
