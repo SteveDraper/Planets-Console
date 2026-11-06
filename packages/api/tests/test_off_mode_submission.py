@@ -19,7 +19,7 @@ from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import FleetEvidenceMark
-from api.analytics.scores.ensure_dependencies import resolve_scores_ensure_dependencies
+from api.analytics.off_mode_prior_dependency import off_mode_ensure_dependencies
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
@@ -100,7 +100,7 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
         fleet_ensure_dependencies_for(
             ctx, export_41, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
         )
-        resolve_scores_ensure_dependencies(
+        off_mode_ensure_dependencies(
             ctx, export_41, backfill_earlier_turns=backfill_earlier_turns_for_context(ctx)
         )
         install_submission_root(ctx.game_id, ctx.perspective, player_id, 41)

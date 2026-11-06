@@ -25,11 +25,11 @@ from api.analytics.military_score_inference.tier_emission_ledger import (
     compact_tier_emissions_from_step_diagnostics,
     tier_emissions_from_wire_complete,
 )
-from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
-from api.analytics.scores.ensure_dependencies import (
-    ENSURE_DEPENDENCIES,
-    resolve_scores_ensure_dependencies,
+from api.analytics.off_mode_prior_dependency import (
+    OFF_MODE_PRIOR_FLEET,
+    off_mode_ensure_dependencies,
 )
+from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
 from api.analytics.scores.export_precedence import (
     ScoresExportResolutionContext,
     ScoresExportResolved,
@@ -664,8 +664,8 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     value_schema=EXPORT_VALUE_SCHEMA,
     path_prefix_scope_rules=PATH_PREFIX_SCOPE_RULES,
     ordering_semantics=ORDERING_SEMANTICS,
-    ensure_dependencies=ENSURE_DEPENDENCIES,
-    ensure_dependencies_for=resolve_scores_ensure_dependencies,
+    ensure_dependencies=OFF_MODE_PRIOR_FLEET,
+    ensure_dependencies_for=off_mode_ensure_dependencies,
     ensure_export=ensure_scores_export,
     materialize_export_tree=materialize_scores_export_tree,
     is_persisted=is_scores_export_persisted,
