@@ -337,6 +337,23 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
     assert carried is None
 
 
+def test_resolved_recompute_names_the_turns_it_wakes():
+    """Wake-all uses the ledger bump. A limited choice uses the turns it stored."""
+    wake_all = WakeAllRecompute()
+    assert wake_all.turns_to_wake({4, 6}) == {4, 6}
+    assert wake_all.reschedules_live_scores() is False
+    wake_all.discard_bumped_work(None, game_id=1, perspective=1, player_id=7)
+
+    limited = LimitedRecompute(
+        turns=frozenset({40}),
+        shell_turns=frozenset({39, 40}),
+        live_turns=frozenset({39, 40}),
+    )
+    assert limited.turns_to_wake({39, 40, 41}) == frozenset({40})
+    assert limited.reschedules_live_scores() is True
+    limited.discard_bumped_work(None, game_id=1, perspective=1, player_id=7)
+
+
 def test_claim_open_turn_roots_returns_the_preimage_then_consumes_that_open():
     orchestrator = ComputeOrchestrator(compute_registry={})
     root = _put(orchestrator, "alpha", 40, open_turn=40, backfill=True)

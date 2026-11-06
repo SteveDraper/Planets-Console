@@ -23,10 +23,8 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
 from api.analytics.off_mode_bump import (
     DeferRecompute,
-    LimitedRecompute,
-    RecomputeDecision,
+    ResolvedRecompute,
     claim_player_open_roots,
-    discard_bumped_player_work,
     live_turns_for_limited_recompute,
     recompute_decision_at_wake,
     resolve_durable_scores_evidence,
@@ -104,39 +102,14 @@ class InferenceInvalidationService:
         wake, scores re-close would never rematerialize that scope. Open fleet
         table streams reschedule in place; otherwise ``force_fresh`` submit
         replaces a terminal that is no longer ensure-final.
-        """
-        return self._update_fleet_after_evidence(
-            game_id,
-            perspective,
-            host_turn,
-            player_id,
-            durable=durable,
-            backfill_earlier_turns=backfill_earlier_turns,
-            decision=DeferRecompute(),
-            orchestrator=self._current_orchestrator(),
-        )
 
-    def _update_fleet_after_evidence(
-        self,
-        game_id: int,
-        perspective: int,
-        host_turn: int,
-        player_id: int,
-        *,
-        durable: bool,
-        backfill_earlier_turns: bool | None,
-        decision: RecomputeDecision,
-        orchestrator: ComputeOrchestrator | None,
-    ) -> set[int]:
-        """Invalidate, discard a limited bump, and wake fleet.
-
-        ``DeferRecompute`` reads the current backfill record, roots, and live
-        streams after the ledger bump. A limited choice discards in-flight work
-        that must not stamp the new mark. Waking every known turn does not.
+        The ledger bump runs first. The turns that wake are chosen after it,
+        from the current backfill record, roots, and live streams.
         """
         fleet = self._fleet_persistence
         if fleet is None:
             return set()
+        orchestrator = self._current_orchestrator()
         turns_to_reschedule = fleet.invalidate_player_ledgers_from_turn(
             game_id,
             perspective,
@@ -144,39 +117,57 @@ class InferenceInvalidationService:
             player_id,
             durable=durable,
         )
-        if isinstance(decision, DeferRecompute):
-            backfill_enabled = (
-                backfill_earlier_turns
-                if backfill_earlier_turns is not None
-                else fleet.backfill_earlier_turns_enabled(game_id)
-            )
-            resolved = recompute_decision_at_wake(
-                host_turn=host_turn,
-                durable=durable,
-                backfill_enabled=backfill_enabled,
-                game_id=game_id,
-                perspective=perspective,
-                player_id=player_id,
-                orchestrator=orchestrator,
-            )
-        else:
-            resolved = decision
-        if isinstance(resolved, LimitedRecompute):
-            if orchestrator is not None:
-                discard_bumped_player_work(
-                    orchestrator,
-                    game_id=game_id,
-                    perspective=perspective,
-                    player_id=player_id,
-                    shell_turns=resolved.shell_turns,
-                    live_turns=resolved.live_turns,
-                )
-            turns_to_wake = resolved.turns
-            live_scores_turns = self._live_scores_turns(game_id, perspective)
-        else:
-            turns_to_wake = turns_to_reschedule
-            live_scores_turns = frozenset()
-        for fleet_turn in sorted(turns_to_wake):
+        backfill_enabled = (
+            backfill_earlier_turns
+            if backfill_earlier_turns is not None
+            else fleet.backfill_earlier_turns_enabled(game_id)
+        )
+        resolved = recompute_decision_at_wake(
+            host_turn=host_turn,
+            durable=durable,
+            backfill_enabled=backfill_enabled,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            orchestrator=orchestrator,
+        )
+        self._update_fleet_after_evidence(
+            game_id,
+            perspective,
+            player_id,
+            resolved=resolved,
+            turns_to_reschedule=turns_to_reschedule,
+            orchestrator=orchestrator,
+        )
+        return turns_to_reschedule
+
+    def _update_fleet_after_evidence(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        *,
+        resolved: ResolvedRecompute,
+        turns_to_reschedule: set[int],
+        orchestrator: ComputeOrchestrator | None,
+    ) -> None:
+        """Wake fleet for an already-resolved recompute.
+
+        ``turns_to_reschedule`` is the ledger bump's known turns. Wake-all
+        uses that set. A limited recompute uses the turns it already chose.
+        """
+        resolved.discard_bumped_work(
+            orchestrator,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+        )
+        live_scores_turns = (
+            self._live_scores_turns(game_id, perspective)
+            if resolved.reschedules_live_scores()
+            else frozenset()
+        )
+        for fleet_turn in sorted(resolved.turns_to_wake(turns_to_reschedule)):
             stream_woke = reschedule_fleet_table_player(
                 FleetTableStreamScope(
                     game_id=game_id,
@@ -185,7 +176,7 @@ class InferenceInvalidationService:
                 ),
                 player_id,
             )
-            if isinstance(resolved, LimitedRecompute) and fleet_turn in live_scores_turns:
+            if fleet_turn in live_scores_turns:
                 reschedule_inference_row(self._scope(game_id, perspective, fleet_turn), player_id)
             if stream_woke:
                 continue
@@ -198,7 +189,6 @@ class InferenceInvalidationService:
                     player_id=player_id,
                 )
             )
-        return turns_to_reschedule
 
     def _live_scores_turns(self, game_id: int, perspective: int) -> frozenset[int]:
         return active_table_stream_turns(game_id, perspective, (SCORES_ANALYTIC_ID,))
@@ -236,8 +226,8 @@ class InferenceInvalidationService:
         backfill record chooses which turns wake. An unconsumed root at this
         host turn is consumed under one orchestrator lock. A bump that had
         that root wakes from the recompute snapshot taken with the claim. A
-        host turn with no unconsumed root does not consume, and the wake
-        chooses turns after the claim.
+        host turn with no unconsumed root does not consume. The ledger bump
+        runs before that deferred choice reads current roots and live streams.
         """
         orchestrator = self._current_orchestrator()
         fleet = self._fleet_persistence
@@ -290,14 +280,32 @@ class InferenceInvalidationService:
         )
         if decision.mark_persist is MarkPersist.STAMP:
             return
-        self._update_fleet_after_evidence(
+        turns_to_reschedule = fleet.invalidate_player_ledgers_from_turn(
             game_id,
             perspective,
             host_turn,
             player_id,
             durable=True,
-            backfill_earlier_turns=evidence.wake_backfill,
-            decision=evidence.recompute,
+        )
+        recompute = evidence.recompute
+        if isinstance(recompute, DeferRecompute):
+            resolved = recompute_decision_at_wake(
+                host_turn=host_turn,
+                durable=True,
+                backfill_enabled=evidence.wake_backfill,
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                orchestrator=orchestrator,
+            )
+        else:
+            resolved = recompute
+        self._update_fleet_after_evidence(
+            game_id,
+            perspective,
+            player_id,
+            resolved=resolved,
+            turns_to_reschedule=turns_to_reschedule,
             orchestrator=orchestrator,
         )
 

@@ -153,6 +153,25 @@ class DeferRecompute:
 class WakeAllRecompute:
     """Every known turn wakes. In-flight work is not discarded."""
 
+    def turns_to_wake(self, rescheduled: set[int]) -> set[int] | frozenset[int]:
+        """The ledger bump's known turns."""
+        return rescheduled
+
+    def discard_bumped_work(
+        self,
+        orchestrator: ComputeOrchestrator | None,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+    ) -> None:
+        """In-flight fleet and scoreboard work stays."""
+        return
+
+    def reschedules_live_scores(self) -> bool:
+        """Scores rows stay on their own schedule."""
+        return False
+
 
 @dataclass(frozen=True)
 class LimitedRecompute:
@@ -166,6 +185,34 @@ class LimitedRecompute:
     turns: frozenset[int]
     shell_turns: frozenset[int]
     live_turns: frozenset[int]
+
+    def turns_to_wake(self, rescheduled: set[int]) -> set[int] | frozenset[int]:
+        """Shell and live turns at the evidence host turn and later."""
+        return self.turns
+
+    def discard_bumped_work(
+        self,
+        orchestrator: ComputeOrchestrator | None,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+    ) -> None:
+        """Drop in-flight work that must not stamp the new mark."""
+        if orchestrator is None:
+            return
+        discard_bumped_player_work(
+            orchestrator,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            shell_turns=self.shell_turns,
+            live_turns=self.live_turns,
+        )
+
+    def reschedules_live_scores(self) -> bool:
+        """A live scores stream on a woken turn reschedules that scores row."""
+        return True
 
 
 RecomputeDecision: TypeAlias = DeferRecompute | WakeAllRecompute | LimitedRecompute
