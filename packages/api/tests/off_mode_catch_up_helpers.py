@@ -109,7 +109,12 @@ def planned_scope_keys(ctx, analytic_id, turn, player_id):
 
 
 def open_turn_fields(open_turn: int, turn: int) -> dict[str, object]:
-    return {"openTurn": open_turn, "catchUp": turn < open_turn}
+    """Off-mode open on a persist wire: carried backfill is off."""
+    return {
+        "openTurn": open_turn,
+        "catchUp": turn < open_turn,
+        "backfillEarlierTurns": False,
+    }
 
 
 def install_submission_root(game_id: int, perspective: int, player_id: int, turn: int):

@@ -64,26 +64,30 @@ def observation_merge_generation(
 
     ``STAMP_CURRENT_EVIDENCE_MARK`` stamps the current mark. An int is the
     generation kept on the open turn. ``merge_generation`` comes from
-    ``off_mode_persist_decision``. The mark is always loaded so that column
-    is the real mark. A carried ``backfillEarlierTurns`` value is used as-is.
-    A wire with an open turn and no carried choice reads the record once.
-    The stored generation is loaded only when the wire carries a submission root.
+    ``off_mode_persist_decision``. An open turn without a carried
+    ``backfillEarlierTurns`` value is a ``ValidationError`` and does not read
+    storage. Otherwise that carried value is used as-is, and a wire with no
+    choice is backfill off. The mark is loaded for the decision. The merge
+    does not read the stored backfill record. The stored generation is loaded
+    only when the wire carries a submission root.
     """
     if not isinstance(scope.player_id, int) or not isinstance(scope.turn, int):
         raise ValueError("fleet observation merge requires concrete player_id and turn")
     open_turn = fields.open_turn
+    carried_backfill = fields.backfill_earlier_turns
+    if open_turn is not None and carried_backfill is None:
+        raise ValidationError(
+            "fleet observation merge requires backfillEarlierTurns when openTurn is set"
+        )
+    backfill_enabled = False if carried_backfill is None else carried_backfill
     is_catch_up = fields.catch_up
     mark = services.persistence.evidence_mark(
         scope.game_id,
         scope.perspective,
         scope.player_id,
     )
-    carried_backfill = fields.backfill_earlier_turns
-    backfill_enabled = False if carried_backfill is None else carried_backfill
     stored_generation: int | None = None
     if open_turn is not None:
-        if carried_backfill is None:
-            backfill_enabled = services.persistence.backfill_earlier_turns_enabled(scope.game_id)
         stored = services.persistence.get_ledger(
             scope.game_id,
             scope.perspective,

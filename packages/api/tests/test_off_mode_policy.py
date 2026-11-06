@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.off_mode_job_wire import stamp_submission_open
+from api.analytics.fleet.off_mode_persist import observation_merge_generation
 from api.analytics.fleet.types import (
     STAMP_CURRENT_EVIDENCE_MARK,
     FleetAcquisitionLedger,
@@ -481,26 +483,93 @@ def test_stamp_submission_open_copies_the_carried_open():
     }
 
 
-def test_stamp_submission_open_rejects_a_bool_open_or_a_wildcard_turn():
-    """A bool is not a turn, and a rejected open leaves the wire unchanged."""
+def test_stamp_submission_open_rejects_a_wildcard_or_bool_scope_turn():
+    """A fleet job wire needs a concrete turn. A rejected scope leaves the wire unchanged."""
     wire = {"openTurn": 1, "catchUp": True}
-    with pytest.raises(ValidationError, match="openTurn must be an integer"):
+    with pytest.raises(ValueError, match="concrete turn"):
         stamp_submission_open(
             wire,
-            _fleet_scope(),
-            SubmissionOpen(open_turn=True),  # type: ignore[arg-type]
+            replace(_fleet_scope(), turn=WILDCARD),
+            SubmissionOpen(open_turn=40),
         )
     assert wire == {"openTurn": 1, "catchUp": True}
 
     with pytest.raises(ValueError, match="concrete turn"):
         stamp_submission_open(
-            {},
-            replace(_fleet_scope(), turn=WILDCARD),
-            SubmissionOpen(open_turn=40),
-        )
-    with pytest.raises(ValueError, match="concrete turn"):
-        stamp_submission_open(
-            {},
+            wire,
             replace(_fleet_scope(), turn=True),  # type: ignore[arg-type]
             SubmissionOpen(open_turn=40),
         )
+    assert wire == {"openTurn": 1, "catchUp": True}
+
+
+class _BackfillCountingPersistence:
+    """Mark and ledger for a merge. Reading stored backfill is a failure."""
+
+    def __init__(self) -> None:
+        self.backfill_reads = 0
+        self.mark_reads = 0
+
+    def backfill_earlier_turns_enabled(self, _game_id: int) -> bool:
+        self.backfill_reads += 1
+        return True
+
+    def evidence_mark(
+        self,
+        _game_id: int,
+        _perspective: int,
+        _player_id: int,
+    ) -> FleetEvidenceMark:
+        self.mark_reads += 1
+        return FleetEvidenceMark(evidence_generation=4, applies_from_turn=38)
+
+    def get_ledger(
+        self,
+        _game_id: int,
+        _perspective: int,
+        _turn: int,
+        player_id: int,
+    ) -> PersistedFleetLedger:
+        return PersistedFleetLedger(
+            ledger=FleetAcquisitionLedger(player_id=player_id),
+            evidence_generation=1,
+        )
+
+
+def test_observation_merge_uses_the_carried_backfill_and_does_not_read_the_record():
+    """An open turn requires the carried choice. The stored record is not read."""
+    persistence = _BackfillCountingPersistence()
+    services = FleetComputeServices(
+        persistence=persistence,  # type: ignore[arg-type]
+        game_id=1,
+        perspective=1,
+        load_turn=lambda _turn: None,
+    )
+    scope = _fleet_scope(turn=40)
+
+    with pytest.raises(ValidationError, match="backfillEarlierTurns"):
+        observation_merge_generation(
+            services,
+            scope,
+            parse_off_mode_wire({"openTurn": 40, "catchUp": False}),
+        )
+    assert persistence.backfill_reads == 0
+    assert persistence.mark_reads == 0
+
+    kept = observation_merge_generation(
+        services,
+        scope,
+        parse_off_mode_wire(
+            {"openTurn": 40, "catchUp": False, "backfillEarlierTurns": False},
+        ),
+    )
+    assert kept == 1
+    assert persistence.backfill_reads == 0
+
+    stamped = observation_merge_generation(
+        services,
+        scope,
+        parse_off_mode_wire({}),
+    )
+    assert stamped is STAMP_CURRENT_EVIDENCE_MARK
+    assert persistence.backfill_reads == 0

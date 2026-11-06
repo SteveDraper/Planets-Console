@@ -47,8 +47,8 @@ from api.exceptions import ValidationError
 from api.models.game import GameSettings, TurnInfo
 
 BACKFILL_EARLIER_TURNS_WIRE_FIELD = "backfillEarlierTurns"
-_OPEN_TURN_FIELD = "openTurn"
-_CATCH_UP_FIELD = "catchUp"
+OPEN_TURN_WIRE_FIELD = "openTurn"
+CATCH_UP_WIRE_FIELD = "catchUp"
 _PLAYER_INVALIDATION_GENERATION_FIELD = "playerInvalidationGeneration"
 
 
@@ -62,48 +62,6 @@ def _require_json_bool(value: object, *, field: str) -> bool:
     if not isinstance(value, bool):
         raise ValidationError(f"{field} must be a boolean")
     return value
-
-
-def off_mode_job_wire_fields(
-    *,
-    open_turn: int | None,
-    turn: int,
-    backfill_enabled: bool,
-) -> dict[str, object]:
-    """``openTurn`` and ``catchUp`` for one fleet job.
-
-    Empty when this submit is not an off-mode open. ``catchUp`` is true for an
-    earlier hop of that open. The open turn itself is false. A bool is not a
-    turn.
-    """
-    if open_turn is not None:
-        open_turn = _require_json_int(open_turn, field=_OPEN_TURN_FIELD)
-    if open_turn is None or backfill_enabled:
-        return {}
-    return {_OPEN_TURN_FIELD: open_turn, _CATCH_UP_FIELD: turn < open_turn}
-
-
-def apply_off_mode_job_wire_fields(
-    wire: dict[str, object],
-    *,
-    open_turn: int | None,
-    turn: int,
-    backfill_enabled: bool,
-) -> None:
-    """Replace ``openTurn`` and ``catchUp`` on ``wire`` from the submission root.
-
-    The replacement is built first, so a rejected open turn leaves ``wire``
-    unchanged. Those two fields are then cleared and written only for an
-    off-mode open with backfill off.
-    """
-    fields = off_mode_job_wire_fields(
-        open_turn=open_turn,
-        turn=turn,
-        backfill_enabled=backfill_enabled,
-    )
-    wire.pop(_OPEN_TURN_FIELD, None)
-    wire.pop(_CATCH_UP_FIELD, None)
-    wire.update(fields)
 
 
 @dataclass(frozen=True)
@@ -129,13 +87,13 @@ def parse_off_mode_wire(wire: Mapping[str, object]) -> OffModeWireFields:
     type is a ``ValidationError``. ``catchUp: true`` without ``openTurn`` is a
     ``ValidationError``. Bool is not an integer.
     """
-    if _OPEN_TURN_FIELD in wire:
-        open_turn = _require_json_int(wire[_OPEN_TURN_FIELD], field=_OPEN_TURN_FIELD)
+    if OPEN_TURN_WIRE_FIELD in wire:
+        open_turn = _require_json_int(wire[OPEN_TURN_WIRE_FIELD], field=OPEN_TURN_WIRE_FIELD)
     else:
         open_turn = None
 
-    if _CATCH_UP_FIELD in wire:
-        catch_up = _require_json_bool(wire[_CATCH_UP_FIELD], field=_CATCH_UP_FIELD)
+    if CATCH_UP_WIRE_FIELD in wire:
+        catch_up = _require_json_bool(wire[CATCH_UP_WIRE_FIELD], field=CATCH_UP_WIRE_FIELD)
     else:
         catch_up = False
     if catch_up and open_turn is None:
@@ -185,9 +143,9 @@ def copy_submission_open_fields(
         payload[_PLAYER_INVALIDATION_GENERATION_FIELD] = fields.player_invalidation_generation
     if fields.open_turn is None:
         return
-    payload[_OPEN_TURN_FIELD] = fields.open_turn
+    payload[OPEN_TURN_WIRE_FIELD] = fields.open_turn
     if fields.catch_up:
-        payload[_CATCH_UP_FIELD] = True
+        payload[CATCH_UP_WIRE_FIELD] = True
 
 
 def ledger_matches_evidence_mark(
