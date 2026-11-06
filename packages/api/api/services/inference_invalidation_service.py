@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.fleet.compute_orchestration import wake_fleet_scope
@@ -96,13 +95,11 @@ def _claim_player_open_roots(
     perspective: int,
     player_id: int,
     open_turn: int,
-    consume: Callable[[tuple[OpenTurnRoot, ...]], bool],
 ) -> tuple[OpenTurnRoot, ...]:
-    """In-flight roots, consuming ``open_turn`` when ``consume`` says so.
+    """In-flight roots, consuming ``open_turn`` when an unconsumed root is there.
 
-    No orchestrator yields an empty snapshot. ``consume`` runs under the
-    orchestrator lock and must not re-enter it. The snapshot is the state
-    from before that consume.
+    No orchestrator yields an empty snapshot. The snapshot is the state from
+    before that consume.
     """
     orchestrator = peek_compute_orchestrator()
     if orchestrator is None:
@@ -113,7 +110,6 @@ def _claim_player_open_roots(
         player_id=player_id,
         open_turn=open_turn,
         analytic_ids=_OPEN_TURN_ANALYTICS,
-        consume=consume,
     )
 
 
@@ -489,10 +485,6 @@ class InferenceInvalidationService:
         host turn with no unconsumed root does not consume, and the wake
         chooses turns after the claim.
         """
-
-        def consume_root(roots: tuple[OpenTurnRoot, ...]) -> bool:
-            return _carried_scores_backfill(roots, host_turn=host_turn) is not None
-
         fleet = self._fleet_persistence
         if fleet is None:
             # No fleet service: no mark to classify and no fleet to wake.
@@ -502,14 +494,13 @@ class InferenceInvalidationService:
                 perspective=perspective,
                 player_id=player_id,
                 open_turn=host_turn,
-                consume=consume_root,
             )
             return
 
         wake_backfill = fleet.backfill_earlier_turns_enabled(game_id)
         mark = fleet.evidence_mark(game_id, perspective, player_id)
-        # Live turns are read before the claim. The claim callback must not
-        # re-enter the orchestrator, and a stream scan takes its own locks.
+        # Live turns are the pre-claim stream scan used to choose the recompute.
+        # The scan takes its own locks, so it stays outside the claim.
         live_turns = (
             active_table_stream_turns(game_id, perspective, _OPEN_TURN_ANALYTICS)
             if not wake_backfill
@@ -520,7 +511,6 @@ class InferenceInvalidationService:
             perspective=perspective,
             player_id=player_id,
             open_turn=host_turn,
-            consume=consume_root,
         )
         evidence = resolve_durable_scores_evidence(
             roots,

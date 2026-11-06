@@ -114,7 +114,7 @@ def test_open_turn_roots_returns_each_in_flight_root():
     )
 
 
-def test_consume_open_turn_roots_marks_only_matching_roots():
+def test_claim_open_turn_roots_marks_only_matching_roots():
     orchestrator = ComputeOrchestrator(compute_registry={})
     root = _put(orchestrator, "alpha", 40, open_turn=40)
     hop = _put(orchestrator, "alpha", 39, open_turn=40)
@@ -122,7 +122,7 @@ def test_consume_open_turn_roots_marks_only_matching_roots():
     other = _put(orchestrator, "gamma", 40, open_turn=40)
     adopted = _put(orchestrator, "beta", 40, open_turn=41)
 
-    orchestrator.consume_open_turn_roots(
+    snapshot = orchestrator.claim_open_turn_roots(
         game_id=1,
         perspective=1,
         player_id=7,
@@ -130,9 +130,17 @@ def test_consume_open_turn_roots_marks_only_matching_roots():
         analytic_ids=frozenset({"alpha", "beta", "delta"}),
     )
 
+    assert snapshot == (
+        OpenTurnRoot(
+            analytic_id="alpha",
+            open_turn=40,
+            backfill_earlier_turns=False,
+            consumed=False,
+        ),
+    )
     assert orchestrator.nodes[root].open_turn_consumed is True
     assert orchestrator.nodes[hop].open_turn_consumed is False
-    # Consume records the one-shot on a finished root. The query omits finished roots.
+    # A finished root at this open is marked. The root query omits finished roots.
     assert orchestrator.nodes[finished].open_turn_consumed is True
     assert orchestrator.nodes[other].open_turn_consumed is False
     assert orchestrator.nodes[adopted].open_turn_consumed is False
@@ -329,17 +337,11 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
     assert carried is None
 
 
-def test_claim_open_turn_roots_consumes_under_one_lock_and_keeps_the_preimage():
+def test_claim_open_turn_roots_returns_the_preimage_then_consumes_that_open():
     orchestrator = ComputeOrchestrator(compute_registry={})
     root = _put(orchestrator, "alpha", 40, open_turn=40, backfill=True)
     hop = _put(orchestrator, "alpha", 39, open_turn=40, backfill=True)
     other = _put(orchestrator, "alpha", 41, open_turn=41)
-    seen: list[tuple[OpenTurnRoot, ...]] = []
-
-    def consume(roots: tuple[OpenTurnRoot, ...]) -> bool:
-        seen.append(roots)
-        assert any(not item.consumed and item.open_turn == 40 for item in roots)
-        return True
 
     snapshot = orchestrator.claim_open_turn_roots(
         game_id=1,
@@ -347,35 +349,29 @@ def test_claim_open_turn_roots_consumes_under_one_lock_and_keeps_the_preimage():
         player_id=7,
         open_turn=40,
         analytic_ids=_ANALYTICS,
-        consume=consume,
     )
 
-    assert snapshot == seen[0]
     assert any(item.open_turn == 40 and item.consumed is False for item in snapshot)
     assert orchestrator.nodes[root].open_turn_consumed is True
     assert orchestrator.nodes[hop].open_turn_consumed is False
     assert orchestrator.nodes[other].open_turn_consumed is False
 
-    def second(roots: tuple[OpenTurnRoot, ...]) -> bool:
-        seen.append(roots)
-        assert all(item.consumed for item in roots if item.open_turn == 40)
-        assert any(not item.consumed and item.open_turn == 41 for item in roots)
-        return True
-
-    orchestrator.claim_open_turn_roots(
+    second = orchestrator.claim_open_turn_roots(
         game_id=1,
         perspective=1,
         player_id=7,
         open_turn=40,
         analytic_ids=_ANALYTICS,
-        consume=second,
     )
+    assert all(item.consumed for item in second if item.open_turn == 40)
+    assert any(not item.consumed and item.open_turn == 41 for item in second)
     assert orchestrator.nodes[other].open_turn_consumed is False
 
 
-def test_claim_open_turn_roots_declines_without_consuming():
+def test_claim_open_turn_roots_skips_consume_when_that_open_has_no_unconsumed_root():
     orchestrator = ComputeOrchestrator(compute_registry={})
-    root = _put(orchestrator, "alpha", 40, open_turn=40)
+    taken = _put(orchestrator, "alpha", 40, open_turn=40, consumed=True)
+    other = _put(orchestrator, "alpha", 41, open_turn=41)
 
     snapshot = orchestrator.claim_open_turn_roots(
         game_id=1,
@@ -383,54 +379,80 @@ def test_claim_open_turn_roots_declines_without_consuming():
         player_id=7,
         open_turn=40,
         analytic_ids=_ANALYTICS,
-        consume=lambda _roots: False,
     )
 
-    assert snapshot[0].consumed is False
-    assert orchestrator.nodes[root].open_turn_consumed is False
+    assert any(item.open_turn == 40 and item.consumed for item in snapshot)
+    assert any(item.open_turn == 41 and not item.consumed for item in snapshot)
+    assert orchestrator.nodes[taken].open_turn_consumed is True
+    assert orchestrator.nodes[other].open_turn_consumed is False
 
 
-def test_claim_open_turn_roots_blocks_a_second_claim_until_consume():
-    orchestrator = ComputeOrchestrator(compute_registry={})
+def test_claim_open_turn_roots_blocks_a_second_claim_until_the_one_shot_is_consumed():
+    """Snapshot and consume share one lock hold, so a second claim sees the one-shot taken."""
+
+    class _StallingOrchestrator(ComputeOrchestrator):
+        def __init__(self) -> None:
+            super().__init__(compute_registry={})
+            self.entered = threading.Event()
+            self.release = threading.Event()
+            self.collect_calls = 0
+
+        def _collect_open_turn_roots(
+            self,
+            *,
+            game_id: int,
+            perspective: int,
+            player_id: int,
+            analytic_ids: frozenset[str],
+            turn: int | None = None,
+        ) -> tuple[OpenTurnRoot, ...]:
+            roots = super()._collect_open_turn_roots(
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                analytic_ids=analytic_ids,
+                turn=turn,
+            )
+            self.collect_calls += 1
+            if self.collect_calls == 1:
+                self.entered.set()
+                assert self.release.wait(timeout=1)
+            return roots
+
+    orchestrator = _StallingOrchestrator()
     _put(orchestrator, "alpha", 40, open_turn=40)
-    entered = threading.Event()
+    first_snapshot: list[tuple[OpenTurnRoot, ...]] = []
     second_snapshot: list[tuple[OpenTurnRoot, ...]] = []
 
-    def second_claim() -> None:
-        def observe(roots: tuple[OpenTurnRoot, ...]) -> bool:
-            second_snapshot.append(roots)
-            return False
-
-        entered.set()
-        orchestrator.claim_open_turn_roots(
+    def claim() -> tuple[OpenTurnRoot, ...]:
+        return orchestrator.claim_open_turn_roots(
             game_id=1,
             perspective=1,
             player_id=7,
             open_turn=40,
             analytic_ids=_ANALYTICS,
-            consume=observe,
         )
 
+    def first_claim() -> None:
+        first_snapshot.append(claim())
+
+    def second_claim() -> None:
+        second_snapshot.append(claim())
+
+    first = threading.Thread(target=first_claim, daemon=True)
     worker = threading.Thread(target=second_claim, daemon=True)
-
-    def first(roots: tuple[OpenTurnRoot, ...]) -> bool:
-        assert any(not item.consumed for item in roots)
-        worker.start()
-        assert entered.wait(timeout=1)
-        worker.join(timeout=0.2)
-        assert worker.is_alive()
-        return True
-
-    orchestrator.claim_open_turn_roots(
-        game_id=1,
-        perspective=1,
-        player_id=7,
-        open_turn=40,
-        analytic_ids=_ANALYTICS,
-        consume=first,
-    )
+    first.start()
+    assert orchestrator.entered.wait(timeout=1)
+    worker.start()
+    worker.join(timeout=0.2)
+    assert worker.is_alive()
+    orchestrator.release.set()
+    first.join(timeout=1)
     worker.join(timeout=1)
 
+    assert not first.is_alive()
     assert not worker.is_alive()
+    assert first_snapshot
     assert second_snapshot
+    assert any(not item.consumed and item.open_turn == 40 for item in first_snapshot[0])
     assert all(item.consumed for item in second_snapshot[0] if item.open_turn == 40)

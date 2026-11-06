@@ -440,17 +440,15 @@ class ComputeOrchestrator(
         player_id: int,
         open_turn: int,
         analytic_ids: frozenset[str],
-        consume: Callable[[tuple[OpenTurnRoot, ...]], bool],
     ) -> tuple[OpenTurnRoot, ...]:
-        """Read this player's in-flight roots and maybe consume one open.
+        """Read this player's in-flight roots and consume one open when it is live.
 
-        ``consume`` runs under the orchestrator lock. It sees every in-flight
-        root for the player, including roots that are already consumed, and
-        returns whether the one-shot at ``open_turn`` is applied before the
-        lock is released. It must not re-enter the orchestrator. The returned
-        snapshot is the state from before that consume, so the caller can
-        still count a shell it is about to close. A later claim sees
-        ``consumed`` on that root.
+        The snapshot is every in-flight root for the player, including roots
+        that are already consumed. It is the state from before this claim
+        consumes. When an unconsumed root exists at ``open_turn``, that
+        one-shot is applied before the lock is released. The caller can still
+        count a shell it is about to close. A later claim sees ``consumed``
+        on that root.
         """
         with self._condition:
             roots = self._collect_open_turn_roots(
@@ -459,7 +457,10 @@ class ComputeOrchestrator(
                 player_id=player_id,
                 analytic_ids=analytic_ids,
             )
-            if consume(roots):
+            has_unconsumed_root = any(
+                not root.consumed and root.open_turn == open_turn for root in roots
+            )
+            if has_unconsumed_root:
                 self._mark_open_turn_consumed(
                     game_id=game_id,
                     perspective=perspective,
@@ -468,30 +469,6 @@ class ComputeOrchestrator(
                     analytic_ids=analytic_ids,
                 )
             return roots
-
-    def consume_open_turn_roots(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        open_turn: int,
-        analytic_ids: frozenset[str],
-    ) -> None:
-        """Record that the one-shot for this submission root has been applied.
-
-        Hops keep ``open_turn`` so a later job for the same walk still sees the
-        shell. The root stays addressable for recompute; ``open_turn_consumed``
-        is what a second persist of that root reads.
-        """
-        with self._condition:
-            self._mark_open_turn_consumed(
-                game_id=game_id,
-                perspective=perspective,
-                player_id=player_id,
-                open_turn=open_turn,
-                analytic_ids=analytic_ids,
-            )
 
     def _collect_open_turn_roots(
         self,
