@@ -53,17 +53,17 @@ class ComputeRequest:
 
 
 @dataclass(frozen=True)
-class ResolvedComputeRequest:
-    """Submission whose open is already resolved.
+class ResolvedComputeRequest(ComputeRequest):
+    """ComputeRequest whose submission open is already resolved.
 
     Orchestrator methods that run under the lock take this type.
-    ``submission_open`` is required, so an unresolved request cannot cross
-    that boundary. ``request`` is the public submission the open was resolved
-    from, including a resubmitted hop that already carried one.
+    ``submission_open`` has no default, so an unresolved request cannot
+    cross that boundary.
     """
 
-    request: ComputeRequest
-    submission_open: SubmissionOpen
+    _: KW_ONLY
+    # ``field()`` keeps this required; the base class default is None.
+    submission_open: SubmissionOpen = field()
 
 
 @dataclass

@@ -99,11 +99,10 @@ class OrchestratorEnsureMixin:
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
             for _index, resolved in resolved_unsatisfied:
-                request = resolved.request
-                bundle = request.resolved_bundle()
+                bundle = resolved.resolved_bundle()
                 if bundle is not None:
                     prepare_compute_request_dependency_chain(
-                        request,
+                        resolved,
                         ctx=self._ctx_for_bundle(bundle),
                         backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
                     )
@@ -111,12 +110,11 @@ class OrchestratorEnsureMixin:
             pending_pool: list[PendingPoolSubmission] = []
             with self._condition:
                 for index, resolved in resolved_unsatisfied:
-                    request = resolved.request
-                    existing = self._nodes.get(request.scope)
+                    existing = self._nodes.get(resolved.scope)
                     # Hollow terminal: durable gone, node still complete/failed. Drop so
                     # default force_fresh=False can plan fresh work (F1). Leave non-terminal
                     # nodes alone for attach / singleflight; parked wake stays explicit.
-                    if existing is not None and existing.is_terminal and not request.force_fresh:
+                    if existing is not None and existing.is_terminal and not resolved.force_fresh:
                         self._replace_terminal_node(existing)
                     submission = self._submit_locked(resolved, wake_if_parked_only=False)
                     if submission is None:

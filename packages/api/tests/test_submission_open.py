@@ -45,16 +45,17 @@ def _ctx(reader: Callable[[int], bool]) -> AnalyticQueryContext:
     )
 
 
-def _open(resolved: ResolvedComputeRequest) -> SubmissionOpen:
-    return resolved.submission_open
+def test_resolved_request_requires_an_open() -> None:
+    with pytest.raises(TypeError, match="submission_open"):
+        ResolvedComputeRequest(scope=_request(40).scope)
 
 
 def test_explicit_open_turn_wins_over_the_scope_turn() -> None:
     carried = SubmissionOpen(open_turn=40, backfill_earlier_turns=True)
     resolved = resolve_submission_open(_request(39, carried))
-    assert _open(resolved) == carried
-    assert resolved.request.submission_open == carried
-    assert submission_open_turn(resolved.request) == 40
+    assert resolved.submission_open == carried
+    assert submission_open_turn(resolved) == 40
+    assert resolve_submission_open(resolved) is resolved
 
 
 def test_absent_submission_open_without_a_bundle_raises() -> None:
@@ -64,8 +65,7 @@ def test_absent_submission_open_without_a_bundle_raises() -> None:
 
 def test_absent_submission_open_reads_the_bundle_reader() -> None:
     resolved = resolve_submission_open(_request(40, ctx=_ctx(lambda _game_id: True)))
-    assert _open(resolved) == SubmissionOpen(open_turn=40, backfill_earlier_turns=True)
-    assert resolved.request.submission_open == _open(resolved)
+    assert resolved.submission_open == SubmissionOpen(open_turn=40, backfill_earlier_turns=True)
 
 
 def test_missing_backfill_reader_raises() -> None:
@@ -83,18 +83,16 @@ def test_missing_backfill_reader_raises() -> None:
 
 def test_carried_backfill_keeps_its_choice_when_the_open_turn_is_derived() -> None:
     resolved = resolve_submission_open(_request(39, SubmissionOpen(backfill_earlier_turns=True)))
-    assert _open(resolved) == SubmissionOpen(open_turn=39, backfill_earlier_turns=True)
-    assert resolved.request.submission_open == _open(resolved)
-    again = resolve_submission_open(resolved.request)
-    assert again.request is resolved.request
-    assert _open(again) == _open(resolved)
+    assert resolved.submission_open == SubmissionOpen(open_turn=39, backfill_earlier_turns=True)
+    again = resolve_submission_open(resolved)
+    assert again is resolved
 
 
 def test_scope_without_a_concrete_turn_has_no_open_turn() -> None:
     ctx = _ctx(lambda _game_id: False)
     resolved = resolve_submission_open(_request("*", ctx=ctx))
-    assert _open(resolved) == SubmissionOpen(open_turn=None, backfill_earlier_turns=False)
-    assert submission_open_turn(resolved.request) is None
+    assert resolved.submission_open == SubmissionOpen(open_turn=None, backfill_earlier_turns=False)
+    assert submission_open_turn(resolved) is None
     boolean_turn = ComputeRequest(
         scope=ComputeScope(
             analytic_id="fleet",
@@ -106,8 +104,8 @@ def test_scope_without_a_concrete_turn_has_no_open_turn() -> None:
         ctx=ctx,
     )
     boolean_resolved = resolve_submission_open(boolean_turn)
-    assert _open(boolean_resolved).open_turn is None
-    assert submission_open_turn(boolean_resolved.request) is None
+    assert boolean_resolved.submission_open.open_turn is None
+    assert submission_open_turn(boolean_resolved) is None
 
     with pytest.raises(UnresolvedSubmissionOpenError, match="no orchestration bundle"):
         resolve_submission_open(_request("*"))
