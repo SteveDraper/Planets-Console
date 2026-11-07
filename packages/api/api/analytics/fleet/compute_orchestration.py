@@ -378,6 +378,10 @@ class FleetPersistencePolicy:
             player_id=scope.player_id,
             persisted=put_result.stored,
         )
+        if fields.catch_up:
+            # Planned hops write the turns before the open turn. This hop does
+            # not walk later files, so it leaves the open turn's file unread.
+            return None
         return self._refresh_following_callback(
             services,
             scope,

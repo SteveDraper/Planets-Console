@@ -143,7 +143,7 @@ def test_catch_up_hop_stamps_and_open_turn_keeps_its_generation(sample_turn):
     store_generation(persistence, ctx.game_id, ctx.perspective, 40, player_id, 1, ship_id=40)
     policy = FleetPersistencePolicy()
 
-    policy.persist(
+    hop_callback = policy.persist(
         ctx,
         ComputeScope(
             analytic_id=FLEET_ANALYTIC_ID,
@@ -158,7 +158,13 @@ def test_catch_up_hop_stamps_and_open_turn_keeps_its_generation(sample_turn):
             **open_turn_fields(40, 39),
         },
     )
-    policy.persist(
+    assert hop_callback is None
+    untouched = persistence.get_ledger(ctx.game_id, ctx.perspective, 40, player_id)
+    assert untouched is not None
+    assert untouched.evidence_generation == 1
+    assert untouched.ledger.records[0].record_id == "ship-40"
+
+    open_callback = policy.persist(
         ctx,
         ComputeScope(
             analytic_id=FLEET_ANALYTIC_ID,
@@ -173,6 +179,7 @@ def test_catch_up_hop_stamps_and_open_turn_keeps_its_generation(sample_turn):
             **open_turn_fields(40, 40),
         },
     )
+    assert open_callback is not None
 
     hop = persistence.get_ledger(ctx.game_id, ctx.perspective, 39, player_id)
     opened = persistence.get_ledger(ctx.game_id, ctx.perspective, 40, player_id)
