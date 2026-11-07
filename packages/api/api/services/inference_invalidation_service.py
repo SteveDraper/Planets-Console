@@ -105,22 +105,18 @@ class InferenceInvalidationService:
         table streams reschedule in place; otherwise ``force_fresh`` submit
         replaces a terminal that is no longer ensure-final.
 
-        The ledger bump runs first. The turns that wake are chosen after it,
+        The recompute is chosen while the player epoch is still the old one,
         from the current backfill record, roots, and one live-stream scan.
+        Discard flags work that must not stamp, then the ledger bump advances
+        the mark and the epoch. Fleet and scores wakes run after that bump.
         A limited recompute reschedules scores rows for woken turns that this
-        scan recorded as scores.
+        scan recorded as scores. Held admission wakes every known turn and
+        does not discard in-flight work.
         """
         fleet = self._fleet_persistence
         if fleet is None:
             return set()
         orchestrator = self._current_orchestrator()
-        turns_to_reschedule = fleet.invalidate_player_ledgers_from_turn(
-            game_id,
-            perspective,
-            host_turn,
-            player_id,
-            durable=durable,
-        )
         backfill_enabled = (
             backfill_earlier_turns
             if backfill_earlier_turns is not None
@@ -135,13 +131,57 @@ class InferenceInvalidationService:
             player_id=player_id,
             orchestrator=orchestrator,
         )
-        self._update_fleet_after_evidence(
+        return self._discard_bump_and_wake(
+            fleet,
+            game_id,
+            perspective,
+            host_turn,
+            player_id,
+            durable=durable,
+            resolved=resolved,
+            orchestrator=orchestrator,
+        )
+
+    def _discard_bump_and_wake(
+        self,
+        fleet: FleetSnapshotPersistenceService,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
+        *,
+        durable: bool,
+        resolved: ResolvedRecompute,
+        orchestrator: InFlightOrchestrator,
+    ) -> set[int]:
+        """Discard, then bump the mark and epoch, then wake.
+
+        ``resolved`` was chosen while this player's epoch was still the old
+        one. Discard flags work that must not stamp before
+        ``invalidate_player_ledgers_from_turn`` publishes the new epoch, so
+        epoch retry cannot rebuild that work onto the new generation. Fleet
+        and scores wakes run after the bump, so replacement work observes the
+        new mark. Wake-all discard leaves in-flight work running.
+        """
+        resolved.discard_bumped_work(
+            orchestrator,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+        )
+        turns_to_reschedule = fleet.invalidate_player_ledgers_from_turn(
+            game_id,
+            perspective,
+            host_turn,
+            player_id,
+            durable=durable,
+        )
+        self._wake_fleet_turns(
             game_id,
             perspective,
             player_id,
             resolved=resolved,
             turns_to_reschedule=turns_to_reschedule,
-            orchestrator=orchestrator,
         )
         self._wake_scores_rows_for_recompute(
             game_id,
@@ -152,7 +192,7 @@ class InferenceInvalidationService:
         )
         return turns_to_reschedule
 
-    def _update_fleet_after_evidence(
+    def _wake_fleet_turns(
         self,
         game_id: int,
         perspective: int,
@@ -160,19 +200,12 @@ class InferenceInvalidationService:
         *,
         resolved: ResolvedRecompute,
         turns_to_reschedule: set[int],
-        orchestrator: InFlightOrchestrator,
     ) -> None:
-        """Wake fleet for an already-resolved recompute.
+        """Wake fleet for an already-resolved recompute after the epoch bump.
 
         ``turns_to_reschedule`` is the ledger bump's known turns. Wake-all
         uses that set. A limited recompute uses the turns it already chose.
         """
-        resolved.discard_bumped_work(
-            orchestrator,
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-        )
         for fleet_turn in sorted(resolved.turns_to_wake(turns_to_reschedule)):
             stream_woke = reschedule_fleet_table_player(
                 FleetTableStreamScope(
@@ -240,9 +273,12 @@ class InferenceInvalidationService:
         backfill record chooses which turns wake. An unconsumed root at this
         host turn is consumed under one orchestrator lock. A bump that had
         that root wakes from the recompute snapshot taken with the claim. A
-        host turn with no unconsumed root does not consume. The ledger bump
-        runs before that deferred choice reads current roots and live streams.
-        A limited recompute reschedules scores rows from the scan that chose it.
+        host turn with no unconsumed root does not consume. A stamp returns
+        before any discard or bump. A deferred recompute reads current roots
+        and live streams while the epoch is still the old one. Discard flags
+        work that must not stamp, then the ledger bump advances the mark and
+        the epoch, then fleet and scores wake. A limited recompute
+        reschedules scores rows from the scan that chose it.
         """
         orchestrator = self._current_orchestrator()
         fleet = self._fleet_persistence
@@ -295,13 +331,6 @@ class InferenceInvalidationService:
         )
         if decision.mark_persist is MarkPersist.STAMP:
             return
-        turns_to_reschedule = fleet.invalidate_player_ledgers_from_turn(
-            game_id,
-            perspective,
-            host_turn,
-            player_id,
-            durable=True,
-        )
         recompute = evidence.recompute
         if isinstance(recompute, DeferRecompute):
             resolved = recompute_decision_at_wake(
@@ -315,20 +344,15 @@ class InferenceInvalidationService:
             )
         else:
             resolved = recompute
-        self._update_fleet_after_evidence(
+        self._discard_bump_and_wake(
+            fleet,
             game_id,
             perspective,
+            host_turn,
             player_id,
+            durable=True,
             resolved=resolved,
-            turns_to_reschedule=turns_to_reschedule,
             orchestrator=orchestrator,
-        )
-        self._wake_scores_rows_for_recompute(
-            game_id,
-            perspective,
-            player_id,
-            resolved=resolved,
-            turns_to_reschedule=turns_to_reschedule,
         )
 
     def on_fleet_ledger_persisted(self, event: FleetLedgerPersistedEvent) -> None:

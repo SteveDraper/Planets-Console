@@ -244,6 +244,19 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
     store_generation(persistence, ctx.game_id, ctx.perspective, 40, player_id, 3, ship_id=40)
     orchestrator = ComputeOrchestrator(compute_registry={})
     root = install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 40)
+    offscreen = ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=39,
+        player_id=player_id,
+    )
+    orchestrator.nodes[offscreen] = ComputeNodeRun(
+        scope=offscreen,
+        dependency_scopes=(),
+        state="running",
+        submission_open=SubmissionOpen(),
+    )
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
@@ -256,6 +269,9 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
     assert stamped == FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
     assert persistence.get_ledger(ctx.game_id, ctx.perspective, 40, player_id) is not None
     assert root.open_turn_consumed is True
+    assert orchestrator.nodes[offscreen].state == "running"
+    assert orchestrator.nodes[offscreen].discard_without_stamp is False
+    assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 0
 
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
 
@@ -541,6 +557,237 @@ def test_bump_drops_offscreen_hops_and_refuses_an_executing_step():
         )
     assert abandoned is True
     assert orchestrator.nodes[running].state == "failed"
+
+
+def test_executing_offscreen_work_is_flagged_before_the_epoch_bump(sample_turn, monkeypatch):
+    """Both bump paths flag off-screen work before the epoch or the mark moves.
+
+    The flag and the failed hop are already applied when
+    ``invalidate_player_ledgers_from_turn`` is entered. Wake runs after that
+    call returns. A shell step that is already running stays running.
+    """
+    host, ctx = context_at_turn(sample_turn, 40)
+    player_id = first_player_id(host)
+    persistence = ctx.export_services[FLEET_ANALYTIC_ID].persistence
+    write_evidence_mark(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=3,
+        applies_from=39,
+    )
+    reset_fleet_table_stream_registry_for_tests()
+    reset_inference_table_stream_registry_for_tests()
+    phase = {"invalidate_returned": False, "wake_before": False}
+    woken: list[int] = []
+
+    def note_wake(turn: int) -> None:
+        if not phase["invalidate_returned"]:
+            phase["wake_before"] = True
+        woken.append(turn)
+
+    def spy_reschedule(scope, _player_id):
+        note_wake(scope.turn_number)
+        return False
+
+    def spy_wake(scope, **_kwargs):
+        note_wake(scope.turn)
+        return True
+
+    def spy_scores(scope, _player_id):
+        note_wake(scope.turn_number)
+        return True
+
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
+        spy_reschedule,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.wake_fleet_scope",
+        spy_wake,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_inference_row",
+        spy_scores,
+    )
+    original_invalidate = persistence.invalidate_player_ledgers_from_turn
+
+    def drive(call) -> None:
+        orchestrator = ComputeOrchestrator(compute_registry={})
+        shell = ComputeScope(
+            analytic_id=FLEET_ANALYTIC_ID,
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=40,
+            player_id=player_id,
+        )
+        running = ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=38,
+            player_id=player_id,
+        )
+        ready = ComputeScope(
+            analytic_id=FLEET_ANALYTIC_ID,
+            game_id=ctx.game_id,
+            perspective=ctx.perspective,
+            turn=37,
+            player_id=player_id,
+        )
+        shell_node = install_submission_root(
+            orchestrator, ctx.game_id, ctx.perspective, player_id, 40
+        )
+        shell_node.state = "running"
+        orchestrator.nodes[running] = ComputeNodeRun(
+            scope=running,
+            dependency_scopes=(),
+            state="running",
+            submission_open=SubmissionOpen(),
+        )
+        orchestrator.nodes[ready] = ComputeNodeRun(
+            scope=ready,
+            dependency_scopes=(),
+            state="ready",
+            submission_open=SubmissionOpen(),
+        )
+        orchestrator._ready_queue.append(ready)
+        invalidation = InferenceInvalidationService(
+            InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+            fleet_persistence=persistence,
+            orchestrator=lambda: orchestrator,
+        )
+        epoch_before = persistence.player_invalidation_generation(
+            ctx.game_id, ctx.perspective, player_id
+        )
+        mark_before = persistence.evidence_mark(
+            ctx.game_id, ctx.perspective, player_id
+        ).evidence_generation
+        seen: dict[str, object] = {}
+        phase["invalidate_returned"] = False
+        phase["wake_before"] = False
+        woken.clear()
+
+        def spy_invalidate(*args, **kwargs):
+            seen["flagged"] = orchestrator.nodes[running].discard_without_stamp
+            seen["ready_state"] = orchestrator.nodes[ready].state
+            seen["ready_queued"] = ready in orchestrator._ready_queue
+            seen["shell_flagged"] = orchestrator.nodes[shell].discard_without_stamp
+            seen["shell_state"] = orchestrator.nodes[shell].state
+            seen["epoch"] = persistence.player_invalidation_generation(
+                ctx.game_id, ctx.perspective, player_id
+            )
+            seen["mark"] = persistence.evidence_mark(
+                ctx.game_id, ctx.perspective, player_id
+            ).evidence_generation
+            result = original_invalidate(*args, **kwargs)
+            phase["invalidate_returned"] = True
+            return result
+
+        persistence.invalidate_player_ledgers_from_turn = spy_invalidate
+        try:
+            call(invalidation)
+        finally:
+            persistence.invalidate_player_ledgers_from_turn = original_invalidate
+
+        assert seen["flagged"] is True
+        assert seen["ready_state"] == "failed"
+        assert seen["ready_queued"] is False
+        assert seen["shell_flagged"] is False
+        assert seen["shell_state"] == "running"
+        assert seen["epoch"] == epoch_before
+        assert seen["mark"] == mark_before
+        assert phase["wake_before"] is False
+        assert 40 in woken
+        assert (
+            persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id)
+            == epoch_before + 1
+        )
+        assert (
+            persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation
+            == mark_before + 1
+        )
+        assert orchestrator.nodes[running].state == "running"
+        assert orchestrator.nodes[shell].state == "running"
+
+    def persist_scores(invalidation: InferenceInvalidationService) -> None:
+        invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 39, player_id)
+
+    def update_evidence(invalidation: InferenceInvalidationService) -> None:
+        invalidation.on_inference_evidence_updated(
+            ctx.game_id,
+            ctx.perspective,
+            39,
+            player_id,
+            durable=True,
+        )
+
+    drive(persist_scores)
+    drive(update_evidence)
+
+
+def test_held_admission_leaves_executing_work_for_epoch_retry(sample_turn, monkeypatch):
+    """Held admission bumps the epoch and leaves an executing node running."""
+    host, ctx = context_at_turn(sample_turn, 40)
+    player_id = first_player_id(host)
+    persistence = ctx.export_services[FLEET_ANALYTIC_ID].persistence
+    write_evidence_mark(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=3,
+        applies_from=40,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
+        lambda _scope, _player_id: False,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.wake_fleet_scope",
+        lambda _scope, **_kwargs: True,
+    )
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    running = ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=39,
+        player_id=player_id,
+    )
+    orchestrator.nodes[running] = ComputeNodeRun(
+        scope=running,
+        dependency_scopes=(),
+        state="running",
+        submission_open=SubmissionOpen(),
+    )
+    invalidation = InferenceInvalidationService(
+        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
+    )
+    epoch_before = persistence.player_invalidation_generation(
+        ctx.game_id, ctx.perspective, player_id
+    )
+
+    invalidation.on_inference_evidence_updated(
+        ctx.game_id,
+        ctx.perspective,
+        40,
+        player_id,
+        durable=False,
+    )
+
+    assert orchestrator.nodes[running].state == "running"
+    assert orchestrator.nodes[running].discard_without_stamp is False
+    assert (
+        persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id)
+        == epoch_before + 1
+    )
+    assert (
+        persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 3
+    )
 
 
 def test_bump_recomputes_shell_and_live_turns_and_leaves_other_later_turns_on_disk(
