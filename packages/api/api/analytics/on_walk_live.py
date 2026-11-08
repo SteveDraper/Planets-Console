@@ -1,12 +1,13 @@
 """Submit on-walks for live fleet and scoreboard streams when the setting turns on.
 
 A turn with no live stream stays quiet. One player does not wait for another.
-A player who still has a non-terminal fleet node from an off-setting walk is
-submitted after that node completes, and only while the setting is still on
-and that stream is still live. The follow-up is a ``force_fresh`` submit after
-the orchestrator has released its lock. A failed off-setting node is terminal
-for the wait. Streams are not re-admitted, so stored rows do not return to
-turn load.
+A player who still has a non-terminal fleet or scoreboard node from an
+off-setting walk is submitted after that node completes, and only while the
+setting is still on and that stream is still live. The follow-up is a
+``force_fresh`` submit after the orchestrator has released its lock. A failed
+off-setting node is terminal for the wait. A running off-setting scoreboard
+does not absorb the on-walk by attach. Streams are not re-admitted, so stored
+rows do not return to turn load.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from api.models.game import TurnInfo
 from api.transport.fleet_table_stream import fleet_work_accepted_event
 from api.transport.inference_stream import inference_work_accepted_event
 
-_FLEET_ONLY = frozenset({FLEET_ANALYTIC_ID})
+_OFF_SETTING_BLOCKERS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
 
 
 @dataclass(frozen=True)
@@ -67,7 +68,7 @@ def submit_on_walks_for_live_streams(
     for shell in shells:
         by_player.setdefault((shell.perspective, shell.player_id), []).append(shell)
     for (perspective, player_id), player_shells in by_player.items():
-        blockers = _off_setting_fleet_blockers(
+        blockers = _off_setting_walk_blockers(
             orch,
             game_id=game_id,
             perspective=perspective,
@@ -76,20 +77,21 @@ def submit_on_walks_for_live_streams(
         if not blockers:
             _submit_shells(orch, player_shells)
             continue
-        _submit_after_off_setting_fleet(orch, player_shells, blockers)
+        _submit_after_off_setting_walk(orch, player_shells, blockers)
 
 
-def _submit_after_off_setting_fleet(
+def _submit_after_off_setting_walk(
     orchestrator: ComputeOrchestrator,
     shells: list[_LiveShell],
     blockers: tuple[ComputeScope, ...],
 ) -> None:
-    """Submit ``shells`` once every off-setting fleet blocker is terminal.
+    """Submit ``shells`` once every off-setting fleet or scoreboard blocker is terminal.
 
     ``blockers`` is the set observed before the listener was registered. The
     listener and the check after registration share one finish, so a node that
     completes in between is submitted once. A parked node stays a blocker.
-    A failed node is terminal.
+    A failed node is terminal. A non-terminal off-setting scoreboard is a
+    blocker, so the on-walk is not attached to the node that walk opened.
     """
     if not blockers:
         _submit_shells(orchestrator, shells)
@@ -101,7 +103,7 @@ def _submit_after_off_setting_fleet(
 
     def try_finish() -> None:
         nonlocal finished
-        if _off_setting_fleet_blockers(
+        if _off_setting_walk_blockers(
             orchestrator,
             game_id=player_shell.game_id,
             perspective=player_shell.perspective,
@@ -122,7 +124,7 @@ def _submit_after_off_setting_fleet(
             return
         if snapshot.state not in {"complete", "failed"}:
             return
-        if snapshot.scope.analytic_id != FLEET_ANALYTIC_ID:
+        if snapshot.scope.analytic_id not in _OFF_SETTING_BLOCKERS:
             return
         if snapshot.scope.player_id != player_shell.player_id:
             return
@@ -159,7 +161,7 @@ def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) 
         shell.emit_accepted()
 
 
-def _off_setting_fleet_blockers(
+def _off_setting_walk_blockers(
     orchestrator: ComputeOrchestrator,
     *,
     game_id: int,
@@ -172,7 +174,7 @@ def _off_setting_fleet_blockers(
             game_id=game_id,
             perspective=perspective,
             player_id=player_id,
-            analytic_ids=_FLEET_ONLY,
+            analytic_ids=_OFF_SETTING_BLOCKERS,
         )
         if _blocks_on_walk(view)
     )

@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import prepare_dependency_chain_turns
-from api.analytics.on_walk import accept_on_walk_root
-from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_compute_dag
+from api.analytics.fleet.types import FleetEvidenceMark
+from api.analytics.on_walk import (
+    prepare_absent_on_walk_mark,
+    remember_on_walk_from_plan,
+    rollback_absent_on_walk_mark,
+)
+from api.compute.dag import (
+    PlannedComputeNode,
+    earliest_planned_turn,
+    force_root_for_entry_step,
+    plan_compute_dag,
+)
 from api.compute.errors import ComputeScopeAbortedError, UnresolvedSubmissionOpenError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
@@ -91,6 +101,18 @@ def resolve_submission_open(request: ComputeRequest) -> ResolvedComputeRequest:
     return _with_resolved_open(request, resolved_open)
 
 
+@dataclass(frozen=True)
+class _FreshRootPlan:
+    """A submission that registered a new root plan, including an empty one.
+
+    ``earliest_turn`` is None when that plan scheduled no scopes. A join does
+    not produce a fresh plan.
+    """
+
+    request: ResolvedComputeRequest
+    earliest_turn: int | None
+
+
 def _is_parked_node(node: ComputeNodeRun | None) -> bool:
     """Whether ``wake_if_parked`` may wake this node."""
     return node is not None and node.state == "parked"
@@ -126,24 +148,27 @@ class OrchestratorSubmissionMixin:
     def submit(self: ComputeOrchestrator, request: ComputeRequest) -> ComputeHandle:
         """Submit or attach to in-flight work for one compute scope."""
         resolved = resolve_submission_open(request)
-        bundle = resolved.resolved_bundle()
-        if bundle is not None:
-            spliced = self._ctx_for_bundle(bundle)
-            prepare_compute_request_dependency_chain(
-                resolved,
-                ctx=spliced,
-                backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
-            )
-            # A join keeps the backfill choice the node started with, so it is
-            # not an on-walk. Mark preparation shares the turn cache with plan.
-            if self._submission_plans_fresh_root(resolved):
-                accept_on_walk_root(
-                    replace(resolved, bundle=None, ctx=spliced),
-                    compute_registry=self._compute_registry,
+        established = self._prepare_on_walk_mark(resolved)
+        try:
+            bundle = resolved.resolved_bundle()
+            if bundle is not None:
+                spliced = self._ctx_for_bundle(bundle)
+                prepare_compute_request_dependency_chain(
+                    resolved,
+                    ctx=spliced,
+                    backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
                 )
-        with self._condition:
-            submission = self._submit_locked(resolved, wake_if_parked_only=False)
-        return self._finish_submission(submission)
+            with self._condition:
+                submission = self._submit_locked(resolved, wake_if_parked_only=False)
+            if submission is None:
+                raise RuntimeError("submit_locked returned None without wake_if_parked_only")
+            handle, pending_inline, pending_pool, fresh_root = submission
+            self._settle_on_walk_mark(resolved, fresh_root, established)
+            established = None
+            return self._finish_submission((handle, pending_inline, pending_pool))
+        finally:
+            if established is not None:
+                self._rollback_prepared_on_walk_mark(resolved, established)
 
     def wake_if_parked(
         self: ComputeOrchestrator,
@@ -160,24 +185,94 @@ class OrchestratorSubmissionMixin:
             if not _is_parked_node(self._nodes.get(request.scope)):
                 return None
         resolved = resolve_submission_open(request)
-        with self._condition:
-            submission = self._submit_locked(resolved, wake_if_parked_only=True)
-        return None if submission is None else self._finish_submission(submission)
+        established = self._prepare_on_walk_mark(resolved)
+        try:
+            with self._condition:
+                submission = self._submit_locked(resolved, wake_if_parked_only=True)
+            if submission is None:
+                return None
+            handle, pending_inline, pending_pool, fresh_root = submission
+            self._settle_on_walk_mark(resolved, fresh_root, established)
+            established = None
+            return self._finish_submission((handle, pending_inline, pending_pool))
+        finally:
+            if established is not None:
+                self._rollback_prepared_on_walk_mark(resolved, established)
+
+    def _prepare_on_walk_mark(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+        *,
+        replace_terminal: bool = False,
+    ) -> FleetEvidenceMark | None:
+        """Establish an absent on-walk mark before the plan. No long lock hold.
+
+        The fresh-root check takes the condition only for the node lookup.
+        The mark write runs after that lock is released. An existing mark is
+        left for the plan to read. A join or an empty plan rolls this write back.
+        """
+        if not request.submission_open.backfill_earlier_turns:
+            return None
+        if not self._submission_plans_fresh_root(request, replace_terminal=replace_terminal):
+            return None
+        return prepare_absent_on_walk_mark(self._request_with_spliced_ctx(request))
 
     def _submission_plans_fresh_root(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
+        *,
+        replace_terminal: bool = False,
     ) -> bool:
-        """Whether this submission will plan a new root instead of joining one.
+        """Whether this submission will register a new root instead of joining.
 
-        A non-terminal node keeps the open and backfill choice it started with.
-        Replacing a terminal node, or finding no node, plans this submission.
+        A non-terminal node is a join. A terminal node is replaced when
+        ``force_fresh`` is set, or when the caller drops hollow terminals.
         """
         with self._condition:
             existing = self._nodes.get(request.scope)
             if existing is None:
                 return True
-            return bool(request.force_fresh and existing.is_terminal)
+            if not existing.is_terminal:
+                return False
+            return bool(request.force_fresh or replace_terminal)
+
+    def _settle_on_walk_mark(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+        fresh_root: _FreshRootPlan | None,
+        established: FleetEvidenceMark | None,
+    ) -> None:
+        """Widen from the registered plan, or roll back an unused absent-mark write.
+
+        An empty plan and a join both roll back. An existing mark is widened
+        only when the registered plan scheduled a turn.
+        """
+        if fresh_root is not None and fresh_root.earliest_turn is not None:
+            remember_on_walk_from_plan(
+                self._request_with_spliced_ctx(fresh_root.request),
+                earliest_turn=fresh_root.earliest_turn,
+            )
+            return
+        if established is None:
+            return
+        rollback_request = fresh_root.request if fresh_root is not None else request
+        self._rollback_prepared_on_walk_mark(rollback_request, established)
+
+    def _rollback_prepared_on_walk_mark(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+        established: FleetEvidenceMark,
+    ) -> None:
+        rollback_absent_on_walk_mark(self._request_with_spliced_ctx(request), established)
+
+    def _request_with_spliced_ctx(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+    ) -> ResolvedComputeRequest:
+        bundle = request.resolved_bundle()
+        if bundle is None:
+            return request
+        return replace(request, bundle=None, ctx=self._ctx_for_bundle(bundle))
 
     def _submit_locked(
         self: ComputeOrchestrator,
@@ -189,6 +284,7 @@ class OrchestratorSubmissionMixin:
             ComputeHandle,
             tuple[PendingInlineExecution, ...],
             tuple[PendingPoolSubmission, ...],
+            _FreshRootPlan | None,
         ]
         | None
     ):
@@ -224,17 +320,20 @@ class OrchestratorSubmissionMixin:
                             self._schedule_recreate_aborted_dependencies(existing)
                 handle = self._attach_to_existing(existing, request)
                 pending_inline, pending_pool = self._dispatch()
-            else:
-                self._emit_force_fresh_lifecycle(
-                    kind="force_fresh_replace",
-                    node=existing,
-                    request=request,
-                )
-                self._replace_terminal_node(existing)
-                handle, pending_inline, pending_pool = self._plan_submission_locked(request)
-        else:
-            handle, pending_inline, pending_pool = self._plan_submission_locked(request)
-        return handle, pending_inline, pending_pool
+                return handle, pending_inline, pending_pool, None
+            self._emit_force_fresh_lifecycle(
+                kind="force_fresh_replace",
+                node=existing,
+                request=request,
+            )
+            self._replace_terminal_node(existing)
+        handle, pending_inline, pending_pool, planned = self._plan_submission_locked(request)
+        return (
+            handle,
+            pending_inline,
+            pending_pool,
+            _FreshRootPlan(request=request, earliest_turn=earliest_planned_turn(planned)),
+        )
 
     def _plan_submission_locked(
         self: ComputeOrchestrator,
@@ -243,12 +342,13 @@ class OrchestratorSubmissionMixin:
         ComputeHandle,
         tuple[PendingInlineExecution, ...],
         tuple[PendingPoolSubmission, ...],
+        tuple[PlannedComputeNode, ...],
     ]:
         """Plan a fresh scope and select its first dispatchable work."""
         submission_open = request.submission_open
         scope = request.scope
         bundle = self._require_bundle(request)
-        self._plan_and_register(
+        planned = self._plan_and_register(
             scope,
             bundle=bundle,
             priority_band=request.priority_band,
@@ -264,6 +364,7 @@ class OrchestratorSubmissionMixin:
                 _condition=self._condition,
             ),
             *self._dispatch(),
+            planned,
         )
 
     def _finish_submission(
@@ -419,7 +520,7 @@ class OrchestratorSubmissionMixin:
         priority_band: ComputePriorityBand,
         entry_step_kind: str | None = None,
         submission_open: SubmissionOpen,
-    ) -> None:
+    ) -> tuple[PlannedComputeNode, ...]:
         export_scope = compute_scope_to_export_scope(root_scope)
         ctx = self._ctx_for_bundle(bundle)
         planned_nodes = plan_compute_dag(
@@ -463,6 +564,7 @@ class OrchestratorSubmissionMixin:
                 bundle=bundle,
                 submission_open=submission_open,
             )
+        return planned_nodes
 
     def _register_planned_node(
         self: ComputeOrchestrator,

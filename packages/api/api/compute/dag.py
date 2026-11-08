@@ -33,6 +33,14 @@ def _pending_key(analytic_id: str, export_scope: ExportScope) -> tuple[str, Expo
     return (analytic_id, export_scope)
 
 
+def earliest_planned_turn(planned: tuple[PlannedComputeNode, ...]) -> int | None:
+    """Earliest host turn ``planned`` refreshes, or None when the plan is empty."""
+    turns = [node.scope.turn for node in planned if isinstance(node.scope.turn, int)]
+    if not turns:
+        return None
+    return min(turns)
+
+
 def force_root_for_entry_step(entry_step_kind: str | None) -> bool:
     """Whether plan (and chain-fill) must walk children of a satisfied root.
 

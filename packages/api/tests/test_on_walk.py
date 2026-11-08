@@ -20,13 +20,19 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     get_inference_table_stream_registry,
     reset_inference_table_stream_registry_for_tests,
 )
-from api.analytics.on_walk import accept_on_walk_root, reset_on_walks_for_tests
+from api.analytics.on_walk import (
+    prepare_absent_on_walk_mark,
+    reset_on_walks_for_tests,
+    rollback_absent_on_walk_mark,
+)
 from api.analytics.on_walk_live import submit_on_walks_for_live_streams
+from api.analytics.scores.exports import is_scores_export_ensure_satisfied
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.turn_roster import iter_turn_players
-from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+from api.compute.dag import plan_compute_dag
+from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
 from api.compute.orchestrator_state import ResolvedComputeRequest
-from api.compute.scope import ComputeScope
+from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.errors import ValidationError
@@ -35,6 +41,7 @@ from api.serialization.backfill_earlier_turns import (
     backfill_earlier_turns_document,
     backfill_earlier_turns_store_key,
 )
+from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -52,7 +59,7 @@ from tests.off_mode_catch_up_helpers import (
     store_generation,
     write_evidence_mark,
 )
-from tests.scores_exports_helpers import first_player_id
+from tests.scores_exports_helpers import first_player_id, put_persisted_row
 from tests.test_fleet_eliminated_player import _stamp_player
 
 
@@ -67,24 +74,43 @@ def _persistence(ctx):
     return ctx.export_services[FLEET_ANALYTIC_ID].persistence
 
 
-def _root(ctx, analytic_id: str, turn: int, player_id: int) -> ResolvedComputeRequest:
-    return ResolvedComputeRequest(
-        scope=ComputeScope(
-            analytic_id=analytic_id,
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            turn=turn,
-            player_id=player_id,
-        ),
-        ctx=ctx,
-        submission_open=SubmissionOpen(open_turn=turn, backfill_earlier_turns=True),
+def _hold_pool(*_args, **_kwargs) -> None:
+    return None
+
+
+def _orchestrator() -> ComputeOrchestrator:
+    return ComputeOrchestrator(
+        compute_registry=FLEET_SCORES_REGISTRY,
+        pool_submitter=_hold_pool,
     )
+
+
+def _shell_scope(ctx, analytic_id: str, turn: int, player_id: int) -> ComputeScope:
+    return ComputeScope(
+        analytic_id=analytic_id,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=turn,
+        player_id=player_id,
+    )
+
+
+def _submit_shell(
+    ctx,
+    analytic_id: str,
+    turn: int,
+    player_id: int,
+    *,
+    orchestrator: ComputeOrchestrator | None = None,
+) -> ComputeOrchestrator:
+    """Production shell submit: no entry step, so the root is not forced."""
+    owner = orchestrator if orchestrator is not None else _orchestrator()
+    owner.submit(ComputeRequest(scope=_shell_scope(ctx, analytic_id, turn, player_id), ctx=ctx))
+    return owner
 
 
 def _accept(ctx, analytic_id: str, turn: int, player_id: int) -> None:
-    accept_on_walk_root(
-        _root(ctx, analytic_id, turn, player_id), compute_registry=FLEET_SCORES_REGISTRY
-    )
+    _submit_shell(ctx, analytic_id, turn, player_id)
 
 
 def _store_final(persistence, ctx, turn: int, player_id: int, generation: int) -> None:
@@ -184,6 +210,220 @@ def test_scoreboard_on_walk_includes_the_prior_fleet(sample_turn):
     assert (FLEET_ANALYTIC_ID, 9) in planned
     assert (FLEET_ANALYTIC_ID, 11) not in planned
     assert (SCORES_ANALYTIC_ID, 11) not in planned
+
+
+def _store_scoreboard(ctx, host, player_id: int, turn: int) -> None:
+    scores = ctx.export_services[SCORES_ANALYTIC_ID]
+    put_persisted_row(
+        scores.persistence,
+        host,
+        player_id,
+        PersistedInferenceRow(
+            status="exact",
+            summary="stored",
+            solution_count=0,
+            is_complete=True,
+            solutions=[],
+        ),
+        game_id=ctx.game_id,
+        host_turn=turn,
+        perspective_id=ctx.perspective,
+    )
+
+
+def _count_registered_plans(monkeypatch) -> dict[str, int]:
+    calls = {"n": 0}
+    real = plan_compute_dag
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", counting)
+    return calls
+
+
+def _player_node_keys(orchestrator: ComputeOrchestrator, player_id: int) -> set[tuple[str, int]]:
+    return {
+        (scope.analytic_id, scope.turn)
+        for scope in orchestrator.nodes
+        if scope.player_id == player_id and isinstance(scope.turn, int)
+    }
+
+
+def _scoreboard_context(sample_turn, turn_number: int):
+    host, stored = host_turn_at(sample_turn, turn_number)
+    ctx = export_chain_query_context(
+        host,
+        stored_turns=stored,
+        persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+    )
+    return host, ctx
+
+
+def test_stored_scoreboard_submit_walks_prior_fleet(sample_turn, monkeypatch):
+    """A stored row does not end the walk, and the registered plan widens the mark.
+
+    The submit leaves step_kind unset, so the root is not forced. Missing,
+    behind-mark, and approximate fleets stay on the walk. An ensure-final
+    fleet ends it. The shell scoreboard is on that plan.
+    """
+    host, ctx = _scoreboard_context(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    persistence = _persistence(ctx)
+    write_evidence_mark(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=4,
+        applies_from=8,
+    )
+    for turn in (1, 2, 3):
+        _store_final(persistence, ctx, turn, player_id, 4)
+    store_generation(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        7,
+        player_id,
+        1,
+        ship_id=7,
+    )
+    _store_final(persistence, ctx, 8, player_id, 1)
+    _store_scoreboard(ctx, host, player_id, 10)
+    scope = _shell_scope(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+    assert is_scores_export_ensure_satisfied(ctx, compute_scope_to_export_scope(scope))
+
+    plans = _count_registered_plans(monkeypatch)
+    orchestrator = _submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+
+    assert plans["n"] == 1
+    planned = _player_node_keys(orchestrator, player_id)
+    assert (SCORES_ANALYTIC_ID, 10) in planned
+    assert orchestrator.nodes[scope].state == "waiting_deps"
+    assert (FLEET_ANALYTIC_ID, 4) in planned
+    assert (FLEET_ANALYTIC_ID, 6) in planned
+    assert (FLEET_ANALYTIC_ID, 7) in planned
+    assert (FLEET_ANALYTIC_ID, 8) in planned
+    assert (FLEET_ANALYTIC_ID, 9) in planned
+    assert (FLEET_ANALYTIC_ID, 3) not in planned
+    assert (FLEET_ANALYTIC_ID, 1) not in planned
+    assert (FLEET_ANALYTIC_ID, 11) not in planned
+    assert (SCORES_ANALYTIC_ID, 9) not in planned
+    assert (SCORES_ANALYTIC_ID, 11) not in planned
+    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == FleetEvidenceMark(
+        evidence_generation=4,
+        applies_from_turn=4,
+    )
+
+
+def test_absent_mark_generation_zero_ledger_stays_on_the_walk(sample_turn, monkeypatch):
+    """A generation-0 final ledger is behind the mark the walk establishes first.
+
+    The submit leaves step_kind unset. The mark is generation 1 at the ensure
+    baseline, and that earlier turn is scheduled.
+    """
+    host, ctx = _scoreboard_context(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    persistence = _persistence(ctx)
+    _store_final(persistence, ctx, 9, player_id, 0)
+    assert persistence.has_final_ledger(ctx.game_id, ctx.perspective, 9, player_id)
+    _store_scoreboard(ctx, host, player_id, 10)
+    scope = _shell_scope(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+    assert is_scores_export_ensure_satisfied(ctx, compute_scope_to_export_scope(scope))
+    baseline = accelerated_ensure_floor(host.settings, 10)
+
+    plans = _count_registered_plans(monkeypatch)
+    orchestrator = _submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+
+    assert plans["n"] == 1
+    assert (FLEET_ANALYTIC_ID, 9) in _player_node_keys(orchestrator, player_id)
+    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == FleetEvidenceMark(
+        evidence_generation=1,
+        applies_from_turn=baseline,
+    )
+    assert not persistence.has_final_ledger(ctx.game_id, ctx.perspective, 9, player_id)
+
+
+def test_empty_on_walk_leaves_the_mark_absent(sample_turn, monkeypatch):
+    """A plan that schedules nothing rolls the absent-mark establish back."""
+    host, ctx = _scoreboard_context(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    persistence = _persistence(ctx)
+    _store_final(persistence, ctx, 9, player_id, 1)
+    _store_scoreboard(ctx, host, player_id, 10)
+    scope = _shell_scope(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+    assert is_scores_export_ensure_satisfied(ctx, compute_scope_to_export_scope(scope))
+
+    plans = _count_registered_plans(monkeypatch)
+    orchestrator = _submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+
+    assert plans["n"] == 1
+    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == FleetEvidenceMark()
+    assert (FLEET_ANALYTIC_ID, 9) not in _player_node_keys(orchestrator, player_id)
+    shell = orchestrator.nodes[scope]
+    assert shell.state == "complete"
+    assert shell.dependency_scopes == ()
+
+
+def test_existing_baseline_mark_survives_an_empty_plan(sample_turn, monkeypatch):
+    """A mark already at generation 1 and the baseline is not a rollback token."""
+    host, ctx = _scoreboard_context(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    persistence = _persistence(ctx)
+    baseline = accelerated_ensure_floor(host.settings, 10)
+    kept = FleetEvidenceMark(evidence_generation=1, applies_from_turn=baseline)
+    write_evidence_mark(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=1,
+        applies_from=baseline,
+    )
+    _store_final(persistence, ctx, 9, player_id, 1)
+    _store_scoreboard(ctx, host, player_id, 10)
+    scope = _shell_scope(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+    assert is_scores_export_ensure_satisfied(ctx, compute_scope_to_export_scope(scope))
+
+    plans = _count_registered_plans(monkeypatch)
+    orchestrator = _submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+
+    assert plans["n"] == 1
+    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == kept
+    assert (FLEET_ANALYTIC_ID, 9) not in _player_node_keys(orchestrator, player_id)
+    shell = orchestrator.nodes[scope]
+    assert shell.state == "complete"
+    assert shell.dependency_scopes == ()
+
+
+def test_rollback_leaves_a_mark_another_writer_changed(sample_turn):
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    baseline = accelerated_ensure_floor(host.settings, 10)
+    request = ResolvedComputeRequest(
+        scope=_shell_scope(ctx, FLEET_ANALYTIC_ID, 10, player_id),
+        ctx=ctx,
+        submission_open=SubmissionOpen(open_turn=10, backfill_earlier_turns=True),
+    )
+    established = prepare_absent_on_walk_mark(request)
+    assert established == FleetEvidenceMark(evidence_generation=1, applies_from_turn=baseline)
+    persistence = _persistence(ctx)
+    changed = FleetEvidenceMark(evidence_generation=2, applies_from_turn=4)
+    persistence.update_evidence_mark(
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        lambda _current: changed,
+    )
+    rollback_absent_on_walk_mark(request, established)
+    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == changed
 
 
 def test_eliminated_shell_player_has_no_prior_fleet(sample_turn):
@@ -480,6 +720,56 @@ def test_off_setting_fleet_defers_one_player_until_the_node_is_terminal(sample_t
         assert blocked_request.priority_band == "stream_attached"
     finally:
         reset_fleet_table_stream_registry_for_tests()
+
+
+def test_off_setting_scoreboard_defers_until_terminal_then_registers_the_walk(sample_turn):
+    """A running off-setting scoreboard does not absorb the on-walk.
+
+    The walk is submitted after that node is terminal, with no entry step, and
+    the registered plan includes the prior fleet.
+    """
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    _attach_stream(
+        get_inference_table_stream_registry(),
+        InferenceStreamScope(ctx.game_id, ctx.perspective, 10),
+        host,
+        ctx,
+        [player_id],
+    )
+    orchestrator = _orchestrator()
+    scores_scope = _shell_scope(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+    node = ComputeNodeRun(
+        scope=scores_scope,
+        dependency_scopes=(),
+        state="running",
+        submission_open=SubmissionOpen(open_turn=10, backfill_earlier_turns=False),
+    )
+    orchestrator.nodes[scores_scope] = node
+    prior = _shell_scope(ctx, FLEET_ANALYTIC_ID, 9, player_id)
+    try:
+        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        assert orchestrator.nodes[scores_scope] is node
+        assert node.submission_open.backfill_earlier_turns is False
+        assert prior not in orchestrator.nodes
+
+        node.state = "parked"
+        orchestrator.observers.notify_scope_outcome(node)
+        orchestrator.observers.drain_post_lock_callbacks()
+        assert prior not in orchestrator.nodes
+        assert node.submission_open.backfill_earlier_turns is False
+
+        node.state = "failed"
+        orchestrator.observers.notify_scope_outcome(node)
+        orchestrator.observers.drain_post_lock_callbacks()
+        registered = orchestrator.nodes[scores_scope]
+        assert registered is not node
+        assert registered.submission_open.backfill_earlier_turns is True
+        assert prior in orchestrator.nodes
+        assert orchestrator.nodes[prior].submission_open.backfill_earlier_turns is True
+    finally:
+        reset_inference_table_stream_registry_for_tests()
 
 
 def test_deferred_on_walk_skips_a_closed_stream_or_a_setting_that_turned_off(

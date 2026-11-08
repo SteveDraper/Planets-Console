@@ -16,6 +16,7 @@ from api.analytics.export_types import (
 )
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.ensure_validation import validate_ensure_dependency_target
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 
@@ -86,7 +87,18 @@ def walk_dependency_tree(
         catalog = ctx.export_registry.get(analytic_id)
         if catalog is None or catalog.is_empty:
             return result
-        if not force_root and not _dependency_needs_processing(ctx, analytic_id, scope, catalog):
+        needs_scope = _dependency_needs_processing(ctx, analytic_id, scope, catalog)
+        # A stored scoreboard row is not fleet ensure-final. With backfill on it
+        # does not end the walk. The shell is queued only when that walk
+        # schedules dependency work, so a finished shell is not re-queued.
+        # An ensure-final fleet still returns here and is not redone.
+        continues_past_satisfied = (
+            not force_root
+            and not needs_scope
+            and backfill_earlier_turns
+            and analytic_id == SCORES_ANALYTIC_ID
+        )
+        if not force_root and not needs_scope and not continues_past_satisfied:
             return result
 
         for dependency in catalog.applicable_ensure_dependencies(
@@ -135,6 +147,9 @@ def walk_dependency_tree(
                     seen_pending,
                     _pending_ensure_key,
                 )
+
+        if continues_past_satisfied and not result.pending_ensure:
+            return result
 
         result.missing_steps.append(
             EnsureMissingStep(
