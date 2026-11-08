@@ -31,7 +31,11 @@ from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.serialization import (
     fleet_acquisition_ledger_to_json,
 )
-from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+from api.analytics.fleet.types import (
+    FleetEvidenceMark,
+    FleetMaterializationProvenance,
+    PersistedFleetLedger,
+)
 from api.analytics.turn_roster import iter_turn_players
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
@@ -372,6 +376,14 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
     assert turn_112 is not None
     player_id = turn_112.scores[0].ownerid
 
+    # Turn 110 is already ensure-final on the generation-1 mark, so the on-walk
+    # stops there and gap-fill is only 111..112.
+    persistence.update_evidence_mark(
+        628580,
+        1,
+        player_id,
+        lambda _current: FleetEvidenceMark(evidence_generation=1, applies_from_turn=1),
+    )
     persistence.put_ledger(
         628580,
         1,
@@ -384,6 +396,7 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
                 prior_ledger_at_n_minus_1=True,
             ),
         ),
+        evidence_generation=1,
     )
 
     inference_persistence = InferenceRowPersistenceService(memory_backend)
