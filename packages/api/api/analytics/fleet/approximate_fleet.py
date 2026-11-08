@@ -26,6 +26,7 @@ from api.analytics.fleet.types import (
     FleetMaterializationProvenance,
     PersistedFleetLedger,
 )
+from api.exceptions import DiscardedWorkRefused
 from api.models.game import TurnInfo
 
 if TYPE_CHECKING:
@@ -171,15 +172,17 @@ def refresh_following_approximate_fleets(
 ) -> None:
     """Replace each later approximate file from the ledger just saved.
 
-    ``player_invalidation_generation`` is the epoch captured for the save that
+    ``player_invalidation_generation`` is the job epoch for the save that
     started this walk. After each rebuild the walk reads that epoch again and
     re-reads the target, then stops before the put when the epoch no longer
-    matches or the target is missing, eliminated, or ensure-final. The same
-    file stop applies before the rebuild. A stop does not raise and does not
-    roll back puts already stored. Does not create the missing turn. A
-    terminal same-turn scoreboard writes the replacement; otherwise the copy
-    stays approximate. ``stop_after_turn`` ends the walk after that turn.
-    None walks every later approximate file.
+    matches or the target is missing, eliminated, or ensure-final. The put
+    compares that same epoch and chooses the generation under one lock.
+    ``DiscardedWorkRefused`` from that put stops the walk. The same file stop
+    applies before the rebuild. A stop does not raise and does not roll back
+    puts already stored. Does not create the missing turn. A terminal
+    same-turn scoreboard writes the replacement; otherwise the copy stays
+    approximate. ``stop_after_turn`` ends the walk after that turn. None walks
+    every later approximate file.
     """
     from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
     from api.analytics.fleet.fleet_table_stream_scheduler import publish_saved_host_turn_ledger
@@ -234,13 +237,17 @@ def refresh_following_approximate_fleets(
         )
         if not epoch_matches() or target_stops_the_walk():
             return
-        put_result = persistence.put_ledger(
-            game_id,
-            perspective,
-            next_turn,
-            player_id,
-            PersistedFleetLedger(ledger=ledger, provenance=provenance),
-        )
+        try:
+            put_result = persistence.put_ledger(
+                game_id,
+                perspective,
+                next_turn,
+                player_id,
+                PersistedFleetLedger(ledger=ledger, provenance=provenance),
+                expected_player_epoch=player_invalidation_generation,
+            )
+        except DiscardedWorkRefused:
+            return
         publish_saved_host_turn_ledger(
             game_id=game_id,
             perspective=perspective,

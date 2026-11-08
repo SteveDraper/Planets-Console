@@ -34,7 +34,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
     StampCurrentEvidenceMark,
 )
-from api.errors import NotFoundError, ValidationError
+from api.errors import DiscardedWorkRefused, NotFoundError, ValidationError
 from api.serialization.backfill_earlier_turns import read_backfill_earlier_turns
 from api.storage.base import StorageBackend
 
@@ -191,7 +191,9 @@ class FleetSnapshotPersistenceService:
         self._turn_invalidation_generation: dict[tuple[int, int, int, int], int] = {}
         self._evidence_marks: dict[tuple[int, int, int], FleetEvidenceMark] = {}
         self._known_ledger_turns: dict[tuple[int, int, int], set[int]] = {}
-        self._generation_lock = threading.Lock()
+        # Re-entrant so a stamp can hold this lock across helpers that also take it.
+        # That hold runs from the epoch compare through the ledger write.
+        self._generation_lock = threading.RLock()
 
     @staticmethod
     def ledger_prefix(game_id: int, perspective: int, turn_number: int) -> str:
@@ -232,12 +234,18 @@ class FleetSnapshotPersistenceService:
         *,
         defer_ledger_persisted_notification: bool = False,
         evidence_generation: int | StampCurrentEvidenceMark = STAMP_CURRENT_EVIDENCE_MARK,
+        expected_player_epoch: int | None = None,
     ) -> PutLedgerResult:
         """Write one player's ledger and bracket a ledger-write notice around the attempt.
 
         ``evidence_generation`` is either the integer stored on the file or
         ``STAMP_CURRENT_EVIDENCE_MARK``, which reads the player's current mark
         at write time.
+
+        ``expected_player_epoch``, when set, is the in-flight fleet job's player
+        epoch. The compare and the generation written on the file happen under
+        the generation lock. A mismatch raises ``DiscardedWorkRefused`` and does
+        not write. Callers that are not an in-flight fleet job omit it.
         """
         with _fleet_ledger_write(game_id, perspective, turn_number, player_id):
             if persisted.ledger.player_id != player_id:
@@ -246,31 +254,47 @@ class FleetSnapshotPersistenceService:
                     f"{persisted.ledger.player_id} does not match key player_id {player_id}",
                 )
             prior = self._read_player_ledger(game_id, perspective, turn_number, player_id)
-            mark = self.evidence_mark(game_id, perspective, player_id)
-            stored_generation = _ledger_evidence_generation(evidence_generation, mark)
-            to_store = PersistedFleetLedger(
-                ledger=persisted.ledger,
-                provenance=persisted.provenance,
-                materialization_version=FLEET_MATERIALIZATION_VERSION,
-                evidence_generation=stored_generation,
-            )
-            prior_was_ensure_final = prior is not None and self.ledger_is_ensure_final(
-                game_id,
-                perspective,
-                turn_number,
-                player_id,
-                prior,
-            )
-            self._write_player_ledger(game_id, perspective, turn_number, player_id, to_store)
-            self._remember_ledger_turn(game_id, perspective, player_id, turn_number)
-            if to_store.provenance.is_final:
-                self._advance_evidence_mark_after_boundary_write(
-                    game_id,
-                    perspective,
-                    player_id,
-                    turn_number,
-                    to_store.evidence_generation,
+            with self._generation_lock:
+                if expected_player_epoch is not None:
+                    if isinstance(expected_player_epoch, bool) or not isinstance(
+                        expected_player_epoch, int
+                    ):
+                        raise ValidationError(
+                            "fleet ledger expected_player_epoch must be an integer"
+                        )
+                    current_epoch = self._invalidation_generation.get(
+                        (game_id, perspective, player_id),
+                        0,
+                    )
+                    if current_epoch != expected_player_epoch:
+                        raise DiscardedWorkRefused(
+                            f"fleet persist refused for game {game_id} perspective {perspective} "
+                            f"player {player_id} turn {turn_number}: "
+                            "in-flight work cannot stamp the new mark"
+                        )
+                mark = self.evidence_mark(game_id, perspective, player_id)
+                stored_generation = _ledger_evidence_generation(evidence_generation, mark)
+                to_store = PersistedFleetLedger(
+                    ledger=persisted.ledger,
+                    provenance=persisted.provenance,
+                    materialization_version=FLEET_MATERIALIZATION_VERSION,
+                    evidence_generation=stored_generation,
                 )
+                prior_was_ensure_final = prior is not None and fleet_ledger_is_ensure_final(
+                    prior,
+                    turn_number=turn_number,
+                    mark=mark,
+                )
+                self._write_player_ledger(game_id, perspective, turn_number, player_id, to_store)
+                self._remember_ledger_turn(game_id, perspective, player_id, turn_number)
+                if to_store.provenance.is_final:
+                    self._advance_evidence_mark_after_boundary_write(
+                        game_id,
+                        perspective,
+                        player_id,
+                        turn_number,
+                        to_store.evidence_generation,
+                    )
             notification = self._ledger_persisted_notification_if_needed(
                 game_id,
                 perspective,
@@ -528,24 +552,26 @@ class FleetSnapshotPersistenceService:
         """Mark player P's fleet ledgers stale from ``turn_number`` without file walks.
 
         Always bumps the in-memory epoch so in-flight fleet work for P aborts.
-        When ``durable`` is true, also bumps P's evidence mark. Ledger files stay
-        in place. The returned turns are the host turn plus turns this process
-        has already read or written at or after ``turn_number``, for stream wake.
+        When ``durable`` is true, the evidence mark and the player epoch publish
+        in this same generation-lock hold. Ledger files stay in place. The
+        returned turns are the host turn plus turns this process has already
+        read or written at or after ``turn_number``, for stream wake.
         """
-        if durable:
-            self._bump_durable_evidence_mark(
+        with self._generation_lock:
+            turns = self._known_turns_from(game_id, perspective, player_id, turn_number)
+            if durable:
+                self._bump_durable_evidence_mark(
+                    game_id,
+                    perspective,
+                    player_id,
+                    turn_number,
+                )
+            self.bump_player_and_turn_invalidations(
                 game_id,
                 perspective,
                 player_id,
-                turn_number,
+                turns,
             )
-        turns = self._known_turns_from(game_id, perspective, player_id, turn_number)
-        self.bump_player_and_turn_invalidations(
-            game_id,
-            perspective,
-            player_id,
-            turns,
-        )
         return turns
 
     def bump_player_and_turn_invalidations(

@@ -10,6 +10,7 @@ from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.injected_services import FleetComputeServices, resolve_fleet_services
 from api.analytics.fleet.off_mode_persist import (
+    job_player_epoch,
     observation_merge_generation,
     refuse_stale_fleet_epoch,
 )
@@ -314,12 +315,7 @@ class FleetPersistencePolicy:
             raise ValueError("fleet observation persist requires concrete turn")
         fields = parse_off_mode_wire(result_wire)
         refuse_stale_fleet_epoch(services, scope, fields)
-        # Epoch for the following-file walk. Read before the ledger put.
-        player_invalidation_generation = services.persistence.player_invalidation_generation(
-            scope.game_id,
-            scope.perspective,
-            scope.player_id,
-        )
+        job_epoch = job_player_epoch(fields)
 
         turn = ctx.load_turn(scope.turn)
         eliminated = result_wire.get("eliminatedAtTurn") is True or (
@@ -367,6 +363,7 @@ class FleetPersistencePolicy:
             persisted,
             defer_ledger_persisted_notification=True,
             evidence_generation=observation_merge_generation(services, scope, fields),
+            expected_player_epoch=job_epoch,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         if eliminated:
@@ -385,7 +382,7 @@ class FleetPersistencePolicy:
         return self._refresh_following_callback(
             services,
             scope,
-            player_invalidation_generation,
+            job_epoch,
             fields.open_turn,
         )
 
@@ -415,19 +412,20 @@ class FleetPersistencePolicy:
             raise ValueError("fleet persist ledger player does not match scope")
         fields = parse_off_mode_wire(result_wire)
         refuse_stale_fleet_epoch(services, scope, fields)
-        # Epoch for the following-file walk. Read before the ledger put.
-        player_invalidation_generation = services.persistence.player_invalidation_generation(
-            scope.game_id,
-            scope.perspective,
-            scope.player_id,
-        )
+        job_epoch = job_player_epoch(fields)
 
         turn = ctx.load_turn(scope.turn)
         if turn is None:
             raise ValueError(f"stored turn {scope.turn} is required for fleet persist")
 
         if fleet_player_eliminated_at_turn(turn, scope.player_id):
-            return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
+            return self._persist_eliminated_empty(
+                ctx,
+                scope,
+                result_wire,
+                turn,
+                expected_player_epoch=job_epoch,
+            )
         if fields.catch_up:
             # Observation already merged the refreshed prior. Do not read this
             # turn's stored scoreboard and do not schedule a solve.
@@ -507,7 +505,7 @@ class FleetPersistencePolicy:
                 provenance=provenance,
                 materialization_version=FLEET_MATERIALIZATION_VERSION,
             ),
-            player_invalidation_generation=player_invalidation_generation,
+            player_invalidation_generation=job_epoch,
             open_turn=fields.open_turn,
         )
 
@@ -535,6 +533,7 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
+            expected_player_epoch=player_invalidation_generation,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         scores_notification = put_result.deferred_notification
@@ -561,10 +560,11 @@ class FleetPersistencePolicy:
     ) -> Callable[[], None]:
         """Replace later approximate files from the ledger this persist just saved.
 
-        ``player_invalidation_generation`` is the epoch captured at the start of
-        that persist, before the ledger put. ``open_turn`` is the submission
-        root on the job wire. The walk stops after that turn when it is set,
-        and continues through later turns when it is None.
+        ``player_invalidation_generation`` is the job epoch the early check
+        accepted. Each later put compares that epoch when it stamps.
+        ``open_turn`` is the submission root on the job wire. The walk stops
+        after that turn when it is set, and continues through later turns when
+        it is None.
         """
         from api.analytics.fleet.approximate_fleet import refresh_following_approximate_fleets
 
@@ -599,6 +599,8 @@ class FleetPersistencePolicy:
         scope: ComputeScope,
         result_wire: dict[str, object],
         turn: TurnInfo,
+        *,
+        expected_player_epoch: int,
     ) -> Callable[[], None] | None:
         """Write an empty final ledger. Does not wait on scores or a prior fleet."""
         from api.analytics.fleet.eliminated_player import (
@@ -623,6 +625,7 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
+            expected_player_epoch=expected_player_epoch,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         return put_result.deferred_notification

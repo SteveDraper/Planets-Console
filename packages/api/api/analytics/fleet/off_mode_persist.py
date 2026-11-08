@@ -22,6 +22,8 @@ def refuse_stale_fleet_epoch(
 ) -> None:
     """Refuse a fleet persist whose job epoch is not the player's current epoch.
 
+    Fast fail before the ledger is built. ``put_ledger`` repeats the compare
+    under the generation lock when it chooses the generation to write.
     ``playerInvalidationGeneration`` is required. A missing value raises
     ``ValidationError``. A present non-integer is already rejected by
     ``parse_off_mode_wire``. When the player id is concrete and the current
@@ -43,6 +45,18 @@ def refuse_stale_fleet_epoch(
         f"fleet persist refused for game {scope.game_id} perspective {scope.perspective} "
         f"player {scope.player_id} turn {scope.turn}: in-flight work cannot stamp the new mark"
     )
+
+
+def job_player_epoch(fields: OffModeWireFields) -> int:
+    """Player epoch carried on a fleet persist wire.
+
+    ``refuse_stale_fleet_epoch`` rejects a missing epoch. The ledger write
+    compares this value under the generation lock.
+    """
+    epoch = fields.player_invalidation_generation
+    if isinstance(epoch, bool) or not isinstance(epoch, int):
+        raise ValidationError("fleet persist wire requires integer playerInvalidationGeneration")
+    return epoch
 
 
 def observation_merge_generation(
