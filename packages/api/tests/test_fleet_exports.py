@@ -7,8 +7,9 @@ from unittest.mock import patch
 
 from api.analytics.export_dependency_walk import walk_dependency_tree
 from api.analytics.export_types import EnsureDependency, ExportScope
-from api.analytics.fleet.compute_services import resolve_fleet_services, turn_chain_through
+from api.analytics.fleet.compute_services import turn_chain_through
 from api.analytics.fleet.exports import EXPORT_CATALOG
+from api.analytics.fleet.injected_services import resolve_fleet_services
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -412,7 +413,13 @@ def test_probe_and_walk_report_fleet_depends_on_prior_turn_final_fleet(sample_tu
     )
     assert fleet_step.status == "not_persisted"
 
-    walk = walk_dependency_tree(ctx, "fleet", scope, visiting=set())
+    walk = walk_dependency_tree(
+        ctx,
+        "fleet",
+        scope,
+        visiting=set(),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
     assert walk.turn_unavailable is None
     walk_keys = [(step.analytic_id, step.turn) for step in walk.missing_steps]
     assert walk_keys == [("fleet", turn_number)]

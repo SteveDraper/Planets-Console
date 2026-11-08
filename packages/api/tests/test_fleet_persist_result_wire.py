@@ -48,6 +48,7 @@ from tests.scores_exports_helpers import (
     ship_build_domain,
     ship_build_wire,
 )
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET_ANALYTIC_ID = "fleet"
 
@@ -218,6 +219,7 @@ def test_persist_writes_refined_option_sets_onto_result_wire(sample_turn):
     result_wire = {
         "persistedLedgerWire": persisted_fleet_ledger_to_json(phase1),
         "materializeTurn": turn.settings.turn,
+        "playerInvalidationGeneration": 0,
     }
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -337,6 +339,11 @@ def test_persist_publishes_non_zero_evidence_generation_on_result_wire(sample_tu
     result_wire = {
         "persistedLedgerWire": persisted_fleet_ledger_to_json(phase1),
         "materializeTurn": turn.settings.turn,
+        "playerInvalidationGeneration": fleet_services.persistence.player_invalidation_generation(
+            628580,
+            game_perspective,
+            player_id,
+        ),
     }
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -440,6 +447,7 @@ def test_observation_persist_keeps_option_sets_from_the_stored_prior(sample_turn
     result_wire_n = {
         "persistedLedgerWire": persisted_fleet_ledger_to_json(phase1_n),
         "materializeTurn": 5,
+        "playerInvalidationGeneration": 0,
     }
     scope_n = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -466,6 +474,7 @@ def test_observation_persist_keeps_option_sets_from_the_stored_prior(sample_turn
         scope_n1,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert "priorLedgerWire" not in job_wire
     assert "baselineLedgerWire" not in job_wire
@@ -542,6 +551,7 @@ def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
         scope_n1,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert "priorLedgerWire" not in job_wire
     observed = run_fleet_observation_leg(job_wire)
@@ -590,6 +600,7 @@ def test_persist_refuses_when_scores_turn_evidence_open(sample_turn):
     result_wire = {
         "persistedLedgerWire": persisted_fleet_ledger_to_json(phase1),
         "materializeTurn": turn.settings.turn,
+        "playerInvalidationGeneration": 0,
     }
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,

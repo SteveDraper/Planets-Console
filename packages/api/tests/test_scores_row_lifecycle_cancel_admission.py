@@ -24,6 +24,7 @@ from api.analytics.military_score_inference.solver import (
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.compute.pools import reset_compute_worker_pool_for_tests
+from api.compute.submission_open import SubmissionOpen
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -479,6 +480,7 @@ def test_cancel_run_uses_cached_generation_without_orch_lookup(sample_turn, monk
             dependency_scopes=(),
             state="running",
             execution_generation=7,
+            submission_open=SubmissionOpen(),
         )
     with scheduler._lock:
         scheduler._runs[session.run_id] = scope

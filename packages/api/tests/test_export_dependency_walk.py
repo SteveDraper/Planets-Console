@@ -40,7 +40,13 @@ def test_walk_uses_is_ensure_satisfied_when_present(sample_turn):
         player_id=player_id,
     )
 
-    result = walk_dependency_tree(ctx, catalog.analytic_id, scope, visiting=set())
+    result = walk_dependency_tree(
+        ctx,
+        catalog.analytic_id,
+        scope,
+        visiting=set(),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
 
     assert result.missing_steps == []
     assert result.pending_ensure == []
@@ -60,7 +66,13 @@ def test_walk_falls_back_to_is_persisted_without_is_ensure_satisfied(sample_turn
         player_id=player_id,
     )
 
-    result = walk_dependency_tree(ctx, catalog.analytic_id, scope, visiting=set())
+    result = walk_dependency_tree(
+        ctx,
+        catalog.analytic_id,
+        scope,
+        visiting=set(),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
 
     assert result.missing_steps == []
     assert result.pending_ensure == []
@@ -80,7 +92,13 @@ def test_walk_reports_missing_when_neither_hook_satisfied(sample_turn):
         player_id=player_id,
     )
 
-    result = walk_dependency_tree(ctx, catalog.analytic_id, scope, visiting=set())
+    result = walk_dependency_tree(
+        ctx,
+        catalog.analytic_id,
+        scope,
+        visiting=set(),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
 
     assert len(result.missing_steps) == 1
     assert result.missing_steps[0].analytic_id == "needs-work"
@@ -125,7 +143,13 @@ def test_walk_includes_unsatisfied_turn_one_despite_prior_turn_dep(sample_turn):
         player_id=first_player_id(turn_one),
     )
 
-    result = walk_dependency_tree(ctx, catalog.analytic_id, scope, visiting=set())
+    result = walk_dependency_tree(
+        ctx,
+        catalog.analytic_id,
+        scope,
+        visiting=set(),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
 
     assert result.turn_unavailable is None
     assert result.pending_ensure == [(catalog.analytic_id, scope, catalog)]

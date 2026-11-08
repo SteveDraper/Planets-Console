@@ -25,6 +25,7 @@ from api.compute import (
     dequeue_next_work_item,
     normalize_export_scope_to_compute_scope,
 )
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
@@ -866,7 +867,9 @@ def test_on_item_enqueued_runs_outside_pool_lock(sample_turn):
     try:
         pool.set_on_item_enqueued(on_enqueued)
         scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
-        node = ComputeNodeRun(scope=scope, dependency_scopes=(), step_index=0)
+        node = ComputeNodeRun(
+            scope=scope, dependency_scopes=(), step_index=0, submission_open=SubmissionOpen()
+        )
         step = ComputeStepSpec(step_kind="materialize", backend="thread")
         pool.submit(0, node, step, priority_band="background")
 

@@ -37,6 +37,7 @@ from api.compute.diagnostics.timeline import (
 )
 from api.compute.runtime import reset_orchestrators_for_tests
 from api.compute.scope import format_compute_scope_key
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
@@ -514,6 +515,7 @@ def test_ready_to_waiting_deps_notifies_ready_queue_depth(sample_turn):
             scope=scope,
             dependency_scopes=(missing_dep,),
             state="ready",
+            submission_open=SubmissionOpen(),
         )
         orchestrator._nodes[scope] = node
         orchestrator._ready_queue.append(scope)

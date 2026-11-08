@@ -19,6 +19,7 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.compute.orchestrator import ComputeHandle, ComputeNodeRun, ComputeRequest
+from api.compute.submission_open import SubmissionOpen
 from api.transport.fleet_table_stream import (
     fleet_complete_event,
     fleet_ledger_updated_event,
@@ -37,7 +38,9 @@ class _AdmitOnlyOrchestrator:
         self.observers = _AdmitOnlyObservers()
 
     def submit(self, request: ComputeRequest) -> ComputeHandle:
-        node = ComputeNodeRun(scope=request.scope, dependency_scopes=())
+        node = ComputeNodeRun(
+            scope=request.scope, dependency_scopes=(), submission_open=SubmissionOpen()
+        )
         return ComputeHandle(scope=request.scope, _node=node)
 
 

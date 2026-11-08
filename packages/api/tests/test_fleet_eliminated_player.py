@@ -25,8 +25,13 @@ from api.compute.scope import ComputeScope
 from api.compute.wire import DependencyOutputs
 from api.errors import FleetScoresEvidenceOpenError
 
-from tests.export_chain_test_fixtures import GAME_ID, export_chain_query_context
+from tests.export_chain_test_fixtures import (
+    GAME_ID,
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.scores_exports_helpers import first_player_id, perspective
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET = "fleet"
 
@@ -101,7 +106,13 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         stored_turns={turn_number: turn},
     )
     scope = _scope(turn, player_id)
-    walk = walk_dependency_tree(ctx, _FLEET, scope, visiting=set())
+    walk = walk_dependency_tree(
+        ctx,
+        _FLEET,
+        scope,
+        visiting=set(),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
     assert walk.turn_unavailable is None
     pending_turns = [
         (analytic_id, pending.turn) for analytic_id, pending, _catalog in walk.pending_ensure
@@ -113,6 +124,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         _FLEET,
         scope,
         compute_registry=COMPUTE_REGISTRY,
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
     assert len(planned) == 1
     assert planned[0].dependency_scopes == ()
@@ -139,6 +151,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
             ),
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
     assert "priorLedgerWire" not in job_wire
     assert "baselineLedgerWire" not in job_wire
@@ -211,6 +224,7 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
         "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
         "materializeTurn": turn_number,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     finalization_deferred = FleetPersistencePolicy().persist(ctx, compute_scope, finalization_wire)
     assert finalization_deferred is not None
@@ -247,6 +261,52 @@ def test_eliminated_player_empty_final_ledger_without_prior_or_scores(
     }
 
 
+def test_eliminated_job_wire_reads_the_player_epoch(sample_turn, persistence):
+    """An eliminated player's job wire carries the current epoch, not a default of 0."""
+    player_id = first_player_id(sample_turn)
+    turn_number = 24
+    turn = _stamp_player(
+        sample_turn,
+        player_id,
+        status=3,
+        statusturn=turn_number,
+        turn_number=turn_number,
+        username="dead",
+    )
+    ctx = export_chain_query_context(
+        turn,
+        persistence=persistence,
+        stored_turns={turn_number: turn},
+    )
+    fleet_services = ctx.export_services[_FLEET]
+    fleet_services.persistence.bump_player_and_turn_invalidations(
+        GAME_ID,
+        perspective(turn),
+        player_id,
+        (turn_number,),
+    )
+    expected = fleet_services.persistence.player_invalidation_generation(
+        GAME_ID,
+        perspective(turn),
+        player_id,
+    )
+    assert expected == 1
+    job_wire = build_fleet_materialization_leg_job_wire(
+        ComputeScope(
+            analytic_id=_FLEET,
+            game_id=GAME_ID,
+            perspective=perspective(turn),
+            turn=turn_number,
+            player_id=player_id,
+        ),
+        dependency_outputs=DependencyOutputs(),
+        ctx=ctx,
+        submission_open=explicit_submission_open(),
+    )
+    assert job_wire["eliminatedAtTurn"] is True
+    assert job_wire["playerInvalidationGeneration"] == expected
+
+
 def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, persistence):
     player_id = first_player_id(sample_turn)
     turn = _stamp_player(
@@ -262,7 +322,14 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
         persistence=persistence,
         stored_turns={23: turn},
     )
-    walk = walk_dependency_tree(ctx, _FLEET, _scope(turn, player_id), visiting=set())
+    enable_backfill_earlier_turns(ctx)
+    walk = walk_dependency_tree(
+        ctx,
+        _FLEET,
+        _scope(turn, player_id),
+        visiting=set(),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
     assert walk.turn_unavailable == "turn_not_stored"
     assert walk.unavailable_turn == 22
 
@@ -270,6 +337,7 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
         "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
         "materializeTurn": 23,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     with pytest.raises(FleetScoresEvidenceOpenError) as raised:
         FleetPersistencePolicy().persist(
@@ -303,7 +371,14 @@ def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):
         persistence=persistence,
         stored_turns={90: turn},
     )
-    walk = walk_dependency_tree(ctx, _FLEET, _scope(turn, player_id), visiting=set())
+    enable_backfill_earlier_turns(ctx)
+    walk = walk_dependency_tree(
+        ctx,
+        _FLEET,
+        _scope(turn, player_id),
+        visiting=set(),
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
     assert walk.turn_unavailable == "turn_not_stored"
     assert walk.unavailable_turn == 89
 
@@ -311,6 +386,7 @@ def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):
         "persistedLedgerWire": persisted_fleet_ledger_to_json(_ship_ledger(player_id)),
         "materializeTurn": 90,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     with pytest.raises(FleetScoresEvidenceOpenError) as raised:
         FleetPersistencePolicy().persist(

@@ -5,7 +5,10 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import (
+    backfill_earlier_turns_disabled,
+    make_analytic_query_context,
+)
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 from api.analytics.fleet.compute_services import (
@@ -66,12 +69,17 @@ from api.compute import (
     compute_scope_to_export_scope,
 )
 from api.compute.dag import plan_compute_dag
+from api.compute.submission_open import SubmissionOpen
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
-from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.export_chain_test_fixtures import (
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
 from tests.scores_exports_helpers import minimal_stream_query_context
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET_ANALYTIC_ID = "fleet"
 
@@ -228,6 +236,7 @@ def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
         },
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     player_id = sample_turn.scores[0].ownerid
     scope = _scores_scope(sample_turn, player_id)
@@ -239,6 +248,7 @@ def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert job_wire.get("runId") is not None
     assert get_row_run_for_scope(scope) is not None
@@ -283,6 +293,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
                 scope,
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
+                submission_open=explicit_submission_open(),
             )
 
     put_persisted_row(
@@ -302,6 +313,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert skip_wire["runId"] is None
     assert skip_wire["evidenceClosed"] is True
@@ -380,6 +392,7 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
     assert wire["runId"] == run.run_id
     assert wire["gameId"] == scope.game_id
@@ -466,6 +479,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
                 scope,
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
+                submission_open=explicit_submission_open(),
             )
 
 
@@ -516,6 +530,7 @@ def test_build_scores_tier_solve_job_wire_raises_when_ensure_satisfied_without_a
                 scope,
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
+                submission_open=explicit_submission_open(),
             )
 
 
@@ -587,7 +602,15 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
 
     # Leaf admit (not orchestration-plane ensure): accelerated-window cheap terminal
     # must close evidence without planning a prior-turn fleet DAG.
-    assert admit_scores_export_work(ctx, export_scope, overlay_ensure=False) is True
+    assert (
+        admit_scores_export_work(
+            ctx,
+            export_scope,
+            overlay_ensure=False,
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+        )
+        is True
+    )
     assert is_scores_export_ensure_satisfied(ctx, export_scope) is True
     assert get_row_run_for_scope(scope) is None
 
@@ -601,6 +624,7 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
         for _ in range(3)
     ]
@@ -690,7 +714,15 @@ def test_missing_full_alliance_row_restores_skip_instead_of_tier_solve_invariant
         player_id=player_id,
     )
 
-    assert admit_scores_export_work(ctx, export_scope, overlay_ensure=False) is True
+    assert (
+        admit_scores_export_work(
+            ctx,
+            export_scope,
+            overlay_ensure=False,
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+        )
+        is True
+    )
     stored = persistence.get_row(GAME_ID, perspective(turn_2), 2, player_id)
     assert stored is not None
     assert stored.status == STATUS_FULL_ALLIANCE
@@ -704,6 +736,7 @@ def test_missing_full_alliance_row_restores_skip_instead_of_tier_solve_invariant
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert skip_wire["runId"] is None
     assert skip_wire["evidenceClosed"] is True
@@ -797,6 +830,7 @@ def test_horwasp_tier_solve_closes_evidence_before_solve_work(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
 
     assert skip_wire["runId"] is None
@@ -851,6 +885,7 @@ def test_historical_materialize_schedules_row_run_for_tier_solve(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
         mock_inference.assert_not_called()
 
@@ -861,6 +896,7 @@ def test_historical_materialize_schedules_row_run_for_tier_solve(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert tier_wire.get("runId") is not None
 
@@ -915,6 +951,7 @@ def test_historical_materialize_skips_tier_when_already_persisted(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
         mock_schedule.assert_not_called()
 
@@ -922,6 +959,7 @@ def test_historical_materialize_skips_tier_when_already_persisted(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert tier_wire["runId"] is None
     assert tier_wire["evidenceClosed"] is True
@@ -968,6 +1006,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
             scope,
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
         mock_inference.assert_not_called()
         mock_put_row.assert_not_called()
@@ -979,6 +1018,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert tier_wire.get("runId") is not None
 
@@ -1043,6 +1083,7 @@ def test_build_scores_tier_solve_job_wire_uses_fleet_dependency_output(sample_tu
         _scores_scope(host_turn, player_id),
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
 
     assert run.session.fleet_torp_input_status == "applied"
@@ -1123,6 +1164,7 @@ def test_scores_tier_wire_stale_dependency_prior_must_not_override_final_disk(
         _scores_scope(host_turn, player_id),
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
 
     assert run.session.fleet_torp_input_status == "applied"
@@ -1193,6 +1235,7 @@ def test_scores_persistence_policy_persist_delegates_to_inference_service(
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext(persistence=row_persistence)},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     policy = ScoresPersistencePolicy()
     row_complete = row_complete_with_summary(
@@ -1253,6 +1296,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     tier_registration = TurnAnalyticRegistration(
         catalog_entry=TurnAnalyticCatalogEntry(
@@ -1337,6 +1381,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
         export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     tier_registration = TurnAnalyticRegistration(
         catalog_entry=TurnAnalyticCatalogEntry(
@@ -1426,6 +1471,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
         ),
         dependency_scopes=(scope,),
         state="waiting_deps",
+        submission_open=SubmissionOpen(),
     )
     assert orchestrator._deps_complete(dependent) is False
 
@@ -1533,7 +1579,9 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
             _FLEET_ANALYTIC_ID: fleet_services,
         },
         ensure_turn=ensure_turn,
+        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
+    enable_backfill_earlier_turns(leader_ctx)
     session = InferenceRowStreamSession(
         player_id=player_id,
         observation=build_inference_observation(
@@ -1569,6 +1617,7 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
         compute_scope_to_export_scope(scope),
         compute_registry=build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION)),
         force_root=True,
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
     planned_by_scope = {node.scope: node for node in planned}
 
@@ -1664,6 +1713,7 @@ def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -
         profile_step_index=1,
         step_index=1,
         bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
+        submission_open=SubmissionOpen(),
     )
     orchestrator._nodes[scope] = waiting
 
@@ -1736,6 +1786,7 @@ def test_enqueue_without_stream_token_wakes_parked_scores_node(
         profile_step_index=1,
         step_index=1,
         bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
+        submission_open=SubmissionOpen(),
     )
     orchestrator._nodes[scope] = parked
 

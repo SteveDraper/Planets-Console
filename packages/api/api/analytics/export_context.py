@@ -25,10 +25,26 @@ from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.jsonpath import parse_jsonpath, resolve_jsonpath
 from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
+from api.serialization.backfill_earlier_turns import backfill_earlier_turns_reader
+from api.storage.base import StorageBackend
 
 T = TypeVar("T")
 
 INLINE_ENSURE_MAX_MISSING_STEPS = 5
+
+
+def _missing_backfill_earlier_turns_reader(game_id: int) -> bool:
+    """Fail when a query context was built without a Backfill earlier turns reader."""
+    raise RuntimeError(
+        "AnalyticQueryContext has no Backfill earlier turns reader "
+        f"for game {game_id}. Pass read_backfill_earlier_turns or storage "
+        "when building the context."
+    )
+
+
+def backfill_earlier_turns_disabled(_game_id: int) -> bool:
+    """Reader for a context whose builder has no Backfill earlier turns record."""
+    return False
 
 
 @dataclass(frozen=True)
@@ -62,6 +78,8 @@ class AnalyticQueryContext:
     export_services: Mapping[str, object] = field(default_factory=dict)
     ensure_turn: Callable[[int], TurnInfo | None] | None = None
     """Login-backed hook to load a missing TurnInfo into storage (None skips auto-fetch)."""
+    read_backfill_earlier_turns: Callable[[int], bool] = _missing_backfill_earlier_turns_reader
+    """Per-game Backfill earlier turns choice. Reading raises when no reader was supplied."""
     # Memo, materialized-tree, and ensure keys use ExportScope (and paths for
     # ResolutionKey) only. TurnAnalyticsOptions connection fields are ambient on
     # ctx.options and are not fingerprinted here (#108 skeleton); connections
@@ -82,6 +100,10 @@ class AnalyticQueryContext:
         default_factory=dict,
         repr=False,
     )
+
+    def backfill_earlier_turns_enabled(self) -> bool:
+        """Return this game's Backfill earlier turns choice from the injected reader."""
+        return self.read_backfill_earlier_turns(self.game_id)
 
     def export_snapshot_for(
         self,
@@ -282,6 +304,7 @@ class AnalyticQueryContext:
             analytic_id,
             resolved_prep.scope,
             catch_ensure_cycle=catch_ensure_cycle,
+            backfill_earlier_turns=self.backfill_earlier_turns_enabled(),
         )
         if not isinstance(walk_outcome, DependencyWalkResult):
             return walk_outcome
@@ -299,6 +322,7 @@ class AnalyticQueryContext:
         *,
         catch_ensure_cycle: bool = False,
         force_root: bool = False,
+        backfill_earlier_turns: bool,
     ) -> DependencyWalkResult | UnavailableReason:
         try:
             walk_result = walk_dependency_tree(
@@ -307,6 +331,7 @@ class AnalyticQueryContext:
                 scope,
                 visiting=set(),
                 force_root=force_root,
+                backfill_earlier_turns=backfill_earlier_turns,
             )
         except ExportCycleDetectedError:
             if catch_ensure_cycle:
@@ -386,6 +411,7 @@ class AnalyticQueryContext:
         scope: ExportScope,
         *,
         force_root: bool = False,
+        backfill_earlier_turns: bool,
     ) -> UnavailableReason | None:
         """Return walk-time unavailability without running ensure work.
 
@@ -400,6 +426,7 @@ class AnalyticQueryContext:
             scope,
             catch_ensure_cycle=False,
             force_root=force_root,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
         if not isinstance(walk_outcome, DependencyWalkResult):
             return walk_outcome
@@ -523,6 +550,8 @@ def make_analytic_query_context(
     enforce_inline_ensure_threshold: bool = True,
     export_services: Mapping[str, object] | None = None,
     ensure_turn: Callable[[int], TurnInfo | None] | None = None,
+    read_backfill_earlier_turns: Callable[[int], bool] | None = None,
+    storage: StorageBackend | None = None,
 ) -> AnalyticQueryContext:
     """Build query context keyed to an explicit storage viewpoint.
 
@@ -533,6 +562,11 @@ def make_analytic_query_context(
 
     ``ensure_turn`` is the login-backed loadturn hook used by
     ``prepare_dependency_chain_turns`` before compute DAG planning.
+
+    ``read_backfill_earlier_turns`` is the per-game choice. ``storage`` binds
+    that reader to the game store when the caller has no reader yet. An
+    explicit reader wins when both are passed. A context built with neither
+    raises when the choice is read.
     """
     from api.analytics.exports.registry import EXPORT_REGISTRY
 
@@ -547,6 +581,13 @@ def make_analytic_query_context(
     else:
         resolved_load_turn = load_turn
 
+    if read_backfill_earlier_turns is not None:
+        resolved_backfill_reader = read_backfill_earlier_turns
+    elif storage is not None:
+        resolved_backfill_reader = backfill_earlier_turns_reader(storage)
+    else:
+        resolved_backfill_reader = _missing_backfill_earlier_turns_reader
+
     return AnalyticQueryContext(
         game_id=game_id,
         perspective=perspective,
@@ -557,4 +598,5 @@ def make_analytic_query_context(
         enforce_inline_ensure_threshold=enforce_inline_ensure_threshold,
         export_services=export_services or {},
         ensure_turn=ensure_turn,
+        read_backfill_earlier_turns=resolved_backfill_reader,
     )

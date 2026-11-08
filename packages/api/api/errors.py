@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from api.exceptions import (
     ConflictError,
     CoreAPIError,
+    DiscardedWorkRefused,
     FleetGapFillEpochInvalidated,
     FleetMaterializationTimeoutError,
     FleetScoresEvidenceOpenError,
@@ -26,6 +27,7 @@ from api.exceptions import (
 __all__ = [
     "ConflictError",
     "CoreAPIError",
+    "DiscardedWorkRefused",
     "FleetGapFillEpochInvalidated",
     "FleetMaterializationTimeoutError",
     "FleetScoresEvidenceOpenError",

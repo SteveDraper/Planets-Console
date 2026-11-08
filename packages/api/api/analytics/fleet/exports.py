@@ -13,13 +13,17 @@ from api.analytics.fleet.chain import (
     get_or_materialize_fleet_snapshot,
 )
 from api.analytics.fleet.composition_export import build_fleet_composition_branch
-from api.analytics.fleet.compute_services import resolve_fleet_services
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.fleet.export_scope import ledgers_for_scope
+from api.analytics.fleet.injected_services import resolve_fleet_services
 from api.analytics.fleet.serialization import fleet_acquisition_ledger_to_json
 from api.analytics.fleet.types import FleetTurnSnapshot
+from api.analytics.off_mode_prior_dependency import (
+    OFF_MODE_PRIOR_FLEET,
+    off_mode_ensure_dependencies,
+)
 from api.analytics.scores.export_precedence import SearchStatus
 from api.analytics.scores.exports import held_scores_for_scope
 from api.errors import ValidationError
@@ -32,22 +36,27 @@ PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.meta.solutionsHeld", requires=("player_id",)),
 )
 
-ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
-    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
-)
-
 
 def fleet_ensure_dependencies_for(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
+    *,
+    backfill_earlier_turns: bool,
 ) -> tuple[EnsureDependency, ...]:
-    """Prior-turn fleet does not apply once the player is eliminated on this turn."""
-    if not isinstance(scope.player_id, int):
-        return ENSURE_DEPENDENCIES
-    turn = ctx.load_turn(scope.turn)
-    if turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id):
-        return ()
-    return ENSURE_DEPENDENCIES
+    """Prior-turn fleet does not apply once the player is eliminated on this turn.
+
+    Every other scope uses ``off_mode_ensure_dependencies``.
+    """
+    player_id = scope.player_id
+    if isinstance(player_id, int):
+        turn = ctx.load_turn(scope.turn)
+        if turn is not None and fleet_player_eliminated_at_turn(turn, player_id):
+            return ()
+    return off_mode_ensure_dependencies(
+        ctx,
+        scope,
+        backfill_earlier_turns=backfill_earlier_turns,
+    )
 
 
 def _fleet_snapshot_for_scope(
@@ -217,7 +226,7 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     analytic_id=ANALYTIC_ID,
     value_schema=EXPORT_VALUE_SCHEMA,
     path_prefix_scope_rules=PATH_PREFIX_SCOPE_RULES,
-    ensure_dependencies=ENSURE_DEPENDENCIES,
+    ensure_dependencies=OFF_MODE_PRIOR_FLEET,
     ensure_dependencies_for=fleet_ensure_dependencies_for,
     ensure_export=ensure_fleet_export,
     materialize_export_tree=materialize_fleet_export_tree,

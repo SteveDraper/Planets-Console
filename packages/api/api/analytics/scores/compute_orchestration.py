@@ -35,6 +35,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs, StepResult
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
@@ -83,6 +84,7 @@ def build_scores_materialize_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Materialize scores export tree on the orchestration plane."""
@@ -96,7 +98,12 @@ def build_scores_materialize_job_wire(
         raise RuntimeError("scores materialize job wire requires AnalyticQueryContext")
     export_scope = compute_scope_to_export_scope(scope)
     # Admit only -- never ensure_scope / wait. Fleet deps are already terminal on the DAG.
-    admit_scores_export_work(ctx, export_scope, overlay_ensure=False)
+    admit_scores_export_work(
+        ctx,
+        export_scope,
+        overlay_ensure=False,
+        backfill_earlier_turns=submission_open.backfill_earlier_turns,
+    )
     tree = materialize_scores_export_tree(ctx, export_scope)
     return {"exportTree": tree}
 
@@ -106,6 +113,7 @@ def build_scores_tier_solve_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
@@ -137,6 +145,7 @@ def build_scores_tier_solve_job_wire(
     if horwasp_skip is not None:
         return horwasp_skip
 
+    backfill_earlier_turns = submission_open.backfill_earlier_turns
     run = get_row_run_for_scope(scope)
     ensure_satisfied = True
     if run is None:
@@ -148,6 +157,7 @@ def build_scores_tier_solve_job_wire(
             ctx,
             export_scope,
             overlay_ensure=False,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
         run = get_row_run_for_scope(scope)
     if run is None:
@@ -179,6 +189,7 @@ def build_scores_tier_solve_job_wire(
             turn=turn,
             dependency_outputs=dependency_outputs,
             overlay_ensure=False,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
     _apply_fleet_resolution_to_row_run(run, fleet_resolution)
 

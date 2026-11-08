@@ -15,6 +15,7 @@ from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.scope import format_compute_scope_key
 from api.compute.wire import coerce_step_result
+from api.exceptions import DiscardedWorkRefused
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -156,6 +157,7 @@ class OrchestratorLifecycleMixin:
             return
 
         step_kind = recovery.step_kind
+        submission_open = node.submission_open
 
         def _force_fresh_dependency() -> None:
             self.submit(
@@ -165,6 +167,7 @@ class OrchestratorLifecycleMixin:
                     force_fresh=True,
                     step_kind=step_kind,
                     bundle=bundle,
+                    submission_open=submission_open,
                 )
             )
 
@@ -177,16 +180,29 @@ class OrchestratorLifecycleMixin:
         """Return True when persist/complete must not proceed. Caller holds the lock."""
         if node.state != "running":
             return True
+        if node.discard_without_stamp:
+            self._fail_discarded_stamp(node)
+            return True
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return True
         return False
+
+    def _fail_discarded_stamp(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """Finish a discarded step without persisting or retrying."""
+        self._fail_node(
+            node,
+            DiscardedWorkRefused("discarded step does not persist or stamp the new evidence mark"),
+        )
 
     def _after_step_success(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
         result_wire: object | None,
     ) -> None:
+        if node.discard_without_stamp:
+            self._fail_discarded_stamp(node)
+            return
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return
@@ -286,6 +302,12 @@ class OrchestratorLifecycleMixin:
                         )
                         return
                     with self._condition:
+                        # Epoch refusal from persist. Same split as an epoch that
+                        # moved before the hook: discard-flagged work fails, and
+                        # a running shell or live turn is re-queued.
+                        if isinstance(exc, DiscardedWorkRefused):
+                            if self._abandon_persist_if_not_running_or_stale(completed_node):
+                                return
                         if completed_node.state == "running":
                             self._fail_node(completed_node, exc)
                     return

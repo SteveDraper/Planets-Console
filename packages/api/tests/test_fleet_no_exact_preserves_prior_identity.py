@@ -55,6 +55,7 @@ from tests.scores_exports_helpers import (
     ship_build_domain,
     ship_build_wire,
 )
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET_ANALYTIC_ID = "fleet"
 
@@ -161,6 +162,7 @@ def _materialize_final_ledger(
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     observation = run_fleet_observation_leg(job_wire)
     assert observation.payload is not None
@@ -496,6 +498,7 @@ def test_stale_dependency_prior_must_not_override_final_disk_ledger(sample_turn)
         scope,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert "priorLedgerWire" not in job_wire
     stale_ids = {record.record_id for record in stale_prior.ledger.records}

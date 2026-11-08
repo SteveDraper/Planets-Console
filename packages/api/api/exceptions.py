@@ -129,6 +129,16 @@ class FleetGapFillEpochInvalidated(CoreAPIError):
     http_error: int = 409
 
 
+class DiscardedWorkRefused(CoreAPIError):
+    """In-flight work must not persist or stamp the new evidence mark.
+
+    The mark moved, or a bump discarded the step before it could stamp. The
+    write does not land and the worker does not stamp the new generation.
+    """
+
+    http_error: int = 409
+
+
 class FleetScoresEvidenceOpenError(PersistDeferredError, CoreAPIError):
     """Fleet host-turn persist refused because same-turn scores evidence is open.
 

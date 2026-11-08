@@ -359,7 +359,12 @@ def test_stealth_ensure_does_not_schedule(sample_turn, persistence) -> None:
         "api.analytics.scores.exports.schedule_inference_row",
         side_effect=AssertionError("stealth must not schedule tier_solve"),
     ):
-        assert admit_scores_export_work(ctx, scope) is True
+        assert (
+            admit_scores_export_work(
+                ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
+            )
+            is True
+        )
     stream_scope = InferenceStreamScope(
         game_id=GAME_ID,
         perspective=stealth.player.id,
@@ -396,7 +401,12 @@ def test_admit_scores_export_persists_skip_immediate_admission(sample_turn, pers
         "api.analytics.scores.exports.schedule_inference_row",
         side_effect=AssertionError("skip ImmediateRowAdmission must not schedule tier_solve"),
     ):
-        assert admit_scores_export_work(ctx, scope) is True
+        assert (
+            admit_scores_export_work(
+                ctx, scope, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
+            )
+            is True
+        )
     stream_scope = InferenceStreamScope(
         game_id=GAME_ID,
         perspective=owner_id,

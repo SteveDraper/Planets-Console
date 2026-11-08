@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from api.analytics.export_types import (
     EnsureDependency,
@@ -20,10 +20,22 @@ MaterializeExportFn = Callable[["AnalyticQueryContext", ExportScope], dict[str, 
 ProbePersistedFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 ProbeEnsureSatisfiedFn = Callable[["AnalyticQueryContext", ExportScope], bool]
 ProbeInProgressFn = Callable[["AnalyticQueryContext", ExportScope], bool]
-EnsureDependenciesForFn = Callable[
-    ["AnalyticQueryContext", ExportScope],
-    tuple[EnsureDependency, ...],
-]
+
+
+class EnsureDependenciesForFn(Protocol):
+    """Resolve ensure edges for one scope.
+
+    ``backfill_earlier_turns`` is the choice already resolved for this walk or
+    submission.
+    """
+
+    def __call__(
+        self,
+        ctx: AnalyticQueryContext,
+        scope: ExportScope,
+        *,
+        backfill_earlier_turns: bool,
+    ) -> tuple[EnsureDependency, ...]: ...
 
 
 @dataclass(frozen=True)
@@ -47,16 +59,23 @@ class AnalyticExportCatalog:
         self,
         ctx: AnalyticQueryContext,
         scope: ExportScope,
+        *,
+        backfill_earlier_turns: bool,
     ) -> tuple[EnsureDependency, ...]:
         """Dependencies the ensure walk and DAG plan enqueue for this scope.
 
         Static ``ensure_dependencies`` is the default. A catalog may set
         ``ensure_dependencies_for`` when an edge does not apply to every scope
         (fleet skips the prior-turn edge for an eliminated player).
+        ``backfill_earlier_turns`` is the choice the walk already resolved.
         """
         if self.ensure_dependencies_for is None:
             return self.ensure_dependencies
-        return self.ensure_dependencies_for(ctx, scope)
+        return self.ensure_dependencies_for(
+            ctx,
+            scope,
+            backfill_earlier_turns=backfill_earlier_turns,
+        )
 
     def requires_player_id_for_path(self, path: str) -> bool:
         for rule in self.path_prefix_scope_rules:

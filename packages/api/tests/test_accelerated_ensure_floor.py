@@ -28,7 +28,10 @@ from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.errors import ConflictError
 from api.storage.memory_asset import MemoryAssetBackend
 
-from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.export_chain_test_fixtures import (
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.scores_exports_helpers import first_player_id
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -84,6 +87,7 @@ def test_scores_ensure_walk_skips_missing_turn_below_accelerated_floor(sample_tu
     turn4 = stored[4]
     player_id = first_player_id(sample_turn)
     ctx = export_chain_query_context(turn4, stored_turns=stored)
+    enable_backfill_earlier_turns(ctx)
     scope = ExportScope(
         game_id=ctx.game_id,
         perspective=ctx.perspective,
@@ -91,7 +95,14 @@ def test_scores_ensure_walk_skips_missing_turn_below_accelerated_floor(sample_tu
         player_id=player_id,
     )
 
-    walk = walk_dependency_tree(ctx, "scores", scope, visiting=set(), force_root=True)
+    walk = walk_dependency_tree(
+        ctx,
+        "scores",
+        scope,
+        visiting=set(),
+        force_root=True,
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
 
     assert walk.turn_unavailable is None
     pending_turns = {(analytic_id, scope.turn) for analytic_id, scope, _ in walk.pending_ensure}
@@ -114,7 +125,14 @@ def test_scores_ensure_walk_at_first_reliable_turn_skips_prior_fleet(sample_turn
         player_id=player_id,
     )
 
-    walk = walk_dependency_tree(ctx, "scores", scope, visiting=set(), force_root=True)
+    walk = walk_dependency_tree(
+        ctx,
+        "scores",
+        scope,
+        visiting=set(),
+        force_root=True,
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+    )
 
     assert walk.turn_unavailable is None
     pending_turns = {(analytic_id, scope.turn) for analytic_id, scope, _ in walk.pending_ensure}

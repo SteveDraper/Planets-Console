@@ -352,10 +352,19 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.analytics.scores.export_services import ScoresExportContext
+    from api.serialization.backfill_earlier_turns import (
+        backfill_earlier_turns_document,
+        backfill_earlier_turns_store_key,
+    )
     from api.serialization.inference_row_persistence import PersistedInferenceRow
     from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
     from tests.scores_exports_helpers import put_persisted_row
+
+    memory_backend.put(
+        backfill_earlier_turns_store_key(628580),
+        backfill_earlier_turns_document(True),
+    )
 
     turn_110 = load_turn(110)
     assert turn_110 is not None

@@ -65,7 +65,12 @@ def test_query_registered_analytic_uses_orchestrator_ensure(sample_turn, persist
         # Admit-only so materialize can run without full durable wait in this unit test.
         from api.analytics.scores.exports import admit_scores_export_work
 
-        return admit_scores_export_work(ctx, scope, overlay_ensure=True)
+        return admit_scores_export_work(
+            ctx,
+            scope,
+            overlay_ensure=True,
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
+        )
 
     with patch.object(
         export_ensure_module,

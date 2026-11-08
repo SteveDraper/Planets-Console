@@ -5,12 +5,15 @@ from __future__ import annotations
 from api.compute.orchestrator import ScopeNodeView
 from api.compute.orchestrator_state import ComputeNodeRun, NodeState
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 
 _SCOPE = ComputeScope(analytic_id="fleet", game_id=1)
 
 
 def _node(state: NodeState) -> ComputeNodeRun:
-    return ComputeNodeRun(scope=_SCOPE, dependency_scopes=(), state=state)
+    return ComputeNodeRun(
+        scope=_SCOPE, dependency_scopes=(), state=state, submission_open=SubmissionOpen()
+    )
 
 
 def _view(state: NodeState) -> ScopeNodeView:

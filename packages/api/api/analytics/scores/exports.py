@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
+from api.analytics.export_types import ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
@@ -24,6 +24,10 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.tier_emission_ledger import (
     compact_tier_emissions_from_step_diagnostics,
     tier_emissions_from_wire_complete,
+)
+from api.analytics.off_mode_prior_dependency import (
+    OFF_MODE_PRIOR_FLEET,
+    off_mode_ensure_dependencies,
 )
 from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
 from api.analytics.scores.export_precedence import (
@@ -75,10 +79,6 @@ ORDERING_SEMANTICS = {
         "$.solutions[0] is the top held explanation."
     ),
 }
-
-ENSURE_DEPENDENCIES: tuple[EnsureDependency, ...] = (
-    EnsureDependency(analytic_id="fleet", turn_delta=-1, player_id="same", quality="final"),
-)
 
 
 @dataclass(frozen=True)
@@ -271,6 +271,7 @@ def admit_scores_export_work(
     scope: ExportScope,
     *,
     overlay_ensure: bool = False,
+    backfill_earlier_turns: bool,
 ) -> bool:
     """Admit scores work for one scope without waiting on the orchestrator.
 
@@ -312,6 +313,7 @@ def admit_scores_export_work(
         scope,
         turn,
         overlay_ensure=overlay_ensure,
+        backfill_earlier_turns=backfill_earlier_turns,
     )
     if not mutated:
         return is_scores_export_ensure_satisfied_from_snapshot(
@@ -347,6 +349,7 @@ def _ensure_admit_inference_row(
     turn: TurnInfo,
     *,
     overlay_ensure: bool = False,
+    backfill_earlier_turns: bool,
 ) -> bool:
     """Schedule a RowRun for CP-SAT; admission skips are handled by the caller."""
     player_id = scope.player_id
@@ -371,6 +374,7 @@ def _ensure_admit_inference_row(
         player_id=inputs.player_id,
         turn=turn,
         overlay_ensure=overlay_ensure,
+        backfill_earlier_turns=backfill_earlier_turns,
     )
     scheduled = schedule_inference_row(
         services.scheduler,
@@ -660,7 +664,8 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     value_schema=EXPORT_VALUE_SCHEMA,
     path_prefix_scope_rules=PATH_PREFIX_SCOPE_RULES,
     ordering_semantics=ORDERING_SEMANTICS,
-    ensure_dependencies=ENSURE_DEPENDENCIES,
+    ensure_dependencies=OFF_MODE_PRIOR_FLEET,
+    ensure_dependencies_for=off_mode_ensure_dependencies,
     ensure_export=ensure_scores_export,
     materialize_export_tree=materialize_scores_export_tree,
     is_persisted=is_scores_export_persisted,

@@ -14,6 +14,17 @@ _orchestrator_lock = threading.Lock()
 _process_orchestrator: ComputeOrchestrator | None = None
 
 
+def peek_compute_orchestrator() -> ComputeOrchestrator | None:
+    """Return the process orchestrator when one already exists.
+
+    Does not create the singleton. Inference invalidation receives this
+    resolver from the composition root and calls it when a persist needs to
+    drop in-flight hops. A persist with no orchestrator yet does not start
+    a worker pool.
+    """
+    return _process_orchestrator
+
+
 def get_compute_orchestrator(
     *,
     worker_pool: ComputeWorkerPool | None = None,

@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import (
+    backfill_earlier_turns_disabled,
+    make_analytic_query_context,
+)
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.inference_api_payload import (
     InferenceProductPayload,
@@ -88,6 +91,7 @@ class FleetInferenceSupport:
                 export_services={SCORES_ANALYTIC_ID: self.scores_services},
                 game_id=game_id,
                 perspective=perspective,
+                read_backfill_earlier_turns=backfill_earlier_turns_disabled,
             )
             scope = ExportScope(
                 game_id=game_id,

@@ -227,6 +227,7 @@ def _prepare_homeworld_ensure_chain(
             ctx,
             ANALYTIC_ID,
             scope,
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
         )
     except DependencyChainFillError as error:
         if error.auto_fetch_unavailable or error.reason == "turn_fetch_failed":

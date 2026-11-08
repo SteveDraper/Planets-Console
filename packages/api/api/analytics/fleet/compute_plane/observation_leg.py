@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from api.analytics.off_mode_wire import copy_submission_open_fields
 from api.compute.wire import StepResult
 
 FLEET_PERSIST_LEG_OBSERVATION = "observation"
@@ -24,6 +25,9 @@ def run_fleet_observation_leg(job_wire: dict[str, Any]) -> StepResult:
     }
     if job_wire.get("eliminatedAtTurn") is True:
         payload["eliminatedAtTurn"] = True
+    # Copies a carried epoch when the job wire has an integer. A missing epoch
+    # stays off the payload, and fleet persist rejects that payload.
+    copy_submission_open_fields(job_wire, payload)
     return StepResult(
         outcome="persist",
         persist_then_continue=True,

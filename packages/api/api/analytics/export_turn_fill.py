@@ -175,6 +175,7 @@ def prepare_dependency_chain_turns(
     scope: ExportScope,
     *,
     force_root: bool = False,
+    backfill_earlier_turns: bool,
 ) -> None:
     """Fill missing turns on the ensure chain, or raise ``DependencyChainFillError``.
 
@@ -189,6 +190,7 @@ def prepare_dependency_chain_turns(
         analytic_id,
         scope,
         force_root=force_root,
+        backfill_earlier_turns=backfill_earlier_turns,
     )
     if unavailable is None:
         return
@@ -204,6 +206,7 @@ def prepare_dependency_chain_turns(
             analytic_id,
             scope,
             force_root=force_root,
+            backfill_earlier_turns=backfill_earlier_turns,
         )
         if unavailable is None:
             return

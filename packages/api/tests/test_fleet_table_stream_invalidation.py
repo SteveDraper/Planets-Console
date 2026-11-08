@@ -25,6 +25,7 @@ from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+from api.compute.runtime import peek_compute_orchestrator
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -189,6 +190,7 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
     invalidation = InferenceInvalidationService(
         inference_persistence,
         fleet_persistence=fleet_persistence,
+        orchestrator=peek_compute_orchestrator,
     )
     for player_id in player_ids:
         fleet_persistence.put_ledger(
@@ -358,6 +360,7 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
     invalidation = InferenceInvalidationService(
         inference_persistence,
         fleet_persistence=fleet_persistence,
+        orchestrator=peek_compute_orchestrator,
     )
     for player_id in player_ids:
         fleet_persistence.put_ledger(
@@ -517,6 +520,7 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
     invalidation = InferenceInvalidationService(
         inference_persistence,
         fleet_persistence=fleet_persistence,
+        orchestrator=peek_compute_orchestrator,
     )
     fleet_persistence.put_ledger(
         628580,

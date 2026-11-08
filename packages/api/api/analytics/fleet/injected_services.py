@@ -31,3 +31,21 @@ class FleetComputeServices:
 def lookup_fleet_compute_services(ctx: AnalyticQueryContext) -> FleetComputeServices | None:
     """Return fleet compute services when this query context has them."""
     return export_service_for(ctx, ANALYTIC_ID, FleetComputeServices)
+
+
+def resolve_fleet_services(exports: AnalyticQueryContext) -> FleetComputeServices:
+    """Return fleet compute services, or raise when the context has none."""
+    services = lookup_fleet_compute_services(exports)
+    if services is not None:
+        return services
+
+    injected = exports.export_services.get(ANALYTIC_ID)
+    if injected is None:
+        raise RuntimeError(
+            f"Fleet requires {ANALYTIC_ID!r} in ctx.export_services; "
+            "inject FleetComputeServices via TurnAnalyticService or test helpers."
+        )
+    raise RuntimeError(
+        f"Fleet export_services[{ANALYTIC_ID!r}] must be FleetComputeServices, "
+        f"got {type(injected).__name__}."
+    )

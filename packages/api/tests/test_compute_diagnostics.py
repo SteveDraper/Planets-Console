@@ -34,6 +34,7 @@ from api.compute.orchestrator import ComputeNodeRun
 from api.compute.pools import ComputePriorityBand, PoolWorkItem
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import format_compute_scope_key
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
@@ -119,7 +120,9 @@ def test_freeze_dispatch_gate_blocks_frozen_scope(sample_turn):
         turn=export_scope.turn,
         player_id=export_scope.player_id,
     )
-    node = ComputeNodeRun(scope=scope, dependency_scopes=(), state="ready")
+    node = ComputeNodeRun(
+        scope=scope, dependency_scopes=(), state="ready", submission_open=SubmissionOpen()
+    )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     assert controller._dispatch_gate(node) is False
@@ -977,6 +980,7 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
         dependency_scopes=(),
         state="ready",
         priority_band="background",
+        submission_open=SubmissionOpen(),
     )
     # Bound gates capture each orchestrator's registration id at bind time.
     assert len(orch_a._observers.dispatch_gates) == 1
@@ -1447,6 +1451,7 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
         profile_step_index=0,
         step_index=item.step_index,
         priority_band=item.priority_band,
+        submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
         item.scope,
@@ -1503,6 +1508,7 @@ def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
         profile_step_index=0,
         step_index=item.step_index,
         priority_band=item.priority_band,
+        submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
         item.scope,
@@ -1571,6 +1577,7 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
         profile_step_index=0,
         step_index=item.step_index,
         priority_band=item.priority_band,
+        submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
         item.scope,
@@ -2198,7 +2205,9 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
     )
     controller.set_freeze_armed(shell, freeze_armed=True)
 
-    in_scope_node = ComputeNodeRun(scope=scope, dependency_scopes=(), state="ready")
+    in_scope_node = ComputeNodeRun(
+        scope=scope, dependency_scopes=(), state="ready", submission_open=SubmissionOpen()
+    )
     assert controller._dispatch_gate(in_scope_node) is False
 
     other_perspective_scope = ComputeScope(
@@ -2216,7 +2225,12 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
         player_id=scope.player_id,
     )
     for out_of_scope in (other_perspective_scope, non_ancestor_turn_scope):
-        out_node = ComputeNodeRun(scope=out_of_scope, dependency_scopes=(), state="ready")
+        out_node = ComputeNodeRun(
+            scope=out_of_scope,
+            dependency_scopes=(),
+            state="ready",
+            submission_open=SubmissionOpen(),
+        )
         assert controller._dispatch_gate(out_node) is True
 
     registration_id = orchestrator.pool_registration_id or "test-orchestrator"
@@ -2331,11 +2345,13 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         scope=ancestor_scope,
         dependency_scopes=(),
         state="ready",
+        submission_open=SubmissionOpen(),
     )
     frozen_node = ComputeNodeRun(
         scope=other_ancestor_scope,
         dependency_scopes=(),
         state="ready",
+        submission_open=SubmissionOpen(),
     )
     # Focus allowlist at turn N covers ancestor-turn N-1 scopes but does not free-run.
     assert controller._dispatch_gate(allowlisted_node) is False
@@ -2379,6 +2395,7 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         profile_step_index=0,
         step_index=0,
         priority_band="interactive",
+        submission_open=SubmissionOpen(),
     )
     from api.analytics.fleet.compute_orchestration import FLEET_OBSERVATION_LEG
 

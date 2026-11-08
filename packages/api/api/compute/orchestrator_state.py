@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from typing import Literal
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -13,6 +13,7 @@ from api.compute.errors import ComputeWaitTimeoutError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.pools import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
+from api.compute.submission_open import SubmissionOpen
 
 NodeState = Literal[
     "waiting_deps",
@@ -37,6 +38,10 @@ class ComputeRequest:
     force_fresh: bool = False
     bundle: OrchestrationBundle | None = None
     ctx: AnalyticQueryContext | None = None
+    # Root turn and backfill choice. None until submission entry resolves it.
+    # A resubmitted hop passes the pair it was planned under. An explicit open
+    # turn on that pair wins over the scope turn.
+    submission_open: SubmissionOpen | None = None
 
     def resolved_bundle(self) -> OrchestrationBundle | None:
         """Return the caller-supplied bundle, or build one from ``ctx`` for convenience."""
@@ -45,6 +50,20 @@ class ComputeRequest:
         if self.ctx is not None:
             return OrchestrationBundle.from_context(self.ctx)
         return None
+
+
+@dataclass(frozen=True)
+class ResolvedComputeRequest(ComputeRequest):
+    """ComputeRequest whose submission open is already resolved.
+
+    Orchestrator methods that run under the lock take this type.
+    ``submission_open`` has no default, so an unresolved request cannot
+    cross that boundary.
+    """
+
+    _: KW_ONLY
+    # ``field()`` keeps this required; the base class default is None.
+    submission_open: SubmissionOpen = field()
 
 
 @dataclass
@@ -138,6 +157,17 @@ class ComputeNodeRun:
     bundle: OrchestrationBundle | None = None
     # Closes priority adoption once expensive work begins.
     execution_sealed: bool = False
+    # Set when in-flight work must finish without persisting or stamping.
+    # The worker may finish; persist and stamp are refused, and the step is
+    # not retried.
+    discard_without_stamp: bool = False
+    _: KW_ONLY
+    # Root turn and backfill choice of the submission that planned this node.
+    # A later submission that roots at this scope replaces the open turn and
+    # keeps this backfill choice.
+    submission_open: SubmissionOpen
+    # The one-shot for this root has already been applied. Hops leave this false.
+    open_turn_consumed: bool = False
 
     @property
     def is_terminal(self) -> bool:

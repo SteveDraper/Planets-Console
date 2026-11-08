@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from api.compute.scope import ComputeScope
+from api.errors import ValidationError
+
+
+class UnresolvedSubmissionOpenError(ValidationError):
+    """A submission has no carried open and no bundle to read the backfill choice."""
 
 
 class ComputeScopeAbortedError(RuntimeError):

@@ -47,7 +47,10 @@ from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
-from tests.export_chain_test_fixtures import export_chain_query_context
+from tests.export_chain_test_fixtures import (
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
 from tests.scores_exports_helpers import inference_target_player_id
@@ -543,6 +546,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
         persistence,
         seed_player_ids=player_id,
     )
+    enable_backfill_earlier_turns(ctx)
 
     fleet_persistence = ctx.export_services["fleet"].persistence
     prior_turn = HOST_TURN - 1

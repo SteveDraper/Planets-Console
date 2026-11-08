@@ -8,11 +8,18 @@ from typing import TYPE_CHECKING, Any
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
+from api.analytics.fleet.injected_services import FleetComputeServices, resolve_fleet_services
+from api.analytics.fleet.off_mode_persist import (
+    job_player_epoch,
+    observation_merge_generation,
+    refuse_stale_fleet_epoch,
+)
 from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.types import PersistedFleetLedger
+from api.analytics.off_mode_wire import parse_off_mode_wire, stamp_submission_open
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import (
     WILDCARD,
@@ -20,12 +27,12 @@ from api.compute.scope import (
     ScopeKeySpec,
     compute_scope_to_export_scope,
 )
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings
 
 if TYPE_CHECKING:
-    from api.analytics.fleet.compute_services import FleetComputeServices
     from api.compute.orchestrator import ComputeOrchestrator
     from api.models.game import TurnInfo
 
@@ -72,6 +79,7 @@ def build_fleet_observation_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg."""
@@ -79,6 +87,7 @@ def build_fleet_observation_leg_job_wire(
         scope,
         dependency_outputs=dependency_outputs,
         ctx=ctx,
+        submission_open=submission_open,
     )
 
 
@@ -87,6 +96,7 @@ def build_fleet_materialization_leg_job_wire(
     *,
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
+    submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one fleet observation leg.
@@ -111,32 +121,49 @@ def build_fleet_materialization_leg_job_wire(
 
     player_id = scope.player_id
     if fleet_player_eliminated_at_turn(turn, player_id):
-        return _eliminated_fleet_job_wire(scope, player_id=player_id)
-
-    return {
-        "gameId": scope.game_id,
-        "perspective": scope.perspective,
-        "playerId": player_id,
-        "materializeTurn": scope.turn,
-    }
+        wire = _eliminated_fleet_job_wire(scope, player_id=player_id, ctx=ctx)
+    else:
+        services = resolve_fleet_services(ctx)
+        wire = {
+            "gameId": scope.game_id,
+            "perspective": scope.perspective,
+            "playerId": player_id,
+            "materializeTurn": scope.turn,
+            "playerInvalidationGeneration": services.persistence.player_invalidation_generation(
+                scope.game_id,
+                scope.perspective,
+                player_id,
+            ),
+        }
+    stamp_submission_open(wire, scope, submission_open)
+    return wire
 
 
 def _eliminated_fleet_job_wire(
     scope: ComputeScope,
     *,
     player_id: int,
+    ctx: AnalyticQueryContext,
 ) -> dict[str, Any]:
     """Job wire for an eliminated player: flag only, no ledger.
 
     Observation persist writes the empty non-final ledger from the flag.
     Finalization persist rebuilds the empty final ledger from the loaded turn.
+    The epoch is the player's current invalidation generation. There is no
+    default generation.
     """
+    services = resolve_fleet_services(ctx)
     return {
         "gameId": scope.game_id,
         "perspective": scope.perspective,
         "playerId": player_id,
         "materializeTurn": scope.turn,
         "eliminatedAtTurn": True,
+        "playerInvalidationGeneration": services.persistence.player_invalidation_generation(
+            scope.game_id,
+            scope.perspective,
+            player_id,
+        ),
     }
 
 
@@ -146,12 +173,25 @@ def build_fleet_finalization_leg_job_wire(
     dependency_outputs: DependencyOutputs,
     ctx: AnalyticQueryContext | None = None,
     node_result_wire: object | None = None,
+    submission_open: SubmissionOpen,
 ) -> dict[str, Any]:
     """Pass the observation continue wire into the inline finalization leg."""
-    del dependency_outputs, ctx
+    del dependency_outputs
+    if ctx is None:
+        raise RuntimeError("fleet finalization leg requires AnalyticQueryContext")
     if not isinstance(node_result_wire, dict):
         raise RuntimeError("fleet finalization leg requires observation result wire on node")
-    return dict(node_result_wire)
+    if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
+        raise ValueError("fleet finalization leg requires concrete player_id")
+    payload = dict(node_result_wire)
+    services = resolve_fleet_services(ctx)
+    payload["playerInvalidationGeneration"] = services.persistence.player_invalidation_generation(
+        scope.game_id,
+        scope.perspective,
+        scope.player_id,
+    )
+    stamp_submission_open(payload, scope, submission_open)
+    return payload
 
 
 class FleetPersistencePolicy:
@@ -165,8 +205,6 @@ class FleetPersistencePolicy:
     """
 
     def is_satisfied(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> bool:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return False
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -185,8 +223,6 @@ class FleetPersistencePolicy:
         scope: ComputeScope,
     ) -> dict[str, object] | None:
         """Hydrate short-circuit completes with the durable final ledger wire."""
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return None
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -268,7 +304,6 @@ class FleetPersistencePolicy:
         """
         from api.analytics.fleet.approximate_fleet import approximate_fleet_ledger
         from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
-        from api.analytics.fleet.compute_services import resolve_fleet_services
         from api.analytics.fleet.fleet_table_stream_scheduler import publish_saved_host_turn_ledger
         from api.analytics.fleet.materialization_provenance import fleet_prior_ledger_at_n_minus_1
         from api.analytics.fleet.types import FleetAcquisitionLedger, FleetMaterializationProvenance
@@ -278,12 +313,9 @@ class FleetPersistencePolicy:
             raise ValueError("fleet observation persist requires concrete player_id")
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
             raise ValueError("fleet observation persist requires concrete turn")
-        # Epoch for the following-file walk. Read before the ledger put.
-        player_invalidation_generation = services.persistence.player_invalidation_generation(
-            scope.game_id,
-            scope.perspective,
-            scope.player_id,
-        )
+        fields = parse_off_mode_wire(result_wire)
+        refuse_stale_fleet_epoch(services, scope, fields)
+        job_epoch = job_player_epoch(fields)
 
         turn = ctx.load_turn(scope.turn)
         eliminated = result_wire.get("eliminatedAtTurn") is True or (
@@ -330,6 +362,8 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
+            evidence_generation=observation_merge_generation(services, scope, fields),
+            expected_player_epoch=job_epoch,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         if eliminated:
@@ -341,10 +375,15 @@ class FleetPersistencePolicy:
             player_id=scope.player_id,
             persisted=put_result.stored,
         )
+        if fields.catch_up:
+            # Planned hops write the turns before the open turn. This hop does
+            # not walk later files, so it leaves the open turn's file unread.
+            return None
         return self._refresh_following_callback(
             services,
             scope,
-            player_invalidation_generation,
+            job_epoch,
+            fields.open_turn,
         )
 
     def _persist_finalization(
@@ -353,7 +392,6 @@ class FleetPersistencePolicy:
         scope: ComputeScope,
         result_wire: dict[str, object],
     ) -> Callable[[], None] | None:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
         from api.analytics.fleet.materialization_provenance import (
             resolve_fleet_materialization_provenance,
         )
@@ -372,19 +410,26 @@ class FleetPersistencePolicy:
             raise ValueError("fleet persist requires concrete turn")
         if wire_ledger.ledger.player_id != scope.player_id:
             raise ValueError("fleet persist ledger player does not match scope")
-        # Epoch for the following-file walk. Read before the ledger put.
-        player_invalidation_generation = services.persistence.player_invalidation_generation(
-            scope.game_id,
-            scope.perspective,
-            scope.player_id,
-        )
+        fields = parse_off_mode_wire(result_wire)
+        refuse_stale_fleet_epoch(services, scope, fields)
+        job_epoch = job_player_epoch(fields)
 
         turn = ctx.load_turn(scope.turn)
         if turn is None:
             raise ValueError(f"stored turn {scope.turn} is required for fleet persist")
 
         if fleet_player_eliminated_at_turn(turn, scope.player_id):
-            return self._persist_eliminated_empty(ctx, scope, result_wire, turn)
+            return self._persist_eliminated_empty(
+                ctx,
+                scope,
+                result_wire,
+                turn,
+                expected_player_epoch=job_epoch,
+            )
+        if fields.catch_up:
+            # Observation already merged the refreshed prior. Do not read this
+            # turn's stored scoreboard and do not schedule a solve.
+            return None
         turn_context = FleetTurnContext.from_turn(turn)
 
         prior_on_disk, prior_is_ensure_final = self._stored_prior(services, scope, turn)
@@ -460,7 +505,8 @@ class FleetPersistencePolicy:
                 provenance=provenance,
                 materialization_version=FLEET_MATERIALIZATION_VERSION,
             ),
-            player_invalidation_generation=player_invalidation_generation,
+            player_invalidation_generation=job_epoch,
+            open_turn=fields.open_turn,
         )
 
     def _commit_living_final(
@@ -471,10 +517,9 @@ class FleetPersistencePolicy:
         persisted: PersistedFleetLedger,
         *,
         player_invalidation_generation: int,
+        open_turn: int | None,
     ) -> Callable[[], None]:
         """Store a living final ledger, then wake scores and later approximate files."""
-        from api.analytics.fleet.compute_services import FleetComputeServices
-
         if not isinstance(services, FleetComputeServices):
             raise TypeError("fleet finalization persist requires FleetComputeServices")
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
@@ -488,6 +533,7 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
+            expected_player_epoch=player_invalidation_generation,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         scores_notification = put_result.deferred_notification
@@ -495,6 +541,7 @@ class FleetPersistencePolicy:
             services,
             scope,
             player_invalidation_generation,
+            open_turn,
         )
 
         def _after_final_save() -> None:
@@ -509,14 +556,17 @@ class FleetPersistencePolicy:
         services: FleetComputeServices,
         scope: ComputeScope,
         player_invalidation_generation: int,
+        open_turn: int | None,
     ) -> Callable[[], None]:
         """Replace later approximate files from the ledger this persist just saved.
 
-        ``player_invalidation_generation`` is the epoch captured at the start of
-        that persist, before the ledger put.
+        ``player_invalidation_generation`` is the job epoch the early check
+        accepted. Each later put compares that epoch when it stamps.
+        ``open_turn`` is the submission root on the job wire. The walk stops
+        after that turn when it is set, and continues through later turns when
+        it is None.
         """
         from api.analytics.fleet.approximate_fleet import refresh_following_approximate_fleets
-        from api.analytics.fleet.compute_services import FleetComputeServices
 
         if not isinstance(services, FleetComputeServices):
             raise TypeError("fleet later-file refresh requires FleetComputeServices")
@@ -538,6 +588,7 @@ class FleetPersistencePolicy:
                 player_invalidation_generation=generation,
                 load_turn=services.load_turn,
                 inference_materialization=services.inference_materialization,
+                stop_after_turn=open_turn,
             )
 
         return _refresh
@@ -548,9 +599,10 @@ class FleetPersistencePolicy:
         scope: ComputeScope,
         result_wire: dict[str, object],
         turn: TurnInfo,
+        *,
+        expected_player_epoch: int,
     ) -> Callable[[], None] | None:
         """Write an empty final ledger. Does not wait on scores or a prior fleet."""
-        from api.analytics.fleet.compute_services import resolve_fleet_services
         from api.analytics.fleet.eliminated_player import (
             eliminated_empty_fleet_ledger,
             eliminated_fleet_provenance,
@@ -573,13 +625,12 @@ class FleetPersistencePolicy:
             scope.player_id,
             persisted,
             defer_ledger_persisted_notification=True,
+            expected_player_epoch=expected_player_epoch,
         )
         result_wire["persistedLedgerWire"] = persisted_fleet_ledger_to_json(put_result.stored)
         return put_result.deferred_notification
 
     def invalidate(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> None:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return
         if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -594,8 +645,6 @@ class FleetPersistencePolicy:
         )
 
     def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
-        from api.analytics.fleet.compute_services import resolve_fleet_services
-
         if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
             return 0
         services = resolve_fleet_services(ctx)

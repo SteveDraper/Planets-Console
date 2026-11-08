@@ -179,6 +179,10 @@ class TestTurnAnalytics:
         from api.analytics.export_turn_fill import prepare_dependency_chain_turns
         from api.analytics.export_types import ExportScope
         from api.analytics.turn_roster import iter_turn_players
+        from api.serialization.backfill_earlier_turns import (
+            backfill_earlier_turns_document,
+            backfill_earlier_turns_store_key,
+        )
         from api.services.turn_analytic_service import TurnAnalyticService
         from api.storage.memory_asset import MemoryAssetBackend
 
@@ -189,6 +193,8 @@ class TestTurnAnalytics:
             3: clone_turn_at(sample_turn, 3),
         }
         fetched: list[int] = []
+        storage = MemoryAssetBackend(initial={})
+        storage.put(backfill_earlier_turns_store_key(628580), backfill_earlier_turns_document(True))
 
         class _Turns:
             def get_turn_info(self, game_id, perspective, turn_number):
@@ -215,7 +221,7 @@ class TestTurnAnalytics:
 
         svc = TurnAnalyticService(
             _Turns(),  # type: ignore[arg-type]
-            storage=MemoryAssetBackend(initial={}),
+            storage=storage,
             planets_client_factory=_FakePlanets.from_config,
         )
         _turn, ctx = svc._build_analytic_query_context(628580, 1, 3, username="captain")
@@ -229,6 +235,7 @@ class TestTurnAnalytics:
                 turn=3,
                 player_id=player_id,
             ),
+            backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
         )
         assert fetched == [2]
 

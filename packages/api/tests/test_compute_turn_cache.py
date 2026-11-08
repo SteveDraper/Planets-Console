@@ -31,7 +31,9 @@ from api.compute import (
 from api.compute.turn_cache import TurnInfoCache
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
 
+from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.fixtures.export_framework.harness import build_stored_turn_chain
+from tests.submission_open_helpers import explicit_submission_open
 from tests.test_compute_foundation import _StubPersistencePolicy
 
 _ROW_SCOPE_KEY = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
@@ -114,6 +116,7 @@ def test_fleet_observation_job_wire_omits_turn(sample_turn) -> None:
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
 
     assert "turnWire" not in job_wire
@@ -168,6 +171,7 @@ def test_observation_job_wire_does_not_embed_the_stored_prior(sample_turn) -> No
         scope,
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
 
     assert fleet_services.persistence.get_ledger(628580, 1, 1, player_id) is not None
@@ -294,7 +298,9 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
+        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
+    enable_backfill_earlier_turns(ctx)
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
     player_id = next(row.ownerid for row in sample_turn.scores)
@@ -377,7 +383,9 @@ def test_pool_fleet_observation_leg_does_not_fill_worker_turn_cache(sample_turn)
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
+        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
+    enable_backfill_earlier_turns(ctx)
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     pool = ComputeWorkerPool(worker_count=1)
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)

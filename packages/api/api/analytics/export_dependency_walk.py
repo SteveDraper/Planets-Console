@@ -69,6 +69,7 @@ def walk_dependency_tree(
     *,
     visiting: set[tuple[str, ExportScope]],
     force_root: bool = False,
+    backfill_earlier_turns: bool,
 ) -> DependencyWalkResult:
     result = DependencyWalkResult()
     seen_pending: set[tuple[str, ExportScope]] = set()
@@ -88,7 +89,11 @@ def walk_dependency_tree(
         if not force_root and not _dependency_needs_processing(ctx, analytic_id, scope, catalog):
             return result
 
-        for dependency in catalog.applicable_ensure_dependencies(ctx, scope):
+        for dependency in catalog.applicable_ensure_dependencies(
+            ctx,
+            scope,
+            backfill_earlier_turns=backfill_earlier_turns,
+        ):
             for dependency_scope in dependency_scopes_for(ctx, scope, dependency):
                 turn_floor = ensure_dependency_turn_floor(ctx, scope)
                 if dependency_scope.turn < turn_floor:
@@ -111,6 +116,7 @@ def walk_dependency_tree(
                     dependency.analytic_id,
                     dependency_scope,
                     visiting=visiting,
+                    backfill_earlier_turns=backfill_earlier_turns,
                 )
                 if nested.turn_unavailable is not None:
                     result.turn_unavailable = nested.turn_unavailable
@@ -283,6 +289,7 @@ def is_export_scope_ensure_satisfied(
     if ctx.is_scope_ensured(analytic_id, scope):
         return True
     if quality == "observation" and analytic_id == "fleet":
+        # fleet.exports imports export_context, which imports this walker.
         from api.analytics.fleet.exports import is_fleet_export_observation_satisfied
 
         return is_fleet_export_observation_satisfied(ctx, scope)

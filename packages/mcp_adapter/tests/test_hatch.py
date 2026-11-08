@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import (
+    backfill_earlier_turns_disabled,
+    make_analytic_query_context,
+)
 from api.analytics.export_types import (
     ExportProbeResult,
     ExportQueryResult,
@@ -129,6 +132,7 @@ def test_query_connections_matches_hatch_read(running_game_info: GameInfo, sampl
         TurnAnalyticsOptions(),
         game_id=sample_turn.game.id,
         perspective=_OWN_SLOT,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     hatch = ctx.hatch_read("connections", ["$"])
 
@@ -151,6 +155,7 @@ def test_query_fixture_catalog_matches_hatch_read(running_game_info: GameInfo, s
         game_id=sample_turn.game.id,
         perspective=_OWN_SLOT,
         export_registry=registry,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     hatch = ctx.hatch_read(
         "export-test-alpha",
@@ -269,6 +274,7 @@ def test_ensure_dry_run_matches_probe(running_game_info: GameInfo, sample_turn):
         TurnAnalyticsOptions(),
         game_id=sample_turn.game.id,
         perspective=_OWN_SLOT,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     probe = ctx.probe("connections")
 
@@ -360,6 +366,7 @@ def test_query_uses_empty_username_ensure_uses_login(
         TurnAnalyticsOptions(),
         game_id=sample_turn.game.id,
         perspective=_OWN_SLOT,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     analytics = MagicMock(spec=TurnAnalyticService)
     analytics.export_query_context.return_value = ctx

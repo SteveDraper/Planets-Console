@@ -5,7 +5,10 @@ from __future__ import annotations
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.fleet.injected_services import lookup_fleet_compute_services
+from api.analytics.fleet.injected_services import (
+    FleetComputeServices,
+    lookup_fleet_compute_services,
+)
 from api.analytics.fleet.prior_selection import resolve_fleet_prior_persisted
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import FleetTurnSnapshot, PersistedFleetLedger
@@ -15,6 +18,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolution_from_fleet_records,
     resolve_prior_turn_fleet_torp_overlay,
 )
+from api.analytics.off_mode import PriorFleetRelation, off_mode_prior_relation
 from api.compute.scope import WILDCARD, ComputeScope, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -58,6 +62,43 @@ def _resolution_from_persisted_fleet(
     return resolution_from_fleet_records(records, prior_turn=prior_turn)
 
 
+def _off_mode_prior_resolution(
+    fleet_services: FleetComputeServices,
+    *,
+    game_id: str,
+    perspective: int,
+    player_id: int,
+    turn_number: int,
+    turn: TurnInfo,
+    prior_turn: TurnInfo | None,
+    prior_persisted: PersistedFleetLedger | None,
+    prior_export_scope: ExportScope,
+) -> PriorTurnFleetTorpResolution:
+    """Scores overlay while Backfill earlier turns is off.
+
+    When ``off_mode_prior_relation`` is on the mark, that stored ledger is the
+    overlay. A hop, a stop, a missing ledger, or a turn that is not stored
+    stays pending and is not ensured.
+    """
+    if prior_persisted is None or prior_turn is None:
+        return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
+    mark = fleet_services.persistence.evidence_mark(game_id, perspective, player_id)
+    relation = off_mode_prior_relation(
+        turn_number=turn_number,
+        settings=turn.settings,
+        load_prior_turn=lambda: prior_turn,
+        prior_ledger=prior_persisted,
+        mark=mark,
+    )
+    if relation is not PriorFleetRelation.ON_MARK:
+        return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
+    return _resolution_from_persisted_fleet(
+        prior_persisted,
+        prior_export_scope,
+        prior_turn=prior_turn,
+    )
+
+
 def resolve_prior_fleet_for_scores(
     ctx: AnalyticQueryContext,
     *,
@@ -68,14 +109,15 @@ def resolve_prior_fleet_for_scores(
     turn: TurnInfo,
     dependency_outputs: DependencyOutputs | None = None,
     overlay_ensure: bool = False,
+    backfill_earlier_turns: bool,
 ) -> PriorTurnFleetTorpResolution:
     """Resolve prior-turn fleet torp overlay for scores wire build and ensure admit.
 
     Prefers an ensure-final DepOutputs / disk ledger via
-    ``resolve_fleet_prior_persisted``. Applies that ledger only when it passes
-    ``prior_is_ensure_final``; otherwise falls back to
-    ``resolve_prior_turn_fleet_torp_overlay``. A readable non-final prior is
-    never applied as the scores overlay.
+    ``resolve_fleet_prior_persisted``. While Backfill earlier turns is on, a
+    readable non-final prior is not the scores overlay. While it is off, an
+    approximate ledger on the current mark is the prior, and a missing earlier
+    turn is not ensured.
     """
     if turn_number == WILDCARD or not isinstance(turn_number, int):
         return PriorTurnFleetTorpResolution(overlay=None, input_status="pending")
@@ -135,8 +177,8 @@ def resolve_prior_fleet_for_scores(
         load_from_disk=load_prior_from_disk,
         is_ensure_final=prior_is_ensure_final,
     )
-    # ``resolve_fleet_prior_persisted`` may still return a non-final ledger for
-    # fleet job-wire baseline use; scores applies only ensure-final priors.
+    # An ensure-final prior is the overlay in either mode. The resolved
+    # backfill choice does not change that overlay.
     if (
         prior_persisted is not None
         and prior_is_ensure_final(prior_persisted)
@@ -146,6 +188,21 @@ def resolve_prior_fleet_for_scores(
             prior_persisted,
             prior_export_scope,
             prior_turn=prior_turn,
+        )
+    # Missing fleet services cannot read the evidence mark. Keep the overlay
+    # path so a provenance-final ledger is not admitted, and so a missing prior
+    # stays unavailable.
+    if fleet_services is not None and not backfill_earlier_turns:
+        return _off_mode_prior_resolution(
+            fleet_services,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            turn_number=turn_number,
+            turn=turn,
+            prior_turn=prior_turn,
+            prior_persisted=prior_persisted,
+            prior_export_scope=prior_export_scope,
         )
 
     return resolve_prior_turn_fleet_torp_overlay(

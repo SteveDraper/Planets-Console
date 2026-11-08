@@ -30,6 +30,7 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
 )
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
+    STAMP_CURRENT_EVIDENCE_MARK,
     FleetAcquisitionLedger,
     FleetCountDiscrepancy,
     FleetEvidenceEvent,
@@ -48,6 +49,7 @@ from api.errors import FleetScoresEvidenceOpenError
 from api.models.enums import PlayerStatus
 
 from tests.fleet_fixtures import single_ship_turn
+from tests.submission_open_helpers import explicit_submission_open
 
 _FLEET = "fleet"
 
@@ -183,6 +185,7 @@ def _write_observation(services, ctx, turn, player_id: int):
         _scope(services, turn, player_id),
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     observed = run_fleet_observation_leg(job_wire)
     assert observed.payload is not None
@@ -319,6 +322,7 @@ def test_observation_persist_folds_the_prior_stored_at_write_time() -> None:
         _scope(services, turn, player_id),
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert "priorLedgerWire" not in job_wire
     assert "baselineLedgerWire" not in job_wire
@@ -392,6 +396,7 @@ def test_non_terminal_scoreboard_leaves_the_approximate_file() -> None:
         "persistedLedgerWire": before,
         "materializeTurn": 5,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     try:
         FleetPersistencePolicy().persist(ctx, _scope(services, turn, player_id), wire)
@@ -429,6 +434,7 @@ def test_terminal_scoreboard_replaces_the_file_and_wakes_the_side_channel() -> N
         "persistedLedgerWire": persisted_fleet_ledger_to_json(approximate),
         "materializeTurn": 1,
         "fleetPersistLeg": "finalization",
+        "playerInvalidationGeneration": 0,
     }
     callback = FleetPersistencePolicy().persist(ctx, _scope(services, turn, player_id), wire)
     assert callback is not None
@@ -601,6 +607,8 @@ def _invalidate_player_after_put(services, player_id: int, turn_number: int) -> 
         persisted,
         *,
         defer_ledger_persisted_notification=False,
+        evidence_generation=STAMP_CURRENT_EVIDENCE_MARK,
+        expected_player_epoch=None,
     ):
         result = original(
             game_id,
@@ -609,6 +617,8 @@ def _invalidate_player_after_put(services, player_id: int, turn_number: int) -> 
             stored_player_id,
             persisted,
             defer_ledger_persisted_notification=defer_ledger_persisted_notification,
+            evidence_generation=evidence_generation,
+            expected_player_epoch=expected_player_epoch,
         )
         if stored_turn == turn_number and stored_player_id == player_id:
             services.persistence.invalidate_player_ledgers_from_turn(
@@ -820,6 +830,7 @@ def test_finalization_refresh_keeps_generation_from_before_the_put() -> None:
             "persistedLedgerWire": persisted_fleet_ledger_to_json(approximate),
             "materializeTurn": 1,
             "fleetPersistLeg": "finalization",
+            "playerInvalidationGeneration": 0,
         },
     )
 
@@ -912,6 +923,7 @@ def test_eliminated_player_is_not_an_approximate_fleet(sample_turn) -> None:
         _scope(services, turn, player_id),
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
+        submission_open=explicit_submission_open(),
     )
     assert job_wire["eliminatedAtTurn"] is True
     observed = run_fleet_observation_leg(job_wire)
@@ -976,7 +988,7 @@ def test_later_file_refresh_and_final_commit_fail_closed() -> None:
     persisted = _prior(player_id, [])
 
     with pytest.raises(TypeError, match="FleetComputeServices"):
-        policy._refresh_following_callback(object(), concrete, 0)
+        policy._refresh_following_callback(object(), concrete, 0, None)
     with pytest.raises(TypeError, match="FleetComputeServices"):
         policy._commit_living_final(
             object(),
@@ -984,9 +996,10 @@ def test_later_file_refresh_and_final_commit_fail_closed() -> None:
             {},
             persisted,
             player_invalidation_generation=0,
+            open_turn=None,
         )
     with pytest.raises(ValueError, match="concrete turn"):
-        policy._refresh_following_callback(services, wildcard_turn, 0)
+        policy._refresh_following_callback(services, wildcard_turn, 0, None)
     with pytest.raises(ValueError, match="concrete turn"):
         policy._commit_living_final(
             services,
@@ -994,4 +1007,5 @@ def test_later_file_refresh_and_final_commit_fail_closed() -> None:
             {},
             persisted,
             player_invalidation_generation=0,
+            open_turn=None,
         )

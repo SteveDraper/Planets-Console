@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -26,6 +26,7 @@ from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmit
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
 from api.compute.turn_cache import TurnInfoCache, get_process_turn_info_cache
+from api.exceptions import DiscardedWorkRefused
 from api.models.game import TurnInfo
 
 # Re-exports for external callers; in-package compute code imports state types
@@ -36,6 +37,7 @@ __all__ = [
     "ComputeOrchestrator",
     "ComputeRequest",
     "NodeState",
+    "OpenTurnRoot",
     "OrchestratorDiagnosticsSnapshot",
     "OrchestratorMetrics",
     "OrchestratorNodeSnapshot",
@@ -81,6 +83,16 @@ class ScopeNodeView:
         ``parked`` is a soft pause, not terminal.
         """
         return self.state in TERMINAL_NODE_STATES
+
+
+@dataclass(frozen=True)
+class OpenTurnRoot:
+    """One in-flight submission root returned by a node query."""
+
+    analytic_id: str
+    open_turn: int
+    backfill_earlier_turns: bool
+    consumed: bool
 
 
 @dataclass(frozen=True)
@@ -266,11 +278,13 @@ class ComputeOrchestrator(
             node_scope = node.scope
             ctx = self._ctx_for_node(node)
             node_result_wire = node.result_wire
+            submission_open = node.submission_open
         job_wire = builder(
             node_scope,
             dependency_outputs=dependency_outputs,
             ctx=ctx,
             node_result_wire=node_result_wire,
+            submission_open=submission_open,
         )
         return run_step(job_wire)
 
@@ -360,6 +374,195 @@ class ComputeOrchestrator(
                     )
                     self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
+
+    def _nodes_for_player(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+        turn: int | None = None,
+    ) -> Iterator[tuple[ComputeScope, ComputeNodeRun]]:
+        """Yield one player's nodes. Caller holds the orchestrator lock.
+
+        ``analytic_ids`` selects which analytics to scan. ``turn`` restricts
+        the scan to that scope turn. When ``turn`` is omitted, scopes whose
+        turn is not an int are skipped. Do not add or remove nodes while
+        iterating.
+        """
+        for scope, node in self._nodes.items():
+            if scope.analytic_id not in analytic_ids:
+                continue
+            if scope.game_id != game_id or scope.perspective != perspective:
+                continue
+            if scope.player_id != player_id:
+                continue
+            if turn is None:
+                if not isinstance(scope.turn, int):
+                    continue
+            elif scope.turn != turn:
+                continue
+            yield scope, node
+
+    def open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+        turn: int | None = None,
+    ) -> tuple[OpenTurnRoot, ...]:
+        """In-flight submission roots for one player.
+
+        A root is a non-terminal node whose scope turn equals its ``open_turn``.
+        That turn is copied on at plan time. A later submission that roots at
+        an in-flight hop adopts the node, so the hop becomes a root. Other hops
+        keep the open they were planned with and are not roots. ``consumed``
+        records whether the one-shot for that root has already been applied.
+        Callers decide which analytic's root wins when several match.
+        """
+        with self._condition:
+            return self._collect_open_turn_roots(
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                analytic_ids=analytic_ids,
+                turn=turn,
+            )
+
+    def claim_open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        open_turn: int,
+        analytic_ids: frozenset[str],
+    ) -> tuple[OpenTurnRoot, ...]:
+        """Read this player's in-flight roots and consume one open when it is live.
+
+        The snapshot is every in-flight root for the player, including roots
+        that are already consumed. It is the state from before this claim
+        consumes. When an unconsumed root exists at ``open_turn``, that
+        one-shot is applied before the lock is released. The caller can still
+        count a shell it is about to close. A later claim sees ``consumed``
+        on that root.
+        """
+        with self._condition:
+            roots = self._collect_open_turn_roots(
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                analytic_ids=analytic_ids,
+            )
+            has_unconsumed_root = any(
+                not root.consumed and root.open_turn == open_turn for root in roots
+            )
+            if has_unconsumed_root:
+                self._mark_open_turn_consumed(
+                    game_id=game_id,
+                    perspective=perspective,
+                    player_id=player_id,
+                    open_turn=open_turn,
+                    analytic_ids=analytic_ids,
+                )
+            return roots
+
+    def _collect_open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+        turn: int | None = None,
+    ) -> tuple[OpenTurnRoot, ...]:
+        """In-flight roots. Caller holds the orchestrator lock."""
+        roots: list[OpenTurnRoot] = []
+        for scope, node in self._nodes_for_player(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            analytic_ids=analytic_ids,
+            turn=turn,
+        ):
+            open_turn = node.submission_open.open_turn
+            if node.is_terminal or open_turn is None:
+                continue
+            if scope.turn != open_turn:
+                continue
+            roots.append(
+                OpenTurnRoot(
+                    analytic_id=scope.analytic_id,
+                    open_turn=open_turn,
+                    backfill_earlier_turns=node.submission_open.backfill_earlier_turns,
+                    consumed=node.open_turn_consumed,
+                )
+            )
+        return tuple(roots)
+
+    def _mark_open_turn_consumed(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        open_turn: int,
+        analytic_ids: frozenset[str],
+    ) -> None:
+        """Mark the one-shot at ``open_turn``. Caller holds the orchestrator lock."""
+        for _scope, node in self._nodes_for_player(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            analytic_ids=analytic_ids,
+            turn=open_turn,
+        ):
+            if node.submission_open.open_turn == open_turn:
+                node.open_turn_consumed = True
+
+    def discard_matching_work(
+        self,
+        should_discard: Callable[[ComputeScope, ComputeNodeRun], bool],
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+    ) -> None:
+        """Discard queued matches and refuse persist on matches already running.
+
+        The player and analytic filter selects candidates. ``should_discard``
+        runs under the orchestrator lock for each non-terminal candidate and
+        must not re-enter the orchestrator. A match that is not running is
+        failed and leaves the ready queue. A match that is running finishes
+        its worker; persist and stamp are refused and the step is not retried.
+        """
+        with self._condition:
+            candidates = [
+                (scope, node)
+                for scope, node in self._nodes_for_player(
+                    game_id=game_id,
+                    perspective=perspective,
+                    player_id=player_id,
+                    analytic_ids=analytic_ids,
+                )
+                if not node.is_terminal
+            ]
+            for scope, node in candidates:
+                if not should_discard(scope, node):
+                    continue
+                if node.state == "running":
+                    node.discard_without_stamp = True
+                    continue
+                self._fail_node(
+                    node,
+                    DiscardedWorkRefused(
+                        "in-flight work was discarded before it started executing"
+                    ),
+                )
 
     def abort_scope(
         self,

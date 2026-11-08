@@ -4,11 +4,22 @@ import json
 from pathlib import Path
 
 import pytest
+from api.analytics.export_context import (
+    AnalyticQueryContext,
+    backfill_earlier_turns_disabled,
+)
+from api.analytics.options import TurnAnalyticsOptions
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.config import ApiConfig, set_config
 from api.errors import NotFoundError, ValidationError
-from api.serialization.backfill_earlier_turns import BACKFILL_EARLIER_TURNS_FIELD
-from api.services.game_service import GameService, backfill_earlier_turns_store_key
+from api.serialization.backfill_earlier_turns import (
+    BACKFILL_EARLIER_TURNS_FIELD,
+    backfill_earlier_turns_document,
+    backfill_earlier_turns_reader,
+    backfill_earlier_turns_store_key,
+    read_backfill_earlier_turns,
+)
+from api.services.game_service import GameService
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 from api.storage_factory import clear_backend_cache, get_storage
@@ -110,6 +121,29 @@ def test_malformed_record_is_rejected(service, storage):
         service.get_backfill_earlier_turns(_GAME_ID)
 
 
+def test_read_record_is_off_when_missing_and_rejects_a_bad_document():
+    storage = MemoryAssetBackend(initial={})
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is False
+    with pytest.raises(NotFoundError):
+        storage.get(backfill_earlier_turns_store_key(_GAME_ID))
+
+    key = backfill_earlier_turns_store_key(_GAME_ID)
+    storage.put(key, ["on"])
+    with pytest.raises(ValidationError, match="Expected JSON object"):
+        read_backfill_earlier_turns(storage, _GAME_ID)
+
+    storage.put(key, {BACKFILL_EARLIER_TURNS_FIELD: "yes"})
+    with pytest.raises(ValidationError, match="boolean"):
+        read_backfill_earlier_turns(storage, _GAME_ID)
+
+    storage.put(key, {BACKFILL_EARLIER_TURNS_FIELD: True, "walkProgress": 1})
+    with pytest.raises(ValidationError, match="only backfillEarlierTurns"):
+        read_backfill_earlier_turns(storage, _GAME_ID)
+
+    storage.put(key, {BACKFILL_EARLIER_TURNS_FIELD: True})
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is True
+
+
 def test_set_rejects_non_boolean_and_missing_game(service, storage):
     with pytest.raises(ValidationError, match="boolean"):
         service.set_backfill_earlier_turns(_GAME_ID, 1)  # type: ignore[arg-type]
@@ -171,3 +205,52 @@ def test_core_http_rejects_extra_fields(client):
         json={BACKFILL_EARLIER_TURNS_FIELD: True, "walkProgress": 1},
     )
     assert response.status_code == 422
+
+
+def _query_context(reader) -> AnalyticQueryContext:
+    return AnalyticQueryContext(
+        game_id=_GAME_ID,
+        perspective=1,
+        ambient_turn=1,
+        options=TurnAnalyticsOptions(),
+        load_turn=lambda _turn: None,
+        export_registry={},
+        read_backfill_earlier_turns=reader,
+    )
+
+
+def test_reader_binds_storage_and_context_uses_it():
+    storage = MemoryAssetBackend(initial={})
+    reader = backfill_earlier_turns_reader(storage)
+    ctx = _query_context(reader)
+    assert ctx.backfill_earlier_turns_enabled() is False
+
+    storage.put(
+        backfill_earlier_turns_store_key(_GAME_ID),
+        backfill_earlier_turns_document(True),
+    )
+    assert ctx.backfill_earlier_turns_enabled() is True
+
+
+def test_context_without_reader_raises_instead_of_reporting_off():
+    ctx = AnalyticQueryContext(
+        game_id=_GAME_ID,
+        perspective=1,
+        ambient_turn=1,
+        options=TurnAnalyticsOptions(),
+        load_turn=lambda _turn: None,
+        export_registry={},
+    )
+    with pytest.raises(RuntimeError, match="no Backfill earlier turns reader"):
+        ctx.backfill_earlier_turns_enabled()
+
+
+def test_disabled_reader_stays_off_when_storage_is_on():
+    storage = MemoryAssetBackend(initial={})
+    storage.put(
+        backfill_earlier_turns_store_key(_GAME_ID),
+        backfill_earlier_turns_document(True),
+    )
+    ctx = _query_context(backfill_earlier_turns_disabled)
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is True
+    assert ctx.backfill_earlier_turns_enabled() is False

@@ -47,6 +47,7 @@ from tests.file_backend_io_accounting import (
 )
 from tests.file_storage_helpers import open_file_storage_backend
 from tests.scores_exports_helpers import first_player_id
+from tests.submission_open_helpers import explicit_submission_open
 
 WORKER_COUNT = 8
 FILE_MIX_ITERS = 400
@@ -109,6 +110,7 @@ def _observation_job_wire(_sample_turn, player_id: int) -> dict[str, object]:
         "perspective": PERSPECTIVE,
         "playerId": player_id,
         "materializeTurn": TURN_NUMBER,
+        "playerInvalidationGeneration": 0,
     }
 
 
@@ -182,12 +184,15 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
     prior_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER - 1, player_id)
     ledger_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
     mark_key = persistence.evidence_mark_key(GAME_ID, PERSPECTIVE, player_id)
+    # This payload has no openTurn, so persist does not consult the backfill
+    # setting. The mark is read to classify the merge, then the ledger write
+    # uses that cached mark.
     assert counts.protocol_counts() == {"get": 3, "put": 1, "list": 0, "delete": 0}, (
         counts.protocol_counts(),
         counts.get_keys,
         counts.list_prefixes,
     )
-    assert counts.get_keys == [prior_key, ledger_key, mark_key]
+    assert counts.get_keys == [prior_key, mark_key, ledger_key]
     assert counts.json_load_calls == 0
     assert counts.json_dump_calls == 1
     assert counts.open_read_calls == 3
@@ -318,6 +323,7 @@ def test_observation_job_wire_does_not_read_a_stored_prior(tmp_path, sample_turn
             scope,
             dependency_outputs=outputs,
             ctx=ctx,
+            submission_open=explicit_submission_open(),
         )
 
     assert "priorLedgerWire" not in wire
@@ -381,6 +387,7 @@ def test_scores_resolve_prior_skips_disk_when_dependency_outputs_has_final_prior
             turn=sample_turn,
             dependency_outputs=outputs,
             overlay_ensure=False,
+            backfill_earlier_turns=False,
         )
 
     prior_fleet_key = persistence.ledger_prefix(GAME_ID, PERSPECTIVE, prior_turn)

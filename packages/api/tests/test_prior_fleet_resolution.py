@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from api.analytics.export_context import make_analytic_query_context
+from api.analytics.export_context import (
+    backfill_earlier_turns_disabled,
+    make_analytic_query_context,
+)
 from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import (
@@ -60,6 +63,7 @@ def test_generation_stale_provenance_final_ledger_is_not_applied(sample_turn, pe
         player_id=player_id,
         turn=host_turn,
         overlay_ensure=False,
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
 
     assert resolution.input_status != "applied"
@@ -91,6 +95,7 @@ def test_missing_fleet_services_does_not_treat_provenance_final_as_ensure_final(
         export_services={},
         game_id=GAME_ID,
         perspective=1,
+        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
     prior_persisted = PersistedFleetLedger(
         ledger=ensure_fleet_baseline_for_player(GAME_ID, 1, host_turn, player_id),
@@ -123,6 +128,7 @@ def test_missing_fleet_services_does_not_treat_provenance_final_as_ensure_final(
         turn=host_turn,
         dependency_outputs=outputs,
         overlay_ensure=False,
+        backfill_earlier_turns=ctx.backfill_earlier_turns_enabled(),
     )
 
     assert resolution.input_status != "applied"

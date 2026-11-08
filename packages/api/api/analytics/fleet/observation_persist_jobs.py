@@ -89,6 +89,7 @@ def time_observation_persist_jobs(
         "perspective": PROBE_PERSPECTIVE,
         "playerId": 1,
         "materializeTurn": PROBE_TURN_NUMBER,
+        "playerInvalidationGeneration": 0,
     }
 
     storage.put(f"games/{PROBE_GAME_ID}/info", {"name": "probe"})
@@ -121,6 +122,7 @@ def time_observation_persist_jobs(
                 load_turn=load_turn,
             )
         },
+        storage=storage,
     )
     scope = ComputeScope(
         analytic_id=ANALYTIC_ID,
