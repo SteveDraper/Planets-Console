@@ -490,6 +490,29 @@ class FleetSnapshotPersistenceService:
             self._evidence_marks[key] = loaded
             return loaded
 
+    def update_evidence_mark(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        update: Callable[[FleetEvidenceMark], FleetEvidenceMark],
+    ) -> FleetEvidenceMark:
+        """Replace one player's evidence mark under the generation lock.
+
+        ``update`` sees the mark currently stored and returns the mark to
+        keep. An equal result is not written again.
+        """
+        key = (game_id, perspective, player_id)
+        with self._generation_lock:
+            current = self._evidence_marks.get(key)
+            if current is None:
+                current = self._read_evidence_mark(game_id, perspective, player_id)
+            updated = update(current)
+            if updated != current:
+                self._write_evidence_mark(game_id, perspective, player_id, updated)
+            self._evidence_marks[key] = updated
+            return updated
+
     def player_invalidation_generation(
         self,
         game_id: int,

@@ -547,6 +547,12 @@ describe('reduceRowStreamState', () => {
     })
     expect(rowDetailFromStreamState(4, onMark).freshness).toBeUndefined()
     expect(rowDetailFromStreamState(4, onMark).displayStatus).toBe('success')
+
+    const onMarkAccepted = reduceRowStreamState(onMark, { type: 'work_accepted' })
+    const onMarkBusy = rowDetailFromStreamState(4, onMarkAccepted)
+    expect(onMarkBusy.summary).toBe('Build inference in progress')
+    expect(onMarkBusy.freshness).toBeUndefined()
+    expect(onMarkBusy.displayStatus).toBe('pending')
   })
 
   it('keeps Provisional beside a stored row that is behind the mark', () => {

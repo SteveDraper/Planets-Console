@@ -164,6 +164,30 @@ def test_off_mode_persist_decision_is_one_table():
         assert decision.merge_generation == merge_generation, name
 
 
+def test_on_walk_stamps_when_backfill_would_bump():
+    """An in-flight on-walk stamps. The same inputs without it bump."""
+    present = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
+    stamped = off_mode_persist_decision(
+        backfill_enabled=True,
+        open_turn=40,
+        is_catch_up=False,
+        host_turn=39,
+        mark=present,
+        stored_generation=1,
+        on_walk=True,
+    )
+    bumped = off_mode_persist_decision(
+        backfill_enabled=True,
+        open_turn=40,
+        is_catch_up=False,
+        host_turn=39,
+        mark=present,
+        stored_generation=1,
+    )
+    assert stamped.mark_persist is MarkPersist.STAMP
+    assert bumped.mark_persist is MarkPersist.BUMP
+
+
 def test_off_mode_prior_relation_classifies_stop_hop_and_on_mark(sample_turn):
     """Floor, absent mark, appliesFromTurn, a missing turn, and the mark share one result."""
     stored = sample_turn

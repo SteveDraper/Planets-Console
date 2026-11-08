@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope
+from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.injected_services import (
     FleetComputeServices,
     lookup_fleet_compute_services,
@@ -34,14 +35,19 @@ def off_mode_ensure_dependencies(
     """Shared prior-fleet edge for this scope, or no edges.
 
     A non-integer player, missing fleet services, or Backfill earlier turns
-    keeps the edge. While backfill is off, a stored turn keeps that same edge
-    only when ``scope.turn - 1`` still needs a hop inside ``appliesFromTurn``.
-    A turn that is not stored, or a prior that does not need a hop, returns
-    no edges. An absent mark does not walk backward. The open turn's own
-    scoreboard is this scope, not an earlier one.
+    keeps the edge. A player eliminated on this turn has no prior-fleet edge
+    while Backfill earlier turns is on. While backfill is off, a stored turn
+    keeps that same edge only when ``scope.turn - 1`` still needs a hop inside
+    ``appliesFromTurn``. A turn that is not stored, or a prior that does not
+    need a hop, returns no edges. An absent mark does not walk backward. The
+    open turn's own scoreboard is this scope, not an earlier one.
     """
     if not isinstance(scope.player_id, int):
         return OFF_MODE_PRIOR_FLEET
+    if backfill_earlier_turns:
+        turn = ctx.load_turn(scope.turn)
+        if turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id):
+            return ()
     services = lookup_fleet_compute_services(ctx)
     if services is None or backfill_earlier_turns:
         return OFF_MODE_PRIOR_FLEET

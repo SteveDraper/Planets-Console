@@ -15,6 +15,7 @@ import type { ShellAnalyticTableViewProps } from '../shellAnalyticRegistry'
 import { scoresAnalyticTableQueryKey } from './api'
 import { scoresDiagnosticsFromTable } from './diagnosticsFromTable'
 import { ScoresTableView } from './ScoresTableView'
+import { useScoresShellStreamSession } from './scoresShellSession'
 import { useGlobalInferencePause } from './useGlobalInferencePause'
 import { useScoresInferenceByRow } from './useScoresInferenceByRow'
 
@@ -47,23 +48,30 @@ function ScoresAnalyticTableBody({
     queryFn: () => fetchAnalyticTable(analyticId, analyticScope),
     enabled: fetchEnabled,
   })
+  const shellSession = useScoresShellStreamSession()
+  const ownsStream = shellSession == null
   const inferenceEnabled =
-    scoresTableParams.includeBuildInference && data?.buildInferenceAvailable !== false
+    ownsStream &&
+    scoresTableParams.includeBuildInference &&
+    data?.buildInferenceAvailable !== false
   const buildInferenceAvailable = data == null ? undefined : data.buildInferenceAvailable !== false
   const globalInferencePauseEnabled =
+    ownsStream &&
     fetchEnabled &&
     scoresTableParams.includeBuildInference &&
     buildInferenceAvailable === true
-  const globalInferencePause = useGlobalInferencePause(
+  const localInferencePause = useGlobalInferencePause(
     analyticScope,
     globalInferencePauseEnabled
   )
-  const { inferenceByRow } = useScoresInferenceByRow(
+  const { inferenceByRow: localInferenceByRow } = useScoresInferenceByRow(
     data,
     analyticScope,
     inferenceEnabled && fetchEnabled,
-    { onGlobalPauseChange: globalInferencePause.syncPausedFromStream }
+    { onGlobalPauseChange: localInferencePause.syncPausedFromStream }
   )
+  const inferenceByRow = shellSession?.inferenceByRow ?? localInferenceByRow
+  const globalInferencePause = shellSession?.globalInferencePause ?? localInferencePause
   const scoresTableWithInference =
     data != null && inferenceByRow != null
       ? buildScoresTableWithInference(data, inferenceByRow)
@@ -90,7 +98,7 @@ function ScoresAnalyticTableBody({
   return <AnalyticTableGrid isPending={isPending} error={error} data={data} />
 }
 
-/** Scores table body: REST grid plus tile-lived inference stream. */
+/** Scores table body. The shell owns the inference stream when it is mounted. */
 export function ScoresAnalyticTableTile({
   analyticId,
   analyticScope,

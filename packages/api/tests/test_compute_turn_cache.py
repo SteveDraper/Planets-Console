@@ -11,7 +11,11 @@ from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.fleet.compute_orchestration import build_fleet_materialization_leg_job_wire
 from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.registration import REGISTRATION as FLEET_REGISTRATION
-from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+from api.analytics.fleet.types import (
+    FleetEvidenceMark,
+    FleetMaterializationProvenance,
+    PersistedFleetLedger,
+)
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
@@ -359,7 +363,14 @@ def test_pool_fleet_observation_leg_does_not_fill_worker_turn_cache(sample_turn)
         inference=FleetInferenceSupport(scores_services=scores_services),
     )
     # Final fleet@1 satisfies the prior-turn DAG edge so only fleet@2 hits the pool
-    # (turn-1 roots are no longer elided from the walk).
+    # (turn-1 roots are no longer elided from the walk). The on-walk prepares an
+    # absent mark before that plan, so the stored final ledger is already on it.
+    fleet_services.persistence.update_evidence_mark(
+        628580,
+        1,
+        player_id,
+        lambda _current: FleetEvidenceMark(evidence_generation=1, applies_from_turn=1),
+    )
     fleet_services.persistence.put_ledger(
         628580,
         1,

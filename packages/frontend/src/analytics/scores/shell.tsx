@@ -1,5 +1,8 @@
 import { ScoresTableTile } from './ScoresTableTile'
 import { ScoresAnalyticTableTile } from './ScoresAnalyticTableTile'
+import { ScoresShellStreamProvider } from './ScoresShellStreamContext'
+import { useScoresShellStream } from './useScoresShellStream'
+import { shellLivedStream } from '../shellLivedStream'
 import { sidebarTileChrome, type ShellAnalyticChrome } from '../shellAnalyticRegistry'
 
 export const scoresShellAnalytic: ShellAnalyticChrome = {
@@ -16,5 +19,8 @@ export const scoresShellAnalytic: ShellAnalyticChrome = {
     )
   },
   TableView: ScoresAnalyticTableTile,
-  stream: { lifetime: 'tile' },
+  stream: shellLivedStream({
+    hook: useScoresShellStream,
+    Provider: ScoresShellStreamProvider,
+  }),
 }

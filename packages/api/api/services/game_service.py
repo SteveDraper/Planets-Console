@@ -30,6 +30,8 @@ _sector_title_by_stored_game_id: dict[str, str | None] = {}
 
 # (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.
 OnGameInfoRefreshed = Callable[[int, GameInfo | None, GameInfo], None]
+# Fired when Backfill earlier turns transitions from off to on for one game.
+OnBackfillEnabled = Callable[[int], None]
 
 
 def clear_sector_title_cache() -> None:
@@ -45,10 +47,12 @@ class GameService:
         credentials: CredentialService | None = None,
         *,
         on_game_info_refreshed: OnGameInfoRefreshed | None = None,
+        on_backfill_enabled: OnBackfillEnabled | None = None,
     ) -> None:
         self._storage = storage
         self._credentials = credentials or CredentialService(storage)
         self._on_game_info_refreshed = on_game_info_refreshed
+        self._on_backfill_enabled = on_backfill_enabled
 
     @staticmethod
     def is_game_finished(info: GameInfo) -> bool:
@@ -205,13 +209,18 @@ class GameService:
         """Store one Backfill earlier turns choice for ``game_id``.
 
         The Settings checkbox is the only writer. The value is shared by every
-        perspective of the game.
+        perspective of the game. Turning the setting from off to on submits
+        on-walks for live fleet and scoreboard streams of this game. Turning
+        it off leaves an accepted walk running.
         """
         if not isinstance(enabled, bool):
             raise ValidationError("backfillEarlierTurns must be a boolean.")
         self.get_game_info(game_id)
+        was_enabled = read_backfill_earlier_turns(self._storage, game_id)
         self._storage.put(
             backfill_earlier_turns_store_key(game_id),
             backfill_earlier_turns_document(enabled),
         )
+        if enabled and not was_enabled and self._on_backfill_enabled is not None:
+            self._on_backfill_enabled(game_id)
         return enabled

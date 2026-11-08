@@ -8,6 +8,7 @@ from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersiste
 from api.analytics.military_score_inference.inference_scheduler import (
     create_inference_row_scheduler,
 )
+from api.analytics.on_walk_live import submit_on_walks_for_live_streams
 from api.compute.runtime import peek_compute_orchestrator
 from api.compute.turn_cache import get_process_turn_info_cache
 from api.concepts.homeworld_layout import homeworld_settings_fingerprint
@@ -68,6 +69,7 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
         storage,
         credentials,
         on_game_info_refreshed=on_game_info_refreshed,
+        on_backfill_enabled=submit_on_walks_for_live_streams,
     )
     league_teams = LeagueTeamDirectoryService(storage, games)
 

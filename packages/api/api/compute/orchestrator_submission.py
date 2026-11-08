@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import prepare_dependency_chain_turns
+from api.analytics.on_walk import accept_on_walk_root
 from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_compute_dag
 from api.compute.errors import ComputeScopeAbortedError, UnresolvedSubmissionOpenError
 from api.compute.orchestration_bundle import OrchestrationBundle
@@ -127,11 +128,19 @@ class OrchestratorSubmissionMixin:
         resolved = resolve_submission_open(request)
         bundle = resolved.resolved_bundle()
         if bundle is not None:
+            spliced = self._ctx_for_bundle(bundle)
             prepare_compute_request_dependency_chain(
                 resolved,
-                ctx=self._ctx_for_bundle(bundle),
+                ctx=spliced,
                 backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
             )
+            # A join keeps the backfill choice the node started with, so it is
+            # not an on-walk. Mark preparation shares the turn cache with plan.
+            if self._submission_plans_fresh_root(resolved):
+                accept_on_walk_root(
+                    replace(resolved, bundle=None, ctx=spliced),
+                    compute_registry=self._compute_registry,
+                )
         with self._condition:
             submission = self._submit_locked(resolved, wake_if_parked_only=False)
         return self._finish_submission(submission)
@@ -154,6 +163,21 @@ class OrchestratorSubmissionMixin:
         with self._condition:
             submission = self._submit_locked(resolved, wake_if_parked_only=True)
         return None if submission is None else self._finish_submission(submission)
+
+    def _submission_plans_fresh_root(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+    ) -> bool:
+        """Whether this submission will plan a new root instead of joining one.
+
+        A non-terminal node keeps the open and backfill choice it started with.
+        Replacing a terminal node, or finding no node, plans this submission.
+        """
+        with self._condition:
+            existing = self._nodes.get(request.scope)
+            if existing is None:
+                return True
+            return bool(request.force_fresh and existing.is_terminal)
 
     def _submit_locked(
         self: ComputeOrchestrator,

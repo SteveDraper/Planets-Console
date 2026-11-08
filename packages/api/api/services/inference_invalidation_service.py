@@ -18,6 +18,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reschedule_inference_row,
 )
 from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
+from api.analytics.on_walk import scoreboard_persist_belongs_to_on_walk
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -320,6 +321,7 @@ class InferenceInvalidationService:
         # The carried choice classifies the mark. Catch-up and the stored
         # generation stay unset; they do not change this classification.
         # An absent carried choice leaves the open turn unset, so this cannot stamp.
+        # An in-flight on-walk stamps the generation it started with instead.
         carried = evidence.decision_backfill
         decision = off_mode_persist_decision(
             backfill_enabled=False if carried is None else carried,
@@ -328,6 +330,13 @@ class InferenceInvalidationService:
             host_turn=host_turn,
             mark=mark,
             stored_generation=None,
+            on_walk=scoreboard_persist_belongs_to_on_walk(
+                orchestrator,
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+                host_turn=host_turn,
+            ),
         )
         if decision.mark_persist is MarkPersist.STAMP:
             return

@@ -295,12 +295,12 @@ The SPA plugin for one **turn analytic**'s **Shell** chrome, keyed by **turn ana
 _Avoid_: SPA analytic registration, analytic descriptor (when meaning frontend chrome), second SPA catalog, stuffing sidebar/table chrome into the map fetch/merge registry, treating GameInfo availability as **view mode** greying
 
 **Shell-lived stream**:
-A **table stream** session mounted in the **Shell** above **view mode**, so toggling tabular vs map does not tear it down. **Fleet stream** is the reference. Both the table tiles and the map layer consume the same demuxed session (typically via a registration-owned React context).
-_Avoid_: fleet stream inside the table tile, a second fleet protocol for map
+A **table stream** session mounted in the **Shell** above **view mode**, so toggling tabular vs map does not tear it down. **Fleet stream** is the reference. The scoreboard **inference table stream** is shell-lived too, and only while build inference is on, so an enabled scoreboard that the current **view mode** greys still has a live session. Table tiles and the map layer consume the same demuxed session (typically via a registration-owned React context).
+_Avoid_: fleet stream inside the table tile, a second fleet protocol for map, tearing down an enabled scoreboard stream on **view mode** change
 
 **Tile-lived stream**:
-A **table stream** session mounted inside the analytic's table view, torn down with that tile (including **view mode** change). Scores **inference table stream** is the reference.
-_Avoid_: scores stream at Shell depth, unifying scores cancel with fleet (see ADR 0006)
+A **table stream** session mounted inside the analytic's table view, torn down with that tile (including **view mode** change).
+_Avoid_: using a tile-lived session as the live scoreboard that a **Backfill earlier turns** walk is submitted from, unifying scores cancel with fleet (see ADR 0006)
 
 **Analytic export**:
 A queryable surface one **turn analytic** exposes as a single **analytic export value schema** tree, queried with JSONPath **analytic export paths** and scope parameters (game, turn, **perspective**, optional **Player**). Scope binds on the query with ambient defaults; path-prefix rules override where defaults are wrong or forbidden. Distinct from the **turn analytic wire contract** and from direct **game concept** imports -- consumers use the **analytic query context** even when the provider delegates to `api/concepts/`.

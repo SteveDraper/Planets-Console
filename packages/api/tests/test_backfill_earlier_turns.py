@@ -8,6 +8,7 @@ from api.analytics.export_context import (
     AnalyticQueryContext,
     backfill_earlier_turns_disabled,
 )
+from api.analytics.on_walk_live import submit_on_walks_for_live_streams
 from api.analytics.options import TurnAnalyticsOptions
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.config import ApiConfig, set_config
@@ -100,6 +101,26 @@ def test_explicit_false_is_stored_and_still_reads_off(service, storage):
     assert storage.get(backfill_earlier_turns_store_key(_GAME_ID)) == {
         BACKFILL_EARLIER_TURNS_FIELD: False
     }
+
+
+def test_off_to_on_notifies_once(storage):
+    notified: list[int] = []
+    service = GameService(storage, on_backfill_enabled=notified.append)
+    service.set_backfill_earlier_turns(_GAME_ID, False)
+    assert notified == []
+    service.set_backfill_earlier_turns(_GAME_ID, True)
+    assert notified == [_GAME_ID]
+    service.set_backfill_earlier_turns(_GAME_ID, True)
+    assert notified == [_GAME_ID]
+    service.set_backfill_earlier_turns(_GAME_ID, False)
+    assert notified == [_GAME_ID]
+    service.set_backfill_earlier_turns(_GAME_ID, True)
+    assert notified == [_GAME_ID, _GAME_ID]
+
+
+def test_service_stack_submits_live_on_walks_when_backfill_turns_on(storage):
+    stack = build_service_stack(storage)
+    assert stack.games._on_backfill_enabled is submit_on_walks_for_live_streams
 
 
 def test_read_and_write_submit_no_walk(service, monkeypatch):

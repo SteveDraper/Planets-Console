@@ -366,7 +366,7 @@ Use this before opening a PR:
 
 | Analytic | Kind | Read |
 |----------|------|------|
-| Scores | Table-only, custom sidebar + tile-lived inference | `api/analytics/scores.py`, `bff/analytics/scores.py`, `src/analytics/scores/shell.tsx` |
+| Scores | Table-only, custom sidebar + shell-lived inference while build inference is on | `api/analytics/scores.py`, `bff/analytics/scores.py`, `src/analytics/scores/shell.tsx` |
 | base-map | Always-on map layer | `api/analytics/base_map.py`, `bff/analytics/base_map.py` |
 | Connections | Map overlay + query params + frontend controls | [design-connections-analytic.md](design-connections-analytic.md) |
 | Minefields | Map-only known-field pane + sidebar prefs | [design-minefields-analytic.md](design-minefields-analytic.md) |

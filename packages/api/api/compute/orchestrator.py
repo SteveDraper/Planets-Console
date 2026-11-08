@@ -25,6 +25,7 @@ from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.compute.turn_cache import TurnInfoCache, get_process_turn_info_cache
 from api.exceptions import DiscardedWorkRefused
 from api.models.game import TurnInfo
@@ -37,6 +38,7 @@ __all__ = [
     "ComputeOrchestrator",
     "ComputeRequest",
     "NodeState",
+    "NodeOpenView",
     "OpenTurnRoot",
     "OrchestratorDiagnosticsSnapshot",
     "OrchestratorMetrics",
@@ -83,6 +85,17 @@ class ScopeNodeView:
         ``parked`` is a soft pause, not terminal.
         """
         return self.state in TERMINAL_NODE_STATES
+
+
+@dataclass(frozen=True)
+class NodeOpenView:
+    """Lock-held submission open for one in-memory node."""
+
+    scope: ComputeScope
+    state: str
+    is_terminal: bool
+    backfill_earlier_turns: bool
+    open_turn: int | None
 
 
 @dataclass(frozen=True)
@@ -404,6 +417,40 @@ class ComputeOrchestrator(
             elif scope.turn != turn:
                 continue
             yield scope, node
+
+    def submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
+        """Submission open of one node, or None when that scope is not in memory."""
+        with self._condition:
+            node = self._nodes.get(scope)
+            if node is None:
+                return None
+            return node.submission_open
+
+    def node_opens_for_player(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+    ) -> tuple[NodeOpenView, ...]:
+        """Submission opens for one player's in-memory nodes."""
+        with self._condition:
+            return tuple(
+                NodeOpenView(
+                    scope=scope,
+                    state=node.state,
+                    is_terminal=node.is_terminal,
+                    backfill_earlier_turns=node.submission_open.backfill_earlier_turns,
+                    open_turn=node.submission_open.open_turn,
+                )
+                for scope, node in self._nodes_for_player(
+                    game_id=game_id,
+                    perspective=perspective,
+                    player_id=player_id,
+                    analytic_ids=analytic_ids,
+                )
+            )
 
     def open_turn_roots(
         self,
