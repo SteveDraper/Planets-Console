@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import replace
-from types import SimpleNamespace
+from dataclasses import dataclass, replace
 
 import pytest
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -583,20 +582,42 @@ class _EventQueue:
         self.events.append(event)
 
 
+@dataclass
+class _QueuedSession:
+    event_queue: _EventQueue
+
+
+@dataclass
+class _QueuedRow:
+    session: _QueuedSession
+
+
+class _LiveStream:
+    """Typed stand-in for a fleet or inference table-stream controller."""
+
+    def __init__(self, turn, ctx, player_ids: list[int]) -> None:
+        self.turn = turn
+        self.query_context = ctx
+        self.scheduled_rows = {
+            player_id: _QueuedRow(session=_QueuedSession(event_queue=_EventQueue()))
+            for player_id in player_ids
+        }
+        self.wake_multiplex = threading.Event()
+
+    def emit_work_accepted(self, player_id: int) -> None:
+        row = self.scheduled_rows.get(player_id)
+        if row is None:
+            return
+        row.session.event_queue.put({"type": "work_accepted"})
+        self.wake_multiplex.set()
+
+
 def _player_ids(turn) -> list[int]:
     return [player.id for player in iter_turn_players(turn)]
 
 
-def _attach_stream(registry, scope, turn, ctx, player_ids: list[int]):
-    rows = {}
-    for player_id in player_ids:
-        rows[player_id] = SimpleNamespace(session=SimpleNamespace(event_queue=_EventQueue()))
-    controller = SimpleNamespace(
-        turn=turn,
-        query_context=ctx,
-        scheduled_rows=rows,
-        wake_multiplex=threading.Event(),
-    )
+def _attach_stream(registry, scope, turn, ctx, player_ids: list[int]) -> _LiveStream:
+    controller = _LiveStream(turn, ctx, player_ids)
     registry.attach(scope, controller)
     return controller
 
@@ -659,11 +680,15 @@ def test_no_live_stream_does_not_create_an_orchestrator(sample_turn, monkeypatch
         raise AssertionError("orchestrator created")
 
     monkeypatch.setattr("api.analytics.on_walk_live.get_compute_orchestrator", refuse)
-    get_fleet_table_stream_registry().attach(
-        FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
-        object(),
-    )
     try:
+        submit_on_walks_for_live_streams(ctx.game_id)
+        _attach_stream(
+            get_fleet_table_stream_registry(),
+            FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
+            _host,
+            None,
+            _player_ids(_host),
+        )
         submit_on_walks_for_live_streams(ctx.game_id)
     finally:
         reset_fleet_table_stream_registry_for_tests()

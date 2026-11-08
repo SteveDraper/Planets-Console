@@ -17,14 +17,24 @@ Safe choreography (see ``reschedule_one`` / ``reschedule_all`` /
 
 from __future__ import annotations
 
+import queue
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import Any, Generic, Protocol, TypeVar
 
 from api.streaming.table_stream.connect import AdmissionDispatch
 
-ScheduledT = TypeVar("ScheduledT")
+
+class _ScheduledRowSession(Protocol):
+    event_queue: queue.Queue[Any]
+
+
+class _ScheduledQueuedRow(Protocol):
+    session: _ScheduledRowSession
+
+
+ScheduledT = TypeVar("ScheduledT", bound=_ScheduledQueuedRow)
 AdmissionT = TypeVar("AdmissionT")
 
 
@@ -46,6 +56,19 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
     def current_scheduled_rows(self) -> tuple[ScheduledT, ...]:
         with self.stream_lock:
             return tuple(self.scheduled_rows.values())
+
+    def enqueue_scheduled_row_event(self, player_id: int, event: object) -> None:
+        """Put ``event`` on the player's scheduled-row queue and wake the multiplex.
+
+        The row is read and the queue write happens under ``stream_lock``.
+        A player with no scheduled row does not wake the multiplex.
+        """
+        with self.stream_lock:
+            row = self.scheduled_rows.get(player_id)
+            if row is None:
+                return
+            row.session.event_queue.put(event)
+        self.wake_multiplex.set()
 
     def register_scheduled_row(self, player_id: int, row: ScheduledT) -> None:
         with self.stream_lock:

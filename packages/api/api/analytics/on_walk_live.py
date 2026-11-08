@@ -15,6 +15,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -32,10 +33,20 @@ from api.compute.orchestrator_state import ComputeRequest
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
-from api.transport.fleet_table_stream import fleet_work_accepted_event
-from api.transport.inference_stream import inference_work_accepted_event
 
 _OFF_SETTING_BLOCKERS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
+
+
+class _LiveStreamController(Protocol):
+    """Fleet or inference table stream that can accept an on-walk."""
+
+    @property
+    def turn(self) -> TurnInfo: ...
+
+    @property
+    def query_context(self) -> AnalyticQueryContext | None: ...
+
+    def emit_work_accepted(self, player_id: int) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -209,13 +220,12 @@ def _shells_for_registry(game_id: int, *, analytic_id: str) -> list[_LiveShell]:
 def _shells_from_controller(
     analytic_id: str,
     scope: FleetTableStreamScope | InferenceStreamScope,
-    controller: object | None,
+    controller: _LiveStreamController | None,
 ) -> list[_LiveShell]:
     if controller is None:
         return []
-    turn = getattr(controller, "turn", None)
-    ctx = getattr(controller, "query_context", None)
-    if not isinstance(turn, TurnInfo) or not isinstance(ctx, AnalyticQueryContext):
+    ctx = controller.query_context
+    if not isinstance(ctx, AnalyticQueryContext):
         return []
     if not isinstance(scope.perspective, int):
         return []
@@ -227,15 +237,14 @@ def _shells_from_controller(
         return _controller_is_attached(bound_analytic, bound_scope)
 
     shells: list[_LiveShell] = []
-    for player in iter_turn_players(turn):
+    for player in iter_turn_players(controller.turn):
         player_id = player.id
 
         def emit(
-            bound_controller: object = controller,
+            bound_controller: _LiveStreamController = controller,
             bound_player: int = player_id,
-            bound_analytic: str = analytic_id,
         ) -> None:
-            _emit_work_accepted(bound_controller, bound_player, bound_analytic)
+            bound_controller.emit_work_accepted(bound_player)
 
         shells.append(
             _LiveShell(
@@ -261,21 +270,3 @@ def _controller_is_attached(
     if isinstance(scope, InferenceStreamScope):
         return get_inference_table_stream_registry().controller_for_scope(scope) is not None
     return False
-
-
-def _emit_work_accepted(controller: object, player_id: int, analytic_id: str) -> None:
-    rows = getattr(controller, "scheduled_rows", None)
-    if not isinstance(rows, dict):
-        return
-    row = rows.get(player_id)
-    session = getattr(row, "session", None)
-    event_queue = getattr(session, "event_queue", None)
-    if event_queue is None:
-        return
-    if analytic_id == FLEET_ANALYTIC_ID:
-        event_queue.put(fleet_work_accepted_event())
-    else:
-        event_queue.put(inference_work_accepted_event())
-    wake = getattr(controller, "wake_multiplex", None)
-    if wake is not None:
-        wake.set()
