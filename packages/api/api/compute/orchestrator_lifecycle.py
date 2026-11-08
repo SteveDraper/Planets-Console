@@ -302,6 +302,12 @@ class OrchestratorLifecycleMixin:
                         )
                         return
                     with self._condition:
+                        # Epoch refusal from persist. Same split as an epoch that
+                        # moved before the hook: discard-flagged work fails, and
+                        # a running shell or live turn is re-queued.
+                        if isinstance(exc, DiscardedWorkRefused):
+                            if self._abandon_persist_if_not_running_or_stale(completed_node):
+                                return
                         if completed_node.state == "running":
                             self._fail_node(completed_node, exc)
                     return
