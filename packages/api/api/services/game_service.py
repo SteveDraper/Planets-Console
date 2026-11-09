@@ -1,5 +1,6 @@
 """Game info reads and Planets.nu refresh."""
 
+import threading
 from collections.abc import Callable
 
 from dacite.exceptions import DaciteError
@@ -26,6 +27,10 @@ from api.transport.sector_display import (
 )
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
+# Serializes the read and the write of a Backfill earlier turns choice, so
+# exactly one concurrent writer sees the off-to-on transition. Every service
+# instance shares it because the Core router builds a stack per request.
+_backfill_earlier_turns_write_lock = threading.Lock()
 
 
 # (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.
@@ -210,17 +215,19 @@ class GameService:
 
         The Settings checkbox is the only writer. The value is shared by every
         perspective of the game. Turning the setting from off to on submits
-        on-walks for live fleet and scoreboard streams of this game. Turning
-        it off leaves an accepted walk running.
+        on-walks for live fleet and scoreboard streams of this game. A
+        submit that fails is logged and the stored value stays. Turning it
+        off leaves an accepted walk running.
         """
         if not isinstance(enabled, bool):
             raise ValidationError("backfillEarlierTurns must be a boolean.")
         self.get_game_info(game_id)
-        was_enabled = read_backfill_earlier_turns(self._storage, game_id)
-        self._storage.put(
-            backfill_earlier_turns_store_key(game_id),
-            backfill_earlier_turns_document(enabled),
-        )
+        with _backfill_earlier_turns_write_lock:
+            was_enabled = read_backfill_earlier_turns(self._storage, game_id)
+            self._storage.put(
+                backfill_earlier_turns_store_key(game_id),
+                backfill_earlier_turns_document(enabled),
+            )
         if enabled and not was_enabled and self._on_backfill_enabled is not None:
             self._on_backfill_enabled(game_id)
         return enabled

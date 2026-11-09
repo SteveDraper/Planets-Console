@@ -8,10 +8,15 @@ setting is still on and that stream is still live. The follow-up is a
 off-setting node is terminal for the wait. A running off-setting scoreboard
 does not absorb the on-walk by attach. Streams are not re-admitted, so stored
 rows do not return to turn load.
+
+A shell whose submit raises is logged and skipped, so one player's failure
+does not stop the others. The setting stays stored: a stream attached while
+the setting is on submits its own on-walk.
 """
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,6 +33,8 @@ from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
 from api.streaming.table_stream.registry import TableStreamRegistry
 from api.streaming.table_stream.registry_catalog import registered_table_stream_registries
+
+logger = logging.getLogger(__name__)
 
 
 class _LiveStreamController(Protocol):
@@ -88,59 +95,92 @@ def submit_on_walks_for_live_streams(
         by_player.setdefault(_PlayerKey.of(shell.compute_scope), []).append(shell)
     for player, player_shells in by_player.items():
         if _has_off_setting_walk(orch, player):
-            _OffSettingWalkWaiter(orch, player, player_shells).start()
+            _OffSettingWalkWaiter.wait(orch, player, player_shells)
         else:
             _submit_shells(orch, player_shells)
+
+
+class _WaiterKey(NamedTuple):
+    orchestrator: ComputeOrchestrator
+    player: _PlayerKey
 
 
 class _OffSettingWalkWaiter:
     """Submits one player's shells once that player's off-setting nodes are terminal.
 
+    There is at most one pending waiter per orchestrator and player. A later
+    wait for that player replaces the shells the pending waiter submits, so a
+    blocker that clears submits each live shell once. The pending entry is
+    removed when the waiter finishes, and its listener is unregistered.
+
     The listener is registered before the first check, and the listener and
-    that check share one ``_finish``, so a node that completes in between is
-    submitted once. A parked node stays a blocker. A failed node is terminal.
-    A non-terminal off-setting scoreboard is a blocker, so the on-walk is not
-    attached to the node that walk opened.
+    that check share one ``_try_finish``, so a node that completes in between
+    is submitted once. A parked node stays a blocker. A failed node is
+    terminal. A non-terminal off-setting scoreboard is a blocker, so the
+    on-walk is not attached to the node that walk opened.
     """
 
-    def __init__(
-        self,
+    _pending_lock = threading.Lock()
+    _pending: dict[_WaiterKey, _OffSettingWalkWaiter] = {}
+
+    def __init__(self, key: _WaiterKey, shells: list[_LiveShell]) -> None:
+        self._key = key
+        self._shells = shells
+        self._unregister: Callable[[], None] | None = None
+
+    @classmethod
+    def wait(
+        cls,
         orchestrator: ComputeOrchestrator,
         player: _PlayerKey,
         shells: list[_LiveShell],
     ) -> None:
-        self._orchestrator = orchestrator
-        self._player = player
-        self._shells = shells
-        self._gate = threading.Lock()
-        self._is_finished = False
-        self._unregister: Callable[[], None] | None = None
+        key = _WaiterKey(orchestrator, player)
+        with cls._pending_lock:
+            pending = cls._pending.get(key)
+            if pending is not None:
+                pending._shells = shells
+                return
+            waiter = cls(key, shells)
+            cls._pending[key] = waiter
+        waiter._start()
 
-    def start(self) -> None:
-        self._unregister = self._orchestrator.observers.register_scope_outcome_listener(
+    def _start(self) -> None:
+        unregister = self._key.orchestrator.observers.register_scope_outcome_listener(
             self._on_outcome
         )
+        with self._pending_lock:
+            self._unregister = unregister
+            is_pending = self._is_pending_locked()
+        if not is_pending:
+            unregister()
+            return
         self._try_finish()
+
+    def _is_pending_locked(self) -> bool:
+        return self._pending.get(self._key) is self
 
     def _on_outcome(self, snapshot: ScopeLifecycleSnapshot) -> None:
         if (
             snapshot.state in {"complete", "failed"}
             and snapshot.scope.analytic_id in FLEET_WALK_ANALYTIC_IDS
-            and _PlayerKey.of(snapshot.scope) == self._player
+            and _PlayerKey.of(snapshot.scope) == self._key.player
         ):
             self._try_finish()
 
     def _try_finish(self) -> None:
-        if _has_off_setting_walk(self._orchestrator, self._player):
+        orchestrator = self._key.orchestrator
+        if _has_off_setting_walk(orchestrator, self._key.player):
             return
-        with self._gate:
-            if self._is_finished:
+        with self._pending_lock:
+            if not self._is_pending_locked():
                 return
-            self._is_finished = True
+            del self._pending[self._key]
+            shells = self._shells
             unregister = self._unregister
         if unregister is not None:
             unregister()
-        _submit_shells(self._orchestrator, self._shells)
+        _submit_shells(orchestrator, shells)
 
 
 def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) -> None:
@@ -149,14 +189,26 @@ def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) 
             continue
         if not shell.ctx.backfill_earlier_turns_enabled():
             continue
-        orchestrator.submit(
-            ComputeRequest(
-                scope=shell.compute_scope,
-                priority_band="stream_attached",
-                force_fresh=True,
-                ctx=shell.ctx,
+        try:
+            orchestrator.submit(
+                ComputeRequest(
+                    scope=shell.compute_scope,
+                    priority_band="stream_attached",
+                    force_fresh=True,
+                    ctx=shell.ctx,
+                )
             )
-        )
+        except Exception:
+            scope = shell.compute_scope
+            logger.exception(
+                "On-walk submit failed for game %s perspective %s turn %s player %s (%s)",
+                scope.game_id,
+                scope.perspective,
+                scope.turn,
+                scope.player_id,
+                scope.analytic_id,
+            )
+            continue
         shell.emit_accepted()
 
 

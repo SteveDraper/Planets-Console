@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 import pytest
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -22,7 +22,6 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.on_walk_live import submit_on_walks_for_live_streams
 from api.analytics.scores.exports import is_scores_export_ensure_satisfied
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.analytics.turn_roster import iter_turn_players
 from api.compute.dag import plan_compute_dag
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
@@ -52,6 +51,7 @@ from tests.off_mode_catch_up_helpers import (
     store_generation,
     write_evidence_mark,
 )
+from tests.on_walk_live_helpers import attach_stream, recording_orchestrator, roster_player_ids
 from tests.scores_exports_helpers import first_player_id, put_persisted_row
 from tests.test_fleet_eliminated_player import _stamp_player
 
@@ -612,76 +612,17 @@ def test_backfill_scoreboard_persist_that_opened_no_walk_bumps(sample_turn):
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 1
 
 
-class _EventQueue:
-    def __init__(self) -> None:
-        self.events: list[object] = []
-
-    def put(self, event: object) -> None:
-        self.events.append(event)
-
-
-@dataclass
-class _QueuedSession:
-    event_queue: _EventQueue
-
-
-@dataclass
-class _QueuedRow:
-    session: _QueuedSession
-
-
-class _LiveStream:
-    """Typed stand-in for a fleet or inference table-stream controller."""
-
-    def __init__(self, turn, ctx, player_ids: list[int]) -> None:
-        self.turn = turn
-        self.query_context = ctx
-        self.scheduled_rows = {
-            player_id: _QueuedRow(session=_QueuedSession(event_queue=_EventQueue()))
-            for player_id in player_ids
-        }
-        self.wake_multiplex = threading.Event()
-
-    def emit_work_accepted(self, player_id: int) -> None:
-        row = self.scheduled_rows.get(player_id)
-        if row is None:
-            return
-        row.session.event_queue.put({"type": "work_accepted"})
-        self.wake_multiplex.set()
-
-
-def _player_ids(turn) -> list[int]:
-    return [player.id for player in iter_turn_players(turn)]
-
-
-def _attach_stream(registry, scope, turn, ctx, player_ids: list[int]) -> _LiveStream:
-    controller = _LiveStream(turn, ctx, player_ids)
-    registry.attach(scope, controller)
-    return controller
-
-
-def _recording_orchestrator(monkeypatch) -> tuple[ComputeOrchestrator, list]:
-    orchestrator = ComputeOrchestrator(compute_registry={})
-    submitted: list = []
-
-    def record(request):
-        submitted.append(request)
-
-    monkeypatch.setattr(orchestrator, "submit", record)
-    return orchestrator, submitted
-
-
 def test_live_streams_submit_one_force_fresh_walk_per_player(sample_turn, monkeypatch):
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
-    player_ids = _player_ids(host)
+    player_ids = roster_player_ids(host)
     fleet_scope = FleetTableStreamScope(ctx.game_id, ctx.perspective, 10)
     scores_scope = InferenceStreamScope(ctx.game_id, ctx.perspective, 10)
-    fleet = _attach_stream(get_fleet_table_stream_registry(), fleet_scope, host, ctx, player_ids)
-    scores = _attach_stream(
+    fleet = attach_stream(get_fleet_table_stream_registry(), fleet_scope, host, ctx, player_ids)
+    scores = attach_stream(
         get_inference_table_stream_registry(), scores_scope, host, ctx, player_ids
     )
-    orchestrator, submitted = _recording_orchestrator(monkeypatch)
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
     try:
         submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
     finally:
@@ -720,12 +661,12 @@ def test_no_live_stream_does_not_create_an_orchestrator(sample_turn, monkeypatch
     monkeypatch.setattr("api.analytics.on_walk_live.get_compute_orchestrator", refuse)
     try:
         submit_on_walks_for_live_streams(ctx.game_id)
-        _attach_stream(
+        attach_stream(
             get_fleet_table_stream_registry(),
             FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
             _host,
             None,
-            _player_ids(_host),
+            roster_player_ids(_host),
         )
         submit_on_walks_for_live_streams(ctx.game_id)
     finally:
@@ -735,18 +676,18 @@ def test_no_live_stream_does_not_create_an_orchestrator(sample_turn, monkeypatch
 def test_off_setting_fleet_defers_one_player_until_the_node_is_terminal(sample_turn, monkeypatch):
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
-    player_ids = _player_ids(host)
+    player_ids = roster_player_ids(host)
     assert len(player_ids) >= 2
     blocked = player_ids[0]
     free = player_ids[1]
-    _attach_stream(
+    attach_stream(
         get_fleet_table_stream_registry(),
         FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
         host,
         ctx,
         player_ids,
     )
-    orchestrator, submitted = _recording_orchestrator(monkeypatch)
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
     blocker = ComputeScope(
         analytic_id=FLEET_ANALYTIC_ID,
         game_id=ctx.game_id,
@@ -794,7 +735,7 @@ def test_off_setting_scoreboard_defers_until_terminal_then_registers_the_walk(sa
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
-    _attach_stream(
+    attach_stream(
         get_inference_table_stream_registry(),
         InferenceStreamScope(ctx.game_id, ctx.perspective, 10),
         host,
@@ -842,8 +783,8 @@ def test_deferred_on_walk_skips_a_closed_stream_or_a_setting_that_turned_off(
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
     scope = FleetTableStreamScope(ctx.game_id, ctx.perspective, 10)
-    _attach_stream(get_fleet_table_stream_registry(), scope, host, ctx, [player_id])
-    orchestrator, submitted = _recording_orchestrator(monkeypatch)
+    attach_stream(get_fleet_table_stream_registry(), scope, host, ctx, [player_id])
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
     blocker = ComputeScope(
         analytic_id=FLEET_ANALYTIC_ID,
         game_id=ctx.game_id,
@@ -876,8 +817,8 @@ def test_deferred_on_walk_skips_a_closed_stream_or_a_setting_that_turned_off(
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
     scope = FleetTableStreamScope(ctx.game_id, ctx.perspective, 10)
-    _attach_stream(get_fleet_table_stream_registry(), scope, host, ctx, [player_id])
-    orchestrator, submitted = _recording_orchestrator(monkeypatch)
+    attach_stream(get_fleet_table_stream_registry(), scope, host, ctx, [player_id])
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
     blocker = ComputeScope(
         analytic_id=FLEET_ANALYTIC_ID,
         game_id=ctx.game_id,

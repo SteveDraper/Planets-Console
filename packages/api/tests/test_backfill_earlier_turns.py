@@ -1,6 +1,7 @@
 """Backfill earlier turns: one boolean per game, read without submitting a walk."""
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,50 @@ def test_off_to_on_notifies_once(storage):
     assert notified == [_GAME_ID]
     service.set_backfill_earlier_turns(_GAME_ID, True)
     assert notified == [_GAME_ID, _GAME_ID]
+
+
+class _ReadersMeetStorage:
+    """Holds each finished Backfill earlier turns read until a second reader or a timeout."""
+
+    def __init__(self, inner: MemoryAssetBackend) -> None:
+        self._inner = inner
+        self._readers_meet = threading.Barrier(2, timeout=0.2)
+
+    def get(self, key: str):
+        if key != backfill_earlier_turns_store_key(_GAME_ID):
+            return self._inner.get(key)
+        try:
+            return self._inner.get(key)
+        finally:
+            try:
+                self._readers_meet.wait()
+            except threading.BrokenBarrierError:
+                pass
+
+    def put(self, key: str, value) -> None:
+        self._inner.put(key, value)
+
+    def delete(self, key: str) -> None:
+        self._inner.delete(key)
+
+    def list(self, prefix: str) -> list[str]:
+        return self._inner.list(prefix)
+
+
+def test_concurrent_enables_notify_once(storage):
+    shared = _ReadersMeetStorage(storage)
+    notified: list[int] = []
+    services = [GameService(shared, on_backfill_enabled=notified.append) for _ in range(2)]
+    writers = [
+        threading.Thread(target=service.set_backfill_earlier_turns, args=(_GAME_ID, True))
+        for service in services
+    ]
+    for writer in writers:
+        writer.start()
+    for writer in writers:
+        writer.join()
+    assert notified == [_GAME_ID]
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is True
 
 
 def test_service_stack_submits_live_on_walks_when_backfill_turns_on(storage):
