@@ -3,20 +3,21 @@
 Fleet and scoreboard registrations open :func:`open_on_walk_root_plan` around
 each submission. While an on-walk shell plans, an absent evidence mark reads
 as generation 1 at the ensure baseline, so ensure-final is classified against
-the mark the walk will establish. Nothing is written for a join or an empty
-plan. A plan that schedules turns establishes that mark, widens
-``appliesFromTurn`` backward only, and remembers the walk, all before the
-first persist. Every scoreboard persist that belongs to the walk stamps the
-generation the walk started with. A scoreboard persist that belongs to no
-in-flight on-walk keeps the ordinary bump.
+the mark the walk will establish. The shell marks its submission open as an
+on-walk, so every node the walk plans, and every hop resubmitted from those
+nodes, carries that membership. Nothing is written for a join or an empty
+plan. A plan that schedules turns establishes that mark and widens
+``appliesFromTurn`` backward only, before the first persist. A scoreboard
+persist whose producing node is on the walk stamps and does not bump. A
+scoreboard persist that belongs to no in-flight on-walk keeps the ordinary
+bump.
 """
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
@@ -28,28 +29,10 @@ from api.analytics.fleet.types import FleetEvidenceMark
 from api.analytics.off_mode import mark_is_absent
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.dag import PlannedComputeNode, earliest_planned_turn
-from api.compute.root_plan import IGNORED_ROOT_PLAN, RootPlan
+from api.compute.root_plan import IgnoredRootPlan, RootPlan
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-
-_registry_lock = threading.Lock()
-_walks: dict[tuple[int, int, int, int], OnWalk] = {}
-
-
-@dataclass(frozen=True)
-class OnWalk:
-    """One accepted on-walk for a player, keyed by the shell turn it started at."""
-
-    generation: int
-    earliest_turn: int
-    open_turn: int
-
-
-def reset_on_walks_for_tests() -> None:
-    """Drop accepted on-walks. Tests that submit with backfill on share this process."""
-    with _registry_lock:
-        _walks.clear()
 
 
 @dataclass(frozen=True)
@@ -57,14 +40,14 @@ class _OnWalkShell:
     """A fleet or scoreboard shell submitted with Backfill earlier turns on."""
 
     services: FleetComputeServices
+    submission_open: SubmissionOpen
     game_id: int
     perspective: int
     player_id: int
-    open_turn: int
     baseline: int
 
     def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
-        """Establish and widen the mark from the registered plan, and remember the walk.
+        """Establish and widen the mark from the registered plan.
 
         An empty plan writes nothing. An absent mark becomes generation 1 at
         the ensure baseline. ``appliesFromTurn`` moves backward only, to the
@@ -74,7 +57,7 @@ class _OnWalkShell:
         earliest_turn = earliest_planned_turn(planned)
         if earliest_turn is None:
             return
-        mark = self.services.persistence.update_evidence_mark(
+        self.services.persistence.update_evidence_mark(
             self.game_id,
             self.perspective,
             self.player_id,
@@ -82,14 +65,6 @@ class _OnWalkShell:
                 _establish_absent_mark(current, self.baseline),
                 earliest_turn,
             ),
-        )
-        _remember_walk(
-            self.game_id,
-            self.perspective,
-            self.player_id,
-            open_turn=self.open_turn,
-            generation=mark.evidence_generation,
-            earliest_turn=earliest_turn,
         )
 
 
@@ -108,7 +83,7 @@ def open_on_walk_root_plan(
     """
     shell = _on_walk_shell(scope, submission_open, ctx)
     if shell is None:
-        yield IGNORED_ROOT_PLAN
+        yield IgnoredRootPlan(submission_open)
         return
     with shell.services.persistence.assuming_evidence_mark(
         shell.game_id,
@@ -140,10 +115,10 @@ def _on_walk_shell(
         return None
     return _OnWalkShell(
         services=services,
+        submission_open=replace(submission_open, on_walk=True),
         game_id=scope.game_id,
         perspective=scope.perspective,
         player_id=scope.player_id,
-        open_turn=open_turn,
         baseline=accelerated_ensure_floor(shell.settings, open_turn),
     )
 
@@ -158,9 +133,9 @@ def scoreboard_persist_belongs_to_on_walk(
 ) -> bool:
     """Whether this scoreboard persist belongs to an in-flight on-walk.
 
-    The producing scores node carries the walk's backfill choice and shell
-    turn. Membership is that walk's refresh range. A node accepted while the
-    setting was off does not belong to an on-walk.
+    The producing scores node carries whether its submission was an on-walk.
+    A node accepted while the setting was off, or by a submission that opened
+    no walk, does not belong to one.
     """
     reader = getattr(orchestrator, "submission_open_for", None)
     if reader is None:
@@ -174,14 +149,7 @@ def scoreboard_persist_belongs_to_on_walk(
             player_id=player_id,
         )
     )
-    if not isinstance(opened, SubmissionOpen):
-        return False
-    if not opened.backfill_earlier_turns or opened.open_turn is None:
-        return False
-    walk = _walk_for(game_id, perspective, player_id, opened.open_turn)
-    if walk is None:
-        return False
-    return walk.earliest_turn <= host_turn <= walk.open_turn
+    return isinstance(opened, SubmissionOpen) and opened.on_walk
 
 
 def _establish_absent_mark(current: FleetEvidenceMark, baseline: int) -> FleetEvidenceMark:
@@ -201,42 +169,3 @@ def _widen_existing_mark(current: FleetEvidenceMark, earliest_turn: int) -> Flee
         evidence_generation=current.evidence_generation,
         applies_from_turn=earliest_turn,
     )
-
-
-def _remember_walk(
-    game_id: int,
-    perspective: int,
-    player_id: int,
-    *,
-    open_turn: int,
-    generation: int,
-    earliest_turn: int,
-) -> None:
-    key = (game_id, perspective, player_id, open_turn)
-    with _registry_lock:
-        existing = _walks.get(key)
-        if existing is None:
-            _walks[key] = OnWalk(
-                generation=generation,
-                earliest_turn=earliest_turn,
-                open_turn=open_turn,
-            )
-            return
-        earliest = existing.earliest_turn
-        if earliest_turn < earliest:
-            earliest = earliest_turn
-        _walks[key] = OnWalk(
-            generation=existing.generation,
-            earliest_turn=earliest,
-            open_turn=open_turn,
-        )
-
-
-def _walk_for(
-    game_id: int,
-    perspective: int,
-    player_id: int,
-    open_turn: int,
-) -> OnWalk | None:
-    with _registry_lock:
-        return _walks.get((game_id, perspective, player_id, open_turn))

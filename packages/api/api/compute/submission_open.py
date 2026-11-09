@@ -17,7 +17,10 @@ class SubmissionOpen:
     scope turn is not a concrete int. A carried ``open_turn`` wins over the
     request scope's turn. ``backfill_earlier_turns`` is the choice for this
     submission once entry has resolved it, or the choice a hop was planned with.
+    ``on_walk`` is set by the root analytic's plan hook when this submission
+    is an on-walk. Nodes the walk plans and hops resubmitted from them keep it.
     """
 
     open_turn: int | None = None
     backfill_earlier_turns: bool = False
+    on_walk: bool = False

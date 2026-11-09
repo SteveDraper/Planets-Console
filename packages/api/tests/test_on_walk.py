@@ -19,7 +19,6 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     get_inference_table_stream_registry,
     reset_inference_table_stream_registry_for_tests,
 )
-from api.analytics.on_walk import reset_on_walks_for_tests
 from api.analytics.on_walk_live import submit_on_walks_for_live_streams
 from api.analytics.scores.exports import is_scores_export_ensure_satisfied
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
@@ -55,13 +54,6 @@ from tests.off_mode_catch_up_helpers import (
 )
 from tests.scores_exports_helpers import first_player_id, put_persisted_row
 from tests.test_fleet_eliminated_player import _stamp_player
-
-
-@pytest.fixture(autouse=True)
-def _clear_on_walks():
-    reset_on_walks_for_tests()
-    yield
-    reset_on_walks_for_tests()
 
 
 def _persistence(ctx):
@@ -459,7 +451,8 @@ def test_eliminated_shell_player_has_no_prior_fleet(sample_turn):
 
     assert (FLEET_ANALYTIC_ID, shell_turn - 1) not in fleet_plan
     assert (FLEET_ANALYTIC_ID, shell_turn - 1) not in scores_plan
-    _accept(ctx, FLEET_ANALYTIC_ID, shell_turn, player_id)
+    orchestrator = _submit_shell(ctx, FLEET_ANALYTIC_ID, shell_turn, player_id)
+    assert not any(node.submission_open.on_walk for node in orchestrator.nodes.values())
     assert (
         _persistence(ctx).evidence_mark(ctx.game_id, ctx.perspective, player_id)
         == FleetEvidenceMark()
@@ -534,23 +527,24 @@ def test_existing_mark_moves_applies_from_backward_only(sample_turn):
     )
 
 
+def _invalidation(ctx, orchestrator: ComputeOrchestrator) -> InferenceInvalidationService:
+    return InferenceInvalidationService(
+        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        fleet_persistence=_persistence(ctx),
+        orchestrator=lambda: orchestrator,
+    )
+
+
 def test_on_walk_scoreboard_persist_stamps_and_a_stray_persist_bumps(sample_turn):
+    """Membership is the producing node's, so a walk persist stamps even after a stray bump."""
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
     persistence = _persistence(ctx)
-    _accept(ctx, FLEET_ANALYTIC_ID, 10, player_id)
-    orchestrator = ComputeOrchestrator(compute_registry={})
-    _scores_node(orchestrator, ctx, player_id, 10, open_turn=10, backfill=True)
-    _scores_node(orchestrator, ctx, player_id, 6, open_turn=10, backfill=True)
-    invalidation = InferenceInvalidationService(
-        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-        fleet_persistence=persistence,
-        orchestrator=lambda: orchestrator,
-    )
+    orchestrator = _submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+    invalidation = _invalidation(ctx, orchestrator)
 
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id)
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 6, player_id)
 
     assert (
         persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 1
@@ -564,22 +558,30 @@ def test_on_walk_scoreboard_persist_stamps_and_a_stray_persist_bumps(sample_turn
     )
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 1
 
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id)
+
+    assert (
+        persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 2
+    )
+    assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 1
+
 
 def test_two_open_turns_stamp_without_discarding_each_other(sample_turn):
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
     persistence = _persistence(ctx)
-    _accept(ctx, FLEET_ANALYTIC_ID, 10, player_id)
-    _accept(ctx, SCORES_ANALYTIC_ID, 8, player_id)
-    orchestrator = ComputeOrchestrator(compute_registry={})
-    _scores_node(orchestrator, ctx, player_id, 10, open_turn=10, backfill=True)
-    _scores_node(orchestrator, ctx, player_id, 8, open_turn=8, backfill=True)
-    invalidation = InferenceInvalidationService(
-        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-        fleet_persistence=persistence,
-        orchestrator=lambda: orchestrator,
-    )
+    orchestrator = _submit_shell(ctx, SCORES_ANALYTIC_ID, 8, player_id)
+    _submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id, orchestrator=orchestrator)
+    opens = {
+        turn: orchestrator.submission_open_for(
+            _shell_scope(ctx, SCORES_ANALYTIC_ID, turn, player_id)
+        )
+        for turn in (8, 10)
+    }
+    assert opens[8] == SubmissionOpen(open_turn=8, backfill_earlier_turns=True, on_walk=True)
+    assert opens[10] == SubmissionOpen(open_turn=10, backfill_earlier_turns=True, on_walk=True)
+    invalidation = _invalidation(ctx, orchestrator)
 
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id)
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 8, player_id)
@@ -588,6 +590,26 @@ def test_two_open_turns_stamp_without_discarding_each_other(sample_turn):
         persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 1
     )
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 0
+
+
+def test_backfill_scoreboard_persist_that_opened_no_walk_bumps(sample_turn):
+    """Backfill on is not membership: the producing node must be on a walk."""
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    persistence = _persistence(ctx)
+    _accept(ctx, FLEET_ANALYTIC_ID, 10, player_id)
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    _scores_node(orchestrator, ctx, player_id, 10, open_turn=10, backfill=True)
+
+    _invalidation(ctx, orchestrator).on_scores_row_persisted(
+        ctx.game_id, ctx.perspective, 10, player_id
+    )
+
+    assert (
+        persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 2
+    )
+    assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 1
 
 
 class _EventQueue:

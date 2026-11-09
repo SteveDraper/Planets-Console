@@ -20,7 +20,7 @@ from api.compute.orchestrator_state import (
 )
 from api.compute.pools import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
-from api.compute.root_plan import IGNORED_ROOT_PLAN, RootPlan
+from api.compute.root_plan import IgnoredRootPlan, RootPlan
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
 
@@ -67,8 +67,9 @@ def _with_resolved_open(
 def resolve_submission_open(request: ComputeRequest) -> ResolvedComputeRequest:
     """Return the request carrying its submission open.
 
-    A request that already carries a backfill choice keeps it. Otherwise the
-    query context's reader is called once. A request with no bundle cannot
+    A request that already carries an open keeps its backfill choice and
+    on-walk membership. Otherwise the query context's reader is called once.
+    A request with no bundle cannot
     supply that reader and raises ``UnresolvedSubmissionOpenError``. The open
     turn is the explicit root when present, otherwise the scope turn. When
     the request is already resolved to that open, the same object is returned.
@@ -76,10 +77,7 @@ def resolve_submission_open(request: ComputeRequest) -> ResolvedComputeRequest:
     open_turn = submission_open_turn(request)
     carried = request.submission_open
     if carried is not None:
-        resolved_open = SubmissionOpen(
-            open_turn=open_turn,
-            backfill_earlier_turns=carried.backfill_earlier_turns,
-        )
+        resolved_open = replace(carried, open_turn=open_turn)
     else:
         bundle = request.resolved_bundle()
         if bundle is None:
@@ -128,6 +126,7 @@ class OrchestratorSubmissionMixin:
         """Submit or attach to in-flight work for one compute scope."""
         resolved = resolve_submission_open(request)
         with self._open_root_plan(resolved) as root_plan:
+            resolved = replace(resolved, submission_open=root_plan.submission_open)
             bundle = resolved.resolved_bundle()
             if bundle is not None:
                 prepare_compute_request_dependency_chain(
@@ -174,7 +173,7 @@ class OrchestratorSubmissionMixin:
         """Open the root analytic's plan hook for this submission, outside the lock."""
         bundle = request.resolved_bundle()
         if bundle is None:
-            return nullcontext(IGNORED_ROOT_PLAN)
+            return nullcontext(IgnoredRootPlan(request.submission_open))
         registration = self._compute_registry[request.scope.analytic_id]
         return registration.open_root_plan(
             request.scope,

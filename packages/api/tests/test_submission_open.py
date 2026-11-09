@@ -58,6 +58,12 @@ def test_explicit_open_turn_wins_over_the_scope_turn() -> None:
     assert resolve_submission_open(resolved) is resolved
 
 
+def test_resubmitted_walk_hop_keeps_its_on_walk_membership() -> None:
+    carried = SubmissionOpen(open_turn=40, backfill_earlier_turns=True, on_walk=True)
+    resolved = resolve_submission_open(_request(37, carried))
+    assert resolved.submission_open == carried
+
+
 def test_absent_submission_open_without_a_bundle_raises() -> None:
     with pytest.raises(UnresolvedSubmissionOpenError, match="no orchestration bundle"):
         resolve_submission_open(_request(40))

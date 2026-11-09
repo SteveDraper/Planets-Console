@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import ExitStack
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
@@ -98,14 +99,23 @@ class OrchestratorEnsureMixin:
                 unsatisfied.append((index, request))
 
         if unsatisfied:
-            resolved_unsatisfied: list[tuple[int, ResolvedComputeRequest]] = [
+            opened_unsatisfied: list[tuple[int, ResolvedComputeRequest]] = [
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
             with ExitStack() as root_plans:
                 root_plan_by_index: dict[int, RootPlan] = {
                     index: root_plans.enter_context(self._open_root_plan(resolved))
-                    for index, resolved in resolved_unsatisfied
+                    for index, resolved in opened_unsatisfied
                 }
+                resolved_unsatisfied = [
+                    (
+                        index,
+                        replace(
+                            resolved, submission_open=root_plan_by_index[index].submission_open
+                        ),
+                    )
+                    for index, resolved in opened_unsatisfied
+                ]
                 for _index, resolved in resolved_unsatisfied:
                     bundle = resolved.resolved_bundle()
                     if bundle is not None:
