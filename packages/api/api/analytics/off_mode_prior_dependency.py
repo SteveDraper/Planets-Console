@@ -46,10 +46,10 @@ def off_mode_ensure_dependencies(
         return OFF_MODE_PRIOR_FLEET
     if backfill_earlier_turns:
         turn = ctx.load_turn(scope.turn)
-        if turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id):
-            return ()
+        is_eliminated = turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id)
+        return () if is_eliminated else OFF_MODE_PRIOR_FLEET
     services = lookup_fleet_compute_services(ctx)
-    if services is None or backfill_earlier_turns:
+    if services is None:
         return OFF_MODE_PRIOR_FLEET
     turn = ctx.load_turn(scope.turn)
     if turn is None:
