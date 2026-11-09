@@ -20,7 +20,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import NamedTuple, Protocol, runtime_checkable
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.off_mode import FLEET_WALK_ANALYTIC_IDS
@@ -30,9 +30,9 @@ from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeRequest
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
+from api.models.game import TurnInfo
 from api.streaming.table_stream.controller_base import WorkAcceptedSink
-from api.streaming.table_stream.registry import TableStreamRegistry
-from api.streaming.table_stream.registry_catalog import registered_table_stream_registries
+from api.streaming.table_stream.registry_catalog import LiveTableStream, live_table_streams
 
 logger = logging.getLogger(__name__)
 
@@ -47,18 +47,22 @@ class _PlayerKey(NamedTuple):
         return cls(scope.game_id, scope.perspective, scope.player_id)
 
 
+@runtime_checkable
+class _OnWalkStreamController(WorkAcceptedSink, Protocol):
+    """What a live fleet or scoreboard stream controller offers an on-walk."""
+
+    turn: TurnInfo
+    query_context: AnalyticQueryContext | None
+
+
 @dataclass(frozen=True)
 class _LiveShell:
     """One player's on-walk root on one live stream."""
 
     compute_scope: ComputeScope
     ctx: AnalyticQueryContext
-    registry: TableStreamRegistry[Any, Any]
-    stream_scope: Any
+    stream: LiveTableStream
     work_accepted_sink: WorkAcceptedSink
-
-    def still_live(self) -> bool:
-        return self.registry.controller_for_scope(self.stream_scope) is not None
 
     def emit_accepted(self) -> None:
         self.work_accepted_sink.emit_work_accepted(self.compute_scope.player_id)
@@ -173,7 +177,7 @@ class _OffSettingWalkWaiter:
 
 def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) -> None:
     for shell in shells:
-        if not shell.still_live():
+        if not shell.stream.is_live():
             continue
         if not shell.ctx.backfill_earlier_turns_enabled():
             continue
@@ -215,32 +219,29 @@ def _has_off_setting_walk(orchestrator: ComputeOrchestrator, player: _PlayerKey)
 
 def _live_shells(game_id: int) -> list[_LiveShell]:
     shells: list[_LiveShell] = []
-    for analytic_id, registry in registered_table_stream_registries(FLEET_WALK_ANALYTIC_IDS):
-        for stream_scope in registry.list_active_scopes():
-            if stream_scope.game_id != game_id:
-                continue
-            controller = registry.controller_for_scope(stream_scope)
-            if controller is None:
-                continue
-            ctx = controller.query_context
-            if not isinstance(ctx, AnalyticQueryContext):
-                continue
-            if not isinstance(stream_scope.perspective, int):
-                continue
-            shells.extend(
-                _LiveShell(
-                    compute_scope=ComputeScope(
-                        analytic_id=analytic_id,
-                        game_id=game_id,
-                        perspective=stream_scope.perspective,
-                        turn=stream_scope.turn_number,
-                        player_id=player.id,
-                    ),
-                    ctx=ctx,
-                    registry=registry,
-                    stream_scope=stream_scope,
-                    work_accepted_sink=controller,
-                )
-                for player in iter_turn_players(controller.turn)
+    for stream in live_table_streams(FLEET_WALK_ANALYTIC_IDS):
+        scope = stream.scope
+        controller = stream.controller
+        if scope.game_id != game_id or not isinstance(scope.perspective, int):
+            continue
+        if not isinstance(controller, _OnWalkStreamController):
+            continue
+        ctx = controller.query_context
+        if not isinstance(ctx, AnalyticQueryContext):
+            continue
+        shells.extend(
+            _LiveShell(
+                compute_scope=ComputeScope(
+                    analytic_id=stream.analytic_id,
+                    game_id=game_id,
+                    perspective=scope.perspective,
+                    turn=scope.turn_number,
+                    player_id=player.id,
+                ),
+                ctx=ctx,
+                stream=stream,
+                work_accepted_sink=controller,
             )
+            for player in iter_turn_players(controller.turn)
+        )
     return shells
