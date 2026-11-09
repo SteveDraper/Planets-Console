@@ -215,8 +215,8 @@ def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) 
 def _has_off_setting_walk(orchestrator: ComputeOrchestrator, player: _PlayerKey) -> bool:
     """Whether the player has a non-terminal fleet or scores node opened with the setting off."""
     return any(
-        not view.is_terminal and not view.backfill_earlier_turns
-        for view in orchestrator.node_opens_for_player(
+        not submission_open.backfill_earlier_turns
+        for submission_open in orchestrator.non_terminal_submission_opens_for_player(
             game_id=player.game_id,
             perspective=player.perspective,
             player_id=player.player_id,

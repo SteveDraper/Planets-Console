@@ -38,7 +38,6 @@ __all__ = [
     "ComputeOrchestrator",
     "ComputeRequest",
     "NodeState",
-    "NodeOpenView",
     "OpenTurnRoot",
     "OrchestratorDiagnosticsSnapshot",
     "OrchestratorMetrics",
@@ -85,17 +84,6 @@ class ScopeNodeView:
         ``parked`` is a soft pause, not terminal.
         """
         return self.state in TERMINAL_NODE_STATES
-
-
-@dataclass(frozen=True)
-class NodeOpenView:
-    """Lock-held submission open for one in-memory node."""
-
-    scope: ComputeScope
-    state: str
-    is_terminal: bool
-    backfill_earlier_turns: bool
-    open_turn: int | None
 
 
 @dataclass(frozen=True)
@@ -426,30 +414,25 @@ class ComputeOrchestrator(
                 return None
             return node.submission_open
 
-    def node_opens_for_player(
+    def non_terminal_submission_opens_for_player(
         self,
         *,
         game_id: int,
         perspective: int,
         player_id: int,
         analytic_ids: frozenset[str],
-    ) -> tuple[NodeOpenView, ...]:
-        """Submission opens for one player's in-memory nodes."""
+    ) -> tuple[SubmissionOpen, ...]:
+        """Submission opens of one player's in-memory nodes that have not reached a final state."""
         with self._condition:
             return tuple(
-                NodeOpenView(
-                    scope=scope,
-                    state=node.state,
-                    is_terminal=node.is_terminal,
-                    backfill_earlier_turns=node.submission_open.backfill_earlier_turns,
-                    open_turn=node.submission_open.open_turn,
-                )
-                for scope, node in self._nodes_for_player(
+                node.submission_open
+                for _, node in self._nodes_for_player(
                     game_id=game_id,
                     perspective=perspective,
                     player_id=player_id,
                     analytic_ids=analytic_ids,
                 )
+                if not node.is_terminal
             )
 
     def open_turn_roots(

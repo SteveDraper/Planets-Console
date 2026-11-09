@@ -30,7 +30,7 @@ from api.transport.fleet_table_stream import fleet_error_event, fleet_work_accep
 
 @dataclass(kw_only=True)
 class FleetTableStreamController(
-    TableStreamControllerBase[ScheduledFleetPlayer, PlayerStreamAdmission]
+    TableStreamControllerBase[ScheduledFleetPlayer, PlayerStreamAdmission, dict[str, object]]
 ):
     """Fleet table-stream controller.
 

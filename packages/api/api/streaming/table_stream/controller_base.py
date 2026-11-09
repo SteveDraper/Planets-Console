@@ -27,6 +27,8 @@ from api.streaming.table_stream.connect import AdmissionDispatch
 
 
 class _ScheduledRowSession(Protocol):
+    # A TypeVar bound cannot mention another TypeVar, so ``ScheduledT`` cannot tie its
+    # rows' queue element type to ``EventT``; ``EventT`` types the enqueue entry point.
     event_queue: queue.Queue[Any]
 
 
@@ -36,10 +38,11 @@ class _ScheduledQueuedRow(Protocol):
 
 ScheduledT = TypeVar("ScheduledT", bound=_ScheduledQueuedRow)
 AdmissionT = TypeVar("AdmissionT")
+EventT = TypeVar("EventT")
 
 
 @dataclass(kw_only=True)
-class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
+class TableStreamControllerBase(Generic[ScheduledT, AdmissionT, EventT]):
     stream_token: str
     player_ids: tuple[int, ...]
     scheduled_rows: dict[int, ScheduledT] = field(default_factory=dict)
@@ -57,7 +60,7 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
         with self.stream_lock:
             return tuple(self.scheduled_rows.values())
 
-    def enqueue_scheduled_row_event(self, player_id: int, event: object) -> None:
+    def enqueue_scheduled_row_event(self, player_id: int, event: EventT) -> None:
         """Put ``event`` on the player's scheduled-row queue and wake the multiplex.
 
         The row is read and the queue write happens under ``stream_lock``.

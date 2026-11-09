@@ -9,11 +9,21 @@ from unittest.mock import patch
 
 import pytest
 from api.analytics.fleet.chain import (
+    ensure_fleet_baseline_for_player,
     get_or_materialize_fleet_ledger_for_player,
 )
 from api.analytics.fleet.exports import ensure_fleet_export
+from api.analytics.fleet.fleet_table_stream_scheduler import (
+    FleetTableStreamScheduler,
+    reset_fleet_table_stream_scheduler_for_tests,
+)
+from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
-from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+from api.analytics.fleet.types import (
+    FleetEvidenceMark,
+    FleetMaterializationProvenance,
+    PersistedFleetLedger,
+)
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
@@ -31,6 +41,7 @@ from tests.test_fleet_persistence import (
     _inference_materialization_for_fleet,
     _seed_scores_rows_for_all_players,
 )
+from tests.test_fleet_table_stream import _events_for_players
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -466,3 +477,111 @@ def test_compute_fleet_fan_out_materializes_all_players_explicitly(persistence, 
     assert chain_calls == roster_size
     for player_id in roster_ids(turn_112):
         assert persistence.has_ledger(628580, 1, 112, player_id)
+
+
+def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
+    persistence,
+    load_turn,
+    memory_backend,
+):
+    """Gap-fill M..N emits ledger_updated after each leg, then complete."""
+    from api.analytics.fleet.held_solutions import (
+        FleetInferenceMaterialization,
+        FleetInferenceSupport,
+    )
+    from api.analytics.military_score_inference.solver import STATUS_EXACT
+    from api.analytics.scores.export_services import ScoresExportContext
+    from api.serialization.backfill_earlier_turns import (
+        backfill_earlier_turns_document,
+        backfill_earlier_turns_store_key,
+    )
+    from api.serialization.inference_row_persistence import PersistedInferenceRow
+    from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+
+    from tests.scores_exports_helpers import put_persisted_row
+
+    memory_backend.put(
+        backfill_earlier_turns_store_key(628580),
+        backfill_earlier_turns_document(True),
+    )
+
+    turn_110 = load_turn(110)
+    assert turn_110 is not None
+    turn_112 = load_turn(112)
+    assert turn_112 is not None
+    player_id = turn_112.scores[0].ownerid
+
+    # Turn 110 is already ensure-final on the generation-1 mark, so the on-walk
+    # stops there and gap-fill is only 111..112.
+    persistence.update_evidence_mark(
+        628580,
+        1,
+        player_id,
+        lambda _current: FleetEvidenceMark(evidence_generation=1, applies_from_turn=1),
+    )
+    persistence.put_ledger(
+        628580,
+        1,
+        110,
+        player_id,
+        PersistedFleetLedger(
+            ledger=ensure_fleet_baseline_for_player(628580, 1, turn_110, player_id),
+            provenance=FleetMaterializationProvenance(
+                turn_evidence_at_n=True,
+                prior_ledger_at_n_minus_1=True,
+            ),
+        ),
+        evidence_generation=1,
+    )
+
+    inference_persistence = InferenceRowPersistenceService(memory_backend)
+    scores_services = ScoresExportContext(persistence=inference_persistence)
+    for turn_number in (111, 112):
+        put_persisted_row(
+            inference_persistence,
+            turn_112,
+            player_id,
+            PersistedInferenceRow(
+                status=STATUS_EXACT,
+                summary="seeded for gap-fill stream",
+                solution_count=0,
+                is_complete=True,
+                solutions=[],
+            ),
+            host_turn=turn_number,
+        )
+
+    reset_fleet_table_stream_scheduler_for_tests()
+    from api.compute.pools import reset_compute_worker_pool_for_tests
+
+    reset_compute_worker_pool_for_tests(worker_count=1)
+    scheduler = FleetTableStreamScheduler()
+    services = FleetComputeServices(
+        persistence=persistence,
+        game_id=628580,
+        perspective=1,
+        load_turn=load_turn,
+        inference_materialization=FleetInferenceMaterialization(
+            inference=FleetInferenceSupport(scores_services=scores_services),
+            load_turn=load_turn,
+        ),
+    )
+
+    events = _events_for_players(
+        turn_112,
+        (player_id,),
+        scheduler=scheduler,
+        services=services,
+    )
+    player_events = [event for event in events if event.get("playerId") == player_id]
+    ledger_updates = [event for event in player_events if event.get("type") == "ledger_updated"]
+    complete_events = [event for event in player_events if event.get("type") == "complete"]
+
+    assert len(ledger_updates) >= 2
+    assert len(complete_events) == 1
+    assert complete_events[0]["type"] == "complete"
+    first_records = ledger_updates[0]["ledger"]["records"]
+    assert isinstance(first_records, list)
+    assert len(first_records) > 0
+    complete_index = player_events.index(complete_events[0])
+    assert all(player_events.index(event) < complete_index for event in ledger_updates)

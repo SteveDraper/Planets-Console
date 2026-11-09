@@ -49,7 +49,7 @@ from api.transport.inference_stream import inference_no_stored_row_event
 
 @dataclass(kw_only=True)
 class InferenceTableStreamController(
-    TableStreamControllerBase[ScheduledInferenceRow, RowStreamAdmission]
+    TableStreamControllerBase[ScheduledInferenceRow, RowStreamAdmission, InferenceStreamDomainEvent]
 ):
     scope: InferenceStreamScope
     turn: TurnInfo
