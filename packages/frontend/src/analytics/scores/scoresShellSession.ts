@@ -9,7 +9,11 @@ export type ScoresShellSession = {
 
 export const ScoresShellStreamContext = createContext<ScoresShellSession | null>(null)
 
-/** Shell session when the scoreboard stream is mounted above the table. */
-export function useScoresShellStreamSession(): ScoresShellSession | null {
-  return useContext(ScoresShellStreamContext)
+/** Scoreboard stream session; must render under ScoresShellStreamProvider. */
+export function useScoresShellStreamSession(): ScoresShellSession {
+  const session = useContext(ScoresShellStreamContext)
+  if (session == null) {
+    throw new Error('useScoresShellStreamSession must be used within ScoresShellStreamProvider')
+  }
+  return session
 }

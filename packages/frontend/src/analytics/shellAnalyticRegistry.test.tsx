@@ -119,7 +119,9 @@ describe('shell analytic registry', () => {
       'homeworld-locator',
     ])
     expect(shellLived[0]?.stream.Mount).toEqual(expect.any(Function))
-    expect(shellAnalyticRegistrationFor(SCORES_ANALYTIC_ID)?.stream?.lifetime).toBe('shell')
+    expect(shellAnalyticRegistrationFor(SCORES_ANALYTIC_ID)?.stream?.Mount).toEqual(
+      expect.any(Function)
+    )
   })
 
   it('authors the fleet shell-lived stream as a typed hook/Provider pair', () => {

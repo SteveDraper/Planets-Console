@@ -17,22 +17,14 @@ type ShellLivedHook<TSession> = (
  * Construct with `shellLivedStream` so the registry mounts a typed pair.
  */
 export type ShellLivedStreamSlot<TSession extends object> = {
-  lifetime: 'shell'
   hook: ShellLivedHook<TSession>
   Provider: ComponentType<TSession & { children: ReactNode }>
 }
 
 /** Registry-facing shell-lived stream; session pairing is closed over by `Mount`. */
 export type ShellLivedStreamMountSlot = {
-  lifetime: 'shell'
   Mount: ComponentType<ShellLivedStreamMountProps>
 }
-
-export type TileLivedStreamSlot = {
-  lifetime: 'tile'
-}
-
-export type ShellAnalyticStreamSlot = ShellLivedStreamMountSlot | TileLivedStreamSlot
 
 type SessionStream<TSession extends object> = ShellLivedStreamSlot<TSession> &
   ShellLivedStreamMountSlot
@@ -71,12 +63,12 @@ export function shellLivedStream<TSession extends object>(
       const session = hook(analyticScope, enabled)
       return <Provider {...session}>{children}</Provider>
     }
-    return { lifetime: 'shell', hook, Provider, Mount }
+    return { hook, Provider, Mount }
   }
   const { hook } = args
   function Mount({ analyticScope, enabled, children }: ShellLivedStreamMountProps) {
     hook(analyticScope, enabled)
     return children
   }
-  return { lifetime: 'shell', hook, Mount }
+  return { hook, Mount }
 }

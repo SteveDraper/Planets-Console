@@ -1,9 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { fetchAnalyticTable } from '../../api/bff'
 import type { AnalyticShellScope } from '../../api/bff'
 import { usePersistStoreHydrated } from '../../lib/usePersistStoreHydrated'
 import { useScoresTablePreferencesStore } from '../../stores/scoresTablePreferences'
-import { SCORES_ANALYTIC_ID, scoresAnalyticTableQueryKey } from './api'
+import { scoresAnalyticTableQueryOptions } from './scoresAnalyticTableQueryOptions'
 import type { ScoresShellSession } from './scoresShellSession'
 import { useGlobalInferencePause } from './useGlobalInferencePause'
 import { useScoresInferenceByRow } from './useScoresInferenceByRow'
@@ -22,13 +21,7 @@ export function useScoresShellStream(
   const streamEnabled =
     enabled && scoresPreferencesHydrated && scoresTableParams.includeBuildInference
   const { data } = useQuery({
-    queryKey: scoresAnalyticTableQueryKey(analyticScope, scoresTableParams),
-    queryFn: () => {
-      if (analyticScope == null) {
-        throw new Error('scores shell stream requires a scope')
-      }
-      return fetchAnalyticTable(SCORES_ANALYTIC_ID, analyticScope)
-    },
+    ...scoresAnalyticTableQueryOptions(analyticScope, scoresTableParams),
     enabled: streamEnabled && analyticScope != null,
   })
   const inferenceEnabled = streamEnabled && data?.buildInferenceAvailable !== false
