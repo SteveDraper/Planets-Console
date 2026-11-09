@@ -30,7 +30,7 @@ from api.transport.fleet_table_stream import fleet_error_event, fleet_work_accep
 
 @dataclass(kw_only=True)
 class FleetTableStreamController(
-    TableStreamControllerBase[ScheduledFleetPlayer, PlayerStreamAdmission, dict[str, object]]
+    TableStreamControllerBase[ScheduledFleetPlayer, PlayerStreamAdmission]
 ):
     """Fleet table-stream controller.
 
@@ -151,7 +151,10 @@ class FleetTableStreamController(
 
     def emit_work_accepted(self, player_id: int) -> None:
         """Queue this player's fleet work_accepted event and wake the multiplex."""
-        self.enqueue_scheduled_row_event(player_id, fleet_work_accepted_event())
+        self.enqueue_on_scheduled_row(
+            player_id,
+            lambda row: row.session.event_queue.put(fleet_work_accepted_event()),
+        )
 
     def attach(self) -> None:
         attach_fleet_table_stream(self)

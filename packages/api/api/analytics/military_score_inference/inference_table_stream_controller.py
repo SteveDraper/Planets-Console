@@ -49,7 +49,7 @@ from api.transport.inference_stream import inference_no_stored_row_event
 
 @dataclass(kw_only=True)
 class InferenceTableStreamController(
-    TableStreamControllerBase[ScheduledInferenceRow, RowStreamAdmission, InferenceStreamDomainEvent]
+    TableStreamControllerBase[ScheduledInferenceRow, RowStreamAdmission]
 ):
     scope: InferenceStreamScope
     turn: TurnInfo
@@ -362,7 +362,10 @@ class InferenceTableStreamController(
 
     def emit_work_accepted(self, player_id: int) -> None:
         """Queue this player's inference work_accepted event and wake the multiplex."""
-        self.enqueue_scheduled_row_event(player_id, WorkAccepted())
+        self.enqueue_on_scheduled_row(
+            player_id,
+            lambda row: row.session.event_queue.put(WorkAccepted()),
+        )
 
     def attach(self) -> None:
         attach_inference_table_stream(self)

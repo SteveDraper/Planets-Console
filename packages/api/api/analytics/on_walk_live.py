@@ -20,7 +20,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Protocol
+from typing import Any, NamedTuple
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.off_mode import FLEET_WALK_ANALYTIC_IDS
@@ -30,23 +30,11 @@ from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeRequest
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
-from api.models.game import TurnInfo
+from api.streaming.table_stream.controller_base import WorkAcceptedSink
 from api.streaming.table_stream.registry import TableStreamRegistry
 from api.streaming.table_stream.registry_catalog import registered_table_stream_registries
 
 logger = logging.getLogger(__name__)
-
-
-class _LiveStreamController(Protocol):
-    """Fleet or inference table stream that can accept an on-walk."""
-
-    @property
-    def turn(self) -> TurnInfo: ...
-
-    @property
-    def query_context(self) -> AnalyticQueryContext | None: ...
-
-    def emit_work_accepted(self, player_id: int) -> None: ...
 
 
 class _PlayerKey(NamedTuple):
@@ -67,13 +55,13 @@ class _LiveShell:
     ctx: AnalyticQueryContext
     registry: TableStreamRegistry[Any, Any]
     stream_scope: Any
-    controller: _LiveStreamController
+    work_accepted_sink: WorkAcceptedSink
 
     def still_live(self) -> bool:
         return self.registry.controller_for_scope(self.stream_scope) is not None
 
     def emit_accepted(self) -> None:
-        self.controller.emit_work_accepted(self.compute_scope.player_id)
+        self.work_accepted_sink.emit_work_accepted(self.compute_scope.player_id)
 
 
 def submit_on_walks_for_live_streams(
@@ -251,7 +239,7 @@ def _live_shells(game_id: int) -> list[_LiveShell]:
                     ctx=ctx,
                     registry=registry,
                     stream_scope=stream_scope,
-                    controller=controller,
+                    work_accepted_sink=controller,
                 )
                 for player in iter_turn_players(controller.turn)
             )

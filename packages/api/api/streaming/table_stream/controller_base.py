@@ -17,32 +17,25 @@ Safe choreography (see ``reschedule_one`` / ``reschedule_all`` /
 
 from __future__ import annotations
 
-import queue
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Generic, Protocol, TypeVar
 
 from api.streaming.table_stream.connect import AdmissionDispatch
 
-
-class _ScheduledRowSession(Protocol):
-    # A TypeVar bound cannot mention another TypeVar, so ``ScheduledT`` cannot tie its
-    # rows' queue element type to ``EventT``; ``EventT`` types the enqueue entry point.
-    event_queue: queue.Queue[Any]
-
-
-class _ScheduledQueuedRow(Protocol):
-    session: _ScheduledRowSession
-
-
-ScheduledT = TypeVar("ScheduledT", bound=_ScheduledQueuedRow)
+ScheduledT = TypeVar("ScheduledT")
 AdmissionT = TypeVar("AdmissionT")
-EventT = TypeVar("EventT")
+
+
+class WorkAcceptedSink(Protocol):
+    """A live table stream that can tell one player's row that work was accepted."""
+
+    def emit_work_accepted(self, player_id: int) -> None: ...
 
 
 @dataclass(kw_only=True)
-class TableStreamControllerBase(Generic[ScheduledT, AdmissionT, EventT]):
+class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
     stream_token: str
     player_ids: tuple[int, ...]
     scheduled_rows: dict[int, ScheduledT] = field(default_factory=dict)
@@ -60,17 +53,22 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT, EventT]):
         with self.stream_lock:
             return tuple(self.scheduled_rows.values())
 
-    def enqueue_scheduled_row_event(self, player_id: int, event: EventT) -> None:
-        """Put ``event`` on the player's scheduled-row queue and wake the multiplex.
+    def enqueue_on_scheduled_row(
+        self,
+        player_id: int,
+        enqueue: Callable[[ScheduledT], None],
+    ) -> None:
+        """Run ``enqueue`` on the player's scheduled row, then wake the multiplex.
 
-        The row is read and the queue write happens under ``stream_lock``.
-        A player with no scheduled row does not wake the multiplex.
+        The row is read and ``enqueue`` runs under ``stream_lock``, so it must not
+        re-enter the controller. A player with no scheduled row does not wake the
+        multiplex.
         """
         with self.stream_lock:
             row = self.scheduled_rows.get(player_id)
             if row is None:
                 return
-            row.session.event_queue.put(event)
+            enqueue(row)
         self.wake_multiplex.set()
 
     def register_scheduled_row(self, player_id: int, row: ScheduledT) -> None:

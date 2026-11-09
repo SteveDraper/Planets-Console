@@ -68,7 +68,7 @@ def _controller_shell(controller_type):
     return controller
 
 
-def test_enqueue_scheduled_row_event_holds_the_stream_lock_during_the_put() -> None:
+def test_enqueue_on_scheduled_row_holds_the_stream_lock_during_the_put() -> None:
     lock = _RecordingLock()
     event_queue = _RecordingQueue(lock)
     controller = TableStreamControllerBase(
@@ -78,14 +78,18 @@ def test_enqueue_scheduled_row_event_holds_the_stream_lock_during_the_put() -> N
     )
     controller.register_scheduled_row(4, _RecordingRow(_RecordingSession(event_queue)))
 
-    controller.enqueue_scheduled_row_event(4, {"type": "work_accepted"})
+    controller.enqueue_on_scheduled_row(
+        4, lambda row: row.session.event_queue.put({"type": "work_accepted"})
+    )
 
     assert event_queue.put_while_held is True
     assert event_queue.events == [{"type": "work_accepted"}]
     assert controller.wake_multiplex.is_set()
 
     controller.wake_multiplex.clear()
-    controller.enqueue_scheduled_row_event(9, {"type": "work_accepted"})
+    controller.enqueue_on_scheduled_row(
+        9, lambda row: row.session.event_queue.put({"type": "work_accepted"})
+    )
     assert event_queue.events == [{"type": "work_accepted"}]
     assert controller.wake_multiplex.is_set() is False
 
