@@ -19,18 +19,13 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     get_inference_table_stream_registry,
     reset_inference_table_stream_registry_for_tests,
 )
-from api.analytics.on_walk import (
-    prepare_absent_on_walk_mark,
-    reset_on_walks_for_tests,
-    rollback_absent_on_walk_mark,
-)
+from api.analytics.on_walk import reset_on_walks_for_tests
 from api.analytics.on_walk_live import submit_on_walks_for_live_streams
 from api.analytics.scores.exports import is_scores_export_ensure_satisfied
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.turn_roster import iter_turn_players
 from api.compute.dag import plan_compute_dag
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
-from api.compute.orchestrator_state import ResolvedComputeRequest
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -348,7 +343,7 @@ def test_absent_mark_generation_zero_ledger_stays_on_the_walk(sample_turn, monke
 
 
 def test_empty_on_walk_leaves_the_mark_absent(sample_turn, monkeypatch):
-    """A plan that schedules nothing rolls the absent-mark establish back."""
+    """A plan that schedules nothing writes no mark."""
     host, ctx = _scoreboard_context(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
@@ -370,7 +365,7 @@ def test_empty_on_walk_leaves_the_mark_absent(sample_turn, monkeypatch):
 
 
 def test_existing_baseline_mark_survives_an_empty_plan(sample_turn, monkeypatch):
-    """A mark already at generation 1 and the baseline is not a rollback token."""
+    """A mark already at generation 1 and the baseline is kept by an empty plan."""
     host, ctx = _scoreboard_context(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
@@ -401,28 +396,49 @@ def test_existing_baseline_mark_survives_an_empty_plan(sample_turn, monkeypatch)
     assert shell.dependency_scopes == ()
 
 
-def test_rollback_leaves_a_mark_another_writer_changed(sample_turn):
+def test_assumed_mark_reads_only_in_this_context_and_only_while_absent(sample_turn):
     host, ctx = context_at_turn(sample_turn, 10)
-    enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
-    baseline = accelerated_ensure_floor(host.settings, 10)
-    request = ResolvedComputeRequest(
-        scope=_shell_scope(ctx, FLEET_ANALYTIC_ID, 10, player_id),
-        ctx=ctx,
-        submission_open=SubmissionOpen(open_turn=10, backfill_earlier_turns=True),
-    )
-    established = prepare_absent_on_walk_mark(request)
-    assert established == FleetEvidenceMark(evidence_generation=1, applies_from_turn=baseline)
     persistence = _persistence(ctx)
-    changed = FleetEvidenceMark(evidence_generation=2, applies_from_turn=4)
-    persistence.update_evidence_mark(
-        ctx.game_id,
-        ctx.perspective,
-        player_id,
-        lambda _current: changed,
-    )
-    rollback_absent_on_walk_mark(request, established)
-    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == changed
+    assumed = FleetEvidenceMark(evidence_generation=1, applies_from_turn=3)
+    stored = FleetEvidenceMark(evidence_generation=2, applies_from_turn=4)
+    seen_by_other_thread: list[FleetEvidenceMark] = []
+
+    def read_elsewhere() -> None:
+        seen_by_other_thread.append(
+            persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
+        )
+
+    with persistence.assuming_evidence_mark(ctx.game_id, ctx.perspective, player_id, assumed):
+        assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == assumed
+        other = threading.Thread(target=read_elsewhere)
+        other.start()
+        other.join()
+        persistence.update_evidence_mark(
+            ctx.game_id,
+            ctx.perspective,
+            player_id,
+            lambda current: stored if current == FleetEvidenceMark() else current,
+        )
+        assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == stored
+
+    assert seen_by_other_thread == [FleetEvidenceMark()]
+    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == stored
+
+
+def test_a_join_neither_establishes_nor_widens_the_mark(sample_turn):
+    host, ctx = context_at_turn(sample_turn, 10)
+    player_id = first_player_id(host)
+    persistence = _persistence(ctx)
+    orchestrator = _submit_shell(ctx, FLEET_ANALYTIC_ID, 10, player_id)
+    scope = _shell_scope(ctx, FLEET_ANALYTIC_ID, 10, player_id)
+    assert not orchestrator.nodes[scope].is_terminal
+
+    enable_backfill_earlier_turns(ctx)
+    _submit_shell(ctx, FLEET_ANALYTIC_ID, 10, player_id, orchestrator=orchestrator)
+
+    assert not orchestrator.nodes[scope].submission_open.backfill_earlier_turns
+    assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == FleetEvidenceMark()
 
 
 def test_eliminated_shell_player_has_no_prior_fleet(sample_turn):

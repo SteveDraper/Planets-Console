@@ -1,19 +1,24 @@
 """On-walk mark and stamp membership for Backfill earlier turns.
 
-An accepted on-walk sets an absent evidence mark to generation 1 at the
-ensure baseline before the plan, so ensure-final is classified against that
-mark. The registered plan then widens ``appliesFromTurn`` backward only.
-An empty plan rolls that establish back. Every scoreboard persist that
-belongs to the walk stamps the generation the walk started with. A scoreboard
-persist that belongs to no in-flight on-walk keeps the ordinary bump.
+Fleet and scoreboard registrations open :func:`open_on_walk_root_plan` around
+each submission. While an on-walk shell plans, an absent evidence mark reads
+as generation 1 at the ensure baseline, so ensure-final is classified against
+the mark the walk will establish. Nothing is written for a join or an empty
+plan. A plan that schedules turns establishes that mark, widens
+``appliesFromTurn`` backward only, and remembers the walk, all before the
+first persist. Every scoreboard persist that belongs to the walk stamps the
+generation the walk started with. A scoreboard persist that belongs to no
+in-flight on-walk keeps the ordinary bump.
 """
 
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
-from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.injected_services import (
     FleetComputeServices,
@@ -22,12 +27,12 @@ from api.analytics.fleet.injected_services import (
 from api.analytics.fleet.types import FleetEvidenceMark
 from api.analytics.off_mode import mark_is_absent
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.orchestrator_state import ResolvedComputeRequest
+from api.compute.dag import PlannedComputeNode, earliest_planned_turn
+from api.compute.root_plan import IGNORED_ROOT_PLAN, RootPlan
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 
-_ON_WALK_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
 _registry_lock = threading.Lock()
 _walks: dict[tuple[int, int, int, int], OnWalk] = {}
 
@@ -47,132 +52,100 @@ def reset_on_walks_for_tests() -> None:
         _walks.clear()
 
 
-def prepare_absent_on_walk_mark(
-    request: ResolvedComputeRequest,
-) -> FleetEvidenceMark | None:
-    """Set an absent on-walk mark to generation 1 at the ensure baseline.
+@dataclass(frozen=True)
+class _OnWalkShell:
+    """A fleet or scoreboard shell submitted with Backfill earlier turns on."""
 
-    Call this before ``plan_compute_dag`` and outside the orchestrator lock,
-    and only when this submission will register a fresh on-walk root. The plan
-    then classifies ensure-final against that mark, so a generation-0 ledger
-    is behind the mark and stays on the walk.
+    services: FleetComputeServices
+    game_id: int
+    perspective: int
+    player_id: int
+    open_turn: int
+    baseline: int
 
-    Returns the mark this call wrote by changing an absent mark into generation
-    1 at the baseline. None means this call did not write. A mark that was
-    already present, including one that is already generation 1 at the
-    baseline, is left unchanged and is not a rollback token. A player
-    eliminated on the shell turn is not an on-walk.
+    def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
+        """Establish and widen the mark from the registered plan, and remember the walk.
+
+        An empty plan writes nothing. An absent mark becomes generation 1 at
+        the ensure baseline. ``appliesFromTurn`` moves backward only, to the
+        earliest planned turn. Runs outside the orchestrator lock and before
+        the first persist.
+        """
+        earliest_turn = earliest_planned_turn(planned)
+        if earliest_turn is None:
+            return
+        mark = self.services.persistence.update_evidence_mark(
+            self.game_id,
+            self.perspective,
+            self.player_id,
+            lambda current: _widen_existing_mark(
+                _establish_absent_mark(current, self.baseline),
+                earliest_turn,
+            ),
+        )
+        _remember_walk(
+            self.game_id,
+            self.perspective,
+            self.player_id,
+            open_turn=self.open_turn,
+            generation=mark.evidence_generation,
+            earliest_turn=earliest_turn,
+        )
+
+
+@contextmanager
+def open_on_walk_root_plan(
+    scope: ComputeScope,
+    submission_open: SubmissionOpen,
+    ctx: AnalyticQueryContext,
+) -> Iterator[RootPlan]:
+    """Root-plan hook for fleet and scoreboard shells.
+
+    An on-walk shell plans against generation 1 at the ensure baseline while
+    no mark is stored, so a generation-0 ledger is behind the mark and stays
+    on the walk. Any other submission is ignored. A player eliminated on the
+    shell turn is not an on-walk.
     """
-    located = _on_walk_shell(request)
-    if located is None:
-        return None
-    services, baseline = located
-    scope = request.scope
-    established = FleetEvidenceMark(evidence_generation=1, applies_from_turn=baseline)
-    wrote_absent_mark = False
-
-    def establish(current: FleetEvidenceMark, floor: int = baseline) -> FleetEvidenceMark:
-        nonlocal wrote_absent_mark
-        updated = _establish_absent_mark(current, floor)
-        wrote_absent_mark = mark_is_absent(current) and updated == established
-        return updated
-
-    stored = services.persistence.update_evidence_mark(
-        scope.game_id,
-        scope.perspective,
-        scope.player_id,
-        establish,
-    )
-    if not wrote_absent_mark:
-        return None
-    return stored
-
-
-def remember_on_walk_from_plan(
-    request: ResolvedComputeRequest,
-    *,
-    earliest_turn: int,
-) -> None:
-    """Widen the mark from the registered plan and remember that walk.
-
-    Does not establish an absent mark. ``appliesFromTurn`` moves backward only
-    to ``earliest_turn``. The caller runs this after the plan, outside the
-    orchestrator lock, and before the first persist.
-    """
-    located = _on_walk_shell(request)
-    if located is None:
+    shell = _on_walk_shell(scope, submission_open, ctx)
+    if shell is None:
+        yield IGNORED_ROOT_PLAN
         return
-    services, _baseline = located
-    scope = request.scope
-    open_turn = request.submission_open.open_turn
-    if open_turn is None:
-        return
-    services.persistence.update_evidence_mark(
-        scope.game_id,
-        scope.perspective,
-        scope.player_id,
-        lambda current, turn=earliest_turn: _widen_existing_mark(current, turn),
-    )
-    mark = services.persistence.evidence_mark(scope.game_id, scope.perspective, scope.player_id)
-    if mark_is_absent(mark):
-        return
-    _remember_walk(
-        scope.game_id,
-        scope.perspective,
-        scope.player_id,
-        open_turn=open_turn,
-        generation=mark.evidence_generation,
-        earliest_turn=earliest_turn,
-    )
-
-
-def rollback_absent_on_walk_mark(
-    request: ResolvedComputeRequest,
-    established: FleetEvidenceMark,
-) -> None:
-    """Drop the absent-mark establish when that mark is still the one we wrote.
-
-    An empty plan, or a submission that joined instead of planning, calls this.
-    A mark another writer has already changed is left alone.
-    """
-    located = _on_walk_shell(request)
-    if located is None:
-        return
-    services, _baseline = located
-    scope = request.scope
-    services.persistence.update_evidence_mark(
-        scope.game_id,
-        scope.perspective,
-        scope.player_id,
-        lambda current, written=established: FleetEvidenceMark() if current == written else current,
-    )
+    with shell.services.persistence.assuming_evidence_mark(
+        shell.game_id,
+        shell.perspective,
+        shell.player_id,
+        FleetEvidenceMark(evidence_generation=1, applies_from_turn=shell.baseline),
+    ):
+        yield shell
 
 
 def _on_walk_shell(
-    request: ResolvedComputeRequest,
-) -> tuple[FleetComputeServices, int] | None:
-    """Fleet services and ensure baseline for an on-walk shell, or None."""
-    if not request.submission_open.backfill_earlier_turns:
+    scope: ComputeScope,
+    submission_open: SubmissionOpen,
+    ctx: AnalyticQueryContext,
+) -> _OnWalkShell | None:
+    """The on-walk shell this submission opens, or None."""
+    if not submission_open.backfill_earlier_turns:
         return None
-    scope = request.scope
-    open_turn = request.submission_open.open_turn
-    if scope.analytic_id not in _ON_WALK_ANALYTICS:
-        return None
+    open_turn = submission_open.open_turn
     if not isinstance(scope.player_id, int) or not isinstance(scope.perspective, int):
         return None
     if not isinstance(scope.turn, int) or open_turn is None or scope.turn != open_turn:
         return None
-    bundle = request.resolved_bundle()
-    if bundle is None:
-        return None
-    ctx = bundle.query_context
     services = lookup_fleet_compute_services(ctx)
     if services is None:
         return None
     shell = ctx.load_turn(open_turn)
     if shell is None or fleet_player_eliminated_at_turn(shell, scope.player_id):
         return None
-    return services, accelerated_ensure_floor(shell.settings, open_turn)
+    return _OnWalkShell(
+        services=services,
+        game_id=scope.game_id,
+        perspective=scope.perspective,
+        player_id=scope.player_id,
+        open_turn=open_turn,
+        baseline=accelerated_ensure_floor(shell.settings, open_turn),
+    )
 
 
 def scoreboard_persist_belongs_to_on_walk(

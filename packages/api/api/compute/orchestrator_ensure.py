@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
-from api.analytics.fleet.types import FleetEvidenceMark
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
+from api.compute.dag import PlannedComputeNode
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
 from api.compute.orchestrator_submission import (
     prepare_compute_request_dependency_chain,
     resolve_submission_open,
 )
+from api.compute.root_plan import RootPlan
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -99,17 +101,12 @@ class OrchestratorEnsureMixin:
             resolved_unsatisfied: list[tuple[int, ResolvedComputeRequest]] = [
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
-            open_marks: dict[int, FleetEvidenceMark] = {}
-            try:
-                for index, resolved in resolved_unsatisfied:
-                    # Hollow terminals in this batch are dropped before plan, so
-                    # they are fresh roots even without force_fresh.
-                    established = self._prepare_on_walk_mark(
-                        resolved,
-                        replace_terminal=True,
-                    )
-                    if established is not None:
-                        open_marks[index] = established
+            with ExitStack() as root_plans:
+                root_plan_by_index: dict[int, RootPlan] = {
+                    index: root_plans.enter_context(self._open_root_plan(resolved))
+                    for index, resolved in resolved_unsatisfied
+                }
+                for _index, resolved in resolved_unsatisfied:
                     bundle = resolved.resolved_bundle()
                     if bundle is not None:
                         prepare_compute_request_dependency_chain(
@@ -119,43 +116,43 @@ class OrchestratorEnsureMixin:
                         )
                 pending_inline: list[PendingInlineExecution] = []
                 pending_pool: list[PendingPoolSubmission] = []
-                fresh_by_index = {}
+                planned_by_index: dict[int, tuple[PlannedComputeNode, ...]] = {}
                 with self._condition:
                     for index, resolved in resolved_unsatisfied:
-                        existing = self._nodes.get(resolved.scope)
-                        # Hollow terminal: durable gone, node still complete/failed. Drop so
-                        # default force_fresh=False can plan fresh work (F1). Leave non-terminal
-                        # nodes alone for attach / singleflight; parked wake stays explicit.
-                        if (
-                            existing is not None
-                            and existing.is_terminal
-                            and not resolved.force_fresh
-                        ):
-                            self._replace_terminal_node(existing)
-                        submission = self._submit_locked(resolved, wake_if_parked_only=False)
-                        if submission is None:
-                            raise RuntimeError(
-                                "ensure submit_locked returned None without wake_if_parked_only"
-                            )
-                        handle, inlines, pools, fresh_root = submission
+                        handle, inlines, pools, planned = self._ensure_submit_locked(resolved)
                         handles_by_index[index] = handle
                         pending_inline.extend(inlines)
                         pending_pool.extend(pools)
-                        fresh_by_index[index] = fresh_root
-                for index, resolved in resolved_unsatisfied:
-                    established = open_marks.get(index)
-                    self._settle_on_walk_mark(resolved, fresh_by_index[index], established)
-                    open_marks.pop(index, None)
-                self._execute_pending_inlines(tuple(pending_inline))
-                self._flush_pending_pool_submissions(tuple(pending_pool))
-                self._observers.drain_post_lock_callbacks()
-            finally:
-                for index, resolved in resolved_unsatisfied:
-                    established = open_marks.pop(index, None)
-                    if established is not None:
-                        self._rollback_prepared_on_walk_mark(resolved, established)
+                        if planned is not None:
+                            planned_by_index[index] = planned
+                for index, planned in planned_by_index.items():
+                    root_plan_by_index[index].plan_registered(planned)
+            self._execute_pending_inlines(tuple(pending_inline))
+            self._flush_pending_pool_submissions(tuple(pending_pool))
+            self._observers.drain_post_lock_callbacks()
 
         return tuple(
             _wait_ensure_handle(handles_by_index[index], timeout=timeout)
             for index in range(len(requests))
         )
+
+    def _ensure_submit_locked(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+    ) -> tuple[
+        ComputeHandle,
+        tuple[PendingInlineExecution, ...],
+        tuple[PendingPoolSubmission, ...],
+        tuple[PlannedComputeNode, ...] | None,
+    ]:
+        """Submit one unsatisfied ensure scope. Caller holds the orchestrator lock."""
+        existing = self._nodes.get(request.scope)
+        # Hollow terminal: durable gone, node still complete/failed. Drop so
+        # default force_fresh=False can plan fresh work (F1). Leave non-terminal
+        # nodes alone for attach / singleflight; parked wake stays explicit.
+        if existing is not None and existing.is_terminal and not request.force_fresh:
+            self._replace_terminal_node(existing)
+        submission = self._submit_locked(request, wake_if_parked_only=False)
+        if submission is None:
+            raise RuntimeError("ensure submit_locked returned None without wake_if_parked_only")
+        return submission

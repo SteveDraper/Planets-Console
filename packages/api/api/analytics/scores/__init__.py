@@ -10,6 +10,7 @@ from api.analytics.compute_context import AnalyticComputeContext, invoke_analyti
 from api.analytics.military_score_inference.inference_admission import (
     is_build_inference_available,
 )
+from api.analytics.on_walk import open_on_walk_root_plan
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores.compute_orchestration import (
@@ -163,4 +164,5 @@ REGISTRATION = TurnAnalyticRegistration(
         (SCORES_MATERIALIZE, run_scores_materialize),
         (SCORES_TIER_SOLVE, run_scores_tier_solve),
     ),
+    open_root_plan=open_on_walk_root_plan,
 )

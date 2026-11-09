@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from api.analytics.fleet.constants import (
     ANALYTIC_ID,
@@ -59,6 +61,12 @@ def _ledger_evidence_generation(
 DeferredNotification = Callable[[], None]
 
 _ABSENT_EVIDENCE_MARK = FleetEvidenceMark()
+
+_EvidenceMarkKey = tuple[int, int, int]
+_assumed_evidence_marks: ContextVar[Mapping[_EvidenceMarkKey, FleetEvidenceMark]] = ContextVar(
+    "assumed_fleet_evidence_marks",
+    default=MappingProxyType({}),
+)
 
 
 @dataclass(frozen=True)
@@ -478,12 +486,40 @@ class FleetSnapshotPersistenceService:
         perspective: int,
         player_id: int,
     ) -> FleetEvidenceMark:
+        """The stored mark, or the mark assumed in this context while none is stored."""
         key = (game_id, perspective, player_id)
+        stored = self._stored_evidence_mark(key)
+        if stored != _ABSENT_EVIDENCE_MARK:
+            return stored
+        return _assumed_evidence_marks.get().get(key, stored)
+
+    @contextmanager
+    def assuming_evidence_mark(
+        self,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        mark: FleetEvidenceMark,
+    ) -> Iterator[None]:
+        """Read ``mark`` for this player in the calling context while no mark is stored.
+
+        Nothing is written. Other threads, and a mark that is stored, are
+        unaffected. ``update_evidence_mark`` always sees the stored mark.
+        """
+        assumed = dict(_assumed_evidence_marks.get())
+        assumed[(game_id, perspective, player_id)] = mark
+        token = _assumed_evidence_marks.set(MappingProxyType(assumed))
+        try:
+            yield
+        finally:
+            _assumed_evidence_marks.reset(token)
+
+    def _stored_evidence_mark(self, key: _EvidenceMarkKey) -> FleetEvidenceMark:
         with self._generation_lock:
             cached = self._evidence_marks.get(key)
             if cached is not None:
                 return cached
-            loaded = self._read_evidence_mark(game_id, perspective, player_id)
+            loaded = self._read_evidence_mark(*key)
             raced = self._evidence_marks.get(key)
             if raced is not None:
                 return raced
@@ -504,9 +540,7 @@ class FleetSnapshotPersistenceService:
         """
         key = (game_id, perspective, player_id)
         with self._generation_lock:
-            current = self._evidence_marks.get(key)
-            if current is None:
-                current = self._read_evidence_mark(game_id, perspective, player_id)
+            current = self._stored_evidence_mark(key)
             updated = update(current)
             if updated != current:
                 self._write_evidence_mark(game_id, perspective, player_id, updated)
