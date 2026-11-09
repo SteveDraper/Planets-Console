@@ -31,7 +31,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.dag import PlannedComputeNode, earliest_planned_turn
 from api.compute.root_plan import IgnoredRootPlan, RootPlan
 from api.compute.scope import ComputeScope
-from api.compute.submission_open import SubmissionOpen
+from api.compute.submission_open import SubmissionOpen, SubmissionOpenReader
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 
 
@@ -124,7 +124,7 @@ def _on_walk_shell(
 
 
 def scoreboard_persist_belongs_to_on_walk(
-    orchestrator: object,
+    orchestrator: SubmissionOpenReader,
     *,
     game_id: int,
     perspective: int,
@@ -137,10 +137,7 @@ def scoreboard_persist_belongs_to_on_walk(
     A node accepted while the setting was off, or by a submission that opened
     no walk, does not belong to one.
     """
-    reader = getattr(orchestrator, "submission_open_for", None)
-    if reader is None:
-        return False
-    opened = reader(
+    opened = orchestrator.submission_open_for(
         ComputeScope(
             analytic_id=SCORES_ANALYTIC_ID,
             game_id=game_id,
@@ -149,7 +146,7 @@ def scoreboard_persist_belongs_to_on_walk(
             player_id=player_id,
         )
     )
-    return isinstance(opened, SubmissionOpen) and opened.on_walk
+    return opened is not None and opened.on_walk
 
 
 def _establish_absent_mark(current: FleetEvidenceMark, baseline: int) -> FleetEvidenceMark:

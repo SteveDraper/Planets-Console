@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.on_walk import scoreboard_persist_belongs_to_on_walk
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import NodeState
@@ -364,6 +365,13 @@ def test_resolved_recompute_names_the_turns_it_wakes():
     assert limited.turns_to_wake({39, 40, 41}) == frozenset({40})
     assert limited.live_scores_turns_to_wake({39, 40, 41}) == frozenset({40})
     limited.discard_bumped_work(absent, game_id=1, perspective=1, player_id=7)
+
+
+def test_scoreboard_persist_with_no_process_orchestrator_belongs_to_no_on_walk():
+    absent = in_flight_orchestrator(None)
+    assert not scoreboard_persist_belongs_to_on_walk(
+        absent, game_id=1, perspective=1, player_id=7, host_turn=40
+    )
 
 
 def test_claim_open_turn_roots_returns_the_preimage_then_consumes_that_open():

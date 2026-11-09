@@ -7,6 +7,9 @@ import analytic code.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
+
+from api.compute.scope import ComputeScope
 
 
 @dataclass(frozen=True)
@@ -24,3 +27,11 @@ class SubmissionOpen:
     open_turn: int | None = None
     backfill_earlier_turns: bool = False
     on_walk: bool = False
+
+
+class SubmissionOpenReader(Protocol):
+    """Reads the submission open of one in-memory compute node."""
+
+    def submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
+        """Submission open of one node, or None when that scope is not in memory."""
+        ...

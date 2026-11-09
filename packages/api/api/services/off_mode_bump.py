@@ -18,6 +18,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns_by_analytic
 
 _OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
@@ -39,6 +40,10 @@ class _AbsentProcessOrchestrator:
 
     def discard_matching_work(self, *_args: object, **_kwargs: object) -> None:
         return
+
+    def submission_open_for(self, _scope: ComputeScope) -> SubmissionOpen | None:
+        """No in-memory node, so no submission open."""
+        return None
 
 
 _ABSENT_PROCESS_ORCHESTRATOR = _AbsentProcessOrchestrator()
