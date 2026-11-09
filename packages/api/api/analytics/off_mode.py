@@ -35,14 +35,20 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.types import (
     STAMP_CURRENT_EVIDENCE_MARK,
     FleetEvidenceMark,
     PersistedFleetLedger,
     StampCurrentEvidenceMark,
 )
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings, TurnInfo
+
+# Analytics whose compute nodes and live table streams carry a submission's
+# backfill choice: the fleet ledger walk and the scoreboard solves it feeds.
+FLEET_WALK_ANALYTIC_IDS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
 
 
 def ledger_matches_evidence_mark(

@@ -51,6 +51,22 @@ def _registered_table_stream_entries() -> list[_RegistryEntry]:
     return _registry_entries
 
 
+def registered_table_stream_registries(
+    analytic_ids: Collection[str],
+) -> tuple[tuple[str, TableStreamRegistry[Any, Any]], ...]:
+    """Registered ``(analytic id, registry)`` pairs for the given analytic ids.
+
+    Registries are registered before the scan. An analytic id with no registry
+    contributes no pair.
+    """
+    wanted = frozenset(analytic_ids)
+    return tuple(
+        (analytic_id, registry)
+        for analytic_id, registry, _binding_wire in _registered_table_stream_entries()
+        if analytic_id in wanted
+    )
+
+
 def active_table_stream_bindings() -> tuple[dict[str, Any], ...]:
     """Return active stream bindings from every registered table-stream registry."""
     bindings: list[dict[str, Any]] = []
@@ -73,11 +89,8 @@ def active_table_stream_turns_by_analytic(
     a registered analytic with no matching scope, is absent. The same turn on
     two analytics appears under each id.
     """
-    wanted = frozenset(analytic_ids)
     found: dict[str, set[int]] = {}
-    for analytic_id, registry, _binding_wire in _registered_table_stream_entries():
-        if analytic_id not in wanted:
-            continue
+    for analytic_id, registry in registered_table_stream_registries(analytic_ids):
         for scope in registry.list_active_scopes():
             if scope.game_id == game_id and scope.perspective == perspective:
                 found.setdefault(analytic_id, set()).add(scope.turn_number)

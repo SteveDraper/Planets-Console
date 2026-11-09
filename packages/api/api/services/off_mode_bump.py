@@ -13,15 +13,13 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TypeAlias
 
-from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.off_mode import FLEET_WALK_ANALYTIC_IDS
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns_by_analytic
-
-_OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
 
 
 class _AbsentProcessOrchestrator:
@@ -94,7 +92,7 @@ def _player_submission_roots(
         game_id=game_id,
         perspective=perspective,
         player_id=player_id,
-        analytic_ids=_OPEN_TURN_ANALYTICS,
+        analytic_ids=FLEET_WALK_ANALYTIC_IDS,
     )
 
 
@@ -115,7 +113,7 @@ def claim_player_open_roots(
         perspective=perspective,
         player_id=player_id,
         open_turn=open_turn,
-        analytic_ids=_OPEN_TURN_ANALYTICS,
+        analytic_ids=FLEET_WALK_ANALYTIC_IDS,
     )
 
 
@@ -153,7 +151,7 @@ def discard_bumped_player_work(
         game_id=game_id,
         perspective=perspective,
         player_id=player_id,
-        analytic_ids=_OPEN_TURN_ANALYTICS,
+        analytic_ids=FLEET_WALK_ANALYTIC_IDS,
     )
 
 
@@ -177,7 +175,7 @@ def live_turns_for_limited_recompute(
     """
     if not _limits_recompute(durable=durable, backfill_enabled=backfill_enabled):
         return {}
-    return active_table_stream_turns_by_analytic(game_id, perspective, _OPEN_TURN_ANALYTICS)
+    return active_table_stream_turns_by_analytic(game_id, perspective, FLEET_WALK_ANALYTIC_IDS)
 
 
 @dataclass(frozen=True)

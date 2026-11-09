@@ -15,26 +15,19 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, NamedTuple, Protocol
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.fleet.fleet_table_stream_registry import get_fleet_table_stream_registry
-from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.inference_table_stream_registry import (
-    get_inference_table_stream_registry,
-)
-from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.analytics.off_mode import FLEET_WALK_ANALYTIC_IDS
 from api.analytics.turn_roster import iter_turn_players
-from api.compute.orchestrator import ComputeOrchestrator, NodeOpenView
+from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeRequest
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
-
-_OFF_SETTING_BLOCKERS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
+from api.streaming.table_stream.registry import TableStreamRegistry
+from api.streaming.table_stream.registry_catalog import registered_table_stream_registries
 
 
 class _LiveStreamController(Protocol):
@@ -49,16 +42,31 @@ class _LiveStreamController(Protocol):
     def emit_work_accepted(self, player_id: int) -> None: ...
 
 
-@dataclass(frozen=True)
-class _LiveShell:
-    analytic_id: str
+class _PlayerKey(NamedTuple):
     game_id: int
     perspective: int
-    turn: int
     player_id: int
+
+    @classmethod
+    def of(cls, scope: ComputeScope) -> _PlayerKey:
+        return cls(scope.game_id, scope.perspective, scope.player_id)
+
+
+@dataclass(frozen=True)
+class _LiveShell:
+    """One player's on-walk root on one live stream."""
+
+    compute_scope: ComputeScope
     ctx: AnalyticQueryContext
-    still_live: Callable[[], bool]
-    emit_accepted: Callable[[], None]
+    registry: TableStreamRegistry[Any, Any]
+    stream_scope: Any
+    controller: _LiveStreamController
+
+    def still_live(self) -> bool:
+        return self.registry.controller_for_scope(self.stream_scope) is not None
+
+    def emit_accepted(self) -> None:
+        self.controller.emit_work_accepted(self.compute_scope.player_id)
 
 
 def submit_on_walks_for_live_streams(
@@ -75,78 +83,64 @@ def submit_on_walks_for_live_streams(
     if not shells:
         return
     orch = orchestrator if orchestrator is not None else get_compute_orchestrator()
-    by_player: dict[tuple[int, int], list[_LiveShell]] = {}
+    by_player: dict[_PlayerKey, list[_LiveShell]] = {}
     for shell in shells:
-        by_player.setdefault((shell.perspective, shell.player_id), []).append(shell)
-    for (perspective, player_id), player_shells in by_player.items():
-        blockers = _off_setting_walk_blockers(
-            orch,
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-        )
-        if not blockers:
+        by_player.setdefault(_PlayerKey.of(shell.compute_scope), []).append(shell)
+    for player, player_shells in by_player.items():
+        if _has_off_setting_walk(orch, player):
+            _OffSettingWalkWaiter(orch, player, player_shells).start()
+        else:
             _submit_shells(orch, player_shells)
-            continue
-        _submit_after_off_setting_walk(orch, player_shells, blockers)
 
 
-def _submit_after_off_setting_walk(
-    orchestrator: ComputeOrchestrator,
-    shells: list[_LiveShell],
-    blockers: tuple[ComputeScope, ...],
-) -> None:
-    """Submit ``shells`` once every off-setting fleet or scoreboard blocker is terminal.
+class _OffSettingWalkWaiter:
+    """Submits one player's shells once that player's off-setting nodes are terminal.
 
-    ``blockers`` is the set observed before the listener was registered. The
-    listener and the check after registration share one finish, so a node that
-    completes in between is submitted once. A parked node stays a blocker.
-    A failed node is terminal. A non-terminal off-setting scoreboard is a
-    blocker, so the on-walk is not attached to the node that walk opened.
+    The listener is registered before the first check, and the listener and
+    that check share one ``_finish``, so a node that completes in between is
+    submitted once. A parked node stays a blocker. A failed node is terminal.
+    A non-terminal off-setting scoreboard is a blocker, so the on-walk is not
+    attached to the node that walk opened.
     """
-    if not blockers:
-        _submit_shells(orchestrator, shells)
-        return
-    gate = threading.Lock()
-    finished = False
-    unregister_holder: list[Callable[[], None] | None] = [None]
-    player_shell = shells[0]
 
-    def try_finish() -> None:
-        nonlocal finished
-        if _off_setting_walk_blockers(
-            orchestrator,
-            game_id=player_shell.game_id,
-            perspective=player_shell.perspective,
-            player_id=player_shell.player_id,
+    def __init__(
+        self,
+        orchestrator: ComputeOrchestrator,
+        player: _PlayerKey,
+        shells: list[_LiveShell],
+    ) -> None:
+        self._orchestrator = orchestrator
+        self._player = player
+        self._shells = shells
+        self._gate = threading.Lock()
+        self._is_finished = False
+        self._unregister: Callable[[], None] | None = None
+
+    def start(self) -> None:
+        self._unregister = self._orchestrator.observers.register_scope_outcome_listener(
+            self._on_outcome
+        )
+        self._try_finish()
+
+    def _on_outcome(self, snapshot: ScopeLifecycleSnapshot) -> None:
+        if (
+            snapshot.state in {"complete", "failed"}
+            and snapshot.scope.analytic_id in FLEET_WALK_ANALYTIC_IDS
+            and _PlayerKey.of(snapshot.scope) == self._player
         ):
+            self._try_finish()
+
+    def _try_finish(self) -> None:
+        if _has_off_setting_walk(self._orchestrator, self._player):
             return
-        with gate:
-            if finished:
+        with self._gate:
+            if self._is_finished:
                 return
-            finished = True
-            registered = unregister_holder[0]
-        if registered is not None:
-            registered()
-        _submit_shells(orchestrator, shells)
-
-    def on_outcome(snapshot: ScopeLifecycleSnapshot) -> None:
-        if snapshot.state == "parked":
-            return
-        if snapshot.state not in {"complete", "failed"}:
-            return
-        if snapshot.scope.analytic_id not in _OFF_SETTING_BLOCKERS:
-            return
-        if snapshot.scope.player_id != player_shell.player_id:
-            return
-        if snapshot.scope.game_id != player_shell.game_id:
-            return
-        if snapshot.scope.perspective != player_shell.perspective:
-            return
-        try_finish()
-
-    unregister_holder[0] = orchestrator.observers.register_scope_outcome_listener(on_outcome)
-    try_finish()
+            self._is_finished = True
+            unregister = self._unregister
+        if unregister is not None:
+            unregister()
+        _submit_shells(self._orchestrator, self._shells)
 
 
 def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) -> None:
@@ -157,13 +151,7 @@ def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) 
             continue
         orchestrator.submit(
             ComputeRequest(
-                scope=ComputeScope(
-                    analytic_id=shell.analytic_id,
-                    game_id=shell.game_id,
-                    perspective=shell.perspective,
-                    turn=shell.turn,
-                    player_id=shell.player_id,
-                ),
+                scope=shell.compute_scope,
                 priority_band="stream_attached",
                 force_fresh=True,
                 ctx=shell.ctx,
@@ -172,101 +160,47 @@ def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) 
         shell.emit_accepted()
 
 
-def _off_setting_walk_blockers(
-    orchestrator: ComputeOrchestrator,
-    *,
-    game_id: int,
-    perspective: int,
-    player_id: int,
-) -> tuple[ComputeScope, ...]:
-    return tuple(
-        view.scope
+def _has_off_setting_walk(orchestrator: ComputeOrchestrator, player: _PlayerKey) -> bool:
+    """Whether the player has a non-terminal fleet or scores node opened with the setting off."""
+    return any(
+        not view.is_terminal and not view.backfill_earlier_turns
         for view in orchestrator.node_opens_for_player(
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-            analytic_ids=_OFF_SETTING_BLOCKERS,
+            game_id=player.game_id,
+            perspective=player.perspective,
+            player_id=player.player_id,
+            analytic_ids=FLEET_WALK_ANALYTIC_IDS,
         )
-        if _blocks_on_walk(view)
     )
 
 
-def _blocks_on_walk(view: NodeOpenView) -> bool:
-    return not view.is_terminal and not view.backfill_earlier_turns
-
-
-def _live_shells(game_id: int) -> tuple[_LiveShell, ...]:
+def _live_shells(game_id: int) -> list[_LiveShell]:
     shells: list[_LiveShell] = []
-    shells.extend(_shells_for_registry(game_id, analytic_id=FLEET_ANALYTIC_ID))
-    shells.extend(_shells_for_registry(game_id, analytic_id=SCORES_ANALYTIC_ID))
-    return tuple(shells)
-
-
-def _shells_for_registry(game_id: int, *, analytic_id: str) -> list[_LiveShell]:
-    if analytic_id == FLEET_ANALYTIC_ID:
-        registry = get_fleet_table_stream_registry()
-    else:
-        registry = get_inference_table_stream_registry()
-    shells: list[_LiveShell] = []
-    for scope in registry.list_active_scopes():
-        if scope.game_id != game_id:
-            continue
-        controller = registry.controller_for_scope(scope)
-        built = _shells_from_controller(analytic_id, scope, controller)
-        shells.extend(built)
-    return shells
-
-
-def _shells_from_controller(
-    analytic_id: str,
-    scope: FleetTableStreamScope | InferenceStreamScope,
-    controller: _LiveStreamController | None,
-) -> list[_LiveShell]:
-    if controller is None:
-        return []
-    ctx = controller.query_context
-    if not isinstance(ctx, AnalyticQueryContext):
-        return []
-    if not isinstance(scope.perspective, int):
-        return []
-
-    def still_live(
-        bound_scope: FleetTableStreamScope | InferenceStreamScope = scope,
-        bound_analytic: str = analytic_id,
-    ) -> bool:
-        return _controller_is_attached(bound_analytic, bound_scope)
-
-    shells: list[_LiveShell] = []
-    for player in iter_turn_players(controller.turn):
-        player_id = player.id
-
-        def emit(
-            bound_controller: _LiveStreamController = controller,
-            bound_player: int = player_id,
-        ) -> None:
-            bound_controller.emit_work_accepted(bound_player)
-
-        shells.append(
-            _LiveShell(
-                analytic_id=analytic_id,
-                game_id=scope.game_id,
-                perspective=scope.perspective,
-                turn=scope.turn_number,
-                player_id=player_id,
-                ctx=ctx,
-                still_live=still_live,
-                emit_accepted=emit,
+    for analytic_id, registry in registered_table_stream_registries(FLEET_WALK_ANALYTIC_IDS):
+        for stream_scope in registry.list_active_scopes():
+            if stream_scope.game_id != game_id:
+                continue
+            controller = registry.controller_for_scope(stream_scope)
+            if controller is None:
+                continue
+            ctx = controller.query_context
+            if not isinstance(ctx, AnalyticQueryContext):
+                continue
+            if not isinstance(stream_scope.perspective, int):
+                continue
+            shells.extend(
+                _LiveShell(
+                    compute_scope=ComputeScope(
+                        analytic_id=analytic_id,
+                        game_id=game_id,
+                        perspective=stream_scope.perspective,
+                        turn=stream_scope.turn_number,
+                        player_id=player.id,
+                    ),
+                    ctx=ctx,
+                    registry=registry,
+                    stream_scope=stream_scope,
+                    controller=controller,
+                )
+                for player in iter_turn_players(controller.turn)
             )
-        )
     return shells
-
-
-def _controller_is_attached(
-    analytic_id: str,
-    scope: FleetTableStreamScope | InferenceStreamScope,
-) -> bool:
-    if analytic_id == FLEET_ANALYTIC_ID and isinstance(scope, FleetTableStreamScope):
-        return get_fleet_table_stream_registry().controller_for_scope(scope) is not None
-    if isinstance(scope, InferenceStreamScope):
-        return get_inference_table_stream_registry().controller_for_scope(scope) is not None
-    return False
