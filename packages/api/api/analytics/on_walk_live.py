@@ -33,7 +33,7 @@ from typing import NamedTuple, Protocol, runtime_checkable
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.eliminated_player import player_has_on_walk_root
-from api.analytics.off_mode import FLEET_WALK_ANALYTIC_IDS
+from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeRequest

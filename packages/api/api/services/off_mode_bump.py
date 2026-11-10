@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol, TypeAlias
 
-from api.analytics.off_mode import FLEET_WALK_ANALYTIC_IDS
+from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import ComputeNodeRun

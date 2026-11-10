@@ -218,6 +218,11 @@ class FleetEvidenceMark:
     evidence_generation: int = 0
     applies_from_turn: int | None = None
 
+    @property
+    def is_absent(self) -> bool:
+        """Whether no mark was ever written: generation 0 with ``appliesFromTurn`` unset."""
+        return self.evidence_generation == 0 and self.applies_from_turn is None
+
 
 @dataclass(frozen=True)
 class StampCurrentEvidenceMark:

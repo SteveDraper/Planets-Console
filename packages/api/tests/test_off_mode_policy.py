@@ -164,6 +164,19 @@ def test_off_mode_persist_decision_is_one_table():
         assert decision.merge_generation == merge_generation, name
 
 
+@pytest.mark.parametrize(
+    ("mark", "expected"),
+    (
+        (FleetEvidenceMark(), True),
+        (FleetEvidenceMark(evidence_generation=1), False),
+        (FleetEvidenceMark(applies_from_turn=5), False),
+        (FleetEvidenceMark(evidence_generation=2, applies_from_turn=5), False),
+    ),
+)
+def test_evidence_mark_is_absent_only_at_generation_zero_with_no_applies_from_turn(mark, expected):
+    assert mark.is_absent is expected
+
+
 def test_mark_persist_precedence_is_on_walk_then_absent_then_open_turn_stamp():
     """On-walk beats an absent mark, which beats the backfill-off open-turn stamp."""
     present = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)

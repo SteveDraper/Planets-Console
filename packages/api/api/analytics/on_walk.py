@@ -26,7 +26,6 @@ from api.analytics.fleet.injected_services import (
     lookup_fleet_compute_services,
 )
 from api.analytics.fleet.types import FleetEvidenceMark
-from api.analytics.off_mode import mark_is_absent
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.dag import PlannedComputeNode, earliest_planned_turn
 from api.compute.root_plan import IgnoredRootPlan, RootPlan
@@ -150,14 +149,14 @@ def scoreboard_persist_belongs_to_on_walk(
 
 
 def _establish_absent_mark(current: FleetEvidenceMark, baseline: int) -> FleetEvidenceMark:
-    if not mark_is_absent(current):
+    if not current.is_absent:
         return current
     return FleetEvidenceMark(evidence_generation=1, applies_from_turn=baseline)
 
 
 def _widen_existing_mark(current: FleetEvidenceMark, earliest_turn: int) -> FleetEvidenceMark:
     """Move ``appliesFromTurn`` backward to ``earliest_turn``. Never forward."""
-    if mark_is_absent(current):
+    if current.is_absent:
         return current
     applies = current.applies_from_turn
     if applies is not None and earliest_turn >= applies:

@@ -21,8 +21,6 @@ from api.analytics.fleet.stored_documents import (
 from api.analytics.fleet.types import FleetEvidenceMark
 from api.storage.base import StorageBackend
 
-_ABSENT_EVIDENCE_MARK = FleetEvidenceMark()
-
 _EvidenceMarkKey = tuple[int, int, int]
 _assumed_evidence_marks: ContextVar[Mapping[_EvidenceMarkKey, FleetEvidenceMark]] = ContextVar(
     "assumed_fleet_evidence_marks",
@@ -54,7 +52,7 @@ class FleetEvidenceMarkStore:
         """The stored mark, or the mark assumed in this context while none is stored."""
         key = (game_id, perspective, player_id)
         stored = self._stored(key)
-        if stored != _ABSENT_EVIDENCE_MARK:
+        if not stored.is_absent:
             return stored
         return _assumed_evidence_marks.get().get(key, stored)
 
@@ -193,7 +191,7 @@ class FleetEvidenceMarkStore:
     def _read(self, key: _EvidenceMarkKey) -> FleetEvidenceMark:
         data = read_json_object(self._storage, self.key(*key))
         if data is None:
-            return _ABSENT_EVIDENCE_MARK
+            return FleetEvidenceMark()
         return fleet_evidence_mark_from_json(data)
 
     def _write(self, key: _EvidenceMarkKey, mark: FleetEvidenceMark) -> None:

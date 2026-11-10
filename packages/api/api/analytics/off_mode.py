@@ -35,20 +35,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.types import (
     STAMP_CURRENT_EVIDENCE_MARK,
     FleetEvidenceMark,
     PersistedFleetLedger,
     StampCurrentEvidenceMark,
 )
-from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.models.game import GameSettings, TurnInfo
-
-# Analytics whose compute nodes and live table streams carry a submission's
-# backfill choice: the fleet ledger walk and the scoreboard solves it feeds.
-FLEET_WALK_ANALYTIC_IDS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
 
 
 def ledger_matches_evidence_mark(
@@ -65,11 +59,6 @@ def ledger_matches_evidence_mark(
     if mark.applies_from_turn is not None and turn_number < mark.applies_from_turn:
         return True
     return persisted.evidence_generation == mark.evidence_generation
-
-
-def mark_is_absent(mark: FleetEvidenceMark) -> bool:
-    """An absent mark is generation 0 with ``appliesFromTurn`` unset."""
-    return mark.evidence_generation == 0 and mark.applies_from_turn is None
 
 
 class MarkPersist(StrEnum):
@@ -125,7 +114,7 @@ def off_mode_persist_decision(
     """
     if on_walk:
         mark_persist = MarkPersist.STAMP
-    elif mark_is_absent(mark):
+    elif mark.is_absent:
         mark_persist = MarkPersist.FIRST_PERSIST
     elif not backfill_enabled and open_turn is not None and host_turn == open_turn:
         mark_persist = MarkPersist.STAMP
@@ -188,7 +177,7 @@ def off_mode_prior_relation(
     ledger_matches_mark = prior_ledger is not None and ledger_matches_evidence_mark(
         prior_turn_number, prior_ledger, mark
     )
-    cannot_hop = mark_is_absent(mark) or (
+    cannot_hop = mark.is_absent or (
         mark.applies_from_turn is not None and prior_turn_number < mark.applies_from_turn
     )
     if cannot_hop and not ledger_matches_mark:
