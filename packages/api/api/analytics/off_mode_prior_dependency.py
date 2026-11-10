@@ -1,10 +1,9 @@
 """Prior-fleet ensure edge shared by fleet and scores.
 
-The edge is a final fleet ledger one turn back for the same player. Off-mode
-keeps that edge when the prior still needs a hop, and returns no edges when
-it does not. The hop is a fleet file brought onto the current evidence mark.
-It does not schedule a scoreboard solve. Fleet drops the edge when the player
-is already eliminated on this turn.
+The edge is a final fleet ledger one turn back for the same player. The hop is
+a fleet file brought onto the current evidence mark. It does not schedule a
+scoreboard solve. ``off_mode_ensure_dependencies`` decides per scope whether
+the edge applies.
 """
 
 from __future__ import annotations
@@ -34,13 +33,18 @@ def off_mode_ensure_dependencies(
 ) -> tuple[EnsureDependency, ...]:
     """Shared prior-fleet edge for this scope, or no edges.
 
-    A non-integer player, missing fleet services, or Backfill earlier turns
-    keeps the edge. A player eliminated on this turn has no prior-fleet edge
-    while Backfill earlier turns is on. While backfill is off, a stored turn
-    keeps that same edge only when ``scope.turn - 1`` still needs a hop inside
-    ``appliesFromTurn``. A turn that is not stored, or a prior that does not
-    need a hop, returns no edges. An absent mark does not walk backward. The
-    open turn's own scoreboard is this scope, not an earlier one.
+    * A non-integer player keeps the edge.
+    * Backfill earlier turns on: the edge applies unless the player is
+      eliminated on ``scope.turn``, which has no on-walk and so no prior-fleet
+      dependency. A turn that cannot be loaded keeps the edge, because
+      elimination cannot be shown. The dependency walk then reports a prior
+      turn that is not stored, or stops at the ensure floor.
+    * Backfill earlier turns off: missing fleet services keep the edge. Without
+      a loadable ``scope.turn`` there are no settings to classify the hop, so
+      there are no edges. Otherwise the edge applies only when
+      ``scope.turn - 1`` still needs a hop inside ``appliesFromTurn``. An absent
+      mark does not walk backward. This branch does not consult elimination; the
+      fleet export applies that check before calling here in both modes.
     """
     if not isinstance(scope.player_id, int):
         return OFF_MODE_PRIOR_FLEET
