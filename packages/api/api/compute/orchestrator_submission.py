@@ -126,18 +126,9 @@ class OrchestratorSubmissionMixin:
         """Submit or attach to in-flight work for one compute scope."""
         resolved = resolve_submission_open(request)
         with self._open_root_plan(resolved) as root_plan:
-            resolved = replace(resolved, submission_open=root_plan.submission_open)
-            bundle = resolved.resolved_bundle()
-            if bundle is not None:
-                prepare_compute_request_dependency_chain(
-                    resolved,
-                    ctx=self._ctx_for_bundle(bundle),
-                    backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
-                )
+            planned_request = self._prepare_root_planned_request(resolved, root_plan)
             with self._condition:
-                submission = self._submit_locked(resolved)
-                if submission.planned is not None:
-                    root_plan.plan_registered(submission.planned)
+                submission = self._submit_root_planned_locked(planned_request, root_plan)
         return self._finish_submission(submission)
 
     def wake_if_parked(
@@ -176,6 +167,40 @@ class OrchestratorSubmissionMixin:
             request.submission_open,
             self._ctx_for_bundle(bundle),
         )
+
+    def _prepare_root_planned_request(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+        root_plan: RootPlan,
+    ) -> ResolvedComputeRequest:
+        """Return ``request`` carrying ``root_plan``'s open, with its chain turns filled.
+
+        Runs while ``root_plan`` is open and outside the orchestrator lock.
+        """
+        planned_request = replace(request, submission_open=root_plan.submission_open)
+        bundle = planned_request.resolved_bundle()
+        if bundle is not None:
+            prepare_compute_request_dependency_chain(
+                planned_request,
+                ctx=self._ctx_for_bundle(bundle),
+                backfill_earlier_turns=planned_request.submission_open.backfill_earlier_turns,
+            )
+        return planned_request
+
+    def _submit_root_planned_locked(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+        root_plan: RootPlan,
+    ) -> AcceptedSubmission:
+        """Apply one submission and report a freshly registered plan to ``root_plan``.
+
+        Caller holds the orchestrator lock, so the report runs in the same hold
+        that registers the plan and before any selected work runs.
+        """
+        submission = self._submit_locked(request)
+        if submission.planned is not None:
+            root_plan.plan_registered(submission.planned)
+        return submission
 
     def _submit_locked(
         self: ComputeOrchestrator,

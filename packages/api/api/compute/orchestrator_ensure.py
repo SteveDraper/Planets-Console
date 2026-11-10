@@ -4,21 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import ExitStack
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
-from api.compute.orchestrator_pending import (
-    AcceptedSubmission,
-    PendingInlineExecution,
-    PendingPoolSubmission,
-)
+from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
-from api.compute.orchestrator_submission import (
-    prepare_compute_request_dependency_chain,
-    resolve_submission_open,
-)
-from api.compute.root_plan import RootPlan
+from api.compute.orchestrator_submission import resolve_submission_open
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -102,41 +93,27 @@ class OrchestratorEnsureMixin:
                 unsatisfied.append((index, request))
 
         if unsatisfied:
-            opened_unsatisfied: list[tuple[int, ResolvedComputeRequest]] = [
+            resolved_unsatisfied = [
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
             with ExitStack() as root_plans:
-                root_plan_by_index: dict[int, RootPlan] = {
-                    index: root_plans.enter_context(self._open_root_plan(resolved))
-                    for index, resolved in opened_unsatisfied
-                }
-                resolved_unsatisfied = [
-                    (
-                        index,
-                        replace(
-                            resolved, submission_open=root_plan_by_index[index].submission_open
-                        ),
-                    )
-                    for index, resolved in opened_unsatisfied
+                opened_unsatisfied = [
+                    (index, resolved, root_plans.enter_context(self._open_root_plan(resolved)))
+                    for index, resolved in resolved_unsatisfied
                 ]
-                for _index, resolved in resolved_unsatisfied:
-                    bundle = resolved.resolved_bundle()
-                    if bundle is not None:
-                        prepare_compute_request_dependency_chain(
-                            resolved,
-                            ctx=self._ctx_for_bundle(bundle),
-                            backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
-                        )
+                planned_unsatisfied = [
+                    (index, self._prepare_root_planned_request(resolved, root_plan), root_plan)
+                    for index, resolved, root_plan in opened_unsatisfied
+                ]
                 pending_inline: list[PendingInlineExecution] = []
                 pending_pool: list[PendingPoolSubmission] = []
                 with self._condition:
-                    for index, resolved in resolved_unsatisfied:
-                        submission = self._ensure_submit_locked(resolved)
+                    for index, planned_request, root_plan in planned_unsatisfied:
+                        self._drop_hollow_terminal_locked(planned_request)
+                        submission = self._submit_root_planned_locked(planned_request, root_plan)
                         handles_by_index[index] = submission.handle
                         pending_inline.extend(submission.pending_inline)
                         pending_pool.extend(submission.pending_pool)
-                        if submission.planned is not None:
-                            root_plan_by_index[index].plan_registered(submission.planned)
             self._execute_pending_inlines(tuple(pending_inline))
             self._flush_pending_pool_submissions(tuple(pending_pool))
             self._observers.drain_post_lock_callbacks()
@@ -146,15 +123,17 @@ class OrchestratorEnsureMixin:
             for index in range(len(requests))
         )
 
-    def _ensure_submit_locked(
+    def _drop_hollow_terminal_locked(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
-    ) -> AcceptedSubmission:
-        """Submit one unsatisfied ensure scope. Caller holds the orchestrator lock."""
+    ) -> None:
+        """Drop a terminal node left for an unsatisfied ensure scope.
+
+        Hollow terminal: durable gone, node still complete/failed. Dropping it
+        lets default force_fresh=False plan fresh work (F1). Non-terminal nodes
+        stay for attach / singleflight; parked wake stays explicit. Caller holds
+        the orchestrator lock.
+        """
         existing = self._nodes.get(request.scope)
-        # Hollow terminal: durable gone, node still complete/failed. Drop so
-        # default force_fresh=False can plan fresh work (F1). Leave non-terminal
-        # nodes alone for attach / singleflight; parked wake stays explicit.
         if existing is not None and existing.is_terminal and not request.force_fresh:
             self._replace_terminal_node(existing)
-        return self._submit_locked(request)
