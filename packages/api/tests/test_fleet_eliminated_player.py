@@ -13,6 +13,7 @@ from api.analytics.fleet.compute_orchestration import (
     build_fleet_materialization_leg_job_wire,
 )
 from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
+from api.analytics.fleet.eliminated_player import player_has_on_walk_root
 from api.analytics.fleet.fleet_table_player_run import wire_materialized_complete_event
 from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_from_json,
@@ -354,6 +355,32 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
     assert raised.value.recovery is not None
     assert raised.value.recovery.step_kind == "tier_solve"
     assert raised.value.recovery.force_fresh is True
+
+
+@pytest.mark.parametrize(
+    ("statusturn", "turn_number", "expected"),
+    [(23, 23, False), (22, 23, False), (24, 23, True)],
+    ids=["eliminated_this_turn", "eliminated_earlier", "elimination_later"],
+)
+def test_player_has_on_walk_root_only_when_not_eliminated_on_the_shell_turn(
+    sample_turn, statusturn, turn_number, expected
+):
+    player_id = first_player_id(sample_turn)
+    turn = _stamp_player(
+        sample_turn,
+        player_id,
+        status=3,
+        statusturn=statusturn,
+        turn_number=turn_number,
+    )
+    assert player_has_on_walk_root(turn, player_id) is expected
+
+
+def test_player_has_on_walk_root_for_a_living_or_absent_player(sample_turn):
+    player_id = first_player_id(sample_turn)
+    turn = _stamp_player(sample_turn, player_id, status=1, statusturn=0, turn_number=23)
+    assert player_has_on_walk_root(turn, player_id) is True
+    assert player_has_on_walk_root(turn, 9999) is True
 
 
 def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):

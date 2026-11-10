@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from typing import NamedTuple, Protocol, runtime_checkable
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
+from api.analytics.fleet.eliminated_player import player_has_on_walk_root
 from api.analytics.off_mode import FLEET_WALK_ANALYTIC_IDS
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
@@ -302,6 +302,6 @@ def _live_shells(game_id: int) -> list[_LiveShell]:
                 work_accepted_sink=controller,
             )
             for player_id in controller.player_ids
-            if not fleet_player_eliminated_at_turn(controller.turn, player_id)
+            if player_has_on_walk_root(controller.turn, player_id)
         )
     return shells

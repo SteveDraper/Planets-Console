@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
+from api.analytics.fleet.eliminated_player import player_has_on_walk_root
 from api.analytics.fleet.injected_services import (
     FleetComputeServices,
     lookup_fleet_compute_services,
@@ -111,7 +111,7 @@ def _on_walk_shell(
     if services is None:
         return None
     shell = ctx.load_turn(open_turn)
-    if shell is None or fleet_player_eliminated_at_turn(shell, scope.player_id):
+    if shell is None or not player_has_on_walk_root(shell, scope.player_id):
         return None
     return _OnWalkShell(
         services=services,

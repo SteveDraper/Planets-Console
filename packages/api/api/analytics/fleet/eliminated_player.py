@@ -21,6 +21,15 @@ def fleet_player_eliminated_at_turn(turn: TurnInfo, player_id: int) -> bool:
     return is_eliminated_at_turn(player, turn.settings.turn)
 
 
+def player_has_on_walk_root(shell_turn: TurnInfo, player_id: int) -> bool:
+    """True when Backfill earlier turns opens an on-walk for this player.
+
+    A player eliminated on the shell turn has no on-walk: nothing walks and
+    its final fleet has no prior-fleet dependency.
+    """
+    return not fleet_player_eliminated_at_turn(shell_turn, player_id)
+
+
 def eliminated_empty_fleet_ledger(turn: TurnInfo, player_id: int) -> FleetAcquisitionLedger:
     """Ship-free ledger for an eliminated player. Does not read a prior turn."""
     player = players_by_id(turn).get(player_id)

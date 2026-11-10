@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope
-from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
+from api.analytics.fleet.eliminated_player import player_has_on_walk_root
 from api.analytics.fleet.injected_services import (
     FleetComputeServices,
     lookup_fleet_compute_services,
@@ -46,8 +46,8 @@ def off_mode_ensure_dependencies(
         return OFF_MODE_PRIOR_FLEET
     if backfill_earlier_turns:
         turn = ctx.load_turn(scope.turn)
-        is_eliminated = turn is not None and fleet_player_eliminated_at_turn(turn, scope.player_id)
-        return () if is_eliminated else OFF_MODE_PRIOR_FLEET
+        has_on_walk_root = turn is None or player_has_on_walk_root(turn, scope.player_id)
+        return OFF_MODE_PRIOR_FLEET if has_on_walk_root else ()
     services = lookup_fleet_compute_services(ctx)
     if services is None:
         return OFF_MODE_PRIOR_FLEET
