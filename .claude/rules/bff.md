@@ -1,0 +1,87 @@
+---
+paths:
+  - "packages/bff/**/*.py"
+---
+
+# BFF Layer Conventions
+
+The BFF aggregates and reshapes responses from the Core REST API into shapes convenient for the SPA. It has no business logic of its own. See `.claude/rules/core-api.md` for the layer below.
+
+## Router Conventions
+
+- One `APIRouter` per domain resource in `packages/bff/routers/`
+- All routes use prefix `/bff/...`
+- Registered in `packages/bff/app.py`, which assembles the BFF FastAPI sub-app
+- The frontend codegen source is a **dedicated BFF-only OpenAPI schema endpoint**, for example `/bff/openapi.json`, rather than the whole application's `/openapi.json`
+
+```python
+# packages/bff/routers/systems.py
+router = APIRouter(prefix="/bff/systems", tags=["bff-systems"])
+
+@router.get("/{id}")
+def get_system_view(id: str, svc: SystemService = Depends(get_system_service)):
+    system = svc.get(id)        # calls Core REST API service
+    return shape_for_frontend(system)   # reshape here, not in the service
+```
+
+## Preferred App Composition
+
+The preferred implementation is:
+
+- `packages/api/app.py` builds the Core REST API sub-app
+- `packages/bff/app.py` builds the BFF sub-app
+- `packages/server/app.py` builds the root server app and mounts them into a single process, e.g. `/api` and `/bff`
+
+This is preferred over filtering a single app's schema because the BFF-only OpenAPI surface then exists by construction rather than by custom schema logic.
+
+## Transport Schemas
+
+The BFF may reuse upstream domain dataclasses only when they already match the frontend contract exactly. In practice, BFF responses will often diverge from domain models because the BFF is responsible for SPA-oriented shaping.
+
+- Prefer dedicated response models when the BFF renames fields, combines resources, omits internals, or adds UI-oriented grouping
+- Keep these transport models close to the BFF router or in a small `packages/bff/transport/` module if they are shared across routes
+- The BFF should be explicit about what contract it exposes; do not let frontend-facing response shapes emerge accidentally from domain internals
+
+## Exceptions
+
+- See `.claude/rules/server-exceptions.md` for the exception hierarchy and HTTP handling rules. All exceptions raised by the BFF must inherit from `BFFError` (in `bff.errors`). The BFF app registers a global exception handler via `make_http_exception_handler(BFFError)` (from `api.errors`).
+
+## Layer Boundary Rules
+
+- **No business logic** — the BFF may filter, aggregate, and rename fields, but must not compute derived state that belongs in the domain model
+- **No direct storage access** — the BFF calls Core REST API services; it never touches `StorageBackend`
+- **Allowed Core REST API import surface** — import from `packages/api/services/` for business services; import from `packages/api/errors` (e.g. `api.errors`) for `PlanetsConsoleError` and `make_http_exception_handler` only. Do not import from `models/`, `storage/`, or serialization internals
+
+## OpenAPI Spec & Type Codegen
+
+The BFF exposes a dedicated OpenAPI schema endpoint, such as `/bff/openapi.json`. This BFF-only schema is the **source of truth for BFF→frontend type safety** — TypeScript types for the frontend are generated from it rather than written by hand.
+
+### Generating types
+
+From the repo root (or `packages/frontend/` via npm):
+
+```bash
+make generate
+# or: cd packages/frontend && npm run generate:api
+```
+
+Pipeline: dump full BFF OpenAPI from `bff.app` → `scripts/filter_bff_openapi.py` (per-router slices) → `openapi-typescript` emits committed `src/api/schema-<slice>.ts` for v1 slices (`games`, `analytics`, `shell`, `diagnostics`). Intermediate JSON (`.bff-openapi.json`, `.bff-openapi-slices/`) is gitignored.
+
+Application code imports the smallest `schema-<slice>.ts` only (see [ADR 0003](../../docs/adr/0003-frontend-bff-contract-codegen.md)). Do not add monolithic or barrel `schema.ts`; CI fails if `src/api/schema.ts` exists (`make check_frontend_api_no_monolithic_schema`, part of `make ci`).
+
+- Regenerate whenever BFF response shapes change
+- Commit generated TypeScript — never hand-edit `schema-*.ts`
+- CI and local pre-merge: `make check_frontend_api_slices` (or `cd packages/frontend && npm run check:api:slices`) — same dump/filter pipeline as generate, then `openapi-typescript --check` per slice; plus `make check_frontend_api_no_monolithic_schema` to block monolithic `schema.ts`
+- If the app also exposes a full-process schema, do not use it for frontend codegen
+
+Live server fallback (fetch OpenAPI JSON, then filter + slices):
+
+```bash
+cd packages/frontend && npm run generate:api:live
+```
+
+## Testing
+
+- BFF tests verify response shaping, aggregation, and contract stability
+- BFF tests do not re-test Core REST API business rules; mock service calls where practical
+- Include schema-sensitive tests for routes whose response contracts are consumed heavily by the frontend

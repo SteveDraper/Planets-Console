@@ -1,0 +1,134 @@
+---
+paths:
+  - "packages/frontend/**/*.{ts,tsx}"
+---
+
+# Frontend Conventions
+
+## Project Setup
+
+- Vite + React + TypeScript; routing via React Router
+- Components from **shadcn/ui** — prefer these over custom primitives
+- Styling with **Tailwind CSS** — no separate CSS files unless unavoidable
+- All BFF calls go through a typed API client in `src/api/` — never `fetch` directly in components
+
+## BFF Types — OpenAPI Codegen
+
+TypeScript types for router-stable BFF REST are **generated from filtered BFF OpenAPI dumps** — never hand-written for those shapes. See [ADR 0003](../../docs/adr/0003-frontend-bff-contract-codegen.md).
+
+Generated modules are `src/api/schema-<slice>.ts` (e.g. `schema-games.ts`, `schema-shared.ts`; committed, never hand-edited). Regenerate all slices by running:
+
+```bash
+npm run generate:api
+```
+
+Import the smallest slice you need (see **Generated schema import rule** in `CONTEXT.md`). `bff.ts` centralizes fetch calls. Example path types:
+
+```ts
+// src/api/systems.ts
+import type { paths } from './schema-games'
+
+type SystemView =
+  paths['/games/{id}']['get']['responses']['200']['content']['application/json']
+
+export async function fetchSystem(id: string): Promise<SystemView> {
+  const res = await fetch(`/bff/systems/${id}`)
+  if (!res.ok) throw new Error('Failed to fetch system')
+  return res.json()
+}
+```
+
+- Define one API client file per domain resource in `src/api/` (e.g. `src/api/systems.ts`)
+- TanStack Query hooks in feature folders import from `src/api/` — they never call `fetch` directly
+- If generated slices are out of date, run `generate:api` and fix any resulting type errors before merging; verify with `npm run check:api:slices` or `make check_frontend_api_slices` (also run by `make ci`)
+- Slices must be generated from the BFF-only schema (filtered from the full BFF dump), not from a whole-process backend schema
+- Do not add a barrel `schema.ts` that re-exports every slice; CI fails if `src/api/schema.ts` exists (`make check_frontend_api_no_monolithic_schema`, part of `make ci`)
+
+## BFF types — when to use Zod instead of OpenAPI codegen
+
+See **Frontend BFF contracts: OpenAPI codegen and Zod** in `.claude/rules/frontend-bff-contracts.md` for the full rule. In short:
+
+- **Default:** `schema-<slice>.ts` + typed fetch helpers in `bff.ts` for normal REST JSON.
+- **Zod + `z.infer`:** stream/NDJSON lines and other wire data that needs runtime validation; one module owns both types and parsing (example: `src/api/loadAllStreamEventSchema.ts` + `parseLoadAllStreamEvent.ts`).
+- **Never** duplicate the same shape in OpenAPI-generated types and hand-written (or second) Zod schemas.
+
+## State Management — The Core Rule
+
+| Data type | Tool |
+|---|---|
+| Anything fetched from the BFF | **TanStack Query** |
+| Ephemeral UI state (selections, open/close, filters) | **Zustand** |
+
+Never copy server data into a Zustand store. Never use TanStack Query for purely local UI state.
+
+```ts
+// ✅ Server state — TanStack Query (names below are illustrative)
+export function useItems() {
+  return useQuery({ queryKey: ['items'], queryFn: fetchItems });
+}
+
+// ✅ UI state — Zustand (only for ephemeral local state)
+const useFeatureUIStore = create<FeatureUIState>()(set => ({
+  selectedId: null,
+  setSelected: (id) => set({ selectedId: id }),
+}));
+
+// ❌ Never do this — server data does not belong in Zustand
+const useItemsStore = create()(() => ({ items: [] }));
+```
+
+## Component Structure
+
+- One component per file; filename matches component name
+- Colocate hooks, types, and tests with the component they belong to
+- Keep `src/components/` for shared/generic components; feature components live under `src/features/<feature>/`
+
+### Source layout (concrete — follow this structure)
+
+```
+src/
+├── api/
+│   ├── schema-*.ts    # Generated per router slice — do not edit. `npm run generate:api`
+│   ├── *Schema.ts     # Zod wire contracts (types via z.infer) when .claude/rules/frontend-bff-contracts.md applies
+│   ├── systems.ts     # (illustrative) Typed fetch functions for one domain resource
+│   └── ...            # One file per domain resource
+├── components/    # Genuinely shared components reused across multiple features
+├── features/      # One subdirectory per product domain feature (see below)
+└── routes/        # React Router route components — thin shells that render feature components
+```
+
+### Feature folder convention (concrete)
+
+Each feature gets its own subdirectory under `src/features/`. The folder name is a domain concept (e.g. `solar-systems`, `missions`, `dashboard`). Inside it, colocate everything that belongs to that feature:
+
+```
+src/features/<feature-name>/
+├── <FeatureComponent>.tsx       # Main component(s) for this feature
+├── <FeatureComponent>.test.tsx  # Tests colocated with the component
+├── use<FeatureName>.ts          # TanStack Query hooks for server state
+└── <featureName>UIStore.ts      # Zustand store — only add if UI state is needed
+```
+
+The names `planets/`, `PlanetList`, and `usePlanets` used elsewhere in this file are **illustrative placeholders** chosen to match the project name. Replace them with the actual domain concepts as features are built.
+
+A component starts in its feature folder. If it later becomes reusable across multiple features, promote it to `src/components/`.
+
+### Analytics sidebar
+
+Every analytics-bar row is `AnalyticSidebarTile` (`src/analytics/AnalyticSidebarTile.tsx`): shared enable checkbox, tile chrome, and chevron. Extra controls are `children` and render only in the expanded pane. Do not copy the header markup into a new tile. See [design-adding-a-turn-analytic.md](../../docs/design-adding-a-turn-analytic.md) §4.
+
+## Graphs — React Flow
+
+- Wrap React Flow in a feature-specific component; never use it directly in a route
+- Node and edge types defined as TypeScript types in the same feature folder
+
+## Tables — TanStack Table
+
+- Define column configs with `ColumnDef<T>` typed to the data model
+- Use shadcn/ui `Table` primitives for rendering
+
+## Testing (Vitest + RTL)
+
+- Test files colocated with components: `Component.test.tsx`
+- Prefer testing user behaviour over implementation details
+- Mock BFF calls at the API client layer, not inside components
