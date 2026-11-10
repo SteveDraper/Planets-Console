@@ -393,7 +393,7 @@ def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
     assert absent.open_turn_roots(**keys) == ()
     assert absent.claim_open_turn_roots(open_turn=40, **keys) == ()
     absent.discard_matching_work(lambda scope, _node: discarded.append(scope) or True, **keys)
-    assert absent.submission_open_for(scope) is None
+    assert absent.non_terminal_submission_open_for(scope) is None
     assert discarded == []
 
 
@@ -405,7 +405,7 @@ def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():
         "open_turn_roots",
         "claim_open_turn_roots",
         "discard_matching_work",
-        "submission_open_for",
+        "non_terminal_submission_open_for",
     }
     for name in members:
         stand_in = inspect.signature(getattr(absent, name))

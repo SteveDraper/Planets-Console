@@ -30,8 +30,11 @@ class SubmissionOpen:
 
 
 class SubmissionOpenReader(Protocol):
-    """Reads the submission open of one in-memory compute node."""
+    """Reads the submission open of one in-flight compute node."""
 
-    def submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
-        """Submission open of one node, or None when that scope is not in memory."""
+    def non_terminal_submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
+        """Submission open of one in-memory node that has not reached a final state.
+
+        None when that scope is not in memory or its node is terminal.
+        """
         ...

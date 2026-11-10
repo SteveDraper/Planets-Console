@@ -91,7 +91,7 @@ def off_mode_persist_decision(
     host_turn: int,
     mark: FleetEvidenceMark,
     stored_generation: int | None,
-    on_walk: bool = False,
+    on_walk: bool,
 ) -> OffModePersistDecision:
     """One table for a scoreboard persist and for the fleet merge at ``host_turn``.
 
@@ -104,13 +104,15 @@ def off_mode_persist_decision(
     3. Backfill off, an open turn, and ``host_turn`` is the open turn: STAMP.
     4. Anything else: BUMP.
 
-    ``is_catch_up`` and ``stored_generation`` do not change this
-    classification. A catch-up hop does not run a scoreboard solve.
+    ``is_catch_up`` and ``stored_generation`` are fleet-merge inputs and do
+    not change this classification. A catch-up hop does not run a scoreboard
+    solve.
 
     Fleet merge: a catch-up hop, any turn that is not the open turn, and every
     turn while backfill is on stamps the current mark. The open turn's own
     merge keeps ``stored_generation``, or 0 when the file is missing. ``mark``
-    and ``on_walk`` do not change the kept generation.
+    and ``on_walk`` are scoreboard inputs and do not change the kept
+    generation.
     """
     if on_walk:
         mark_persist = MarkPersist.STAMP

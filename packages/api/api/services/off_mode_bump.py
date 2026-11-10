@@ -101,7 +101,7 @@ class _AbsentProcessOrchestrator(InFlightOrchestrator):
     ) -> None:
         return
 
-    def submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
+    def non_terminal_submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
         """No in-memory node, so no submission open."""
         return None
 

@@ -85,6 +85,27 @@ def test_on_walk_scoreboard_persist_stamps_and_a_stray_persist_bumps(sample_turn
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 1
 
 
+def test_scoreboard_persist_after_the_on_walk_node_reached_a_final_state_bumps(sample_turn):
+    """A retained terminal on-walk node is not an in-flight on-walk."""
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    persistence = fleet_persistence(ctx)
+    orchestrator = submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+    scope = shell_scope(ctx, SCORES_ANALYTIC_ID, 10, player_id)
+    assert orchestrator.nodes[scope].submission_open.on_walk
+    orchestrator.nodes[scope].state = "complete"
+
+    _invalidation(ctx, orchestrator).on_scores_row_persisted(
+        ctx.game_id, ctx.perspective, 10, player_id
+    )
+
+    assert (
+        persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 2
+    )
+    assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 1
+
+
 def test_two_open_turns_stamp_without_discarding_each_other(sample_turn):
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
@@ -93,7 +114,7 @@ def test_two_open_turns_stamp_without_discarding_each_other(sample_turn):
     orchestrator = submit_shell(ctx, SCORES_ANALYTIC_ID, 8, player_id)
     submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id, orchestrator=orchestrator)
     opens = {
-        turn: orchestrator.submission_open_for(
+        turn: orchestrator.non_terminal_submission_open_for(
             shell_scope(ctx, SCORES_ANALYTIC_ID, turn, player_id)
         )
         for turn in (8, 10)

@@ -159,6 +159,7 @@ def test_off_mode_persist_decision_is_one_table():
             host_turn=host_turn,
             mark=mark,
             stored_generation=stored_generation,
+            on_walk=False,
         )
         assert decision.mark_persist is mark_persist, name
         assert decision.merge_generation == merge_generation, name

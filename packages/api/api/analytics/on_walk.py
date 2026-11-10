@@ -134,9 +134,10 @@ def scoreboard_persist_belongs_to_on_walk(
 
     The producing scores node carries whether its submission was an on-walk.
     A node accepted while the setting was off, or by a submission that opened
-    no walk, does not belong to one.
+    no walk, does not belong to one. A node that has reached a final state is
+    no longer in flight, so a later persist at its scope does not belong to it.
     """
-    opened = orchestrator.submission_open_for(
+    opened = orchestrator.non_terminal_submission_open_for(
         ComputeScope(
             analytic_id=SCORES_ANALYTIC_ID,
             game_id=game_id,

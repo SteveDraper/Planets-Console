@@ -100,6 +100,8 @@ def observation_merge_generation(
         )
         if stored is not None:
             stored_generation = stored.evidence_generation
+    # On-walk membership classifies the scoreboard persist only; it does not
+    # change the merge generation.
     return off_mode_persist_decision(
         backfill_enabled=backfill_enabled,
         open_turn=open_turn,
@@ -107,4 +109,5 @@ def observation_merge_generation(
         host_turn=scope.turn,
         mark=mark,
         stored_generation=stored_generation,
+        on_walk=False,
     ).merge_generation
