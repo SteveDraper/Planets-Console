@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 import threading
+from typing import get_protocol_members
 
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.on_walk import scoreboard_persist_belongs_to_on_walk
@@ -13,6 +15,7 @@ from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.services.off_mode_bump import (
     DeferRecompute,
+    InFlightOrchestrator,
     LimitedRecompute,
     WakeAllRecompute,
     in_flight_orchestrator,
@@ -372,6 +375,42 @@ def test_scoreboard_persist_with_no_process_orchestrator_belongs_to_no_on_walk()
     assert not scoreboard_persist_belongs_to_on_walk(
         absent, game_id=1, perspective=1, player_id=7, host_turn=40
     )
+
+
+def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
+    absent = in_flight_orchestrator(None)
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID, game_id=1, perspective=1, turn=40, player_id=7
+    )
+    discarded: list[ComputeScope] = []
+    keys = {
+        "game_id": 1,
+        "perspective": 1,
+        "player_id": 7,
+        "analytic_ids": frozenset({SCORES_ANALYTIC_ID}),
+    }
+
+    assert absent.open_turn_roots(**keys) == ()
+    assert absent.claim_open_turn_roots(open_turn=40, **keys) == ()
+    absent.discard_matching_work(lambda scope, _node: discarded.append(scope) or True, **keys)
+    assert absent.submission_open_for(scope) is None
+    assert discarded == []
+
+
+def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():
+    absent = in_flight_orchestrator(None)
+    members = get_protocol_members(InFlightOrchestrator)
+
+    assert members == {
+        "open_turn_roots",
+        "claim_open_turn_roots",
+        "discard_matching_work",
+        "submission_open_for",
+    }
+    for name in members:
+        stand_in = inspect.signature(getattr(absent, name))
+        real = inspect.signature(getattr(ComputeOrchestrator, name))
+        assert list(stand_in.parameters.values()) == list(real.parameters.values())[1:], name
 
 
 def test_claim_open_turn_roots_returns_the_preimage_then_consumes_that_open():
