@@ -25,7 +25,11 @@ from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.injected_services import FleetComputeServices
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
+from api.analytics.military_score_inference.prior_mining.mine_stock import (
+    load_mine_stock_for_category,
+)
 from api.compute.runtime import peek_compute_orchestrator
+from api.concepts.game_category import GameCategory
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -44,6 +48,17 @@ def memory_backend():
     with open(ASSETS_DIR / "turn_sample.json") as handle:
         backend.put("games/628580/1/turns/111", json.load(handle))
     return backend
+
+
+@pytest.fixture(autouse=True)
+def parsed_mine_stock_asset():
+    """Parse the standard mine-stock asset before any timed wait.
+
+    The first scores solve in a process parses that multi-megabyte YAML, which takes
+    longer than these tests wait for a stream event. The parse is cached for the
+    process, so a test that ran earlier is not the one that pays for it.
+    """
+    load_mine_stock_for_category(GameCategory.STANDARD)
 
 
 def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:
