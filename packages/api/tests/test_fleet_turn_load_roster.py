@@ -86,7 +86,7 @@ def test_generation_behind_ledger_is_painted_before_scheduling(sample_turn):
         player_id,
         _stored_ship_ledger(sample_turn, player_id),
     )
-    services.persistence._bump_durable_evidence_mark(
+    services.persistence._evidence_mark_store.bump_durable(
         sample_turn.game.id,
         sample_turn.player.id,
         player_id,
@@ -227,7 +227,7 @@ def test_stream_yields_stored_ledger_without_running_the_chain(sample_turn, monk
         player_id,
         _stored_ship_ledger(sample_turn, player_id),
     )
-    services.persistence._bump_durable_evidence_mark(
+    services.persistence._evidence_mark_store.bump_durable(
         sample_turn.game.id,
         sample_turn.player.id,
         player_id,

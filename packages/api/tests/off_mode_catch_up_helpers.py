@@ -79,8 +79,7 @@ def write_evidence_mark(
         evidence_generation=generation,
         applies_from_turn=applies_from,
     )
-    persistence._evidence_marks[(game_id, perspective, player_id)] = mark
-    persistence._write_evidence_mark(game_id, perspective, player_id, mark)
+    persistence.update_evidence_mark(game_id, perspective, player_id, lambda _: mark)
 
 
 def context_at_turn(sample_turn, turn_number: int):

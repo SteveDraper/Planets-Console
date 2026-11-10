@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterable, Iterator, Mapping
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from types import MappingProxyType
 
 from api.analytics.fleet.constants import (
     ANALYTIC_ID,
-    FLEET_EVIDENCE_MARK_SEGMENT,
     FLEET_MATERIALIZATION_VERSION,
 )
+from api.analytics.fleet.evidence_mark_store import FleetEvidenceMarkStore
 from api.analytics.fleet.identity_change import (
     OnFleetAgeIdentityChangedCallback,
     notify_fleet_age_identity_if_changed,
@@ -21,12 +19,15 @@ from api.analytics.fleet.identity_change import (
 )
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
 from api.analytics.fleet.serialization import (
-    fleet_evidence_mark_from_json,
-    fleet_evidence_mark_to_json,
     fleet_ledger_is_ensure_final,
     is_current_fleet_materialization_version,
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
+)
+from api.analytics.fleet.stored_documents import (
+    delete_if_present,
+    list_segments,
+    read_json_object,
 )
 from api.analytics.fleet.types import (
     STAMP_CURRENT_EVIDENCE_MARK,
@@ -36,7 +37,7 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
     StampCurrentEvidenceMark,
 )
-from api.errors import DiscardedWorkRefused, NotFoundError, ValidationError
+from api.errors import DiscardedWorkRefused, ValidationError
 from api.serialization.backfill_earlier_turns import read_backfill_earlier_turns
 from api.storage.base import StorageBackend
 
@@ -59,14 +60,6 @@ def _ledger_evidence_generation(
 
 
 DeferredNotification = Callable[[], None]
-
-_ABSENT_EVIDENCE_MARK = FleetEvidenceMark()
-
-_EvidenceMarkKey = tuple[int, int, int]
-_assumed_evidence_marks: ContextVar[Mapping[_EvidenceMarkKey, FleetEvidenceMark]] = ContextVar(
-    "assumed_fleet_evidence_marks",
-    default=MappingProxyType({}),
-)
 
 
 @dataclass(frozen=True)
@@ -197,11 +190,11 @@ class FleetSnapshotPersistenceService:
         self._invalidation_generation: dict[tuple[int, int, int], int] = {}
         # Turn-scoped: scores@N epoch tracks fleet@(N-1) only.
         self._turn_invalidation_generation: dict[tuple[int, int, int, int], int] = {}
-        self._evidence_marks: dict[tuple[int, int, int], FleetEvidenceMark] = {}
         self._known_ledger_turns: dict[tuple[int, int, int], set[int]] = {}
         # Re-entrant so a stamp can hold this lock across helpers that also take it.
         # That hold runs from the epoch compare through the ledger write.
         self._generation_lock = threading.RLock()
+        self._evidence_mark_store = FleetEvidenceMarkStore(storage, self._generation_lock)
 
     @staticmethod
     def ledger_prefix(game_id: int, perspective: int, turn_number: int) -> str:
@@ -221,7 +214,7 @@ class FleetSnapshotPersistenceService:
 
     @staticmethod
     def evidence_mark_key(game_id: int, perspective: int, player_id: int) -> str:
-        return f"games/{game_id}/{perspective}/analytics/{FLEET_EVIDENCE_MARK_SEGMENT}/{player_id}"
+        return FleetEvidenceMarkStore.key(game_id, perspective, player_id)
 
     def get_ledger(
         self,
@@ -296,7 +289,7 @@ class FleetSnapshotPersistenceService:
                 self._write_player_ledger(game_id, perspective, turn_number, player_id, to_store)
                 self._remember_ledger_turn(game_id, perspective, player_id, turn_number)
                 if to_store.provenance.is_final:
-                    self._advance_evidence_mark_after_boundary_write(
+                    self._evidence_mark_store.advance_after_boundary_write(
                         game_id,
                         perspective,
                         player_id,
@@ -487,44 +480,17 @@ class FleetSnapshotPersistenceService:
         player_id: int,
     ) -> FleetEvidenceMark:
         """The stored mark, or the mark assumed in this context while none is stored."""
-        key = (game_id, perspective, player_id)
-        stored = self._stored_evidence_mark(key)
-        if stored != _ABSENT_EVIDENCE_MARK:
-            return stored
-        return _assumed_evidence_marks.get().get(key, stored)
+        return self._evidence_mark_store.get(game_id, perspective, player_id)
 
-    @contextmanager
     def assuming_evidence_mark(
         self,
         game_id: int,
         perspective: int,
         player_id: int,
         mark: FleetEvidenceMark,
-    ) -> Iterator[None]:
-        """Read ``mark`` for this player in the calling context while no mark is stored.
-
-        Nothing is written. Other threads, and a mark that is stored, are
-        unaffected. ``update_evidence_mark`` always sees the stored mark.
-        """
-        assumed = dict(_assumed_evidence_marks.get())
-        assumed[(game_id, perspective, player_id)] = mark
-        token = _assumed_evidence_marks.set(MappingProxyType(assumed))
-        try:
-            yield
-        finally:
-            _assumed_evidence_marks.reset(token)
-
-    def _stored_evidence_mark(self, key: _EvidenceMarkKey) -> FleetEvidenceMark:
-        with self._generation_lock:
-            cached = self._evidence_marks.get(key)
-            if cached is not None:
-                return cached
-            loaded = self._read_evidence_mark(*key)
-            raced = self._evidence_marks.get(key)
-            if raced is not None:
-                return raced
-            self._evidence_marks[key] = loaded
-            return loaded
+    ) -> AbstractContextManager[None]:
+        """Read ``mark`` for this player in the calling context while no mark is stored."""
+        return self._evidence_mark_store.assuming(game_id, perspective, player_id, mark)
 
     def update_evidence_mark(
         self,
@@ -533,19 +499,8 @@ class FleetSnapshotPersistenceService:
         player_id: int,
         update: Callable[[FleetEvidenceMark], FleetEvidenceMark],
     ) -> FleetEvidenceMark:
-        """Replace one player's evidence mark under the generation lock.
-
-        ``update`` sees the mark currently stored and returns the mark to
-        keep. An equal result is not written again.
-        """
-        key = (game_id, perspective, player_id)
-        with self._generation_lock:
-            current = self._stored_evidence_mark(key)
-            updated = update(current)
-            if updated != current:
-                self._write_evidence_mark(game_id, perspective, player_id, updated)
-            self._evidence_marks[key] = updated
-            return updated
+        """Replace one player's evidence mark under the generation lock."""
+        return self._evidence_mark_store.update(game_id, perspective, player_id, update)
 
     def player_invalidation_generation(
         self,
@@ -617,7 +572,7 @@ class FleetSnapshotPersistenceService:
         with self._generation_lock:
             turns = self._known_turns_from(game_id, perspective, player_id, turn_number)
             if durable:
-                self._bump_durable_evidence_mark(
+                self._evidence_mark_store.bump_durable(
                     game_id,
                     perspective,
                     player_id,
@@ -652,25 +607,11 @@ class FleetSnapshotPersistenceService:
 
     def delete_evidence_mark(self, game_id: int, perspective: int, player_id: int) -> bool:
         """Remove one player's evidence mark. Return whether a file was deleted."""
-        deleted = self._delete_if_present(
-            self.evidence_mark_key(game_id, perspective, player_id),
-        )
-        with self._generation_lock:
-            self._evidence_marks.pop((game_id, perspective, player_id), None)
-        return deleted
+        return self._evidence_mark_store.delete(game_id, perspective, player_id)
 
     def delete_evidence_marks(self, game_id: int, perspective: int) -> list[str]:
         """Remove every evidence mark for one perspective. Return deleted keys."""
-        prefix = f"games/{game_id}/{perspective}/analytics/{FLEET_EVIDENCE_MARK_SEGMENT}"
-        deleted: list[str] = []
-        for segment in self._list_segments(prefix):
-            if not segment.isdigit():
-                continue
-            player_id = int(segment)
-            key = self.evidence_mark_key(game_id, perspective, player_id)
-            if self.delete_evidence_mark(game_id, perspective, player_id):
-                deleted.append(key)
-        return deleted
+        return self._evidence_mark_store.delete_all(game_id, perspective)
 
     def _ledger_persisted_notification_if_needed(
         self,
@@ -765,82 +706,6 @@ class FleetSnapshotPersistenceService:
     ) -> None:
         self._on_fleet_age_identity_changed = callback
 
-    def _bump_durable_evidence_mark(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        host_turn: int,
-    ) -> FleetEvidenceMark:
-        """Advance the mark. Do not move ``appliesFromTurn`` forward over a gap."""
-        with self._generation_lock:
-            current = self._evidence_marks.get((game_id, perspective, player_id))
-            if current is None:
-                current = self._read_evidence_mark(game_id, perspective, player_id)
-            applies_from = current.applies_from_turn
-            if applies_from is None or host_turn < applies_from:
-                applies_from = host_turn
-            updated = FleetEvidenceMark(
-                evidence_generation=current.evidence_generation + 1,
-                applies_from_turn=applies_from,
-            )
-            self._write_evidence_mark(game_id, perspective, player_id, updated)
-            self._evidence_marks[(game_id, perspective, player_id)] = updated
-            return updated
-
-    def _advance_evidence_mark_after_boundary_write(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        turn_number: int,
-        evidence_generation: int,
-    ) -> None:
-        """After a final ledger at the bound, the next turn is the new bound.
-
-        The generation is unchanged. A crash before this write leaves the bound
-        on the turn just stored; that ledger still matches the generation, and
-        later turns do not.
-        """
-        with self._generation_lock:
-            key = (game_id, perspective, player_id)
-            current = self._evidence_marks.get(key)
-            if current is None:
-                current = self._read_evidence_mark(game_id, perspective, player_id)
-            if current.applies_from_turn != turn_number:
-                return
-            if current.evidence_generation != evidence_generation:
-                return
-            updated = FleetEvidenceMark(
-                evidence_generation=current.evidence_generation,
-                applies_from_turn=turn_number + 1,
-            )
-            self._write_evidence_mark(game_id, perspective, player_id, updated)
-            self._evidence_marks[key] = updated
-
-    def _read_evidence_mark(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-    ) -> FleetEvidenceMark:
-        data = self._read_json_object(self.evidence_mark_key(game_id, perspective, player_id))
-        if data is None:
-            return _ABSENT_EVIDENCE_MARK
-        return fleet_evidence_mark_from_json(data)
-
-    def _write_evidence_mark(
-        self,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        mark: FleetEvidenceMark,
-    ) -> None:
-        self._storage.put(
-            self.evidence_mark_key(game_id, perspective, player_id),
-            fleet_evidence_mark_to_json(mark),
-        )
-
     def _read_player_ledger(
         self,
         game_id: int,
@@ -848,7 +713,8 @@ class FleetSnapshotPersistenceService:
         turn_number: int,
         player_id: int,
     ) -> PersistedFleetLedger | None:
-        data = self._read_json_object(
+        data = read_json_object(
+            self._storage,
             self.ledger_key(game_id, perspective, turn_number, player_id),
         )
         if data is None:
@@ -888,7 +754,8 @@ class FleetSnapshotPersistenceService:
         player_id: int,
     ) -> bool:
         """Remove the ledger file. Return whether a file was present."""
-        return self._delete_if_present(
+        return delete_if_present(
+            self._storage,
             self.ledger_key(game_id, perspective, turn_number, player_id),
         )
 
@@ -900,34 +767,10 @@ class FleetSnapshotPersistenceService:
     ) -> list[int]:
         prefix = self.ledger_prefix(game_id, perspective, turn_number)
         player_ids: list[int] = []
-        for segment in self._list_segments(prefix):
+        for segment in list_segments(self._storage, prefix):
             if segment.isdigit():
                 player_ids.append(int(segment))
         return sorted(player_ids)
-
-    def _list_segments(self, prefix: str) -> list[str]:
-        try:
-            return self._storage.list(prefix)
-        except NotFoundError, ValidationError:
-            return []
-
-    def _read_json_object(self, key: str) -> dict[str, object] | None:
-        try:
-            data = self._storage.get(key)
-        except NotFoundError:
-            return None
-        if data is None:
-            return None
-        if not isinstance(data, dict):
-            raise ValidationError(f"stored fleet document at {key} must be a JSON object")
-        return data
-
-    def _delete_if_present(self, key: str) -> bool:
-        try:
-            self._storage.delete(key)
-        except NotFoundError:
-            return False
-        return True
 
     def _remember_ledger_turn(
         self,
@@ -980,7 +823,7 @@ class FleetSnapshotPersistenceService:
     def _stored_turn_numbers(self, game_id: int, perspective: int) -> list[int]:
         turns_prefix = f"games/{game_id}/{perspective}/turns"
         turn_numbers: list[int] = []
-        for segment in self._list_segments(turns_prefix):
+        for segment in list_segments(self._storage, turns_prefix):
             if segment.isdigit():
                 turn_numbers.append(int(segment))
         return sorted(turn_numbers)
