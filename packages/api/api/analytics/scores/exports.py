@@ -671,4 +671,5 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     is_persisted=is_scores_export_persisted,
     is_ensure_satisfied=is_scores_export_ensure_satisfied,
     is_in_progress=is_scores_export_in_progress,
+    backfill_rewalks_satisfied_scope=True,
 )

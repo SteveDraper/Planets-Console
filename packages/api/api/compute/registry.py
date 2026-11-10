@@ -12,6 +12,7 @@ from api.compute.profile import (
     AnalyticComputeProfile,
     ComputeStepSpec,
 )
+from api.compute.root_plan import OpenRootPlanFn
 from api.compute.scope import ScopeKeySpec
 from api.compute.wire import BuildStepJobWireFn, RunStepFn
 from api.validation import require_non_empty_string
@@ -27,6 +28,7 @@ class AnalyticComputeRegistration:
     persistence_policy: PersistencePolicy
     build_step_job_wire: Mapping[str, BuildStepJobWireFn]
     run_step: Mapping[str, RunStepFn]
+    open_root_plan: OpenRootPlanFn
 
 
 def _mapping_from_pairs(
@@ -156,6 +158,7 @@ def validate_turn_analytic_compute_registration(
         persistence_policy=persistence_policy,
         build_step_job_wire=build_step_job_wire,
         run_step=run_step,
+        open_root_plan=registration.open_root_plan,
     )
 
 

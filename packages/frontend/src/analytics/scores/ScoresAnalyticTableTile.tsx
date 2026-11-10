@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchAnalyticTable } from '../../api/bff'
 import type {
   AnalyticShellScope,
   ScoresInferenceRowDetail,
@@ -12,11 +11,10 @@ import { useAnalyticDiagnosticsStore } from '../../stores/analyticDiagnostics'
 import { useScoresTablePreferencesStore } from '../../stores/scoresTablePreferences'
 import { AnalyticTableGrid } from '../AnalyticTableGrid'
 import type { ShellAnalyticTableViewProps } from '../shellAnalyticRegistry'
-import { scoresAnalyticTableQueryKey } from './api'
 import { scoresDiagnosticsFromTable } from './diagnosticsFromTable'
 import { ScoresTableView } from './ScoresTableView'
-import { useGlobalInferencePause } from './useGlobalInferencePause'
-import { useScoresInferenceByRow } from './useScoresInferenceByRow'
+import { scoresAnalyticTableQueryOptions } from './scoresAnalyticTableQueryOptions'
+import { useScoresShellStreamSession } from './scoresShellSession'
 
 function buildScoresTableWithInference(
   data: TableDataResponse,
@@ -32,38 +30,19 @@ function buildScoresTableWithInference(
 }
 
 function ScoresAnalyticTableBody({
-  analyticId,
   analyticScope,
   fetchEnabled,
 }: {
-  analyticId: string
   analyticScope: AnalyticShellScope
   fetchEnabled: boolean
 }) {
   const scoresTableParams = useScoresTablePreferencesStore((s) => s.scoresTableParams)
   const setScoresDiagnostics = useAnalyticDiagnosticsStore((state) => state.setScoresDiagnostics)
   const { data, isPending, error } = useQuery({
-    queryKey: scoresAnalyticTableQueryKey(analyticScope, scoresTableParams),
-    queryFn: () => fetchAnalyticTable(analyticId, analyticScope),
+    ...scoresAnalyticTableQueryOptions(analyticScope, scoresTableParams),
     enabled: fetchEnabled,
   })
-  const inferenceEnabled =
-    scoresTableParams.includeBuildInference && data?.buildInferenceAvailable !== false
-  const buildInferenceAvailable = data == null ? undefined : data.buildInferenceAvailable !== false
-  const globalInferencePauseEnabled =
-    fetchEnabled &&
-    scoresTableParams.includeBuildInference &&
-    buildInferenceAvailable === true
-  const globalInferencePause = useGlobalInferencePause(
-    analyticScope,
-    globalInferencePauseEnabled
-  )
-  const { inferenceByRow } = useScoresInferenceByRow(
-    data,
-    analyticScope,
-    inferenceEnabled && fetchEnabled,
-    { onGlobalPauseChange: globalInferencePause.syncPausedFromStream }
-  )
+  const { inferenceByRow, globalInferencePause } = useScoresShellStreamSession()
   const scoresTableWithInference =
     data != null && inferenceByRow != null
       ? buildScoresTableWithInference(data, inferenceByRow)
@@ -90,9 +69,8 @@ function ScoresAnalyticTableBody({
   return <AnalyticTableGrid isPending={isPending} error={error} data={data} />
 }
 
-/** Scores table body: REST grid plus tile-lived inference stream. */
+/** Scores table body. The shell-lived stream owns the inference session. */
 export function ScoresAnalyticTableTile({
-  analyticId,
   analyticScope,
   fetchEnabled,
 }: ShellAnalyticTableViewProps) {
@@ -109,7 +87,6 @@ export function ScoresAnalyticTableTile({
 
   return (
     <ScoresAnalyticTableBody
-      analyticId={analyticId}
       analyticScope={analyticScope}
       fetchEnabled={scoresFetchEnabled}
     />

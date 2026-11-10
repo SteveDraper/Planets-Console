@@ -10,6 +10,7 @@ from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHul
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     InferenceStreamDomainEvent,
+    WorkAccepted,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
     _TERMINAL_EVENT_TYPES,
@@ -357,6 +358,13 @@ class InferenceTableStreamController(
                 force_schedule=force_schedule,
             ),
             before_collect_cancels=self._refresh_host_turn,
+        )
+
+    def emit_work_accepted(self, player_id: int) -> None:
+        """Queue this player's inference work_accepted event and wake the multiplex."""
+        self.enqueue_on_scheduled_row(
+            player_id,
+            lambda row: row.session.event_queue.put(WorkAccepted()),
         )
 
     def attach(self) -> None:

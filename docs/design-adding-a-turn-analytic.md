@@ -278,7 +278,7 @@ An unregistered selectable id is not an error: generic checkbox + generic table.
 | Custom MainArea table body | `TableView` |
 | Extra GET query params on generic table/map fetch | Appender in `shellAnalyticQueryParams.ts` (`SHELL_TABLE_QUERY_APPENDERS` / `SHELL_MAP_QUERY_APPENDERS`). The shell registry composes `queryParams` onto the registration. `bff.ts` imports that module so it does not pull React chrome. Do not set `queryParams` on `shell.tsx`. |
 | GameInfo inactivity (grey/disable without dropping persisted enablement) | `availability(gameInfo) => string \| null` |
-| Table stream | `stream`: `shellLivedStream({ hook, Provider })` (shell-lived) or `{ lifetime: 'tile' }` |
+| Table stream | `stream`: `shellLivedStream({ hook, Provider })` (shell-lived; every table stream is mounted above view mode) |
 
 `renderSidebar` receives `ShellAnalyticSidebarContext`: `viewMode`, `catalogItem`, `enabled`, `onToggle`, plus shell-owned `turnDataReady` and `analyticScope` so tiles do not re-derive ensure/scope.
 
@@ -366,7 +366,7 @@ Use this before opening a PR:
 
 | Analytic | Kind | Read |
 |----------|------|------|
-| Scores | Table-only, custom sidebar + tile-lived inference | `api/analytics/scores.py`, `bff/analytics/scores.py`, `src/analytics/scores/shell.tsx` |
+| Scores | Table-only, custom sidebar + shell-lived inference while build inference is on | `api/analytics/scores.py`, `bff/analytics/scores.py`, `src/analytics/scores/shell.tsx` |
 | base-map | Always-on map layer | `api/analytics/base_map.py`, `bff/analytics/base_map.py` |
 | Connections | Map overlay + query params + frontend controls | [design-connections-analytic.md](design-connections-analytic.md) |
 | Minefields | Map-only known-field pane + sidebar prefs | [design-minefields-analytic.md](design-minefields-analytic.md) |

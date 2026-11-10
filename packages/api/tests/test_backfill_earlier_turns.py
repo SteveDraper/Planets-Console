@@ -1,6 +1,8 @@
 """Backfill earlier turns: one boolean per game, read without submitting a walk."""
 
 import json
+import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ from api.analytics.export_context import (
     AnalyticQueryContext,
     backfill_earlier_turns_disabled,
 )
+from api.analytics.on_walk_live import submit_on_walks_for_live_streams
 from api.analytics.options import TurnAnalyticsOptions
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.config import ApiConfig, set_config
@@ -100,6 +103,84 @@ def test_explicit_false_is_stored_and_still_reads_off(service, storage):
     assert storage.get(backfill_earlier_turns_store_key(_GAME_ID)) == {
         BACKFILL_EARLIER_TURNS_FIELD: False
     }
+
+
+def test_off_to_on_notifies_once(storage):
+    notified: list[int] = []
+    service = GameService(storage, on_backfill_enabled=notified.append)
+    service.set_backfill_earlier_turns(_GAME_ID, False)
+    assert notified == []
+    service.set_backfill_earlier_turns(_GAME_ID, True)
+    assert notified == [_GAME_ID]
+    service.set_backfill_earlier_turns(_GAME_ID, True)
+    assert notified == [_GAME_ID]
+    service.set_backfill_earlier_turns(_GAME_ID, False)
+    assert notified == [_GAME_ID]
+    service.set_backfill_earlier_turns(_GAME_ID, True)
+    assert notified == [_GAME_ID, _GAME_ID]
+
+
+def test_failing_listener_does_not_fail_the_save(storage, caplog):
+    def fail(game_id: int) -> None:
+        raise RuntimeError("scan blew up")
+
+    service = GameService(storage, on_backfill_enabled=fail)
+    with caplog.at_level(logging.ERROR, logger="api.services.game_service"):
+        assert service.set_backfill_earlier_turns(_GAME_ID, True) is True
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is True
+    failures = [record for record in caplog.records if record.exc_info is not None]
+    assert len(failures) == 1
+    assert str(_GAME_ID) in failures[0].getMessage()
+    assert failures[0].exc_info[1].args == ("scan blew up",)
+
+
+class _ReadersMeetStorage:
+    """Holds each finished Backfill earlier turns read until a second reader or a timeout."""
+
+    def __init__(self, inner: MemoryAssetBackend) -> None:
+        self._inner = inner
+        self._readers_meet = threading.Barrier(2, timeout=0.2)
+
+    def get(self, key: str):
+        if key != backfill_earlier_turns_store_key(_GAME_ID):
+            return self._inner.get(key)
+        try:
+            return self._inner.get(key)
+        finally:
+            try:
+                self._readers_meet.wait()
+            except threading.BrokenBarrierError:
+                pass
+
+    def put(self, key: str, value) -> None:
+        self._inner.put(key, value)
+
+    def delete(self, key: str) -> None:
+        self._inner.delete(key)
+
+    def list(self, prefix: str) -> list[str]:
+        return self._inner.list(prefix)
+
+
+def test_concurrent_enables_notify_once(storage):
+    shared = _ReadersMeetStorage(storage)
+    notified: list[int] = []
+    services = [GameService(shared, on_backfill_enabled=notified.append) for _ in range(2)]
+    writers = [
+        threading.Thread(target=service.set_backfill_earlier_turns, args=(_GAME_ID, True))
+        for service in services
+    ]
+    for writer in writers:
+        writer.start()
+    for writer in writers:
+        writer.join()
+    assert notified == [_GAME_ID]
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is True
+
+
+def test_service_stack_submits_live_on_walks_when_backfill_turns_on(storage):
+    stack = build_service_stack(storage)
+    assert stack.games._on_backfill_enabled is submit_on_walks_for_live_streams
 
 
 def test_read_and_write_submit_no_walk(service, monkeypatch):

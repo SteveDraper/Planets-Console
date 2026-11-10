@@ -13,6 +13,7 @@ from api.analytics.fleet.compute_orchestration import (
     build_fleet_observation_leg_job_wire,
 )
 from api.analytics.fleet.constants import ANALYTIC_ID
+from api.analytics.on_walk import open_on_walk_root_plan
 from api.analytics.registration import TurnAnalyticRegistration
 from api.compute.wire import StepResult
 from api.models.game import TurnInfo
@@ -132,4 +133,5 @@ REGISTRATION = TurnAnalyticRegistration(
         (FLEET_OBSERVATION_LEG, _run_fleet_observation_leg),
         (FLEET_FINALIZATION_LEG, _run_fleet_finalization_leg),
     ),
+    open_root_plan=open_on_walk_root_plan,
 )

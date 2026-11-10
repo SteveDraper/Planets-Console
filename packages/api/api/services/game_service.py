@@ -1,5 +1,7 @@
 """Game info reads and Planets.nu refresh."""
 
+import logging
+import threading
 from collections.abc import Callable
 
 from dacite.exceptions import DaciteError
@@ -25,11 +27,22 @@ from api.transport.sector_display import (
     sector_display_name_from_stored_payload,
 )
 
+logger = logging.getLogger(__name__)
+
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
+# Serializes the read and the write of a Backfill earlier turns choice, so
+# exactly one concurrent writer sees the off-to-on transition. Every service
+# instance shares it because the Core router builds a stack per request.
+_backfill_earlier_turns_write_lock = threading.Lock()
 
 
 # (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.
 OnGameInfoRefreshed = Callable[[int, GameInfo | None, GameInfo], None]
+# Fired when Backfill earlier turns transitions from off to on for one game.
+# The listener must not block on the work it starts; its return value is ignored.
+# The service catches and logs any ``Exception`` it raises, so a failing listener
+# never fails the settings write.
+OnBackfillEnabled = Callable[[int], object]
 
 
 def clear_sector_title_cache() -> None:
@@ -45,10 +58,12 @@ class GameService:
         credentials: CredentialService | None = None,
         *,
         on_game_info_refreshed: OnGameInfoRefreshed | None = None,
+        on_backfill_enabled: OnBackfillEnabled | None = None,
     ) -> None:
         self._storage = storage
         self._credentials = credentials or CredentialService(storage)
         self._on_game_info_refreshed = on_game_info_refreshed
+        self._on_backfill_enabled = on_backfill_enabled
 
     @staticmethod
     def is_game_finished(info: GameInfo) -> bool:
@@ -205,13 +220,28 @@ class GameService:
         """Store one Backfill earlier turns choice for ``game_id``.
 
         The Settings checkbox is the only writer. The value is shared by every
-        perspective of the game.
+        perspective of the game. Turning the setting from off to on starts
+        on-walks for live fleet and scoreboard streams of this game and
+        returns without waiting for their submits. The stored value is the
+        outcome of the call: a listener that raises is logged with the game id
+        and the call still returns ``enabled``. Turning it off leaves an
+        accepted walk running.
         """
         if not isinstance(enabled, bool):
             raise ValidationError("backfillEarlierTurns must be a boolean.")
         self.get_game_info(game_id)
-        self._storage.put(
-            backfill_earlier_turns_store_key(game_id),
-            backfill_earlier_turns_document(enabled),
-        )
+        with _backfill_earlier_turns_write_lock:
+            was_enabled = read_backfill_earlier_turns(self._storage, game_id)
+            self._storage.put(
+                backfill_earlier_turns_store_key(game_id),
+                backfill_earlier_turns_document(enabled),
+            )
+        if enabled and not was_enabled and self._on_backfill_enabled is not None:
+            try:
+                self._on_backfill_enabled(game_id)
+            except Exception:
+                logger.exception(
+                    "Backfill earlier turns listener failed for game %s; the setting stays on",
+                    game_id,
+                )
         return enabled

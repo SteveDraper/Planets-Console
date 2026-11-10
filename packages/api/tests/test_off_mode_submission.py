@@ -56,8 +56,6 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
     Turn 40's scoreboard solve is scheduled and that persist stamps. Turn 41
     stays on disk.
     """
-    from api.analytics.fleet.exports import fleet_ensure_dependencies_for
-
     host, ctx = context_at_turn(sample_turn, 41)
     player_id = first_player_id(host)
     services = ctx.export_services[FLEET_ANALYTIC_ID]
@@ -94,9 +92,6 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
             perspective=ctx.perspective,
             turn=41,
             player_id=player_id,
-        )
-        fleet_ensure_dependencies_for(
-            ctx, export_41, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()
         )
         off_mode_ensure_dependencies(
             ctx, export_41, backfill_earlier_turns=ctx.backfill_earlier_turns_enabled()

@@ -19,6 +19,7 @@ from api.streaming.table_stream.registry_catalog import (
     active_table_stream_bindings,
     active_table_stream_turns,
     active_table_stream_turns_by_analytic,
+    live_table_streams,
     reset_table_stream_registry_catalog_for_tests,
 )
 
@@ -118,3 +119,24 @@ def test_active_table_stream_turns_filters_game_perspective_and_analytic() -> No
     assert active_table_stream_turns(10, 3, ("fleet",)) == frozenset({7})
     assert active_table_stream_turns(10, 2, ()) == frozenset()
     assert active_table_stream_turns(10, 2, ("homeworld-locator",)) == frozenset()
+
+
+def test_live_table_streams_yield_attached_controllers_that_report_liveness() -> None:
+    fleet_scope = FleetTableStreamScope(game_id=10, perspective=2, turn_number=8)
+    fleet_controller = object()
+    get_fleet_table_stream_registry().attach(fleet_scope, fleet_controller)
+    get_inference_table_stream_registry().attach(
+        InferenceStreamScope(game_id=10, perspective=2, turn_number=8),
+        object(),
+    )
+
+    (stream,) = live_table_streams(("fleet", "homeworld-locator"))
+
+    assert (stream.analytic_id, stream.scope, stream.controller) == (
+        "fleet",
+        fleet_scope,
+        fleet_controller,
+    )
+    assert stream.is_live()
+    reset_fleet_table_stream_registry_for_tests()
+    assert not stream.is_live()

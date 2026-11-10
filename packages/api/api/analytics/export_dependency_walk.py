@@ -71,6 +71,13 @@ def walk_dependency_tree(
     force_root: bool = False,
     backfill_earlier_turns: bool,
 ) -> DependencyWalkResult:
+    """Collect the ensure work for ``scope`` and its dependencies, leaves first.
+
+    A scope is queued when it needs ensure work itself (or ``force_root``) or
+    when its own dependency walk scheduled work. A satisfied scope walks its
+    dependencies only while Backfill earlier turns is on and its catalog sets
+    ``backfill_rewalks_satisfied_scope``.
+    """
     result = DependencyWalkResult()
     seen_pending: set[tuple[str, ExportScope]] = set()
     seen_missing: set[tuple[str, int, int | None]] = set()
@@ -86,7 +93,11 @@ def walk_dependency_tree(
         catalog = ctx.export_registry.get(analytic_id)
         if catalog is None or catalog.is_empty:
             return result
-        if not force_root and not _dependency_needs_processing(ctx, analytic_id, scope, catalog):
+        needs_scope = force_root or _dependency_needs_processing(ctx, analytic_id, scope, catalog)
+        walks_dependencies = needs_scope or (
+            backfill_earlier_turns and catalog.backfill_rewalks_satisfied_scope
+        )
+        if not walks_dependencies:
             return result
 
         for dependency in catalog.applicable_ensure_dependencies(
@@ -136,15 +147,17 @@ def walk_dependency_tree(
                     _pending_ensure_key,
                 )
 
-        result.missing_steps.append(
-            EnsureMissingStep(
-                analytic_id=analytic_id,
-                turn=scope.turn,
-                player_id=scope.player_id,
-                status="not_persisted",
-            ),
-        )
-        result.pending_ensure.append((analytic_id, scope, catalog))
+        schedules_scope = needs_scope or bool(result.pending_ensure)
+        if schedules_scope:
+            result.missing_steps.append(
+                EnsureMissingStep(
+                    analytic_id=analytic_id,
+                    turn=scope.turn,
+                    player_id=scope.player_id,
+                    status="not_persisted",
+                ),
+            )
+            result.pending_ensure.append((analytic_id, scope, catalog))
         return result
     finally:
         visiting.discard(visit_key)

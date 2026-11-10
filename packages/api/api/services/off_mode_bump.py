@@ -11,19 +11,56 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TypeAlias
+from typing import Protocol, TypeAlias
 
-from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen, SubmissionOpenReader
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns_by_analytic
 
-_OPEN_TURN_ANALYTICS = frozenset({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID})
+
+class InFlightOrchestrator(SubmissionOpenReader, Protocol):
+    """The orchestrator queries and discard a persist-time bump uses.
+
+    ``ComputeOrchestrator`` satisfies it structurally. The absent-process
+    stand-in subclasses it, so its signatures are checked against this one.
+    """
+
+    def open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+        turn: int | None = None,
+    ) -> tuple[OpenTurnRoot, ...]: ...
+
+    def claim_open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        open_turn: int,
+        analytic_ids: frozenset[str],
+    ) -> tuple[OpenTurnRoot, ...]: ...
+
+    def discard_matching_work(
+        self,
+        should_discard: Callable[[ComputeScope, ComputeNodeRun], bool],
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+    ) -> None: ...
 
 
-class _AbsentProcessOrchestrator:
+class _AbsentProcessOrchestrator(InFlightOrchestrator):
     """Stand-in when this process has not created an orchestrator.
 
     A persist then has no in-flight fleet or scores work. Creating the real
@@ -31,19 +68,46 @@ class _AbsentProcessOrchestrator:
     discard is a no-op.
     """
 
-    def open_turn_roots(self, *_args: object, **_kwargs: object) -> tuple[OpenTurnRoot, ...]:
+    def open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+        turn: int | None = None,
+    ) -> tuple[OpenTurnRoot, ...]:
         return ()
 
-    def claim_open_turn_roots(self, *_args: object, **_kwargs: object) -> tuple[OpenTurnRoot, ...]:
+    def claim_open_turn_roots(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        open_turn: int,
+        analytic_ids: frozenset[str],
+    ) -> tuple[OpenTurnRoot, ...]:
         return ()
 
-    def discard_matching_work(self, *_args: object, **_kwargs: object) -> None:
+    def discard_matching_work(
+        self,
+        should_discard: Callable[[ComputeScope, ComputeNodeRun], bool],
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+    ) -> None:
         return
+
+    def non_terminal_submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
+        """No in-memory node, so no submission open."""
+        return None
 
 
 _ABSENT_PROCESS_ORCHESTRATOR = _AbsentProcessOrchestrator()
 
-InFlightOrchestrator: TypeAlias = ComputeOrchestrator | _AbsentProcessOrchestrator
 OrchestratorResolver: TypeAlias = Callable[[], ComputeOrchestrator | None]
 
 
@@ -89,7 +153,7 @@ def _player_submission_roots(
         game_id=game_id,
         perspective=perspective,
         player_id=player_id,
-        analytic_ids=_OPEN_TURN_ANALYTICS,
+        analytic_ids=FLEET_WALK_ANALYTIC_IDS,
     )
 
 
@@ -110,7 +174,7 @@ def claim_player_open_roots(
         perspective=perspective,
         player_id=player_id,
         open_turn=open_turn,
-        analytic_ids=_OPEN_TURN_ANALYTICS,
+        analytic_ids=FLEET_WALK_ANALYTIC_IDS,
     )
 
 
@@ -148,7 +212,7 @@ def discard_bumped_player_work(
         game_id=game_id,
         perspective=perspective,
         player_id=player_id,
-        analytic_ids=_OPEN_TURN_ANALYTICS,
+        analytic_ids=FLEET_WALK_ANALYTIC_IDS,
     )
 
 
@@ -172,7 +236,7 @@ def live_turns_for_limited_recompute(
     """
     if not _limits_recompute(durable=durable, backfill_enabled=backfill_enabled):
         return {}
-    return active_table_stream_turns_by_analytic(game_id, perspective, _OPEN_TURN_ANALYTICS)
+    return active_table_stream_turns_by_analytic(game_id, perspective, FLEET_WALK_ANALYTIC_IDS)
 
 
 @dataclass(frozen=True)

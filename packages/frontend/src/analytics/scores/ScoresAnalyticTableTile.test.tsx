@@ -2,7 +2,10 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AnalyticShellScope } from '../../api/bff'
 import { ScoresAnalyticTableTile } from './ScoresAnalyticTableTile'
+import { ScoresShellStreamProvider } from './ScoresShellStreamContext'
+import { useScoresShellStream } from './useScoresShellStream'
 import { useScoresTablePreferencesStore } from '../../stores/scoresTablePreferences'
 import { BUILD_INFERENCE_COLUMN, SCORES_TABLE_DATA_COLUMNS } from './scoresTableColumns'
 
@@ -23,11 +26,24 @@ import { fetchAnalyticTable } from '../../api/bff'
 
 const sampleScope = { gameId: '628580', turn: 111, perspective: 1 }
 
+function ShellStreamSession({
+  analyticScope,
+  children,
+}: {
+  analyticScope: AnalyticShellScope
+  children: ReactNode
+}) {
+  const session = useScoresShellStream(analyticScope, true)
+  return <ScoresShellStreamProvider {...session}>{children}</ScoresShellStreamProvider>
+}
+
 function renderTile(ui: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(ui, {
     wrapper: ({ children }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      <QueryClientProvider client={client}>
+        <ShellStreamSession analyticScope={sampleScope}>{children}</ShellStreamSession>
+      </QueryClientProvider>
     ),
   })
 }
@@ -46,10 +62,10 @@ describe('ScoresAnalyticTableTile', () => {
     })
   })
 
-  it('fetches with analyticId from table-view props', async () => {
+  it('fetches the scores table for the scope', async () => {
     renderTile(
       <ScoresAnalyticTableTile
-        analyticId="from-table-view-props"
+        analyticId="scores"
         analyticScope={sampleScope}
         fetchEnabled
       />
@@ -59,7 +75,7 @@ describe('ScoresAnalyticTableTile', () => {
     await waitFor(() => {
       expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
     })
-    expect(fetchAnalyticTable).toHaveBeenCalledWith('from-table-view-props', sampleScope)
+    expect(fetchAnalyticTable).toHaveBeenCalledWith('scores', sampleScope)
   })
 
   it('renders the shared fallback grid from the same query without a second fetch', async () => {
@@ -114,5 +130,18 @@ describe('ScoresAnalyticTableTile', () => {
       expect(fetchAnalyticTable).toHaveBeenCalledTimes(1)
     })
     expect(fetchAnalyticTable).toHaveBeenCalledWith('scores', sampleScope)
+  })
+
+  it('requires the shell stream provider', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(() =>
+      render(
+        <QueryClientProvider client={client}>
+          <ScoresAnalyticTableTile analyticId="scores" analyticScope={sampleScope} fetchEnabled />
+        </QueryClientProvider>
+      )
+    ).toThrow('useScoresShellStreamSession must be used within ScoresShellStreamProvider')
+    consoleError.mockRestore()
   })
 })

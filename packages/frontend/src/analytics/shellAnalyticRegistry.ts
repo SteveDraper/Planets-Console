@@ -19,18 +19,16 @@ import {
   queryParamsAdaptersFor,
   type ShellAnalyticQueryParamAdapters,
 } from './shellAnalyticQueryParams'
-import type { ShellAnalyticStreamSlot, ShellLivedStreamMountSlot } from './shellLivedStream'
+import type { ShellLivedStreamMountSlot } from './shellLivedStream'
 import { stellarCartographyShellAnalytic } from './stellar-cartography/shell'
 import { visibilityShellAnalytic } from './visibility/shell'
 import { minefieldsShellAnalytic } from './minefields/shell'
 import { teamInformationShellAnalytic } from './team-information/shell'
 
 export type {
-  ShellAnalyticStreamSlot,
   ShellLivedStreamMountProps,
   ShellLivedStreamMountSlot,
   ShellLivedStreamSlot,
-  TileLivedStreamSlot,
 } from './shellLivedStream'
 
 export type ShellViewMode = 'tabular' | 'map'
@@ -65,7 +63,7 @@ export type ShellAnalyticRegistration = {
   TableView?: ComponentType<ShellAnalyticTableViewProps>
   queryParams?: ShellAnalyticQueryParamAdapters
   availability?: (gameInfo: GameInfoShellContext | null) => string | null
-  stream?: ShellAnalyticStreamSlot
+  stream?: ShellLivedStreamMountSlot
 }
 
 /** Authored in `shell.tsx`. Query-param adapters are composed from `shellAnalyticQueryParams.ts`. */
@@ -177,9 +175,6 @@ export function shellLivedStreamRegistrations(): Array<{
 }> {
   return Object.entries(shellAnalyticRegistry).flatMap(([analyticId, registration]) => {
     const stream = registration.stream
-    if (stream == null || stream.lifetime !== 'shell') {
-      return []
-    }
-    return [{ analyticId, stream }]
+    return stream == null ? [] : [{ analyticId, stream }]
   })
 }

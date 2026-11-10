@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
-from api.compute.orchestrator_submission import (
-    prepare_compute_request_dependency_chain,
-    resolve_submission_open,
-)
+from api.compute.orchestrator_submission import resolve_submission_open
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -95,36 +93,27 @@ class OrchestratorEnsureMixin:
                 unsatisfied.append((index, request))
 
         if unsatisfied:
-            resolved_unsatisfied: list[tuple[int, ResolvedComputeRequest]] = [
+            resolved_unsatisfied = [
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
-            for _index, resolved in resolved_unsatisfied:
-                bundle = resolved.resolved_bundle()
-                if bundle is not None:
-                    prepare_compute_request_dependency_chain(
-                        resolved,
-                        ctx=self._ctx_for_bundle(bundle),
-                        backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
-                    )
-            pending_inline: list[PendingInlineExecution] = []
-            pending_pool: list[PendingPoolSubmission] = []
-            with self._condition:
-                for index, resolved in resolved_unsatisfied:
-                    existing = self._nodes.get(resolved.scope)
-                    # Hollow terminal: durable gone, node still complete/failed. Drop so
-                    # default force_fresh=False can plan fresh work (F1). Leave non-terminal
-                    # nodes alone for attach / singleflight; parked wake stays explicit.
-                    if existing is not None and existing.is_terminal and not resolved.force_fresh:
-                        self._replace_terminal_node(existing)
-                    submission = self._submit_locked(resolved, wake_if_parked_only=False)
-                    if submission is None:
-                        raise RuntimeError(
-                            "ensure submit_locked returned None without wake_if_parked_only"
-                        )
-                    handle, inlines, pools = submission
-                    handles_by_index[index] = handle
-                    pending_inline.extend(inlines)
-                    pending_pool.extend(pools)
+            with ExitStack() as root_plans:
+                opened_unsatisfied = [
+                    (index, resolved, root_plans.enter_context(self._open_root_plan(resolved)))
+                    for index, resolved in resolved_unsatisfied
+                ]
+                planned_unsatisfied = [
+                    (index, self._prepare_root_planned_request(resolved, root_plan), root_plan)
+                    for index, resolved, root_plan in opened_unsatisfied
+                ]
+                pending_inline: list[PendingInlineExecution] = []
+                pending_pool: list[PendingPoolSubmission] = []
+                with self._condition:
+                    for index, planned_request, root_plan in planned_unsatisfied:
+                        self._drop_hollow_terminal_locked(planned_request)
+                        submission = self._submit_root_planned_locked(planned_request, root_plan)
+                        handles_by_index[index] = submission.handle
+                        pending_inline.extend(submission.pending_inline)
+                        pending_pool.extend(submission.pending_pool)
             self._execute_pending_inlines(tuple(pending_inline))
             self._flush_pending_pool_submissions(tuple(pending_pool))
             self._observers.drain_post_lock_callbacks()
@@ -133,3 +122,18 @@ class OrchestratorEnsureMixin:
             _wait_ensure_handle(handles_by_index[index], timeout=timeout)
             for index in range(len(requests))
         )
+
+    def _drop_hollow_terminal_locked(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+    ) -> None:
+        """Drop a terminal node left for an unsatisfied ensure scope.
+
+        Hollow terminal: durable gone, node still complete/failed. Dropping it
+        lets default force_fresh=False plan fresh work (F1). Non-terminal nodes
+        stay for attach / singleflight; parked wake stays explicit. Caller holds
+        the orchestrator lock.
+        """
+        existing = self._nodes.get(request.scope)
+        if existing is not None and existing.is_terminal and not request.force_fresh:
+            self._replace_terminal_node(existing)

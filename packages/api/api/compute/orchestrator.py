@@ -25,6 +25,7 @@ from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
 from api.compute.turn_cache import TurnInfoCache, get_process_turn_info_cache
 from api.exceptions import DiscardedWorkRefused
 from api.models.game import TurnInfo
@@ -404,6 +405,38 @@ class ComputeOrchestrator(
             elif scope.turn != turn:
                 continue
             yield scope, node
+
+    def non_terminal_submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
+        """Submission open of one in-memory node that has not reached a final state.
+
+        None when that scope is not in memory or its node is terminal.
+        """
+        with self._condition:
+            node = self._nodes.get(scope)
+            if node is None or node.is_terminal:
+                return None
+            return node.submission_open
+
+    def non_terminal_submission_opens_for_player(
+        self,
+        *,
+        game_id: int,
+        perspective: int,
+        player_id: int,
+        analytic_ids: frozenset[str],
+    ) -> tuple[SubmissionOpen, ...]:
+        """Submission opens of one player's in-memory nodes that have not reached a final state."""
+        with self._condition:
+            return tuple(
+                node.submission_open
+                for _, node in self._nodes_for_player(
+                    game_id=game_id,
+                    perspective=perspective,
+                    player_id=player_id,
+                    analytic_ids=analytic_ids,
+                )
+                if not node.is_terminal
+            )
 
     def open_turn_roots(
         self,

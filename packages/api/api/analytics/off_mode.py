@@ -3,9 +3,10 @@
 Backfill earlier turns is off by default. A stale open refreshes fleet from
 that turn back through ``appliesFromTurn`` and does not schedule scoreboard
 solves on the earlier hops. An absent mark does not walk backward. The open
-turn's own scoreboard still runs. ``off_mode_persist_decision`` is the one
-table for that scoreboard and for the fleet merge: stamp, bump, or first
-persist, and the generation the open turn's merge keeps.
+turn's own scoreboard still runs. ``off_mode_mark_persist`` decides whether
+that scoreboard stamps, bumps, or takes the first persist.
+``off_mode_merge_generation`` decides the generation a fleet merge writes.
+Both stamp on ``is_backfill_off_open_turn``.
 
 The open turn is the root of the submission the user opens. The orchestrator
 copies it onto every node of that plan. A later submission that roots at an
@@ -32,7 +33,6 @@ the walk. The stored record is read by the game service.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from enum import StrEnum
 
 from api.analytics.fleet.types import (
@@ -61,11 +61,6 @@ def ledger_matches_evidence_mark(
     return persisted.evidence_generation == mark.evidence_generation
 
 
-def mark_is_absent(mark: FleetEvidenceMark) -> bool:
-    """An absent mark is generation 0 with ``appliesFromTurn`` unset."""
-    return mark.evidence_generation == 0 and mark.applies_from_turn is None
-
-
 class MarkPersist(StrEnum):
     """What a scoreboard persist does to the player's evidence mark."""
 
@@ -74,60 +69,77 @@ class MarkPersist(StrEnum):
     FIRST_PERSIST = "first_persist"
 
 
-@dataclass(frozen=True)
-class OffModePersistDecision:
-    """Stamp, bump, or first persist, and the generation a fleet merge writes.
+def is_backfill_off_open_turn(
+    *,
+    backfill_enabled: bool,
+    open_turn: int | None,
+    host_turn: int,
+) -> bool:
+    """Whether backfill is off, an open turn is carried, and ``host_turn`` is that open turn.
 
-    ``merge_generation`` is ``STAMP_CURRENT_EVIDENCE_MARK`` when the merge
-    stamps the current mark. An int is the generation kept on the open turn's
-    approximate file so that merge does not look complete before its
-    scoreboard is stored.
+    Both the scoreboard mark persist and the fleet merge generation stamp on
+    this rule.
     """
-
-    mark_persist: MarkPersist
-    merge_generation: int | StampCurrentEvidenceMark
+    return not backfill_enabled and open_turn is not None and host_turn == open_turn
 
 
-def off_mode_persist_decision(
+def off_mode_mark_persist(
+    *,
+    on_walk: bool,
+    mark: FleetEvidenceMark,
+    backfill_enabled: bool,
+    open_turn: int | None,
+    host_turn: int,
+) -> MarkPersist:
+    """What a scoreboard persist at ``host_turn`` does to the evidence mark.
+
+    The first rule that matches decides, in this order.
+
+    1. ``on_walk`` (the persist belongs to an in-flight on-walk): STAMP, even
+       with an absent mark. The on-walk plan establishes the mark before any
+       of its scoreboards persist, so it never takes the first persist.
+    2. Absent mark: FIRST_PERSIST, which becomes generation 1.
+    3. ``is_backfill_off_open_turn``: STAMP.
+    4. Anything else: BUMP.
+    """
+    if on_walk:
+        return MarkPersist.STAMP
+    if mark.is_absent:
+        return MarkPersist.FIRST_PERSIST
+    if is_backfill_off_open_turn(
+        backfill_enabled=backfill_enabled,
+        open_turn=open_turn,
+        host_turn=host_turn,
+    ):
+        return MarkPersist.STAMP
+    return MarkPersist.BUMP
+
+
+def off_mode_merge_generation(
     *,
     backfill_enabled: bool,
     open_turn: int | None,
     is_catch_up: bool,
     host_turn: int,
-    mark: FleetEvidenceMark,
     stored_generation: int | None,
-) -> OffModePersistDecision:
-    """One table for a scoreboard persist and for the fleet merge at ``host_turn``.
+) -> int | StampCurrentEvidenceMark:
+    """Generation the fleet merge at ``host_turn`` writes.
 
-    Scoreboard: the submission's open turn, with backfill off and a mark
-    already present, stamps and does not increment. An absent mark is the
-    first persist and becomes generation 1. Every other scoreboard persist
-    bumps. ``is_catch_up`` and ``stored_generation`` do not change this
-    classification. A catch-up hop does not run a scoreboard solve.
-
-    Fleet merge: a catch-up hop, any turn that is not the open turn, and every
-    turn while backfill is on stamps the current mark. The open turn's own
-    merge keeps ``stored_generation``, or 0 when the file is missing. ``mark``
-    does not change the kept generation.
+    ``STAMP_CURRENT_EVIDENCE_MARK`` stamps the current mark. A catch-up hop,
+    and any turn where ``is_backfill_off_open_turn`` does not hold, stamps.
+    The open turn's own merge keeps ``stored_generation``, or 0 when the file
+    is missing, so that approximate file does not look complete before its
+    scoreboard is stored.
     """
-    if mark_is_absent(mark):
-        mark_persist = MarkPersist.FIRST_PERSIST
-    elif not backfill_enabled and open_turn is not None and host_turn == open_turn:
-        mark_persist = MarkPersist.STAMP
-    else:
-        mark_persist = MarkPersist.BUMP
-
-    if backfill_enabled or is_catch_up or open_turn is None or host_turn != open_turn:
-        merge_generation: int | StampCurrentEvidenceMark = STAMP_CURRENT_EVIDENCE_MARK
-    elif stored_generation is None:
-        merge_generation = 0
-    else:
-        merge_generation = stored_generation
-
-    return OffModePersistDecision(
-        mark_persist=mark_persist,
-        merge_generation=merge_generation,
-    )
+    if is_catch_up or not is_backfill_off_open_turn(
+        backfill_enabled=backfill_enabled,
+        open_turn=open_turn,
+        host_turn=host_turn,
+    ):
+        return STAMP_CURRENT_EVIDENCE_MARK
+    if stored_generation is None:
+        return 0
+    return stored_generation
 
 
 class PriorFleetRelation(StrEnum):
@@ -173,7 +185,7 @@ def off_mode_prior_relation(
     ledger_matches_mark = prior_ledger is not None and ledger_matches_evidence_mark(
         prior_turn_number, prior_ledger, mark
     )
-    cannot_hop = mark_is_absent(mark) or (
+    cannot_hop = mark.is_absent or (
         mark.applies_from_turn is not None and prior_turn_number < mark.applies_from_turn
     )
     if cannot_hop and not ledger_matches_mark:

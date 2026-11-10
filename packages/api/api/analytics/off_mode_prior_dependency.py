@@ -1,16 +1,16 @@
 """Prior-fleet ensure edge shared by fleet and scores.
 
-The edge is a final fleet ledger one turn back for the same player. Off-mode
-keeps that edge when the prior still needs a hop, and returns no edges when
-it does not. The hop is a fleet file brought onto the current evidence mark.
-It does not schedule a scoreboard solve. Fleet drops the edge when the player
-is already eliminated on this turn.
+The edge is a final fleet ledger one turn back for the same player. The hop is
+a fleet file brought onto the current evidence mark. It does not schedule a
+scoreboard solve. ``off_mode_ensure_dependencies`` decides per scope whether
+the edge applies.
 """
 
 from __future__ import annotations
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope
+from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.injected_services import (
     FleetComputeServices,
     lookup_fleet_compute_services,
@@ -33,26 +33,36 @@ def off_mode_ensure_dependencies(
 ) -> tuple[EnsureDependency, ...]:
     """Shared prior-fleet edge for this scope, or no edges.
 
-    A non-integer player, missing fleet services, or Backfill earlier turns
-    keeps the edge. While backfill is off, a stored turn keeps that same edge
-    only when ``scope.turn - 1`` still needs a hop inside ``appliesFromTurn``.
-    A turn that is not stored, or a prior that does not need a hop, returns
-    no edges. An absent mark does not walk backward. The open turn's own
-    scoreboard is this scope, not an earlier one.
+    * A non-integer player keeps the edge.
+    * A player eliminated on ``scope.turn`` has no edge in either mode: nothing
+      walks for that player and its final fleet reads no prior turn. A turn that
+      cannot be loaded cannot show elimination, so the rules below decide.
+    * Backfill earlier turns on: the edge applies. The dependency walk reports
+      a prior turn that is not stored, or stops at the ensure floor.
+    * Backfill earlier turns off: missing fleet services keep the edge. Without
+      a loadable ``scope.turn`` there are no settings to classify the hop, so
+      there are no edges. Otherwise the edge applies only when
+      ``scope.turn - 1`` still needs a hop inside ``appliesFromTurn``. An absent
+      mark does not walk backward.
     """
-    if not isinstance(scope.player_id, int):
-        return OFF_MODE_PRIOR_FLEET
-    services = lookup_fleet_compute_services(ctx)
-    if services is None or backfill_earlier_turns:
+    player_id = scope.player_id
+    if not isinstance(player_id, int):
         return OFF_MODE_PRIOR_FLEET
     turn = ctx.load_turn(scope.turn)
+    if turn is not None and fleet_player_eliminated_at_turn(turn, player_id):
+        return ()
+    if backfill_earlier_turns:
+        return OFF_MODE_PRIOR_FLEET
+    services = lookup_fleet_compute_services(ctx)
+    if services is None:
+        return OFF_MODE_PRIOR_FLEET
     if turn is None:
         return ()
     return _off_mode_prior_dependency(
         ctx,
         scope,
         services,
-        player_id=scope.player_id,
+        player_id=player_id,
         turn=turn,
     )
 

@@ -477,6 +477,35 @@ describe('reduceFleetPlayerStreamState', () => {
     expect(next.summary).toBe('done')
   })
 
+  it('keeps an on-mark approximate fleet complete when the walk is accepted', () => {
+    const painted = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
+      type: 'roster_paint',
+      playerId: 8,
+      paint: 'ledger',
+      evidenceGeneration: 4,
+      evidenceMark: 4,
+      ledger: ledgerPlayer,
+    })
+    const approximate = reduceFleetPlayerStreamState(painted, {
+      type: 'provenance',
+      playerId: 8,
+      turnEvidenceAtN: false,
+      priorLedgerAtNMinus1: true,
+      isFinal: false,
+    })
+    const complete = reduceFleetPlayerStreamState(approximate, {
+      type: 'complete',
+      playerId: 8,
+      isFinal: false,
+      summary: 'Approximate fleet',
+    })
+    const accepted = reduceFleetPlayerStreamState(complete, { type: 'work_accepted' })
+
+    expect(accepted.isComplete).toBe(true)
+    expect(accepted.isFinal).toBe(false)
+    expect(fleetPlayerStreamSliceFromState(accepted)?.freshness).toBe('none')
+  })
+
   it('updates provenance summary while materializing', () => {
     const next = reduceFleetPlayerStreamState(initialFleetPlayerStreamState(), {
       type: 'provenance',

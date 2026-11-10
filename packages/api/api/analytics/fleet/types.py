@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from api.analytics.fleet.constants import ANALYTIC_ID
@@ -217,6 +217,25 @@ class FleetEvidenceMark:
 
     evidence_generation: int = 0
     applies_from_turn: int | None = None
+
+    @property
+    def is_absent(self) -> bool:
+        """Whether no mark was ever written: generation 0 with ``appliesFromTurn`` unset."""
+        return self.evidence_generation == 0 and self.applies_from_turn is None
+
+    @classmethod
+    def first_at(cls, baseline_turn: int) -> FleetEvidenceMark:
+        """The first mark an on-walk establishes: generation 1 at ``baseline_turn``."""
+        return cls(evidence_generation=1, applies_from_turn=baseline_turn)
+
+    def widened_to(self, turn: int) -> FleetEvidenceMark:
+        """This mark with ``appliesFromTurn`` moved backward to ``turn``, never forward.
+
+        An unset ``appliesFromTurn`` becomes ``turn``. The generation is unchanged.
+        """
+        if self.applies_from_turn is not None and turn >= self.applies_from_turn:
+            return self
+        return replace(self, applies_from_turn=turn)
 
 
 @dataclass(frozen=True)

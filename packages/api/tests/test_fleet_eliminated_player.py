@@ -13,12 +13,17 @@ from api.analytics.fleet.compute_orchestration import (
     build_fleet_materialization_leg_job_wire,
 )
 from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
+from api.analytics.fleet.eliminated_player import player_has_on_walk_root
 from api.analytics.fleet.fleet_table_player_run import wire_materialized_complete_event
 from api.analytics.fleet.serialization import (
     persisted_fleet_ledger_from_json,
     persisted_fleet_ledger_to_json,
 )
 from api.analytics.fleet.types import FleetAcquisitionLedger, FleetShipRecord, PersistedFleetLedger
+from api.analytics.off_mode_prior_dependency import (
+    OFF_MODE_PRIOR_FLEET,
+    off_mode_ensure_dependencies,
+)
 from api.compute.dag import plan_compute_dag
 from api.compute.registry import COMPUTE_REGISTRY
 from api.compute.scope import ComputeScope
@@ -354,6 +359,62 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
     assert raised.value.recovery is not None
     assert raised.value.recovery.step_kind == "tier_solve"
     assert raised.value.recovery.force_fresh is True
+
+
+@pytest.mark.parametrize(
+    ("statusturn", "turn_number", "expected"),
+    [(23, 23, False), (22, 23, False), (24, 23, True)],
+    ids=["eliminated_this_turn", "eliminated_earlier", "elimination_later"],
+)
+def test_player_has_on_walk_root_only_when_not_eliminated_on_the_shell_turn(
+    sample_turn, statusturn, turn_number, expected
+):
+    player_id = first_player_id(sample_turn)
+    turn = _stamp_player(
+        sample_turn,
+        player_id,
+        status=3,
+        statusturn=statusturn,
+        turn_number=turn_number,
+    )
+    assert player_has_on_walk_root(turn, player_id) is expected
+
+
+def test_player_has_on_walk_root_for_a_living_or_absent_player(sample_turn):
+    player_id = first_player_id(sample_turn)
+    turn = _stamp_player(sample_turn, player_id, status=1, statusturn=0, turn_number=23)
+    assert player_has_on_walk_root(turn, player_id) is True
+    assert player_has_on_walk_root(turn, 9999) is True
+
+
+def _prior_fleet_edges(sample_turn, persistence, *, status: int, backfill_earlier_turns: bool):
+    player_id = first_player_id(sample_turn)
+    turn = _stamp_player(sample_turn, player_id, status=status, statusturn=23, turn_number=23)
+    ctx = export_chain_query_context(turn, persistence=persistence, stored_turns={23: turn})
+    scope = ExportScope(
+        game_id=GAME_ID,
+        perspective=perspective(sample_turn),
+        turn=23,
+        player_id=player_id,
+    )
+    return off_mode_ensure_dependencies(ctx, scope, backfill_earlier_turns=backfill_earlier_turns)
+
+
+@pytest.mark.parametrize(
+    "backfill_earlier_turns", [False, True], ids=["backfill_off", "backfill_on"]
+)
+def test_prior_fleet_edge_is_dropped_for_a_player_eliminated_on_the_turn(
+    sample_turn, persistence, backfill_earlier_turns
+):
+    edges = _prior_fleet_edges(
+        sample_turn, persistence, status=3, backfill_earlier_turns=backfill_earlier_turns
+    )
+    assert edges == ()
+
+
+def test_prior_fleet_edge_is_kept_for_a_living_player_when_backfill_is_on(sample_turn, persistence):
+    edges = _prior_fleet_edges(sample_turn, persistence, status=1, backfill_earlier_turns=True)
+    assert edges == OFF_MODE_PRIOR_FLEET
 
 
 def test_slot_takeover_does_not_short_circuit(sample_turn, persistence):

@@ -16,7 +16,9 @@ from api.analytics.fleet.types import (
 from api.analytics.off_mode import (
     MarkPersist,
     PriorFleetRelation,
-    off_mode_persist_decision,
+    is_backfill_off_open_turn,
+    off_mode_mark_persist,
+    off_mode_merge_generation,
     off_mode_prior_relation,
 )
 from api.analytics.off_mode_wire import parse_off_mode_wire, stamp_submission_open
@@ -25,8 +27,8 @@ from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
 
 
-def test_off_mode_persist_decision_is_one_table():
-    """Scoreboard classification and the fleet merge generation share one record."""
+def test_mark_persist_and_merge_generation_agree_on_the_open_turn_rule():
+    """Scoreboard classification and the fleet merge generation for the same inputs."""
     present = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
     absent = FleetEvidenceMark()
     cases = (
@@ -152,16 +154,141 @@ def test_off_mode_persist_decision_is_one_table():
         mark_persist,
         merge_generation,
     ) in cases:
-        decision = off_mode_persist_decision(
+        assert (
+            off_mode_mark_persist(
+                on_walk=False,
+                mark=mark,
+                backfill_enabled=backfill_enabled,
+                open_turn=open_turn,
+                host_turn=host_turn,
+            )
+            is mark_persist
+        ), name
+        assert (
+            off_mode_merge_generation(
+                backfill_enabled=backfill_enabled,
+                open_turn=open_turn,
+                is_catch_up=is_catch_up,
+                host_turn=host_turn,
+                stored_generation=stored_generation,
+            )
+            == merge_generation
+        ), name
+
+
+@pytest.mark.parametrize(
+    ("backfill_enabled", "open_turn", "host_turn", "expected"),
+    (
+        (False, 40, 40, True),
+        (False, 40, 39, False),
+        (False, 40, 41, False),
+        (False, None, 40, False),
+        (True, 40, 40, False),
+    ),
+)
+def test_is_backfill_off_open_turn_needs_backfill_off_and_host_turn_on_the_open_turn(
+    backfill_enabled, open_turn, host_turn, expected
+):
+    assert (
+        is_backfill_off_open_turn(
             backfill_enabled=backfill_enabled,
             open_turn=open_turn,
-            is_catch_up=is_catch_up,
             host_turn=host_turn,
-            mark=mark,
-            stored_generation=stored_generation,
         )
-        assert decision.mark_persist is mark_persist, name
-        assert decision.merge_generation == merge_generation, name
+        is expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("mark", "expected"),
+    (
+        (FleetEvidenceMark(), True),
+        (FleetEvidenceMark(evidence_generation=1), False),
+        (FleetEvidenceMark(applies_from_turn=5), False),
+        (FleetEvidenceMark(evidence_generation=2, applies_from_turn=5), False),
+    ),
+)
+def test_evidence_mark_is_absent_only_at_generation_zero_with_no_applies_from_turn(mark, expected):
+    assert mark.is_absent is expected
+
+
+def test_first_at_is_generation_one_at_the_baseline_turn():
+    mark = FleetEvidenceMark.first_at(40)
+    assert mark == FleetEvidenceMark(evidence_generation=1, applies_from_turn=40)
+    assert not mark.is_absent
+
+
+@pytest.mark.parametrize(
+    ("mark", "turn", "expected"),
+    (
+        (
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+            35,
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=35),
+        ),
+        (
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+            40,
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+        ),
+        (
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+            45,
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+        ),
+        (
+            FleetEvidenceMark(evidence_generation=2),
+            45,
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=45),
+        ),
+    ),
+)
+def test_widened_to_moves_applies_from_turn_backward_only(mark, turn, expected):
+    assert mark.widened_to(turn) == expected
+
+
+def test_mark_persist_precedence_is_on_walk_then_absent_then_open_turn_stamp():
+    """On-walk beats an absent mark, which beats the backfill-off open-turn stamp."""
+    present = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
+    absent = FleetEvidenceMark()
+    cases = (
+        # (on_walk, mark, backfill_enabled, host_turn, expected); open_turn is 40.
+        ("on-walk, absent mark, off-open", True, absent, False, 40, MarkPersist.STAMP),
+        ("on-walk, absent mark, off-earlier", True, absent, False, 39, MarkPersist.STAMP),
+        ("on-walk, absent mark, backfill on", True, absent, True, 39, MarkPersist.STAMP),
+        ("on-walk, present mark, off-open", True, present, False, 40, MarkPersist.STAMP),
+        ("on-walk, present mark, off-earlier", True, present, False, 39, MarkPersist.STAMP),
+        ("on-walk, present mark, backfill on", True, present, True, 39, MarkPersist.STAMP),
+        ("absent mark, off-open", False, absent, False, 40, MarkPersist.FIRST_PERSIST),
+        ("absent mark, off-earlier", False, absent, False, 39, MarkPersist.FIRST_PERSIST),
+        ("absent mark, backfill on", False, absent, True, 40, MarkPersist.FIRST_PERSIST),
+        ("present mark, off-open", False, present, False, 40, MarkPersist.STAMP),
+        ("present mark, off-earlier", False, present, False, 39, MarkPersist.BUMP),
+        ("present mark, backfill on, open", False, present, True, 40, MarkPersist.BUMP),
+        ("present mark, backfill on, earlier", False, present, True, 39, MarkPersist.BUMP),
+    )
+    for name, on_walk, mark, backfill_enabled, host_turn, expected in cases:
+        mark_persist = off_mode_mark_persist(
+            on_walk=on_walk,
+            mark=mark,
+            backfill_enabled=backfill_enabled,
+            open_turn=40,
+            host_turn=host_turn,
+        )
+        assert mark_persist is expected, name
+
+
+def test_merge_generation_keeps_the_stored_generation_only_on_the_open_turn():
+    """The open turn keeps the stored generation; an earlier turn stamps the mark."""
+    for host_turn, expected in ((40, 1), (39, STAMP_CURRENT_EVIDENCE_MARK)):
+        merge_generation = off_mode_merge_generation(
+            backfill_enabled=False,
+            open_turn=40,
+            is_catch_up=False,
+            host_turn=host_turn,
+            stored_generation=1,
+        )
+        assert merge_generation == expected, host_turn
 
 
 def test_off_mode_prior_relation_classifies_stop_hop_and_on_mark(sample_turn):

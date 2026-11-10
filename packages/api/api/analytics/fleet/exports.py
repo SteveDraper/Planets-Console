@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.export_types import EnsureDependency, ExportScope, PathPrefixScopeRule
+from api.analytics.export_types import ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
 from api.analytics.fleet.chain import (
@@ -14,7 +14,6 @@ from api.analytics.fleet.chain import (
 )
 from api.analytics.fleet.composition_export import build_fleet_composition_branch
 from api.analytics.fleet.constants import ANALYTIC_ID
-from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.export_schema import EXPORT_VALUE_SCHEMA
 from api.analytics.fleet.export_scope import ledgers_for_scope
 from api.analytics.fleet.injected_services import resolve_fleet_services
@@ -35,28 +34,6 @@ PATH_PREFIX_SCOPE_RULES = (
     PathPrefixScopeRule(prefix="$.meta.searchStatus", requires=("player_id",)),
     PathPrefixScopeRule(prefix="$.meta.solutionsHeld", requires=("player_id",)),
 )
-
-
-def fleet_ensure_dependencies_for(
-    ctx: AnalyticQueryContext,
-    scope: ExportScope,
-    *,
-    backfill_earlier_turns: bool,
-) -> tuple[EnsureDependency, ...]:
-    """Prior-turn fleet does not apply once the player is eliminated on this turn.
-
-    Every other scope uses ``off_mode_ensure_dependencies``.
-    """
-    player_id = scope.player_id
-    if isinstance(player_id, int):
-        turn = ctx.load_turn(scope.turn)
-        if turn is not None and fleet_player_eliminated_at_turn(turn, player_id):
-            return ()
-    return off_mode_ensure_dependencies(
-        ctx,
-        scope,
-        backfill_earlier_turns=backfill_earlier_turns,
-    )
 
 
 def _fleet_snapshot_for_scope(
@@ -227,7 +204,7 @@ EXPORT_CATALOG = AnalyticExportCatalog(
     value_schema=EXPORT_VALUE_SCHEMA,
     path_prefix_scope_rules=PATH_PREFIX_SCOPE_RULES,
     ensure_dependencies=OFF_MODE_PRIOR_FLEET,
-    ensure_dependencies_for=fleet_ensure_dependencies_for,
+    ensure_dependencies_for=off_mode_ensure_dependencies,
     ensure_export=ensure_fleet_export,
     materialize_export_tree=materialize_fleet_export_tree,
     is_persisted=is_fleet_export_persisted,

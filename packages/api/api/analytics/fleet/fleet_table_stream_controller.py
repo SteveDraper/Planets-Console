@@ -25,7 +25,7 @@ from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.models.game import TurnInfo
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.controller_base import TableStreamControllerBase
-from api.transport.fleet_table_stream import fleet_error_event
+from api.transport.fleet_table_stream import fleet_error_event, fleet_work_accepted_event
 
 
 @dataclass(kw_only=True)
@@ -147,6 +147,13 @@ class FleetTableStreamController(
                 player_id,
                 force_schedule=force_schedule,
             ),
+        )
+
+    def emit_work_accepted(self, player_id: int) -> None:
+        """Queue this player's fleet work_accepted event and wake the multiplex."""
+        self.enqueue_on_scheduled_row(
+            player_id,
+            lambda row: row.session.event_queue.put(fleet_work_accepted_event()),
         )
 
     def attach(self) -> None:

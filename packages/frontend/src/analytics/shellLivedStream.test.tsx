@@ -25,7 +25,6 @@ describe('shellLivedStream', () => {
       hook: useFakeSession,
       Provider: FakeProvider,
     })
-    expect(stream.lifetime).toBe('shell')
     expect(stream.hook).toBe(useFakeSession)
     expect(stream.Provider).toBe(FakeProvider)
 
@@ -45,7 +44,6 @@ describe('shellLivedStream', () => {
       enabledFlags.push(enabled)
     }
     const stream = shellLivedStream({ hook: useWatch })
-    expect(stream.lifetime).toBe('shell')
     expect(stream.hook).toBe(useWatch)
     expect(stream).not.toHaveProperty('Provider')
 
