@@ -164,28 +164,54 @@ def test_off_mode_persist_decision_is_one_table():
         assert decision.merge_generation == merge_generation, name
 
 
-def test_on_walk_stamps_when_backfill_would_bump():
-    """An in-flight on-walk stamps. The same inputs without it bump."""
+def test_mark_persist_precedence_is_on_walk_then_absent_then_open_turn_stamp():
+    """On-walk beats an absent mark, which beats the backfill-off open-turn stamp."""
     present = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
-    stamped = off_mode_persist_decision(
-        backfill_enabled=True,
-        open_turn=40,
-        is_catch_up=False,
-        host_turn=39,
-        mark=present,
-        stored_generation=1,
-        on_walk=True,
+    absent = FleetEvidenceMark()
+    cases = (
+        # (on_walk, mark, backfill_enabled, host_turn, expected); open_turn is 40.
+        ("on-walk, absent mark, off-open", True, absent, False, 40, MarkPersist.STAMP),
+        ("on-walk, absent mark, off-earlier", True, absent, False, 39, MarkPersist.STAMP),
+        ("on-walk, absent mark, backfill on", True, absent, True, 39, MarkPersist.STAMP),
+        ("on-walk, present mark, off-open", True, present, False, 40, MarkPersist.STAMP),
+        ("on-walk, present mark, off-earlier", True, present, False, 39, MarkPersist.STAMP),
+        ("on-walk, present mark, backfill on", True, present, True, 39, MarkPersist.STAMP),
+        ("absent mark, off-open", False, absent, False, 40, MarkPersist.FIRST_PERSIST),
+        ("absent mark, off-earlier", False, absent, False, 39, MarkPersist.FIRST_PERSIST),
+        ("absent mark, backfill on", False, absent, True, 40, MarkPersist.FIRST_PERSIST),
+        ("present mark, off-open", False, present, False, 40, MarkPersist.STAMP),
+        ("present mark, off-earlier", False, present, False, 39, MarkPersist.BUMP),
+        ("present mark, backfill on, open", False, present, True, 40, MarkPersist.BUMP),
+        ("present mark, backfill on, earlier", False, present, True, 39, MarkPersist.BUMP),
     )
-    bumped = off_mode_persist_decision(
-        backfill_enabled=True,
-        open_turn=40,
-        is_catch_up=False,
-        host_turn=39,
-        mark=present,
-        stored_generation=1,
-    )
-    assert stamped.mark_persist is MarkPersist.STAMP
-    assert bumped.mark_persist is MarkPersist.BUMP
+    for name, on_walk, mark, backfill_enabled, host_turn, expected in cases:
+        decision = off_mode_persist_decision(
+            backfill_enabled=backfill_enabled,
+            open_turn=40,
+            is_catch_up=False,
+            host_turn=host_turn,
+            mark=mark,
+            stored_generation=None,
+            on_walk=on_walk,
+        )
+        assert decision.mark_persist is expected, name
+
+
+def test_on_walk_does_not_change_the_merge_generation():
+    """The kept open-turn generation and the merge stamp follow the merge rules only."""
+    present = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
+    for host_turn, expected in ((40, 1), (39, STAMP_CURRENT_EVIDENCE_MARK)):
+        for on_walk in (False, True):
+            decision = off_mode_persist_decision(
+                backfill_enabled=False,
+                open_turn=40,
+                is_catch_up=False,
+                host_turn=host_turn,
+                mark=present,
+                stored_generation=1,
+                on_walk=on_walk,
+            )
+            assert decision.merge_generation == expected, (host_turn, on_walk)
 
 
 def test_off_mode_prior_relation_classifies_stop_hop_and_on_mark(sample_turn):

@@ -106,17 +106,22 @@ def off_mode_persist_decision(
 ) -> OffModePersistDecision:
     """One table for a scoreboard persist and for the fleet merge at ``host_turn``.
 
-    Scoreboard: a persist that belongs to an in-flight on-walk stamps and
-    does not increment. Otherwise the submission's open turn, with backfill
-    off and a mark already present, stamps. An absent mark is the first
-    persist and becomes generation 1. Every other scoreboard persist bumps.
+    Scoreboard: the first rule that matches decides, in this order.
+
+    1. ``on_walk`` (the persist belongs to an in-flight on-walk): STAMP, even
+       with an absent mark. The on-walk plan establishes the mark before any
+       of its scoreboards persist, so it never takes the first persist.
+    2. Absent mark: FIRST_PERSIST, which becomes generation 1.
+    3. Backfill off, an open turn, and ``host_turn`` is the open turn: STAMP.
+    4. Anything else: BUMP.
+
     ``is_catch_up`` and ``stored_generation`` do not change this
     classification. A catch-up hop does not run a scoreboard solve.
 
     Fleet merge: a catch-up hop, any turn that is not the open turn, and every
     turn while backfill is on stamps the current mark. The open turn's own
     merge keeps ``stored_generation``, or 0 when the file is missing. ``mark``
-    does not change the kept generation.
+    and ``on_walk`` do not change the kept generation.
     """
     if on_walk:
         mark_persist = MarkPersist.STAMP
