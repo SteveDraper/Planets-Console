@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from concurrent.futures import Future
 from dataclasses import dataclass
 
-from api.analytics.on_walk_live import _PendingOnWalks
+from api.analytics.on_walk_live import _pending_on_walks
 from api.analytics.turn_roster import iter_turn_players
 from api.compute.orchestrator import ComputeOrchestrator
 
@@ -87,7 +87,5 @@ def wait_for_unblocked_submits(
     orchestrator: ComputeOrchestrator, futures: Iterable[Future[None]]
 ) -> None:
     """Wait for every submit except those still behind an off-setting walk."""
-    waiting = {
-        waiter.submitted for waiter in orchestrator.attachment(_PendingOnWalks).waiters.values()
-    }
+    waiting = {waiter.submitted for waiter in _pending_on_walks(orchestrator).waiters.values()}
     wait_for_submits(future for future in futures if future not in waiting)

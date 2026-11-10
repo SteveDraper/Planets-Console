@@ -161,23 +161,6 @@ class ComputeOrchestrator(
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._observers = OrchestratorObservers(self._condition)
-        self._attachments: dict[type, object] = {}
-
-    def attachment[T](self, owner_type: type[T]) -> T:
-        """Return this orchestrator's one ``owner_type()`` instance, creating it on first use.
-
-        Callers keep per-orchestrator state here so it lives exactly as long as
-        this orchestrator. ``owner_type`` is constructed with no arguments under
-        the orchestrator lock, so its constructor must not call back into the
-        orchestrator.
-        """
-        with self._condition:
-            existing = self._attachments.get(owner_type)
-            if isinstance(existing, owner_type):
-                return existing
-            created = owner_type()
-            self._attachments[owner_type] = created
-            return created
 
     def dispatch_ready_work(self) -> None:
         """Dispatch any ready nodes allowed by the current gates.

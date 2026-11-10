@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import threading
+import weakref
 from concurrent.futures import FIRST_COMPLETED, wait
 from dataclasses import replace
 
@@ -13,7 +15,7 @@ from api.analytics.fleet.fleet_table_stream_registry import (
     reset_fleet_table_stream_registry_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.analytics.on_walk_live import _PendingOnWalks, submit_on_walks_for_live_streams
+from api.analytics.on_walk_live import _pending_on_walks, submit_on_walks_for_live_streams
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
@@ -264,7 +266,7 @@ def test_a_deduplicated_waiter_skips_when_the_setting_turned_off_and_then_lets_g
 
 
 def _pending_players(orchestrator: ComputeOrchestrator) -> set[int]:
-    return {player.player_id for player in orchestrator.attachment(_PendingOnWalks).waiters}
+    return {player.player_id for player in _pending_on_walks(orchestrator).waiters}
 
 
 def test_pending_waiters_belong_to_their_orchestrator_and_end_when_they_finish(
@@ -304,3 +306,34 @@ def test_pending_waiters_belong_to_their_orchestrator_and_end_when_they_finish(
 
     assert _pending_players(second) == set()
     assert len(_requests_for(second_submitted, player_id)) == 1
+
+
+def test_a_pending_waiter_does_not_outlive_an_abandoned_orchestrator(sample_turn):
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    stream = attach_stream(
+        get_fleet_table_stream_registry(),
+        FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
+        host,
+        ctx,
+        [player_id],
+    )
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    # A live scheduler's controller holds the process orchestrator, so the
+    # waiter's shells reach the orchestrator strongly.
+    stream.orchestrator = orchestrator
+    _off_setting_fleet_blocker(orchestrator, ctx, player_id)
+    try:
+        started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        (waiter,) = _pending_on_walks(orchestrator).waiters.values()
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+    abandoned = weakref.ref(orchestrator)
+    abandoned_waiter = weakref.ref(waiter)
+    del orchestrator, stream, waiter
+    gc.collect()
+
+    assert abandoned() is None
+    assert abandoned_waiter() is None
+    assert not started[0].done()

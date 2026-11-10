@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import weakref
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -108,7 +109,7 @@ def submit_on_walks_for_live_streams(
     submitted: list[Future[None]] = []
     for player, player_shells in by_player.items():
         if _has_off_setting_walk(orch, player):
-            submitted.append(orch.attachment(_PendingOnWalks).wait(orch, player, player_shells))
+            submitted.append(_pending_on_walks(orch).wait(orch, player, player_shells))
         else:
             player_submitted: Future[None] = Future()
             _start_submit(orch, player, player_shells, player_submitted)
@@ -119,8 +120,10 @@ def submit_on_walks_for_live_streams(
 class _PendingOnWalks:
     """One orchestrator's pending off-setting waiters, at most one per player.
 
-    Held through ``ComputeOrchestrator.attachment``, so a waiter whose blocker
-    never becomes terminal lives no longer than its orchestrator.
+    Each pending waiter's outcome listener on the orchestrator holds the
+    waiter, and the waiter holds this registry. Nothing else holds it
+    strongly, so a waiter whose blocker never becomes terminal lives no
+    longer than its orchestrator.
     """
 
     def __init__(self) -> None:
@@ -210,6 +213,30 @@ class _OffSettingWalkWaiter:
         if unregister is not None:
             unregister()
         _start_submit(self._orchestrator, self._player, shells, self.submitted)
+
+
+_pending_lock = threading.Lock()
+_pending_by_orchestrator: weakref.WeakKeyDictionary[
+    ComputeOrchestrator, weakref.ref[_PendingOnWalks]
+] = weakref.WeakKeyDictionary()
+
+
+def _pending_on_walks(orchestrator: ComputeOrchestrator) -> _PendingOnWalks:
+    """Return the orchestrator's pending registry, creating it when none is alive.
+
+    The map holds the orchestrator and its registry only weakly. A waiter
+    holds its shells, and a live stream's controller can hold the
+    orchestrator, so a strong registry here would keep an abandoned
+    orchestrator alive. A registry with no pending waiter may be dropped and
+    is created again on the next wait.
+    """
+    with _pending_lock:
+        registry_ref = _pending_by_orchestrator.get(orchestrator)
+        pending = registry_ref() if registry_ref is not None else None
+        if pending is None:
+            pending = _PendingOnWalks()
+            _pending_by_orchestrator[orchestrator] = weakref.ref(pending)
+        return pending
 
 
 def _start_submit(
