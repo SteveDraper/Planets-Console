@@ -5,9 +5,11 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from api.analytics.fleet.fleet_table_stream_registry import (
+    detach_fleet_table_stream,
     get_fleet_table_stream_registry,
     reset_fleet_table_stream_registry_for_tests,
 )
@@ -195,7 +197,7 @@ def test_active_table_stream_turns_filters_game_perspective_and_analytic() -> No
     assert active_table_stream_turns(10, 2, ("homeworld-locator",)) == frozenset()
 
 
-def test_live_table_streams_yield_attached_controllers_that_report_liveness() -> None:
+def test_live_table_streams_yield_attached_controllers_on_the_named_registries() -> None:
     fleet_scope = FleetTableStreamScope(game_id=10, perspective=2, turn_number=8)
     fleet_controller = object()
     get_fleet_table_stream_registry().attach(fleet_scope, fleet_controller)
@@ -211,6 +213,22 @@ def test_live_table_streams_yield_attached_controllers_that_report_liveness() ->
         fleet_scope,
         fleet_controller,
     )
-    assert stream.is_live()
-    reset_fleet_table_stream_registry_for_tests()
-    assert not stream.is_live()
+
+
+def test_a_captured_stream_is_live_only_while_its_own_controller_is_attached() -> None:
+    scope = FleetTableStreamScope(game_id=10, perspective=2, turn_number=8)
+    registry = get_fleet_table_stream_registry()
+    first = SimpleNamespace(stream_token="first")
+    registry.attach(scope, first)
+    (captured_first,) = live_table_streams(("fleet",))
+    assert captured_first.is_live()
+
+    detach_fleet_table_stream("first")
+    assert not captured_first.is_live()
+
+    registry.attach(scope, first)
+    (captured_reattached,) = live_table_streams(("fleet",))
+    registry.attach(scope, SimpleNamespace(stream_token="second"))
+    assert not captured_reattached.is_live()
+    (captured_second,) = live_table_streams(("fleet",))
+    assert captured_second.is_live()

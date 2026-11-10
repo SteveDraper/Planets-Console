@@ -357,38 +357,43 @@ def test_deferred_on_walk_skips_a_closed_stream_or_a_setting_that_turned_off(
 
 
 @pytest.mark.parametrize(
-    ("closed_analytics", "submitted_analytics"),
+    ("closed_analytics", "is_reopened", "submitted_analytics"),
     [
-        ({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID}, set()),
-        ({FLEET_ANALYTIC_ID}, {SCORES_ANALYTIC_ID}),
+        ({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID}, False, set()),
+        ({FLEET_ANALYTIC_ID}, False, {SCORES_ANALYTIC_ID}),
+        ({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID}, True, set()),
+        ({FLEET_ANALYTIC_ID}, True, {SCORES_ANALYTIC_ID}),
     ],
 )
 def test_an_off_setting_waiter_submits_nothing_on_a_shell_stream_that_closed(
-    sample_turn, monkeypatch, closed_analytics, submitted_analytics
+    sample_turn, monkeypatch, closed_analytics, is_reopened, submitted_analytics
 ):
+    """A closed shell stays closed for the waiter even when its scope reopens.
+
+    A stream reopened at the same scope before the blocker completes is a new
+    controller: the waiter submits nothing for the closed shell and tells
+    neither controller that work was accepted.
+    """
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
-    streams = {
-        FLEET_ANALYTIC_ID: attach_stream(
+    registries = {
+        FLEET_ANALYTIC_ID: (
             get_fleet_table_stream_registry(),
             FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
-            host,
-            ctx,
-            [player_id],
+            detach_fleet_table_stream,
         ),
-        SCORES_ANALYTIC_ID: attach_stream(
+        SCORES_ANALYTIC_ID: (
             get_inference_table_stream_registry(),
             InferenceStreamScope(ctx.game_id, ctx.perspective, 10),
-            host,
-            ctx,
-            [player_id],
+            detach_inference_table_stream,
         ),
     }
-    detach_by_analytic = {
-        FLEET_ANALYTIC_ID: detach_fleet_table_stream,
-        SCORES_ANALYTIC_ID: detach_inference_table_stream,
+    streams = {
+        analytic_id: attach_stream(registry, scope, host, ctx, [player_id])
+        for analytic_id, (registry, scope, _detach) in registries.items()
     }
+    reopened = {}
     orchestrator, submitted = recording_orchestrator(monkeypatch)
     blocker = shell_scope(ctx, FLEET_ANALYTIC_ID, 9, player_id)
     node = ComputeNodeRun(
@@ -402,16 +407,28 @@ def test_an_off_setting_waiter_submits_nothing_on_a_shell_stream_that_closed(
         started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         assert submitted == []
         for analytic_id in closed_analytics:
-            detach_by_analytic[analytic_id](streams[analytic_id].stream_token)
+            registry, scope, detach = registries[analytic_id]
+            detach(streams[analytic_id].stream_token)
+            if is_reopened:
+                reopened[analytic_id] = attach_stream(registry, scope, host, ctx, [player_id])
 
         node.state = "complete"
         orchestrator.observers.notify_scope_outcome(node)
         orchestrator.observers.drain_post_lock_callbacks()
         wait_for_submits(started)
+        assert {request.scope.analytic_id for request in submitted} == submitted_analytics
+        for analytic_id in closed_analytics:
+            assert streams[analytic_id].accepted_events(player_id) == []
+        for reopened_stream in reopened.values():
+            assert reopened_stream.accepted_events(player_id) == []
+
+        del submitted[:]
+        wait_for_submits(submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator))
+        assert {request.scope.analytic_id for request in submitted} == (
+            set(registries) - closed_analytics
+        ) | set(reopened)
+        for reopened_stream in reopened.values():
+            assert reopened_stream.accepted_events(player_id)[0]["type"] == "work_accepted"
     finally:
         reset_fleet_table_stream_registry_for_tests()
         reset_inference_table_stream_registry_for_tests()
-
-    assert {request.scope.analytic_id for request in submitted} == submitted_analytics
-    for analytic_id in closed_analytics:
-        assert streams[analytic_id].accepted_events(player_id) == []

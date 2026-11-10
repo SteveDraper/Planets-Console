@@ -6,7 +6,8 @@ no walk, so nothing is submitted and no work_accepted reaches the row. One
 player does not wait for another.
 A player who still has a non-terminal fleet or scoreboard node from an
 off-setting walk is submitted after that node completes, and only while the
-setting is still on and that stream is still live. The follow-up is a
+setting is still on and that stream's own controller is still attached: a
+stream reopened at the same scope submits its own on-walk. The follow-up is a
 ``force_fresh`` submit after the orchestrator has released its lock. A failed
 off-setting node is terminal for the wait. A running off-setting scoreboard
 does not absorb the on-walk by attach. Streams are not re-admitted, so stored

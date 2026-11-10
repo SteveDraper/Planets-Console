@@ -72,7 +72,7 @@ class LiveTableStream:
     """One active scope on a registered table-stream registry, as seen by a scan.
 
     ``controller`` is the controller attached when the scan saw the scope.
-    ``is_live`` re-asks the registry.
+    ``is_live`` re-reads the registry's published snapshot.
     """
 
     analytic_id: str
@@ -81,8 +81,12 @@ class LiveTableStream:
     _registry: CatalogedTableStreamRegistry = field(repr=False)
 
     def is_live(self) -> bool:
-        """Whether a controller is still attached for this scope."""
-        return self._registry.controller_for_scope(self.scope) is not None
+        """Whether ``controller`` is still the controller attached at this scope.
+
+        A detach ends liveness, and so does a new stream attached at the same
+        scope: the captured stream stays closed even when its scope reopens.
+        """
+        return self._registry.controller_for_scope(self.scope) is self.controller
 
 
 def live_table_streams(analytic_ids: Collection[str]) -> tuple[LiveTableStream, ...]:
