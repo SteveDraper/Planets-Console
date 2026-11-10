@@ -1,0 +1,136 @@
+---
+paths:
+  - "packages/api/**/*.py"
+---
+
+# Core REST API Layer Conventions
+
+This layer owns the data model and all business logic. It has no knowledge of the SPA or the BFF above it. See `.claude/rules/storage.md` for the storage sub-layer below.
+
+## Package Structure
+
+```
+packages/api/
+├── models/       # Dataclass definitions — the data model
+├── concepts/     # Host-aligned game rules (no HTTP, no storage); see CONTEXT.md "Game concept"
+│   ├── races.py  # Race-specific raceid constants and mechanics — do not duplicate in analytics/
+│   ├── warp_well.py
+│   └── …
+├── analytics/    # Turn-scoped analytic handlers; import race rules from concepts/races.py
+├── services/     # Business logic (called by routers, call storage via injected backend)
+├── routers/      # FastAPI APIRouter definitions (one file per domain resource)
+├── transport/    # Optional request/response contract models when HTTP contracts differ from domain models
+├── serialization/ # Explicit codecs for persistence of non-JSON-native field types
+├── storage/      # StorageBackend protocol + implementations (see .claude/rules/storage.md)
+├── storage_factory.py  # Process opener: production migrations + get_storage()
+├── config.py     # AppConfig dataclass + load_config() (see .claude/rules/python-tooling.md)
+└── app.py        # Core REST API FastAPI sub-app assembly — mounts API routers only
+```
+
+**Race-specific rules:** Anything keyed to a Planets.nu `raceid` lives in `concepts/races.py`. Analytic modules (including `analytics/military_score_inference/`) import helpers from there; they do not define new per-race constants locally. Game-wide rules (homeworld baselines, accelerated start) stay in the module that owns that behavior.
+
+**Placement before adding helpers:** Before adding helpers under `analytics/<feature>/`, check whether the operation is game-domain (`concepts/`), wire-shape (`serialization/`), or truly feature-specific. Wrong placement forces cross-feature imports later. See `.claude/rules/implementation-quality.md`.
+
+## Data Model
+
+- All domain objects defined as plain `@dataclass` classes in `packages/api/models/`
+- No ORM, no Pydantic models in the data layer
+
+```python
+# packages/api/models/system.py
+@dataclass
+class SolarSystem:
+    id: str
+    name: str
+    star_count: int
+```
+
+## Transport Schemas
+
+FastAPI request/response contracts may reuse domain dataclasses directly **when the domain shape already matches the external API contract**. When the HTTP contract differs, define dedicated transport models in `packages/api/transport/`.
+
+- Reuse domain dataclasses only when field names, shape, and semantics are already correct for the API boundary
+- Introduce dedicated request/response models when the HTTP contract needs different naming, field omission, versioning, validation, or composition
+- Keep the distinction honest: domain models represent the problem space; transport models represent the wire contract
+
+This means the Core REST API may sometimes return a domain dataclass directly and may sometimes map to a transport model first. The BFF will typically need dedicated transport models more often than the Core REST API.
+
+## Serialization Pattern
+
+The storage sub-layer operates entirely in `dict` (JSON blobs). Conversion between dicts and dataclasses happens exclusively in the **service layer** using explicit codecs from `packages/api/serialization/` — never in routers and never inside `storage/`.
+
+- JSON-native dataclasses may use `dataclasses.asdict()` on write
+- `dict -> dataclass` reconstruction uses `dacite.from_dict()`
+- Any non-JSON-native field type (`datetime`, `UUID`, `Enum`, `Path`, `Decimal`, tagged unions, etc.) must be handled via explicit codecs in `packages/api/serialization/`
+- Services call codec functions; they do not hand-encode special field types inline
+
+```python
+# Writing
+payload = system_to_json(obj)
+self._storage.put(f"systems/{obj.id}", payload)
+
+# Reading
+data = self._storage.get(f"systems/{id}")
+return system_from_json(data) if data else None
+```
+
+The storage layer never sees dataclass types or codecs; services never let raw dicts leak beyond their own methods.
+
+## FastAPI Routers
+
+- One `APIRouter` per domain resource in `packages/api/routers/`
+- All routes use prefix `/api/v1/...`
+- Routers are registered in `packages/api/app.py` — no inline route handlers there
+- Routers call services; services call storage — routers do not touch storage directly
+
+```python
+# packages/api/routers/systems.py
+router = APIRouter(prefix="/api/v1/systems", tags=["systems"])
+
+@router.get("/{id}")
+def get_system(id: str, svc: SystemService = Depends(get_system_service)):
+    return svc.get(id)
+```
+
+## Business Logic (Services)
+
+- Services live in `packages/api/services/`, one file per domain
+- Services receive a `StorageBackend` instance via constructor injection — never instantiate storage inside a service
+- Services contain all business logic; routers contain only HTTP concerns (request parsing, response shaping, status codes)
+
+```python
+# packages/api/services/systems.py
+class SystemService:
+    def __init__(self, storage: StorageBackend) -> None:
+        self._storage = storage
+
+    def get(self, id: str) -> SolarSystem | None:
+        data = self._storage.get(f"systems/{id}")
+        return system_from_json(data) if data else None
+```
+
+## Testing
+
+- Service unit tests mock `StorageBackend` and verify business behavior, serialization choices, and key selection
+- Router tests exercise HTTP contracts, status codes, and request/response mapping
+- Codec tests live close to `packages/api/serialization/` and cover non-JSON-native field round-trips
+- Avoid tests that couple unrelated layers together when a smaller unit test would prove the same rule
+
+## Exceptions
+
+- See `.claude/rules/server-exceptions.md` for the exception hierarchy and HTTP handling rules. All exceptions raised by the Core API must inherit from `CoreAPIError` (in `api.errors`). The app registers a global exception handler via `make_http_exception_handler(CoreAPIError)`.
+
+## Layer Boundary Rules
+
+- **No UI semantics** — route paths, field names, and response shapes must reflect the domain, not the SPA's needs. The BFF layer handles UI-specific reshaping.
+- **No BFF imports** — `packages/api` must never import from `packages/bff`
+- **Storage only via protocol** — never reference `FileStorageBackend` or any concrete implementation outside `packages/api/storage/`
+
+## Core REST API: deserialization before semantic validation
+
+When a service handles a JSON payload from storage or an upstream call that maps to a domain dataclass:
+
+1. **Deserialize first** using the codec in `packages/api/serialization/` (e.g. `*_from_json`). That layer owns **syntactic** concerns: structure, types, required fields, and wire-to-domain fixes.
+2. **Then** run **semantic** checks on the dataclass instance (e.g. ids match the request, turn numbers agree with what was asked for, cross-field consistency).
+
+Do not implement semantic validation by walking a raw `dict` before deserialization. That duplicates shape logic, invites type errors on bad JSON, and blurs syntactic vs semantic failures. The only pre-deserialization step should be minimal (e.g. confirming the stored value is a JSON object where the contract requires it).

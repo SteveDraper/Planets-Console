@@ -1,0 +1,54 @@
+---
+name: clear-analytic-persistence
+description: >-
+  Clear persisted analytic state (fleet ledgers, scores inference rows, hull
+  catalog masks, homeworld locator cache) for a game/perspective/player via
+  scripts/clear_analytic_persistence.py. Apply when asked to clear, wipe, reset,
+  purge, or delete analytic persistence, cached inference/fleet results, or
+  similar durable analytic state for a game.
+---
+
+# Clear analytic persistence
+
+When asked to clear, wipe, reset, purge, or delete **persisted analytic state**
+for a game (fleet ledgers, scores inference rows, hull catalog masks, homeworld
+locator persistence, or "analytic cache"), **do not** invent ad-hoc `rm` paths
+or one-off storage deletes.
+
+Use this project script
+
+```bash
+uv run python scripts/clear_analytic_persistence.py \
+  --game-id <GAME_ID> \
+  --perspective <N|*> \
+  --player <N|*>
+```
+
+Optional `--storage-root ./.data` (default), `--dry-run`, `--analytics <id>`
+(repeatable or comma-separated; default to all analytics).
+
+## Selectors
+
+| Flag | Values | Effect |
+|------|--------|--------|
+| `--perspective` | integer or `*` | Filters turn-scoped and perspective-scoped analytic documents |
+| `--player` | integer or `*` | Filters per-player fleet/scores entries and hull catalog masks |
+| `--analytics` / `-a` | analytic id(s) | Restrict which analytics are cleared; omit for all |
+
+Both perspective/player axes are independent. Examples...
+
+- One perspective, all players: `--perspective 11 --player '*'`
+- All perspectives, one player: `--perspective '*' --player 8`
+- Full wipe for a game: `--perspective '*' --player '*'`
+- Homeworld only: `--perspective '*' --player '*' --analytics homeworld-locator`
+- Fleet + scores: `--perspective '*' --player '*' --analytics fleet,scores`
+
+Game-global non-player documents (e.g. homeworld-locator) clear only when both
+perspective and player selectors are `*`. Turn **RST / TurnInfo** data is never
+removed.
+
+## After clearing
+
+Durable files under `storage_root` are updated immediately. If a local server
+process holds in-memory compute/export state for that scope, restart it or
+re-open the shell scope so work recomputes from empty persistence.
