@@ -1,4 +1,4 @@
-"""Catalog of generic table-stream registries for diagnostics and live-stream queries."""
+"""Catalog of table-stream registries for diagnostics and live-stream queries."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from api.streaming.table_stream.registry import TableStreamRegistry
+from api.streaming.table_stream.controller_base import OnWalkStreamController
 
 
 class TableStreamScopeBinding(Protocol):
@@ -17,7 +17,18 @@ class TableStreamScopeBinding(Protocol):
     turn_number: int
 
 
-_RegistryEntry = tuple[str, TableStreamRegistry[Any, Any], Callable[[Any], dict[str, Any]]]
+class CatalogedTableStreamRegistry(Protocol):
+    """What the catalog reads from a registered table-stream registry.
+
+    Every registered registry holds on-walk stream controllers.
+    """
+
+    def controller_for_scope(self, scope: Any) -> OnWalkStreamController | None: ...
+
+    def list_active_scopes(self) -> tuple[Any, ...]: ...
+
+
+_RegistryEntry = tuple[str, CatalogedTableStreamRegistry, Callable[[Any], dict[str, Any]]]
 _registry_entries: list[_RegistryEntry] = []
 
 
@@ -32,7 +43,7 @@ def scope_binding_wire(scope: TableStreamScopeBinding) -> dict[str, Any]:
 
 def register_table_stream_registry(
     analytic_id: str,
-    registry: TableStreamRegistry[Any, Any],
+    registry: CatalogedTableStreamRegistry,
     *,
     binding_wire: Callable[[Any], dict[str, Any]] = scope_binding_wire,
 ) -> None:
@@ -56,14 +67,14 @@ def _registered_table_stream_entries() -> list[_RegistryEntry]:
 class LiveTableStream:
     """One active scope on a registered table-stream registry, as seen by a scan.
 
-    ``controller`` is the controller attached when the scan saw the scope; the
-    catalog does not know its analytic type. ``is_live`` re-asks the registry.
+    ``controller`` is the controller attached when the scan saw the scope.
+    ``is_live`` re-asks the registry.
     """
 
     analytic_id: str
     scope: TableStreamScopeBinding
-    controller: object
-    _registry: TableStreamRegistry[Any, Any] = field(repr=False)
+    controller: OnWalkStreamController
+    _registry: CatalogedTableStreamRegistry = field(repr=False)
 
     def is_live(self) -> bool:
         """Whether a controller is still attached for this scope."""

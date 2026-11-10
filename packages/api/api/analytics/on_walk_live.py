@@ -18,9 +18,7 @@ the blocker finish. A submit may fetch missing earlier turns from Planets.nu
 before it plans the walk, so one player's slow fetch does not hold another
 player's submit, the settings write, or the listener. A shell whose submit
 raises is logged and skipped, so one player's failure does not stop the
-others. A live fleet or scoreboard stream whose controller is not an on-walk
-stream controller is logged at error level and skipped, and the other streams
-still proceed; a stream with no query context is skipped quietly. The setting
+others. A stream with no query context is skipped quietly. The setting
 stays stored: a stream attached while the setting is on submits its own
 on-walk.
 """
@@ -33,7 +31,7 @@ import weakref
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import NamedTuple, Protocol, runtime_checkable
+from typing import NamedTuple
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.eliminated_player import player_has_on_walk_root
@@ -43,8 +41,6 @@ from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeRequest
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
-from api.models.game import TurnInfo
-from api.streaming.table_stream.controller_base import WorkAcceptedSink
 from api.streaming.table_stream.registry_catalog import LiveTableStream, live_table_streams
 
 logger = logging.getLogger(__name__)
@@ -60,21 +56,11 @@ class _PlayerKey(NamedTuple):
         return cls(scope.game_id, scope.perspective, scope.player_id)
 
 
-@runtime_checkable
-class _OnWalkStreamController(WorkAcceptedSink, Protocol):
-    """What a live fleet or scoreboard stream controller offers an on-walk."""
-
-    turn: TurnInfo
-    player_ids: tuple[int, ...]
-    query_context: AnalyticQueryContext | None
-
-
 @dataclass(frozen=True)
 class _ScannedStream:
-    """A live stream seen by a scan, with its controller and query context narrowed once."""
+    """A live stream seen by a scan, with its query context narrowed once."""
 
     stream: LiveTableStream
-    controller: _OnWalkStreamController
     ctx: AnalyticQueryContext
 
 
@@ -86,7 +72,7 @@ class _LiveShell:
     scanned: _ScannedStream
 
     def emit_accepted(self) -> None:
-        self.scanned.controller.emit_work_accepted(self.compute_scope.player_id)
+        self.scanned.stream.controller.emit_work_accepted(self.compute_scope.player_id)
 
 
 def submit_on_walks_for_live_streams(
@@ -321,23 +307,12 @@ def _live_shells(game_id: int) -> list[_LiveShell]:
         controller = stream.controller
         if scope.game_id != game_id or not isinstance(scope.perspective, int):
             continue
-        if not isinstance(controller, _OnWalkStreamController):
-            logger.error(
-                "Live %s stream for game %s perspective %s turn %s has a %s controller "
-                "that is not an on-walk stream controller; no on-walk is submitted for it",
-                stream.analytic_id,
-                scope.game_id,
-                scope.perspective,
-                scope.turn_number,
-                type(controller).__name__,
-            )
-            continue
         ctx = controller.query_context
         if ctx is None:
             # A scoreboard stream can be opened without a query context; it has
             # nothing to submit with.
             continue
-        scanned = _ScannedStream(stream=stream, controller=controller, ctx=ctx)
+        scanned = _ScannedStream(stream=stream, ctx=ctx)
         shells.extend(
             _LiveShell(
                 compute_scope=ComputeScope(

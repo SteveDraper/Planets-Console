@@ -20,9 +20,13 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
 from api.streaming.table_stream.connect import AdmissionDispatch
+
+if TYPE_CHECKING:
+    from api.analytics.export_context import AnalyticQueryContext
+    from api.models.game import TurnInfo
 
 ScheduledT = TypeVar("ScheduledT")
 AdmissionT = TypeVar("AdmissionT")
@@ -32,6 +36,22 @@ class WorkAcceptedSink(Protocol):
     """A live table stream that can tell one player's row that work was accepted."""
 
     def emit_work_accepted(self, player_id: int) -> None: ...
+
+
+class OnWalkStreamController(WorkAcceptedSink, Protocol):
+    """A live fleet or scoreboard stream controller, as an on-walk submit reads it.
+
+    A controller with no query context has nothing to submit an on-walk with.
+    """
+
+    @property
+    def turn(self) -> TurnInfo: ...
+
+    @property
+    def player_ids(self) -> tuple[int, ...]: ...
+
+    @property
+    def query_context(self) -> AnalyticQueryContext | None: ...
 
 
 @dataclass(kw_only=True)
