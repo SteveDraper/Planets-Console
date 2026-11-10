@@ -1,5 +1,6 @@
 """Game info reads and Planets.nu refresh."""
 
+import logging
 import threading
 from collections.abc import Callable
 
@@ -26,6 +27,8 @@ from api.transport.sector_display import (
     sector_display_name_from_stored_payload,
 )
 
+logger = logging.getLogger(__name__)
+
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
 # Serializes the read and the write of a Backfill earlier turns choice, so
 # exactly one concurrent writer sees the off-to-on transition. Every service
@@ -37,6 +40,8 @@ _backfill_earlier_turns_write_lock = threading.Lock()
 OnGameInfoRefreshed = Callable[[int, GameInfo | None, GameInfo], None]
 # Fired when Backfill earlier turns transitions from off to on for one game.
 # The listener must not block on the work it starts; its return value is ignored.
+# The service catches and logs any ``Exception`` it raises, so a failing listener
+# never fails the settings write.
 OnBackfillEnabled = Callable[[int], object]
 
 
@@ -217,9 +222,10 @@ class GameService:
         The Settings checkbox is the only writer. The value is shared by every
         perspective of the game. Turning the setting from off to on starts
         on-walks for live fleet and scoreboard streams of this game and
-        returns without waiting for their submits. A submit that fails is
-        logged and the stored value stays. Turning it off leaves an accepted
-        walk running.
+        returns without waiting for their submits. The stored value is the
+        outcome of the call: a listener that raises is logged with the game id
+        and the call still returns ``enabled``. Turning it off leaves an
+        accepted walk running.
         """
         if not isinstance(enabled, bool):
             raise ValidationError("backfillEarlierTurns must be a boolean.")
@@ -231,5 +237,11 @@ class GameService:
                 backfill_earlier_turns_document(enabled),
             )
         if enabled and not was_enabled and self._on_backfill_enabled is not None:
-            self._on_backfill_enabled(game_id)
+            try:
+                self._on_backfill_enabled(game_id)
+            except Exception:
+                logger.exception(
+                    "Backfill earlier turns listener failed for game %s; the setting stays on",
+                    game_id,
+                )
         return enabled

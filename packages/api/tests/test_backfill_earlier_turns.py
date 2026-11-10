@@ -1,6 +1,7 @@
 """Backfill earlier turns: one boolean per game, read without submitting a walk."""
 
 import json
+import logging
 import threading
 from pathlib import Path
 
@@ -117,6 +118,20 @@ def test_off_to_on_notifies_once(storage):
     assert notified == [_GAME_ID]
     service.set_backfill_earlier_turns(_GAME_ID, True)
     assert notified == [_GAME_ID, _GAME_ID]
+
+
+def test_failing_listener_does_not_fail_the_save(storage, caplog):
+    def fail(game_id: int) -> None:
+        raise RuntimeError("scan blew up")
+
+    service = GameService(storage, on_backfill_enabled=fail)
+    with caplog.at_level(logging.ERROR, logger="api.services.game_service"):
+        assert service.set_backfill_earlier_turns(_GAME_ID, True) is True
+    assert read_backfill_earlier_turns(storage, _GAME_ID) is True
+    failures = [record for record in caplog.records if record.exc_info is not None]
+    assert len(failures) == 1
+    assert str(_GAME_ID) in failures[0].getMessage()
+    assert failures[0].exc_info[1].args == ("scan blew up",)
 
 
 class _ReadersMeetStorage:
