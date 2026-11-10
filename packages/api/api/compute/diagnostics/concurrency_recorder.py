@@ -23,7 +23,7 @@ from api.compute.diagnostics.timeline import (
     make_concurrency_event,
 )
 from api.compute.orchestrator_state import ComputeNodeRun
-from api.compute.pools import ComputePriorityBand
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
 
 

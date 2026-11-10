@@ -18,6 +18,7 @@ from api.compute import (
     normalize_export_scope_to_compute_scope,
     validate_turn_analytic_compute_registration,
 )
+from api.compute.priority_band import UNWATCHED, ShellStreamWatch, WatchedShellKey
 
 
 class _StubPersistencePolicy:
@@ -68,6 +69,7 @@ def _compute_registration(**kwargs) -> TurnAnalyticRegistration:
         "run_steps",
         (("materialize", lambda _job: {"result": True}),),
     )
+    shell_stream_watch = kwargs.get("shell_stream_watch", UNWATCHED)
 
     def compute(_ctx) -> dict:
         return {"analyticId": analytic_id}
@@ -81,6 +83,7 @@ def _compute_registration(**kwargs) -> TurnAnalyticRegistration:
         persistence_policy=persistence_policy,
         build_step_job_wires=build_step_job_wires,
         run_steps=run_steps,
+        shell_stream_watch=shell_stream_watch,
     )
 
 
@@ -151,6 +154,20 @@ def test_validate_compute_registration_accepts_complete_profile():
     assert compute_registration.analytic_id == "test-analytic"
     assert "materialize" in compute_registration.build_step_job_wire
     assert "materialize" in compute_registration.run_step
+    assert compute_registration.shell_stream_watch is UNWATCHED
+
+
+def test_validate_compute_registration_carries_shell_stream_watch():
+    class _Watch(ShellStreamWatch):
+        def watched_keys(self) -> frozenset[WatchedShellKey]:
+            return frozenset()
+
+    watch = _Watch()
+    compute_registration = validate_turn_analytic_compute_registration(
+        _compute_registration(shell_stream_watch=watch)
+    )
+    assert compute_registration is not None
+    assert compute_registration.shell_stream_watch is watch
 
 
 def test_validate_compute_registration_skips_when_profile_absent():
@@ -225,6 +242,12 @@ def test_validate_compute_registration_skips_when_profile_absent():
             },
             "must declare at least one axis",
         ),
+        (
+            {
+                "shell_stream_watch": lambda: frozenset(),
+            },
+            "shell_stream_watch must be a ShellStreamWatch",
+        ),
     ],
 )
 def test_validate_compute_registration_rejects_invalid_profiles(overrides, match):
@@ -247,6 +270,20 @@ def test_production_compute_registry_imports_fleet_and_scores():
 
     assert "fleet" in COMPUTE_REGISTRY
     assert "scores" in COMPUTE_REGISTRY
+
+
+def test_production_compute_registrations_are_unwatched():
+    from api.compute.registry import COMPUTE_REGISTRY
+
+    watches = {
+        analytic_id: registration.shell_stream_watch
+        for analytic_id, registration in COMPUTE_REGISTRY.items()
+    }
+    assert watches == {
+        "fleet": UNWATCHED,
+        "scores": UNWATCHED,
+        "homeworld-locator": UNWATCHED,
+    }
 
 
 def test_fleet_compute_profile_uses_interpreter_backend():

@@ -14,7 +14,6 @@ from api.analytics.registration import TurnAnalyticRegistration
 from api.compute import (
     AnalyticComputeProfile,
     ComputeOrchestrator,
-    ComputePriorityBand,
     ComputeRequest,
     ComputeScope,
     ComputeStepSpec,
@@ -25,6 +24,7 @@ from api.compute import (
     dequeue_next_work_item,
     normalize_export_scope_to_compute_scope,
 )
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 

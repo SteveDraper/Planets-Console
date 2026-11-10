@@ -18,7 +18,7 @@ from api.compute.orchestrator_state import (
     ComputeRequest,
     ResolvedComputeRequest,
 )
-from api.compute.pools import PRIORITY_BAND_RANK, ComputePriorityBand
+from api.compute.priority_band import ComputePriorityBand, highest_band
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.root_plan import IgnoredRootPlan, RootPlan
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
@@ -402,9 +402,7 @@ class OrchestratorSubmissionMixin:
             return
         if not node.allows_priority_adopt:
             return
-        if PRIORITY_BAND_RANK[priority_band] >= PRIORITY_BAND_RANK[node.priority_band]:
-            return
-        node.priority_band = priority_band
+        node.priority_band = highest_band(node.priority_band, priority_band)
 
     def _replace_terminal_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         if not node.is_terminal:

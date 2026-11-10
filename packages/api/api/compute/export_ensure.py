@@ -17,7 +17,7 @@ from api.analytics.export_types import (
 )
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.orchestrator_state import ComputeRequest
-from api.compute.pools import ComputePriorityBand
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.scope import ComputeScope, normalize_export_scope_to_compute_scope
 
 if TYPE_CHECKING:

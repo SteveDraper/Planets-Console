@@ -22,7 +22,8 @@ from api.compute.orchestrator_state import (
 )
 from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
-from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
+from api.compute.pools import ComputeWorkerPool, PoolSubmitter
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen

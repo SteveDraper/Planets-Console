@@ -40,7 +40,6 @@ _REGISTRY_EXPORTS = frozenset(
 
 _POOL_EXPORTS = frozenset(
     {
-        "ComputePriorityBand",
         "ComputeWorkerPool",
         "PoolMetrics",
         "PoolSubmitter",
@@ -113,7 +112,6 @@ __all__ = [
     "ComputeHandle",
     "ComputeNodeRun",
     "ComputeOrchestrator",
-    "ComputePriorityBand",
     "ComputeRequest",
     "ComputeScope",
     "ComputeStepSpec",

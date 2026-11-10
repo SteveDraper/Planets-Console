@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from api.compute.orchestrator import OrchestratorNodeSnapshot
-from api.compute.pools import ComputeBackend, ComputePriorityBand, PoolWorkItem
+from api.compute.pools import ComputeBackend, PoolWorkItem
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
 
 # (orchestrator_id, scope, step_kind, step_index) -- matches a running DAG node.

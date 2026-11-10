@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.compute_context import AnalyticComputeContext
 from api.analytics.exports.catalog import AnalyticExportCatalog
+from api.compute.priority_band import UNWATCHED, ShellStreamWatch
 from api.compute.root_plan import OpenRootPlanFn, open_ignored_root_plan
 from api.validation import require_non_empty_string
 
@@ -34,6 +35,7 @@ class TurnAnalyticRegistration:
     build_step_job_wires: tuple[tuple[str, BuildStepJobWireFn], ...] = ()
     run_steps: tuple[tuple[str, RunStepFn], ...] = ()
     open_root_plan: OpenRootPlanFn = open_ignored_root_plan
+    shell_stream_watch: ShellStreamWatch = UNWATCHED
 
 
 def resolve_registration_export_catalog(

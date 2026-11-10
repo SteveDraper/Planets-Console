@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from api.compute.orchestrator_observers import LifecycleEventKind
-from api.compute.pools import ComputePriorityBand
+from api.compute.priority_band import ComputePriorityBand
 
 DEFAULT_TIMELINE_CAPACITY = 5000
 

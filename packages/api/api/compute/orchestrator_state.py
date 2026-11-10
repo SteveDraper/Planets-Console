@@ -11,7 +11,7 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.errors import ComputeWaitTimeoutError
 from api.compute.orchestration_bundle import OrchestrationBundle
-from api.compute.pools import ComputePriorityBand
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.compute.submission_open import SubmissionOpen
 

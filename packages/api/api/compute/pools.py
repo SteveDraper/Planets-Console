@@ -10,9 +10,10 @@ from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from api.compute.backend_runtime import effective_compute_backend, process_is_frozen
+from api.compute.priority_band import ComputePriorityBand, highest_band
 from api.compute.profile import ComputeBackend, ComputeStepSpec
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
@@ -24,14 +25,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.orchestrator_state import ComputeNodeRun
-
-ComputePriorityBand = Literal["stream_attached", "interactive_ensure", "background"]
-
-PRIORITY_BAND_RANK: dict[ComputePriorityBand, int] = {
-    "stream_attached": 0,
-    "interactive_ensure": 1,
-    "background": 2,
-}
 
 # Wider than historical 4: scores ``tier_solve`` is single-threaded CP-SAT, so
 # parallelism is across per-player DAG nodes on this pool (not inside one Solve).
@@ -103,11 +96,11 @@ def dequeue_next_work_item(
     allowed = [item for item in queue if predicate is None or predicate(item)]
     if not allowed:
         return None
-    best_rank = min(PRIORITY_BAND_RANK[item.priority_band] for item in allowed)
+    best_band = highest_band(*(item.priority_band for item in allowed))
     candidate_indices = [
         index
         for index, item in enumerate(queue)
-        if item in allowed and PRIORITY_BAND_RANK[item.priority_band] == best_rank
+        if item in allowed and item.priority_band == best_band
     ]
     for index in candidate_indices:
         if queue[index].step_index == 0:

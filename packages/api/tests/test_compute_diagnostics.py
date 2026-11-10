@@ -31,7 +31,8 @@ from api.compute.diagnostics.scope import (
     scope_in_diagnostic_scope,
 )
 from api.compute.orchestrator import ComputeNodeRun
-from api.compute.pools import ComputePriorityBand, PoolWorkItem
+from api.compute.pools import PoolWorkItem
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import format_compute_scope_key
 from api.compute.submission_open import SubmissionOpen
