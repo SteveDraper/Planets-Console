@@ -43,7 +43,7 @@ class _OnWalkShell:
     game_id: int
     perspective: int
     player_id: int
-    baseline: int
+    baseline_mark: FleetEvidenceMark
 
     def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
         """Establish and widen the mark from the registered plan.
@@ -57,14 +57,16 @@ class _OnWalkShell:
         earliest_turn = earliest_planned_turn(planned)
         if earliest_turn is None:
             return
+
+        def establish_and_widen(current: FleetEvidenceMark) -> FleetEvidenceMark:
+            established = self.baseline_mark if current.is_absent else current
+            return established.widened_to(earliest_turn)
+
         self.services.persistence.update_evidence_mark(
             self.game_id,
             self.perspective,
             self.player_id,
-            lambda current: _widen_existing_mark(
-                _establish_absent_mark(current, self.baseline),
-                earliest_turn,
-            ),
+            establish_and_widen,
         )
 
 
@@ -89,7 +91,7 @@ def open_on_walk_root_plan(
         shell.game_id,
         shell.perspective,
         shell.player_id,
-        FleetEvidenceMark(evidence_generation=1, applies_from_turn=shell.baseline),
+        shell.baseline_mark,
     ):
         yield shell
 
@@ -119,7 +121,9 @@ def _on_walk_shell(
         game_id=scope.game_id,
         perspective=scope.perspective,
         player_id=scope.player_id,
-        baseline=accelerated_ensure_floor(shell.settings, open_turn),
+        baseline_mark=FleetEvidenceMark.first_at(
+            accelerated_ensure_floor(shell.settings, open_turn)
+        ),
     )
 
 
@@ -148,22 +152,3 @@ def scoreboard_persist_belongs_to_on_walk(
         )
     )
     return opened is not None and opened.on_walk
-
-
-def _establish_absent_mark(current: FleetEvidenceMark, baseline: int) -> FleetEvidenceMark:
-    if not current.is_absent:
-        return current
-    return FleetEvidenceMark(evidence_generation=1, applies_from_turn=baseline)
-
-
-def _widen_existing_mark(current: FleetEvidenceMark, earliest_turn: int) -> FleetEvidenceMark:
-    """Move ``appliesFromTurn`` backward to ``earliest_turn``. Never forward."""
-    if current.is_absent:
-        return current
-    applies = current.applies_from_turn
-    if applies is not None and earliest_turn >= applies:
-        return current
-    return FleetEvidenceMark(
-        evidence_generation=current.evidence_generation,
-        applies_from_turn=earliest_turn,
-    )

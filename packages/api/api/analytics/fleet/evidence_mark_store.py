@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from types import MappingProxyType
 
 from api.analytics.fleet.constants import FLEET_EVIDENCE_MARK_SEGMENT
@@ -109,13 +110,8 @@ class FleetEvidenceMarkStore:
         key = (game_id, perspective, player_id)
         with self._lock:
             current = self._cached_or_read(key)
-            applies_from = current.applies_from_turn
-            if applies_from is None or host_turn < applies_from:
-                applies_from = host_turn
-            updated = FleetEvidenceMark(
-                evidence_generation=current.evidence_generation + 1,
-                applies_from_turn=applies_from,
-            )
+            widened = current.widened_to(host_turn)
+            updated = replace(widened, evidence_generation=widened.evidence_generation + 1)
             self._write(key, updated)
             self._cache[key] = updated
             return updated

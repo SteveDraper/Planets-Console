@@ -178,6 +178,41 @@ def test_evidence_mark_is_absent_only_at_generation_zero_with_no_applies_from_tu
     assert mark.is_absent is expected
 
 
+def test_first_at_is_generation_one_at_the_baseline_turn():
+    mark = FleetEvidenceMark.first_at(40)
+    assert mark == FleetEvidenceMark(evidence_generation=1, applies_from_turn=40)
+    assert not mark.is_absent
+
+
+@pytest.mark.parametrize(
+    ("mark", "turn", "expected"),
+    (
+        (
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+            35,
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=35),
+        ),
+        (
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+            40,
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+        ),
+        (
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+            45,
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=40),
+        ),
+        (
+            FleetEvidenceMark(evidence_generation=2),
+            45,
+            FleetEvidenceMark(evidence_generation=2, applies_from_turn=45),
+        ),
+    ),
+)
+def test_widened_to_moves_applies_from_turn_backward_only(mark, turn, expected):
+    assert mark.widened_to(turn) == expected
+
+
 def test_mark_persist_precedence_is_on_walk_then_absent_then_open_turn_stamp():
     """On-walk beats an absent mark, which beats the backfill-off open-turn stamp."""
     present = FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
