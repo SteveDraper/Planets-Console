@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_stream_registry import (
     get_fleet_table_stream_registry,
@@ -126,6 +128,60 @@ def test_an_eliminated_player_is_neither_submitted_nor_told_work_was_accepted(
     assert {request.scope.player_id for request in submitted} == set(roster) - {eliminated}
     assert fleet.accepted_events(eliminated) == []
     assert scores.accepted_events(eliminated) == []
+
+
+def test_a_scoreboard_controller_of_the_wrong_shape_is_logged_and_the_fleet_stream_still_submits(
+    sample_turn, monkeypatch, caplog
+):
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_ids = roster_player_ids(host)
+    fleet_scope = FleetTableStreamScope(ctx.game_id, ctx.perspective, 10)
+    scores_scope = InferenceStreamScope(ctx.game_id, ctx.perspective, 10)
+    attach_stream(get_fleet_table_stream_registry(), fleet_scope, host, ctx, player_ids)
+    get_inference_table_stream_registry().attach(scores_scope, object())
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
+    try:
+        with caplog.at_level(logging.ERROR, logger="api.analytics.on_walk_live"):
+            wait_for_submits(
+                submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+            )
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+        reset_inference_table_stream_registry_for_tests()
+
+    assert {request.scope.analytic_id for request in submitted} == {FLEET_ANALYTIC_ID}
+    assert {request.scope.player_id for request in submitted} == set(player_ids)
+    [record] = [r for r in caplog.records if r.levelno == logging.ERROR]
+    message = record.getMessage()
+    assert SCORES_ANALYTIC_ID in message
+    assert f"game {ctx.game_id}" in message
+    assert "turn 10" in message
+
+
+def test_a_stream_without_a_query_context_is_skipped_quietly(sample_turn, monkeypatch, caplog):
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_ids = roster_player_ids(host)
+    fleet_scope = FleetTableStreamScope(ctx.game_id, ctx.perspective, 10)
+    scores_scope = InferenceStreamScope(ctx.game_id, ctx.perspective, 10)
+    attach_stream(get_fleet_table_stream_registry(), fleet_scope, host, ctx, player_ids)
+    scores = attach_stream(
+        get_inference_table_stream_registry(), scores_scope, host, None, player_ids
+    )
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="api.analytics.on_walk_live"):
+            wait_for_submits(
+                submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+            )
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+        reset_inference_table_stream_registry_for_tests()
+
+    assert {request.scope.analytic_id for request in submitted} == {FLEET_ANALYTIC_ID}
+    assert not scores.wake_multiplex.is_set()
+    assert caplog.records == []
 
 
 def test_no_live_stream_does_not_create_an_orchestrator(sample_turn, monkeypatch):

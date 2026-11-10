@@ -18,8 +18,11 @@ the blocker finish. A submit may fetch missing earlier turns from Planets.nu
 before it plans the walk, so one player's slow fetch does not hold another
 player's submit, the settings write, or the listener. A shell whose submit
 raises is logged and skipped, so one player's failure does not stop the
-others. The setting stays stored: a stream attached while the setting is on
-submits its own on-walk.
+others. A live fleet or scoreboard stream whose controller is not an on-walk
+stream controller is logged at error level and skipped, and the other streams
+still proceed; a stream with no query context is skipped quietly. The setting
+stays stored: a stream attached while the setting is on submits its own
+on-walk.
 """
 
 from __future__ import annotations
@@ -319,9 +322,20 @@ def _live_shells(game_id: int) -> list[_LiveShell]:
         if scope.game_id != game_id or not isinstance(scope.perspective, int):
             continue
         if not isinstance(controller, _OnWalkStreamController):
+            logger.error(
+                "Live %s stream for game %s perspective %s turn %s has a %s controller "
+                "that is not an on-walk stream controller; no on-walk is submitted for it",
+                stream.analytic_id,
+                scope.game_id,
+                scope.perspective,
+                scope.turn_number,
+                type(controller).__name__,
+            )
             continue
         ctx = controller.query_context
-        if not isinstance(ctx, AnalyticQueryContext):
+        if ctx is None:
+            # A scoreboard stream can be opened without a query context; it has
+            # nothing to submit with.
             continue
         scanned = _ScannedStream(stream=stream, controller=controller, ctx=ctx)
         shells.extend(
