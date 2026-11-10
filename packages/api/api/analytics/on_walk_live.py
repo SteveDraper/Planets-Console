@@ -66,16 +66,23 @@ class _OnWalkStreamController(WorkAcceptedSink, Protocol):
 
 
 @dataclass(frozen=True)
+class _ScannedStream:
+    """A live stream seen by a scan, with its controller and query context narrowed once."""
+
+    stream: LiveTableStream
+    controller: _OnWalkStreamController
+    ctx: AnalyticQueryContext
+
+
+@dataclass(frozen=True)
 class _LiveShell:
     """One player's on-walk root on one live stream."""
 
     compute_scope: ComputeScope
-    ctx: AnalyticQueryContext
-    stream: LiveTableStream
-    work_accepted_sink: WorkAcceptedSink
+    scanned: _ScannedStream
 
     def emit_accepted(self) -> None:
-        self.work_accepted_sink.emit_work_accepted(self.compute_scope.player_id)
+        self.scanned.controller.emit_work_accepted(self.compute_scope.player_id)
 
 
 def submit_on_walks_for_live_streams(
@@ -236,9 +243,10 @@ def _start_submit(
 
 def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) -> None:
     for shell in shells:
-        if not shell.stream.is_live():
+        ctx = shell.scanned.ctx
+        if not shell.scanned.stream.is_live():
             continue
-        if not shell.ctx.backfill_earlier_turns_enabled():
+        if not ctx.backfill_earlier_turns_enabled():
             continue
         try:
             orchestrator.submit(
@@ -246,7 +254,7 @@ def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) 
                     scope=shell.compute_scope,
                     priority_band="stream_attached",
                     force_fresh=True,
-                    ctx=shell.ctx,
+                    ctx=ctx,
                 )
             )
         except Exception:
@@ -288,6 +296,7 @@ def _live_shells(game_id: int) -> list[_LiveShell]:
         ctx = controller.query_context
         if not isinstance(ctx, AnalyticQueryContext):
             continue
+        scanned = _ScannedStream(stream=stream, controller=controller, ctx=ctx)
         shells.extend(
             _LiveShell(
                 compute_scope=ComputeScope(
@@ -297,9 +306,7 @@ def _live_shells(game_id: int) -> list[_LiveShell]:
                     turn=scope.turn_number,
                     player_id=player_id,
                 ),
-                ctx=ctx,
-                stream=stream,
-                work_accepted_sink=controller,
+                scanned=scanned,
             )
             for player_id in controller.player_ids
             if player_has_on_walk_root(controller.turn, player_id)
