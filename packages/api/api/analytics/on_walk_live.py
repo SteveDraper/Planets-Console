@@ -36,12 +36,13 @@ from typing import NamedTuple
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.eliminated_player import player_has_on_walk_root
 from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
+from api.analytics.walk_shell_watch import live_walk_shells
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeRequest
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
-from api.streaming.table_stream.registry_catalog import LiveTableStream, live_table_streams
+from api.streaming.table_stream.registry_catalog import LiveTableStream
 
 logger = logging.getLogger(__name__)
 
@@ -57,22 +58,15 @@ class _PlayerKey(NamedTuple):
 
 
 @dataclass(frozen=True)
-class _ScannedStream:
-    """A live stream seen by a scan, with its query context narrowed once."""
+class _LiveShell:
+    """One player's on-walk root on one live stream, with the stream's query context."""
 
+    compute_scope: ComputeScope
     stream: LiveTableStream
     ctx: AnalyticQueryContext
 
-
-@dataclass(frozen=True)
-class _LiveShell:
-    """One player's on-walk root on one live stream."""
-
-    compute_scope: ComputeScope
-    scanned: _ScannedStream
-
     def emit_accepted(self) -> None:
-        self.scanned.stream.controller.emit_work_accepted(self.compute_scope.player_id)
+        self.stream.controller.emit_work_accepted(self.compute_scope.player_id)
 
 
 def submit_on_walks_for_live_streams(
@@ -259,8 +253,8 @@ def _start_submit(
 
 def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) -> None:
     for shell in shells:
-        ctx = shell.scanned.ctx
-        if not shell.scanned.stream.is_live():
+        ctx = shell.ctx
+        if not shell.stream.is_live():
             continue
         # Re-check the stored setting immediately before submit so a thread
         # that lost the race to a toggle-off does not submit; the submission
@@ -304,30 +298,31 @@ def _has_off_setting_walk(orchestrator: ComputeOrchestrator, player: _PlayerKey)
 
 
 def _live_shells(game_id: int) -> list[_LiveShell]:
+    """The game's live walk shells that have an on-walk to submit.
+
+    A stream with no query context has nothing to submit with, and a player
+    eliminated on the shell turn has no walk.
+    """
     shells: list[_LiveShell] = []
-    for stream in live_table_streams(FLEET_WALK_ANALYTIC_IDS):
-        scope = stream.scope
-        controller = stream.controller
-        if scope.game_id != game_id or not isinstance(scope.perspective, int):
-            continue
+    for walk_shell in live_walk_shells():
+        key = walk_shell.key
+        controller = walk_shell.stream.controller
         ctx = controller.query_context
-        if ctx is None:
-            # A scoreboard stream can be opened without a query context; it has
-            # nothing to submit with.
+        if key.game_id != game_id or ctx is None:
             continue
-        scanned = _ScannedStream(stream=stream, ctx=ctx)
-        shells.extend(
+        if not player_has_on_walk_root(controller.turn, key.player_id):
+            continue
+        shells.append(
             _LiveShell(
                 compute_scope=ComputeScope(
-                    analytic_id=stream.analytic_id,
-                    game_id=game_id,
-                    perspective=scope.perspective,
-                    turn=scope.turn_number,
-                    player_id=player_id,
+                    analytic_id=walk_shell.stream.analytic_id,
+                    game_id=key.game_id,
+                    perspective=key.perspective,
+                    turn=key.turn,
+                    player_id=key.player_id,
                 ),
-                scanned=scanned,
+                stream=walk_shell.stream,
+                ctx=ctx,
             )
-            for player_id in controller.player_ids
-            if player_has_on_walk_root(controller.turn, player_id)
         )
     return shells

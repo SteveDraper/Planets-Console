@@ -881,7 +881,7 @@ def test_limited_bump_reschedules_scores_rows_from_the_same_live_scan(
     install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 4)
     fleet_turns: list[int] = []
     scores_turns: list[int] = []
-    list_calls = {"fleet": 0, "scores": 0}
+    scan_calls = {"fleet": 0, "scores": 0}
 
     def spy_fleet(scope, _player_id):
         fleet_turns.append(scope.turn_number)
@@ -931,19 +931,19 @@ def test_limited_bump_reschedules_scores_rows_from_the_same_live_scan(
         object(),
     )
     fleet_registry = get_fleet_table_stream_registry()
-    fleet_list = fleet_registry.list_active_scopes
-    scores_list = scores_registry.list_active_scopes
+    fleet_items = fleet_registry.items
+    scores_items = scores_registry.items
 
     def counting_fleet():
-        list_calls["fleet"] += 1
-        return fleet_list()
+        scan_calls["fleet"] += 1
+        return fleet_items()
 
     def counting_scores():
-        list_calls["scores"] += 1
-        return scores_list()
+        scan_calls["scores"] += 1
+        return scores_items()
 
-    monkeypatch.setattr(fleet_registry, "list_active_scopes", counting_fleet)
-    monkeypatch.setattr(scores_registry, "list_active_scopes", counting_scores)
+    monkeypatch.setattr(fleet_registry, "items", counting_fleet)
+    monkeypatch.setattr(scores_registry, "items", counting_scores)
     invalidation = InferenceInvalidationService(
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
@@ -963,7 +963,7 @@ def test_limited_bump_reschedules_scores_rows_from_the_same_live_scan(
 
     assert fleet_turns == [4, 5, 6]
     assert scores_turns == [6]
-    assert list_calls == {"fleet": 1, "scores": 1}
+    assert scan_calls == {"fleet": 1, "scores": 1}
 
 
 def test_backfill_on_keeps_the_final_prior_dependency(sample_turn):

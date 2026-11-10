@@ -119,6 +119,20 @@ def _isolate_compute_diagnostics_state(request: pytest.FixtureRequest):
 
 
 @pytest.fixture(autouse=True)
+def _catalog_table_stream_registries():
+    """Catalog the table-stream registries as a stream connect does.
+
+    Tests that attach a controller straight to a registry skip connect, so the
+    catalog scans would not see it otherwise.
+    """
+    from api.streaming.table_stream.registry_bootstrap import (
+        ensure_table_stream_registries_registered,
+    )
+
+    ensure_table_stream_registries_registered()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_fleet_table_stream_compute_state(request: pytest.FixtureRequest):
     """Reset orchestrator and worker pool between fleet stream tests."""
     if "test_fleet_table_stream" not in request.path.name:

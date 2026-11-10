@@ -272,7 +272,8 @@ def test_production_compute_registry_imports_fleet_and_scores():
     assert "scores" in COMPUTE_REGISTRY
 
 
-def test_production_compute_registrations_are_unwatched():
+def test_production_fleet_and_scores_share_the_walk_watch_and_homeworld_is_unwatched():
+    from api.analytics.walk_shell_watch import WALK_SHELL_STREAM_WATCH
     from api.compute.registry import COMPUTE_REGISTRY
 
     watches = {
@@ -280,8 +281,8 @@ def test_production_compute_registrations_are_unwatched():
         for analytic_id, registration in COMPUTE_REGISTRY.items()
     }
     assert watches == {
-        "fleet": UNWATCHED,
-        "scores": UNWATCHED,
+        "fleet": WALK_SHELL_STREAM_WATCH,
+        "scores": WALK_SHELL_STREAM_WATCH,
         "homeworld-locator": UNWATCHED,
     }
 

@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_stream_registry import (
+    detach_fleet_table_stream,
     get_fleet_table_stream_registry,
     reset_fleet_table_stream_registry_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
+    detach_inference_table_stream,
     get_inference_table_stream_registry,
     reset_inference_table_stream_registry_for_tests,
 )
@@ -351,3 +354,64 @@ def test_deferred_on_walk_skips_a_closed_stream_or_a_setting_that_turned_off(
         assert player_id not in {request.scope.player_id for request in submitted}
     finally:
         reset_fleet_table_stream_registry_for_tests()
+
+
+@pytest.mark.parametrize(
+    ("closed_analytics", "submitted_analytics"),
+    [
+        ({FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID}, set()),
+        ({FLEET_ANALYTIC_ID}, {SCORES_ANALYTIC_ID}),
+    ],
+)
+def test_an_off_setting_waiter_submits_nothing_on_a_shell_stream_that_closed(
+    sample_turn, monkeypatch, closed_analytics, submitted_analytics
+):
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    streams = {
+        FLEET_ANALYTIC_ID: attach_stream(
+            get_fleet_table_stream_registry(),
+            FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
+            host,
+            ctx,
+            [player_id],
+        ),
+        SCORES_ANALYTIC_ID: attach_stream(
+            get_inference_table_stream_registry(),
+            InferenceStreamScope(ctx.game_id, ctx.perspective, 10),
+            host,
+            ctx,
+            [player_id],
+        ),
+    }
+    detach_by_analytic = {
+        FLEET_ANALYTIC_ID: detach_fleet_table_stream,
+        SCORES_ANALYTIC_ID: detach_inference_table_stream,
+    }
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
+    blocker = shell_scope(ctx, FLEET_ANALYTIC_ID, 9, player_id)
+    node = ComputeNodeRun(
+        scope=blocker,
+        dependency_scopes=(),
+        state="running",
+        submission_open=SubmissionOpen(open_turn=10, backfill_earlier_turns=False),
+    )
+    orchestrator.nodes[blocker] = node
+    try:
+        started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        assert submitted == []
+        for analytic_id in closed_analytics:
+            detach_by_analytic[analytic_id](streams[analytic_id].stream_token)
+
+        node.state = "complete"
+        orchestrator.observers.notify_scope_outcome(node)
+        orchestrator.observers.drain_post_lock_callbacks()
+        wait_for_submits(started)
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+        reset_inference_table_stream_registry_for_tests()
+
+    assert {request.scope.analytic_id for request in submitted} == submitted_analytics
+    for analytic_id in closed_analytics:
+        assert streams[analytic_id].accepted_events(player_id) == []

@@ -1,8 +1,11 @@
-"""Central registration of analytic table-stream registries for diagnostics.
+"""Central registration of analytic table-stream registries in the catalog.
 
-Analytic registry modules own attach/detach/reschedule only. Diagnostics
-introspection registers those registries here so fleet/scores never import
-``registry_catalog``.
+Analytic registry modules own attach/detach/reschedule only. This module
+catalogs those registries so fleet/scores never import ``registry_catalog``.
+
+The stream connect entry (``scoped_connect``) calls it before the stream's
+controller is attached, outside every lock, so a catalog scan never registers
+or imports anything.
 """
 
 from __future__ import annotations
@@ -13,19 +16,8 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.streaming.table_stream.registry_catalog import register_table_stream_registry
 
-_registered = False
-
 
 def ensure_table_stream_registries_registered() -> None:
-    """Register known table-stream registries once for diagnostics snapshots."""
-    global _registered
-    if _registered:
-        return
+    """Catalog the fleet and scores table-stream registries; repeat calls change nothing."""
     register_table_stream_registry("fleet", get_fleet_table_stream_registry())
     register_table_stream_registry("scores", get_inference_table_stream_registry())
-    _registered = True
-
-
-def reset_table_stream_registry_bootstrap_for_tests() -> None:
-    global _registered
-    _registered = False

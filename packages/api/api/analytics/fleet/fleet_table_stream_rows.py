@@ -22,13 +22,13 @@ from api.analytics.fleet.observation_ingest import turn_load_sighting_ledger
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.table_wire import fleet_acquisition_ledger_to_table_wire
 from api.models.game import TurnInfo
-from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
 from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events as _drain_available_multiplex_events,
 )
 from api.streaming.table_stream.multiplex import (
     iter_multiplexed_stream_events,
 )
+from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 from api.transport.fleet_table_stream import fleet_roster_paint_event
 
 _TERMINAL_EVENT_TYPES = frozenset({"complete", "error"})

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from collections.abc import Iterable
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ class LiveStream:
     """Typed stand-in for a fleet or inference table-stream controller."""
 
     def __init__(self, turn, ctx, player_ids: list[int]) -> None:
+        self.stream_token = uuid.uuid4().hex
         self.turn = turn
         self.query_context = ctx
         self.player_ids = tuple(player_ids)

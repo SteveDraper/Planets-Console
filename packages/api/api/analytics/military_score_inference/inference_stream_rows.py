@@ -43,13 +43,13 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.scoreboard_evidence import annotate_scoreboard_paint
 from api.models.game import Score, TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.streaming.table_stream.connect import iter_table_stream_connect_with_scope
 from api.streaming.table_stream.multiplex import (
     drain_available_multiplex_events as _drain_available_multiplex_events,
 )
 from api.streaming.table_stream.multiplex import (
     iter_multiplexed_stream_events,
 )
+from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 from api.transport.inference_stream_wire import domain_event_to_wire_events
 
 _TERMINAL_EVENT_TYPES = frozenset({"complete", "error"})
