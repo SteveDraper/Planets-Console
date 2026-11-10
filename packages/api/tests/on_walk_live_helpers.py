@@ -33,6 +33,7 @@ class LiveStream:
     def __init__(self, turn, ctx, player_ids: list[int]) -> None:
         self.turn = turn
         self.query_context = ctx
+        self.player_ids = tuple(player_ids)
         self.scheduled_rows = {
             player_id: _QueuedRow(session=_QueuedSession(event_queue=_EventQueue()))
             for player_id in player_ids

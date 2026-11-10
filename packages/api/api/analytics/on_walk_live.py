@@ -1,6 +1,9 @@
 """Submit on-walks for live fleet and scoreboard streams when the setting turns on.
 
-A turn with no live stream stays quiet. One player does not wait for another.
+A turn with no live stream stays quiet. Each stream submits only the players
+it was opened for, and never a player eliminated on its turn: that player has
+no walk, so nothing is submitted and no work_accepted reaches the row. One
+player does not wait for another.
 A player who still has a non-terminal fleet or scoreboard node from an
 off-setting walk is submitted after that node completes, and only while the
 setting is still on and that stream is still live. The follow-up is a
@@ -23,8 +26,8 @@ from dataclasses import dataclass
 from typing import NamedTuple, Protocol, runtime_checkable
 
 from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.off_mode import FLEET_WALK_ANALYTIC_IDS
-from api.analytics.turn_roster import iter_turn_players
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeRequest
@@ -52,6 +55,7 @@ class _OnWalkStreamController(WorkAcceptedSink, Protocol):
     """What a live fleet or scoreboard stream controller offers an on-walk."""
 
     turn: TurnInfo
+    player_ids: tuple[int, ...]
     query_context: AnalyticQueryContext | None
 
 
@@ -245,12 +249,13 @@ def _live_shells(game_id: int) -> list[_LiveShell]:
                     game_id=game_id,
                     perspective=scope.perspective,
                     turn=scope.turn_number,
-                    player_id=player.id,
+                    player_id=player_id,
                 ),
                 ctx=ctx,
                 stream=stream,
                 work_accepted_sink=controller,
             )
-            for player in iter_turn_players(controller.turn)
+            for player_id in controller.player_ids
+            if not fleet_player_eliminated_at_turn(controller.turn, player_id)
         )
     return shells

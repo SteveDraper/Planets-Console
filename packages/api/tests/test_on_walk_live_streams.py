@@ -18,6 +18,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
+from api.models.enums import PlayerStatus
 from api.serialization.backfill_earlier_turns import (
     backfill_earlier_turns_document,
     backfill_earlier_turns_store_key,
@@ -28,6 +29,7 @@ from tests.off_mode_catch_up_helpers import context_at_turn
 from tests.on_walk_helpers import fleet_persistence, held_pool_orchestrator, shell_scope
 from tests.on_walk_live_helpers import attach_stream, recording_orchestrator, roster_player_ids
 from tests.scores_exports_helpers import first_player_id
+from tests.test_fleet_eliminated_player import _stamp_player
 
 
 def test_live_streams_submit_one_force_fresh_walk_per_player(sample_turn, monkeypatch):
@@ -68,6 +70,56 @@ def test_live_streams_submit_one_force_fresh_walk_per_player(sample_turn, monkey
             scores.scheduled_rows[player_id].session.event_queue.events[0]["type"]
             == "work_accepted"
         )
+
+
+def test_a_stream_submits_only_the_players_it_was_opened_for(sample_turn, monkeypatch):
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    roster = roster_player_ids(host)
+    assert len(roster) >= 2
+    opened_for = roster[:1]
+    fleet_scope = FleetTableStreamScope(ctx.game_id, ctx.perspective, 10)
+    fleet = attach_stream(get_fleet_table_stream_registry(), fleet_scope, host, ctx, opened_for)
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
+    try:
+        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+
+    assert {request.scope.player_id for request in submitted} == set(opened_for)
+    assert fleet.accepted_events(opened_for[0])[0]["type"] == "work_accepted"
+
+
+def test_an_eliminated_player_is_neither_submitted_nor_told_work_was_accepted(
+    sample_turn, monkeypatch
+):
+    shell_turn = 10
+    eliminated = first_player_id(sample_turn)
+    stamped = _stamp_player(
+        sample_turn,
+        eliminated,
+        status=int(PlayerStatus.ELIMINATED),
+        statusturn=shell_turn,
+        turn_number=shell_turn,
+    )
+    host, ctx = context_at_turn(stamped, shell_turn)
+    enable_backfill_earlier_turns(ctx)
+    roster = roster_player_ids(host)
+    assert eliminated in roster and len(roster) >= 2
+    fleet_scope = FleetTableStreamScope(ctx.game_id, ctx.perspective, shell_turn)
+    scores_scope = InferenceStreamScope(ctx.game_id, ctx.perspective, shell_turn)
+    fleet = attach_stream(get_fleet_table_stream_registry(), fleet_scope, host, ctx, roster)
+    scores = attach_stream(get_inference_table_stream_registry(), scores_scope, host, ctx, roster)
+    orchestrator, submitted = recording_orchestrator(monkeypatch)
+    try:
+        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+        reset_inference_table_stream_registry_for_tests()
+
+    assert {request.scope.player_id for request in submitted} == set(roster) - {eliminated}
+    assert fleet.accepted_events(eliminated) == []
+    assert scores.accepted_events(eliminated) == []
 
 
 def test_no_live_stream_does_not_create_an_orchestrator(sample_turn, monkeypatch):
