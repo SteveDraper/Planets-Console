@@ -30,8 +30,9 @@ from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
     scope_in_diagnostic_scope,
 )
+from api.compute.diagnostics.single_step_preview import SingleStepPin
 from api.compute.orchestrator import ComputeNodeRun
-from api.compute.pools import PoolWorkItem
+from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem
 from api.compute.priority_band import ComputePriorityBand
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import format_compute_scope_key
@@ -39,12 +40,22 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
+from tests.compute_published_band_helpers import publish_node_band
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
 from tests.test_compute_foundation import _StubPersistencePolicy
+
+
+def _take_queued_item(pool: ComputeWorkerPool) -> PoolWorkItem | None:
+    picked = pool.take_next_item_for_tests()
+    return None if picked is None else picked.item
+
+
+def _queued_items(pool: ComputeWorkerPool) -> tuple[PoolWorkItem, ...]:
+    return tuple(queued.item for queued in pool.snapshot_work_queue())
 
 
 @pytest.fixture(autouse=True)
@@ -630,12 +641,11 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
         ),
         step_kind="materialize",
         backend="thread",
-        priority_band="background",
         step_index=0,
     )
     pool.enqueue_for_tests(later_held)
     assert controller._pool_item_is_runnable(later_held) is False
-    assert pool.take_next_item_for_tests() is None
+    assert _take_queued_item(pool) is None
 
 
 def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
@@ -778,7 +788,6 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
         scope=held_scope,
         step_kind="materialize",
         backend="thread",
-        priority_band="background",
         step_index=0,
     )
 
@@ -804,7 +813,7 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     assert controller._pool_item_is_runnable(held_item) is True
     assert controller._single_step.grants_remaining == 1
 
-    released = pool.take_next_item_for_tests()
+    released = _take_queued_item(pool)
     assert released is held_item
     assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(held_item) is False
@@ -848,7 +857,6 @@ def test_single_step_prefers_stream_attached_ready_over_background_held(sample_t
         scope=held_scope,
         step_kind="materialize",
         backend="thread",
-        priority_band="background",
         step_index=0,
     )
 
@@ -970,9 +978,11 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
 
     with controller._lock:
         controller._single_step.shell = shell
-        controller._single_step.target_scope = scope
-        controller._single_step.target_priority_band = "background"
-        controller._single_step.target_orchestrator_id = id_a
+        controller._single_step.target = SingleStepPin(
+            orchestrator_id=id_a,
+            scope=scope,
+            step_index=0,
+        )
         controller._single_step.dispatch_slots_remaining = 1
         controller._single_step.grants_remaining = 1
 
@@ -1085,7 +1095,6 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
         scope=other_scope,
         step_kind="materialize",
         backend="thread",
-        priority_band="stream_attached",
         step_index=0,
     )
     focus_item = PoolWorkItem(
@@ -1093,7 +1102,6 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
         scope=focus_scope,
         step_kind="materialize",
         backend="thread",
-        priority_band="background",
         step_index=0,
     )
 
@@ -1107,11 +1115,11 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
     assert controller._pool_item_is_runnable(other_item) is False
     assert controller._pool_item_is_runnable(focus_item) is True
 
-    released = pool.take_next_item_for_tests()
+    released = _take_queued_item(pool)
     assert released is focus_item
     assert controller._single_step.grants_remaining == 0
-    assert pool.snapshot_work_queue() == (other_item,)
-    assert pool.take_next_item_for_tests() is None
+    assert _queued_items(pool) == (other_item,)
+    assert _take_queued_item(pool) is None
 
 
 def test_single_step_pool_dequeue_releases_one_held_item(sample_turn):
@@ -1125,11 +1133,11 @@ def test_single_step_pool_dequeue_releases_one_held_item(sample_turn):
     assert controller._pool_item_is_runnable(item) is True
     assert controller._single_step.grants_remaining == 1
 
-    released = pool.take_next_item_for_tests()
+    released = _take_queued_item(pool)
     assert released is item
     assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(item) is False
-    assert pool.take_next_item_for_tests() is None
+    assert _take_queued_item(pool) is None
 
 
 def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter(
@@ -1152,7 +1160,6 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
         scope=high_scope,
         step_kind="materialize",
         backend="inline",
-        priority_band="stream_attached",
         step_index=0,
     )
 
@@ -1161,18 +1168,20 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
         shell,
         frozenset({low_item.scope.player_id, high_scope.player_id}),
     )
+    bound = controller._bound_orchestrators_snapshot()[0]
+    publish_node_band(bound.orchestrator, high_scope, "stream_attached")
     # Lower-priority frozen item is first in the queue; higher-priority second.
     pool.enqueue_for_tests(low_item)
     pool.enqueue_for_tests(high_item)
     assert controller.single_step(shell) is True
     assert controller._single_step.grants_remaining == 1
 
-    released = pool.take_next_item_for_tests()
+    released = _take_queued_item(pool)
     assert released is high_item
     assert controller._single_step.grants_remaining == 0
-    assert pool.snapshot_work_queue() == (low_item,)
+    assert _queued_items(pool) == (low_item,)
     assert controller._pool_item_is_runnable(low_item) is False
-    assert pool.take_next_item_for_tests() is None
+    assert _take_queued_item(pool) is None
 
 
 def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
@@ -1196,7 +1205,6 @@ def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
         scope=focus_scope,
         step_kind="materialize",
         backend="inline",
-        priority_band="background",
         step_index=0,
     )
 
@@ -1206,11 +1214,11 @@ def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
     pool.enqueue_for_tests(focus_item)
     assert controller.single_step(shell) is True
 
-    first = pool.take_next_item_for_tests()
+    first = _take_queued_item(pool)
     assert first is focus_item
     assert controller._single_step.grants_remaining == 0
-    assert pool.snapshot_work_queue() == (frozen_item,)
-    assert pool.take_next_item_for_tests() is None
+    assert _queued_items(pool) == (frozen_item,)
+    assert _take_queued_item(pool) is None
 
 
 def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
@@ -1233,7 +1241,6 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
         scope=second_scope,
         step_kind="materialize",
         backend="inline",
-        priority_band="background",
         step_index=0,
     )
 
@@ -1253,7 +1260,7 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
 
     def dequeue_once() -> None:
         start.wait(timeout=2.0)
-        item = pool.take_next_item_for_tests()
+        item = _take_queued_item(pool)
         with released_lock:
             released.append(item)
 
@@ -1270,7 +1277,7 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
     assert non_none[0] in {first_item, second_item}
     assert controller._single_step.grants_remaining == 0
     assert len(pool.snapshot_work_queue()) == 1
-    assert pool.take_next_item_for_tests() is None
+    assert _take_queued_item(pool) is None
 
 
 def _pool_held_item_fixture(sample_turn, *, worker_count: int = 0):
@@ -1330,7 +1337,6 @@ def _pool_held_item_fixture(sample_turn, *, worker_count: int = 0):
         scope=scope,
         step_kind="materialize",
         backend="inline",
-        priority_band="background",
         step_index=0,
     )
     return controller, pool, shell, item
@@ -1353,11 +1359,11 @@ def test_snapshot_does_not_consume_single_step_grant(sample_turn):
     assert controller._pool_item_is_runnable(item) is True
     assert controller._single_step.grants_remaining == 1
 
-    released = pool.take_next_item_for_tests()
+    released = _take_queued_item(pool)
     assert released is item
     assert controller._single_step.grants_remaining == 0
     assert controller._pool_item_is_runnable(item) is False
-    assert pool.take_next_item_for_tests() is None
+    assert _take_queued_item(pool) is None
 
 
 def test_snapshot_wire_shape_includes_required_sections(sample_turn):
@@ -1432,7 +1438,7 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
     assert wire_before["inFlight"] == []
     assert len(wire_before["poolQueue"]) == 1
 
-    released = pool.take_next_item_for_tests()
+    released = _take_queued_item(pool)
     assert released is item
     assert len(controller._in_flight_snapshot()) == 1
     record = controller._in_flight_snapshot()[0]
@@ -1440,7 +1446,7 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
     assert record.analytic_id == item.scope.analytic_id
     assert record.step_kind == item.step_kind
     assert record.step_index == item.step_index
-    assert record.priority_band == item.priority_band
+    assert record.priority_band == "background"
     assert record.backend == item.backend
     assert record.orchestrator_id == item.orchestrator_id
     assert isinstance(record.started_at, str) and record.started_at
@@ -1451,7 +1457,7 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
         state="succeeded",
         profile_step_index=0,
         step_index=item.step_index,
-        priority_band=item.priority_band,
+        priority_band="background",
         submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
@@ -1479,13 +1485,12 @@ def test_in_flight_clear_is_scoped_to_orchestrator_id(sample_turn):
         scope=item_a.scope,
         step_kind=item_a.step_kind,
         backend=item_a.backend,
-        priority_band=item_a.priority_band,
         step_index=item_a.step_index,
     )
     pool.enqueue_for_tests(item_a)
     pool.enqueue_for_tests(item_b)
-    assert pool.take_next_item_for_tests() is item_a
-    assert pool.take_next_item_for_tests() is item_b
+    assert _take_queued_item(pool) is item_a
+    assert _take_queued_item(pool) is item_b
     assert len(controller._in_flight_snapshot()) == 2
 
     controller._on_pool_item_finished(item_a)
@@ -1498,7 +1503,7 @@ def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
     """Worker finish clears in-flight even when complete_pool_step is a no-op."""
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
     pool.enqueue_for_tests(item)
-    assert pool.take_next_item_for_tests() is item
+    assert _take_queued_item(pool) is item
     assert len(controller._in_flight_snapshot()) == 1
 
     # Simulate abort-before-finish: step-complete already ran; worker still finishes.
@@ -1508,7 +1513,7 @@ def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
         state="failed",
         profile_step_index=0,
         step_index=item.step_index,
-        priority_band=item.priority_band,
+        priority_band="background",
         submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
@@ -1523,7 +1528,7 @@ def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
     assert controller._in_flight_snapshot() == ()
 
     # Re-record a ghost as if abort clear missed, then pool finish must clear it.
-    controller._on_pool_item_dequeued(item)
+    controller._on_pool_item_dequeued(BandedWorkItem(item=item, priority_band="background"))
     assert len(controller._in_flight_snapshot()) == 1
     controller._on_pool_item_finished(item)
     assert controller._in_flight_snapshot() == ()
@@ -1534,7 +1539,7 @@ def test_snapshot_filters_orphan_in_flight_without_mutating(sample_turn):
     """Orphan in-flight is omitted from the wire; snapshot GET must not purge state."""
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
     pool.enqueue_for_tests(item)
-    assert pool.take_next_item_for_tests() is item
+    assert _take_queued_item(pool) is item
     assert len(controller._in_flight_snapshot()) == 1
 
     # Node never entered running on the bound orchestrator -- orphan for the wire.
@@ -1557,13 +1562,12 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
         ),
         step_kind=item.step_kind,
         backend=item.backend,
-        priority_band=item.priority_band,
         step_index=item.step_index,
     )
     pool.enqueue_for_tests(item)
     pool.enqueue_for_tests(other_item)
-    assert pool.take_next_item_for_tests() is item
-    assert pool.take_next_item_for_tests() is other_item
+    assert _take_queued_item(pool) is item
+    assert _take_queued_item(pool) is other_item
     assert len(controller._in_flight_snapshot()) == 2
 
     # Snapshot filters only -- does not mutate controller state.
@@ -1577,7 +1581,7 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
         state="failed",
         profile_step_index=0,
         step_index=item.step_index,
-        priority_band=item.priority_band,
+        priority_band="background",
         submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
@@ -1592,7 +1596,7 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
     assert controller._in_flight_snapshot() == ()
 
     # Finish remains the authoritative clear for the matching row after re-record.
-    controller._on_pool_item_dequeued(item)
+    controller._on_pool_item_dequeued(BandedWorkItem(item=item, priority_band="background"))
     assert len(controller._in_flight_snapshot()) == 1
     controller._on_pool_item_finished(item)
     assert controller._in_flight_snapshot() == ()
@@ -1615,7 +1619,7 @@ def test_snapshot_held_preview_matches_empty_pool_queue(sample_turn):
 def test_in_flight_clears_on_orchestrator_unbind(sample_turn):
     controller, pool, shell, item = _pool_held_item_fixture(sample_turn, worker_count=0)
     pool.enqueue_for_tests(item)
-    assert pool.take_next_item_for_tests() is item
+    assert _take_queued_item(pool) is item
     # Orphan relative to running nodes; retained until unbind / finish (snapshot
     # filters only and must not purge).
     assert len(controller._in_flight_snapshot()) == 1
@@ -1646,13 +1650,12 @@ def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
         scope=other_scope,
         step_kind=item.step_kind,
         backend=item.backend,
-        priority_band=item.priority_band,
         step_index=item.step_index,
     )
     pool.enqueue_for_tests(item)
     pool.enqueue_for_tests(other_item)
-    assert pool.take_next_item_for_tests() is item
-    assert pool.take_next_item_for_tests() is other_item
+    assert _take_queued_item(pool) is item
+    assert _take_queued_item(pool) is other_item
 
     # Both recorded on the controller; raw snapshot retains them (no matching
     # running nodes -- wire live filter would omit them).
@@ -2240,7 +2243,6 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
         scope=scope,
         step_kind="materialize",
         backend="thread",
-        priority_band="background",
         step_index=0,
     )
     assert controller._pool_item_is_runnable(in_item) is False
@@ -2250,7 +2252,6 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
             scope=out_of_scope,
             step_kind="materialize",
             backend="thread",
-            priority_band="background",
             step_index=0,
         )
         assert controller._pool_item_is_runnable(out_item) is True
@@ -2365,7 +2366,6 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         scope=other_ancestor_scope,
         step_kind="materialize",
         backend="thread",
-        priority_band="stream_attached",
         step_index=0,
     )
     focus_held = PoolWorkItem(
@@ -2373,7 +2373,6 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         scope=ancestor_scope,
         step_kind="materialize",
         backend="thread",
-        priority_band="background",
         step_index=0,
     )
     pool.enqueue_for_tests(non_focus_held)
@@ -2384,9 +2383,9 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
     assert controller._pool_item_is_runnable(non_focus_held) is False
     assert controller._pool_item_is_runnable(focus_held) is True
     assert controller._single_step.grants_remaining == 1
-    assert pool.take_next_item_for_tests() is focus_held
+    assert _take_queued_item(pool) is focus_held
     assert controller._single_step.grants_remaining == 0
-    assert pool.snapshot_work_queue() == (non_focus_held,)
+    assert _queued_items(pool) == (non_focus_held,)
 
     # Production fleet step kind (history resolves against COMPUTE_REGISTRY).
     completed_node = ComputeNodeRun(

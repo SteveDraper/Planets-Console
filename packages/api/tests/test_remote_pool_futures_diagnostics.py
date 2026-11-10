@@ -11,7 +11,7 @@ from api.compute.diagnostics.snapshot import (
     build_compute_diagnostics_snapshot,
     snapshot_to_wire,
 )
-from api.compute.pools import ComputeWorkerPool, PoolWorkItem
+from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem
 from api.compute.remote_futures import (
     classify_future_state,
     future_exception_type,
@@ -123,17 +123,17 @@ def test_pool_registers_remote_future_on_interpreter_submit_and_clears_after_don
             scope=_scope(),
             step_kind="materialization_leg",
             backend="interpreter",
-            priority_band="background",
             step_index=0,
             job_wire={"x": 1},
             run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
         )
         pool._interpreter_executor = executor  # type: ignore[assignment]
-        pool._execute_item(item)
+        pool._execute_item(BandedWorkItem(item=item, priority_band="stream_attached"))
 
         records = pool.snapshot_remote_futures()
         assert len(records) == 1
         assert records[0].future is pending
+        assert records[0].priority_band == "stream_attached"
         assert classify_future_state(pending) == "pending"
         probe = pool.remote_executor_probe()
         assert probe["interpreterMaxWorkers"] == pool.worker_count
@@ -167,13 +167,12 @@ def test_remote_future_unregister_does_not_take_pool_condition_under_controller(
             scope=_scope(),
             step_kind="materialization_leg",
             backend="interpreter",
-            priority_band="background",
             step_index=0,
             job_wire={"x": 1},
             run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
         )
         future: Future[object] = Future()
-        pool._register_remote_future(item, future)
+        pool._register_remote_future(BandedWorkItem(item=item, priority_band="background"), future)
 
         def worker_holds_pool_then_controller() -> None:
             with pool._condition:

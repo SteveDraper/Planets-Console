@@ -1,7 +1,8 @@
 """Step dispatch and post-lock execution helpers for ComputeOrchestrator.
 
 Owns durable-satisfaction short-circuit, ready-queue dispatch into pending
-inline/pool work, and seal-before-expensive-work execute paths that must run
+inline/pool work, the band map each dispatch pass publishes for the worker
+pool, and seal-before-expensive-work execute paths that must run
 only after the orchestrator lock is released. The DAG scheduler in
 ``orchestrator`` stays focused on readiness, singleflight, and terminal
 lifecycle.
@@ -9,6 +10,7 @@ lifecycle.
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from api.compute.backend_runtime import effective_compute_backend
@@ -26,8 +28,9 @@ class OrchestratorStepExecutionMixin:
     """Short-circuit, dispatch, and post-lock step execution for the orchestrator.
 
     Expects the concrete orchestrator to provide ``_condition``, ``_nodes``,
-    ``_ready_queue``, ``_metrics``, ``_observers``, ``_compute_registry``,
-    ``_pool_submitter``, ``_ctx_for_node``, ``_complete_node``, ``_fail_node``,
+    ``_published_bands``, ``_ready_queue``, ``_metrics``, ``_observers``,
+    ``_compute_registry``, ``_pool_submitter``, ``_ctx_for_node``,
+    ``_complete_node``, ``_fail_node``,
     ``_after_step_success``, ``_deps_complete``, ``_enqueue_ready``,
     ``_ready_depth``, and ``_notify_ready_queue_changed``.
     """
@@ -43,6 +46,8 @@ class OrchestratorStepExecutionMixin:
 
         Before execution, durable satisfaction short-circuits the node so a node
         whose durable artifact already satisfies this step never re-runs it.
+
+        The pass ends by publishing the band map the worker pool picks by.
         """
         pending_inline: list[PendingInlineExecution] = []
         pending_pool: list[PendingPoolSubmission] = []
@@ -88,7 +93,22 @@ class OrchestratorStepExecutionMixin:
         # ``_dequeue_ready`` notify on their own paths; this catches dispatch-only leaves.
         if self._ready_depth() != initial_ready_depth:
             self._notify_ready_queue_changed()
+        self._publish_bands()
         return tuple(pending_inline), tuple(pending_pool)
+
+    def _publish_bands(self) -> None:
+        """Replace the published band map with every non-terminal node's band.
+
+        Caller holds the orchestrator lock. Readers take no lock, so the map is
+        built whole and swapped in one assignment.
+        """
+        self._published_bands = MappingProxyType(
+            {
+                scope: node.priority_band
+                for scope, node in self._nodes.items()
+                if not node.is_terminal
+            }
+        )
 
     def _snapshot_dependency_outputs(self, node: ComputeNodeRun) -> DependencyOutputs:
         """Copy dependency result wires under the orchestrator lock."""

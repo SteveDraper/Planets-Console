@@ -6,6 +6,7 @@ import threading
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.errors import ComputeScopeAbortedError
@@ -123,10 +124,16 @@ class ComputeOrchestrator(
     what wire build, persist, and satisfaction checks see.
 
     A waiter with a higher-priority band than the node it attaches to upgrades
-    ``node.priority_band`` in place so the next enqueue/dispatch sees the
+    ``node.priority_band`` in place so the next dispatch pass sees the
     higher band, unless the node has already sealed for execution (job wire
     built inline, or handed to the pool) -- the adopt window has closed by
     then and the waiter simply waits for the leader.
+
+    Every dispatch pass ends by publishing an immutable ``{scope: band}`` map
+    of its non-terminal nodes. The worker pool reads that map through
+    :meth:`published_band`, without the orchestrator lock, each time it picks
+    queued work, so a queued step ranks by its node's band at the last pass.
+    A step keeps the band it was picked at.
 
     There is no process-wide scope lease: singleflight here plus durable
     satisfaction short-circuit (``PersistencePolicy.is_satisfied``) is enough
@@ -156,6 +163,7 @@ class ComputeOrchestrator(
         self._pool_submitter = pool_submitter
         self._worker_pool = worker_pool
         self._nodes: dict[ComputeScope, ComputeNodeRun] = {}
+        self._published_bands: Mapping[ComputeScope, ComputePriorityBand] = MappingProxyType({})
         self._ready_queue: deque[ComputeScope] = deque()
         self._metrics = OrchestratorMetrics()
         self._next_execution_generation = 1
@@ -204,6 +212,15 @@ class ComputeOrchestrator(
     def nodes(self) -> Mapping[ComputeScope, ComputeNodeRun]:
         """Live node map for tests and diagnostics. Adapters must use peek APIs."""
         return self._nodes
+
+    def published_band(self, scope: ComputeScope) -> ComputePriorityBand | None:
+        """Return the band the last dispatch pass published for ``scope``.
+
+        Takes no lock: the map is immutable and replaced whole, so the worker
+        pool reads it while holding only its own lock. None when ``scope`` had
+        no non-terminal node at that pass.
+        """
+        return self._published_bands.get(scope)
 
     def peek_node_state(self, scope: ComputeScope) -> str | None:
         """Return ``node.state`` under the orchestrator lock, or None if absent."""

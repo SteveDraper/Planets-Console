@@ -1,4 +1,9 @@
-"""Global compute worker pool with priority bands and backend dispatch."""
+"""Global compute worker pool: band-ordered picks and backend dispatch.
+
+A queued step carries no band. When a worker picks, each candidate ranks by
+the band its orchestrator currently publishes for its scope, read without the
+orchestrator lock. The band a step was picked at is fixed from then on.
+"""
 
 from __future__ import annotations
 
@@ -7,13 +12,13 @@ import os
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from api.compute.backend_runtime import effective_compute_backend, process_is_frozen
-from api.compute.priority_band import ComputePriorityBand, highest_band
+from api.compute.priority_band import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.profile import ComputeBackend, ComputeStepSpec
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
@@ -54,16 +59,28 @@ def configured_worker_count() -> int:
 
 @dataclass(frozen=True)
 class PoolWorkItem:
-    """One schedulable pool unit dequeued by priority band and fairness rules."""
+    """One schedulable pool unit. Its band is read from its orchestrator at each pick."""
 
     orchestrator_id: int
     scope: ComputeScope
     step_kind: str
     backend: ComputeBackend
-    priority_band: ComputePriorityBand
     step_index: int
     job_wire: object | None = None
     run_step: RunStepFn | None = None
+
+
+@dataclass(frozen=True)
+class BandedWorkItem:
+    """A pool work item with the band its orchestrator published for it at one read.
+
+    For a queued item the band is the one it would be picked at now. For a
+    picked item it is the band it was picked at, which never changes after
+    the pick.
+    """
+
+    item: PoolWorkItem
+    priority_band: ComputePriorityBand
 
 
 @dataclass
@@ -76,42 +93,22 @@ class PoolMetrics:
     process_executions: int = 0
 
 
-def dequeue_next_work_item(
-    queue: deque[PoolWorkItem],
-    *,
-    predicate: Callable[[PoolWorkItem], bool] | None = None,
-) -> PoolWorkItem | None:
-    """Dequeue the next work item using priority bands and within-band fairness.
+def work_pick_key(priority_band: ComputePriorityBand, step_index: int) -> tuple[int, int]:
+    """Return the pick order key: higher band first, then initial steps before continuations."""
+    return (PRIORITY_BAND_RANK[priority_band], 0 if step_index == 0 else 1)
 
-    Within a band, initial steps (step_index == 0) run before continuations.
-    Among continuations, FIFO queue order provides round-robin across scopes.
 
-    ``predicate`` is evaluated for every queued item before selection. It must be
-    side-effect free -- grant or other mutable gate state belongs in an
-    ``on_item_dequeued`` hook invoked under the pool lock after the chosen item
-    is popped, so concurrent workers cannot both claim the same grant.
+def pick_next_work_item(candidates: Iterable[BandedWorkItem]) -> BandedWorkItem | None:
+    """Return the candidate a worker picks next, or None when there is none.
+
+    Ties keep candidate order, so queue (FIFO) order round-robins continuations
+    across scopes within a band.
     """
-    if not queue:
-        return None
-    allowed = [item for item in queue if predicate is None or predicate(item)]
-    if not allowed:
-        return None
-    best_band = highest_band(*(item.priority_band for item in allowed))
-    candidate_indices = [
-        index
-        for index, item in enumerate(queue)
-        if item in allowed and item.priority_band == best_band
-    ]
-    for index in candidate_indices:
-        if queue[index].step_index == 0:
-            return _pop_at(queue, index)
-    return _pop_at(queue, candidate_indices[0])
-
-
-def _pop_at(queue: deque[PoolWorkItem], index: int) -> PoolWorkItem:
-    item = queue[index]
-    del queue[index]
-    return item
+    return min(
+        candidates,
+        key=lambda candidate: work_pick_key(candidate.priority_band, candidate.item.step_index),
+        default=None,
+    )
 
 
 def _executor_queue_depth(executor: object | None) -> int | None:
@@ -148,8 +145,8 @@ class ComputeWorkerPool:
         self._workers: list[threading.Thread] = []
         self._metrics = PoolMetrics()
         self._dequeue_predicate: Callable[[PoolWorkItem], bool] | None = None
-        self._on_item_dequeued: Callable[[PoolWorkItem, int], None] | None = None
-        self._on_item_enqueued: Callable[[PoolWorkItem, int], None] | None = None
+        self._on_item_dequeued: Callable[[BandedWorkItem, int], None] | None = None
+        self._on_item_enqueued: Callable[[BandedWorkItem, int], None] | None = None
         self._on_item_finished: Callable[[PoolWorkItem], None] | None = None
         self._interpreter_executor: InterpreterPoolExecutor | None = None
         self._process_executor: ProcessPoolExecutor | None = None
@@ -188,22 +185,24 @@ class ComputeWorkerPool:
 
     def set_on_item_dequeued(
         self,
-        callback: Callable[[PoolWorkItem, int], None] | None,
+        callback: Callable[[BandedWorkItem, int], None] | None,
     ) -> None:
         """Set a hook invoked once under the pool lock for the item actually dequeued.
 
-        The second argument is the work-queue depth after the item was popped.
+        The first argument carries the band the item was picked at. The second
+        is the work-queue depth after the item was popped.
         """
         with self._condition:
             self._on_item_dequeued = callback
 
     def set_on_item_enqueued(
         self,
-        callback: Callable[[PoolWorkItem, int], None] | None,
+        callback: Callable[[BandedWorkItem, int], None] | None,
     ) -> None:
         """Set a hook invoked after an item is enqueued (outside the pool lock).
 
-        The second argument is the work-queue depth after the append. Invoked
+        The first argument carries the band published for the item at enqueue.
+        The second is the work-queue depth after the append. Invoked
         outside the pool condition so the callback may take the diagnostics
         controller lock without nesting under the pool lock (workers hold pool
         then controller in predicate / on_dequeued).
@@ -223,9 +222,10 @@ class ComputeWorkerPool:
         with self._condition:
             self._on_item_finished = callback
 
-    def snapshot_work_queue(self) -> tuple[PoolWorkItem, ...]:
+    def snapshot_work_queue(self) -> tuple[BandedWorkItem, ...]:
+        """Return queued items in queue order with the band each would be picked at now."""
         with self._condition:
-            return tuple(self._work_queue)
+            return tuple(self._with_published_band_locked(item) for item in self._work_queue)
 
     def snapshot_remote_futures(self) -> tuple[RemotePoolFutureRecord, ...]:
         """Return interpreter/process futures still tracked between submit and finish."""
@@ -271,7 +271,7 @@ class ComputeWorkerPool:
             self._work_queue.append(item)
             self._condition.notify()
 
-    def take_next_item_for_tests(self) -> PoolWorkItem | None:
+    def take_next_item_for_tests(self) -> BandedWorkItem | None:
         """Dequeue one item using live predicate / on_dequeued hooks (tests only)."""
         with self._condition:
             return self._pop_runnable_item_locked()
@@ -303,7 +303,6 @@ class ComputeWorkerPool:
         node: ComputeNodeRun,
         step: ComputeStepSpec,
         *,
-        priority_band: ComputePriorityBand,
         job_wire: object | None = None,
         run_step: RunStepFn | None = None,
     ) -> None:
@@ -313,7 +312,6 @@ class ComputeWorkerPool:
             scope=node.scope,
             step_kind=step.step_kind,
             backend=step.backend,
-            priority_band=priority_band,
             step_index=node.step_index,
             job_wire=job_wire,
             run_step=run_step,
@@ -321,13 +319,14 @@ class ComputeWorkerPool:
         with self._condition:
             self._work_queue.append(item)
             on_enqueued = self._on_item_enqueued
+            enqueued = self._with_published_band_locked(item)
             queue_depth = len(self._work_queue)
             self._condition.notify()
         # Outside the pool lock: enqueue hooks take the diagnostics controller lock
         # (must not nest under the pool condition -- workers hold pool then
         # controller in predicate / on_dequeued).
         if on_enqueued is not None:
-            on_enqueued(item, queue_depth)
+            on_enqueued(enqueued, queue_depth)
 
     def shutdown(self, *, wait_for_interpreters: bool = False) -> None:
         with self._condition:
@@ -357,7 +356,6 @@ class ComputeWorkerPool:
                 orchestrator_id,
                 node,
                 step,
-                priority_band=node.priority_band,
                 job_wire=job_wire,
                 run_step=run_step,
             )
@@ -367,49 +365,75 @@ class ComputeWorkerPool:
     def _worker_loop(self) -> None:
         while True:
             try:
-                item = self._take_next_item()
+                picked = self._take_next_item()
             except BaseException:
                 with self._condition:
                     self._worker_exception_count += 1
                 logger.exception("compute pool worker failed while dequeuing; continuing")
                 continue
-            if item is None:
+            if picked is None:
                 return
             try:
-                self._execute_item(item)
+                self._execute_item(picked)
             except BaseException:
                 with self._condition:
                     self._worker_exception_count += 1
                 logger.exception(
                     "compute pool worker failed while executing %s %s; continuing",
-                    item.step_kind,
-                    item.scope,
+                    picked.item.step_kind,
+                    picked.item.scope,
                 )
 
-    def _take_next_item(self) -> PoolWorkItem | None:
+    def _take_next_item(self) -> BandedWorkItem | None:
         with self._condition:
             while not self._shutdown:
-                item = self._pop_runnable_item_locked()
-                if item is not None:
-                    return item
+                picked = self._pop_runnable_item_locked()
+                if picked is not None:
+                    return picked
                 self._condition.wait(timeout=_DEQUEUE_WAIT_SECONDS)
             return None
 
-    def _pop_runnable_item_locked(self) -> PoolWorkItem | None:
+    def _pop_runnable_item_locked(self) -> BandedWorkItem | None:
+        """Pick, pop, and record one runnable item at its currently published band.
+
+        The dequeue predicate is evaluated for every queued item before the pick.
+        It must be side-effect free: grant or other mutable gate state belongs in
+        the ``on_item_dequeued`` hook, invoked here after the pop so concurrent
+        workers cannot both claim the same grant.
+        """
+        predicate = self._dequeue_predicate
         on_dequeued = self._on_item_dequeued
-        item = dequeue_next_work_item(
-            self._work_queue,
-            predicate=self._dequeue_predicate,
+        picked = pick_next_work_item(
+            [
+                self._with_published_band_locked(item)
+                for item in self._work_queue
+                if predicate is None or predicate(item)
+            ]
         )
-        if item is None:
+        if picked is None:
             return None
+        picked_index = next(
+            index for index, queued in enumerate(self._work_queue) if queued is picked.item
+        )
+        del self._work_queue[picked_index]
         self._metrics.dequeues += 1
         self._last_dequeue_monotonic = time.monotonic()
         # Same critical section as pop -- grant burn must be atomic with selection.
         # Callback may take the diagnostics controller lock (pool -> controller).
         if on_dequeued is not None:
-            on_dequeued(item, len(self._work_queue))
-        return item
+            on_dequeued(picked, len(self._work_queue))
+        return picked
+
+    def _with_published_band_locked(self, item: PoolWorkItem) -> BandedWorkItem:
+        """Pair ``item`` with the band its orchestrator publishes for its scope.
+
+        Reads the orchestrator's immutable band map and never takes the
+        orchestrator lock. An item whose orchestrator is gone, or whose scope
+        has no published band, ranks as ``background``.
+        """
+        orchestrator = self._orchestrators.get(item.orchestrator_id)
+        band = None if orchestrator is None else orchestrator.published_band(item.scope)
+        return BandedWorkItem(item=item, priority_band="background" if band is None else band)
 
     def _record_backend_execution_locked(self, backend: ComputeBackend) -> None:
         if backend == "thread":
@@ -423,7 +447,7 @@ class ComputeWorkerPool:
         with self._condition:
             return self._orchestrators.get(orchestrator_id)
 
-    def _execute_item(self, item: PoolWorkItem) -> None:
+    def _execute_item(self, picked: BandedWorkItem) -> None:
         """Run one dequeued item.
 
         Thread-backend work runs synchronously on the pool worker. Interpreter and
@@ -435,6 +459,7 @@ class ComputeWorkerPool:
         ``interpreter`` to ``thread`` before dispatch: PyInstaller
         subinterpreters cannot import application modules.
         """
+        item = picked.item
         orchestrator = self._lookup_orchestrator(item.orchestrator_id)
         if orchestrator is None:
             self._notify_item_finished(item)
@@ -470,7 +495,7 @@ class ComputeWorkerPool:
                 else:
                     executor = self._process_executor_locked()
             future = executor.submit(item.run_step, item.job_wire)
-            self._register_remote_future(item, future)
+            self._register_remote_future(picked, future)
             future.add_done_callback(
                 lambda completed, pool_item=item: self._on_remote_future_done(
                     pool_item,
@@ -500,13 +525,14 @@ class ComputeWorkerPool:
             reason = "api.remap_interpreter_backend_to_thread"
         logger.info("Compute backend %r remapped to %r (%s)", declared, effective, reason)
 
-    def _register_remote_future(self, item: PoolWorkItem, future: Future[object]) -> None:
+    def _register_remote_future(self, picked: BandedWorkItem, future: Future[object]) -> None:
+        item = picked.item
         record = remote_future_record(
             orchestrator_id=item.orchestrator_id,
             scope=item.scope,
             step_kind=item.step_kind,
             step_index=item.step_index,
-            priority_band=item.priority_band,
+            priority_band=picked.priority_band,
             backend=item.backend,
             future=future,
         )

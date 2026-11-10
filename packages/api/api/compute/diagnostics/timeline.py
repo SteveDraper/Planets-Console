@@ -93,12 +93,26 @@ class ComputeConcurrencyTimeline:
             self._entries.clear()
 
 
-@dataclass
+@dataclass(frozen=True)
 class OpenExecution:
-    """In-flight start timestamp used to derive wall duration on finish."""
+    """What a start event recorded, kept until the matching finish.
+
+    ``priority_band`` is the band the step started at (for a pool step, the
+    band it was picked at), so its finish reports that band.
+    """
 
     started_at: datetime
     backend: str | None
+    priority_band: ComputePriorityBand
+
+
+@dataclass(frozen=True)
+class ClosedExecution:
+    """A finished execution paired with its start event."""
+
+    duration_ms: float
+    backend: str | None
+    priority_band: ComputePriorityBand
 
 
 class OpenExecutionTracker:
@@ -113,21 +127,29 @@ class OpenExecutionTracker:
         execution_key: str,
         *,
         backend: str | None,
+        priority_band: ComputePriorityBand,
         started_at: datetime | None = None,
     ) -> datetime:
         started = started_at if started_at is not None else datetime.now(UTC)
         with self._lock:
-            self._open[execution_key] = OpenExecution(started_at=started, backend=backend)
+            self._open[execution_key] = OpenExecution(
+                started_at=started,
+                backend=backend,
+                priority_band=priority_band,
+            )
         return started
 
-    def close(self, execution_key: str) -> tuple[float | None, str | None]:
-        """Return ``(duration_ms, backend)`` when a matching start exists."""
+    def close(self, execution_key: str) -> ClosedExecution | None:
+        """Return the closed execution, or None when no matching start was recorded."""
         with self._lock:
             opened = self._open.pop(execution_key, None)
         if opened is None:
-            return None, None
-        duration_ms = (datetime.now(UTC) - opened.started_at).total_seconds() * 1000.0
-        return duration_ms, opened.backend
+            return None
+        return ClosedExecution(
+            duration_ms=(datetime.now(UTC) - opened.started_at).total_seconds() * 1000.0,
+            backend=opened.backend,
+            priority_band=opened.priority_band,
+        )
 
     def clear(self) -> None:
         with self._lock:

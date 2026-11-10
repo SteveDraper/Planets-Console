@@ -359,6 +359,8 @@ Defer cross-process shared mutable caches; parent and worker heaps stay separate
 
 An accepted **Backfill earlier turns** walk with both the fleet analytic and the scoreboard disabled keeps running. Steps not yet inside expensive execution run at background. A shell-turn change while either toggle stays on leaves the walk you left running in that same waiting band. Reopening that turn adopts not-yet-executing steps back to stream-attached. A perspective change uses that same waiting band. On a turn or perspective change an in-flight scoreboard step may persist. A scope the shell you are watching submits may adopt upward when it is not yet inside expensive execution. A game change stops that game's accepted walks: queued hops are dropped, an in-flight scoreboard step does not persist, and an in-flight fleet step may still stamp. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2.
 
+A queued pool step carries no band of its own. Each dispatch pass ends by publishing an immutable `{scope: band}` map of the orchestrator's non-terminal nodes, and the worker pool ranks every queued candidate by that map each time a worker picks, without taking the orchestrator lock. A step whose scope has no published band (orchestrator gone, or node terminal) ranks as background. A step keeps the band it was picked at: in-flight rows, remote-future rows, and completion history report that band.
+
 **Within each band:**
 
 | Analytic | Fairness rule |

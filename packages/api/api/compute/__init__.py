@@ -40,13 +40,14 @@ _REGISTRY_EXPORTS = frozenset(
 
 _POOL_EXPORTS = frozenset(
     {
+        "BandedWorkItem",
         "ComputeWorkerPool",
         "PoolMetrics",
         "PoolSubmitter",
         "PoolWorkItem",
         "configured_worker_count",
-        "dequeue_next_work_item",
         "get_compute_worker_pool",
+        "pick_next_work_item",
         "reset_compute_worker_pool_for_tests",
         "shutdown_compute_worker_pool_for_tests",
     }
@@ -106,6 +107,7 @@ __all__ = [
     "VALID_COMPUTE_BACKENDS",
     "AnalyticComputeProfile",
     "AnalyticComputeRegistration",
+    "BandedWorkItem",
     "BuildStepJobWireFn",
     "BuildStepJobWireKwargs",
     "ComputeBackend",
@@ -135,11 +137,11 @@ __all__ = [
     "build_compute_registry",
     "compute_scope_to_export_scope",
     "configured_worker_count",
-    "dequeue_next_work_item",
     "fingerprint_parameters",
     "format_compute_scope_key",
     "get_compute_worker_pool",
     "normalize_export_scope_to_compute_scope",
+    "pick_next_work_item",
     "plan_compute_dag",
     "reset_compute_worker_pool_for_tests",
     "shutdown_compute_worker_pool_for_tests",

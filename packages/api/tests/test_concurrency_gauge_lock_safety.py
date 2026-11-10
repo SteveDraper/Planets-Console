@@ -104,6 +104,7 @@ def test_record_ready_default_does_not_sample_live_orchestrators() -> None:
         orchestrator_id=1,
         step_kind="tier_solve",
         step_index=0,
+        priority_band="background",
         sample_ready_from_orchestrators=False,
     )
 
@@ -139,6 +140,7 @@ def test_listener_gauges_use_last_known_global_queue_depth() -> None:
         orchestrator_id=1,
         step_kind="materialize",
         step_index=0,
+        priority_band="background",
     )
     recorder.record(
         shell,
@@ -147,6 +149,7 @@ def test_listener_gauges_use_last_known_global_queue_depth() -> None:
         orchestrator_id=1,
         step_kind="materialize",
         step_index=0,
+        priority_band="background",
     )
     recorder.record_finish(
         shell,
@@ -190,6 +193,7 @@ def test_explicit_global_queue_depth_updates_last_known() -> None:
         orchestrator_id=1,
         step_kind="materialize",
         step_index=0,
+        priority_band="background",
         global_queue_depth=3,
     )
     recorder.record(
@@ -199,6 +203,7 @@ def test_explicit_global_queue_depth_updates_last_known() -> None:
         orchestrator_id=1,
         step_kind="materialize",
         step_index=0,
+        priority_band="background",
     )
 
     events = recorder.recent(shell)

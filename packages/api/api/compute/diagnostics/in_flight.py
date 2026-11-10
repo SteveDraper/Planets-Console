@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from api.compute.orchestrator import OrchestratorNodeSnapshot
-from api.compute.pools import ComputeBackend, PoolWorkItem
+from api.compute.pools import BandedWorkItem, ComputeBackend
 from api.compute.priority_band import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
 
@@ -17,7 +17,11 @@ InFlightExecutionKey = tuple[int, ComputeScope, str, int]
 
 @dataclass(frozen=True)
 class InFlightPoolExecution:
-    """One pool work item that has been dequeued and is not yet complete."""
+    """One pool work item that has been dequeued and is not yet complete.
+
+    ``priority_band`` is the band the item was picked at; it does not follow
+    later band changes on its node.
+    """
 
     scope: ComputeScope
     scope_key: str
@@ -30,15 +34,16 @@ class InFlightPoolExecution:
     started_at: str
 
 
-def in_flight_from_pool_item(item: PoolWorkItem) -> InFlightPoolExecution:
-    """Build an in-flight record at the dequeue boundary."""
+def in_flight_from_pool_item(picked: BandedWorkItem) -> InFlightPoolExecution:
+    """Build an in-flight record at the dequeue boundary, at the band ``picked`` was picked at."""
+    item = picked.item
     return InFlightPoolExecution(
         scope=item.scope,
         scope_key=format_compute_scope_key(item.scope),
         analytic_id=item.scope.analytic_id,
         step_kind=item.step_kind,
         step_index=item.step_index,
-        priority_band=item.priority_band,
+        priority_band=picked.priority_band,
         backend=item.backend,
         orchestrator_id=item.orchestrator_id,
         started_at=datetime.now(UTC).isoformat(),

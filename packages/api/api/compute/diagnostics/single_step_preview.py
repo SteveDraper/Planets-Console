@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -12,8 +11,8 @@ from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.profile_steps import profile_step_at
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
 from api.compute.orchestrator import OrchestratorNodeSnapshot
-from api.compute.pools import PoolWorkItem, dequeue_next_work_item
-from api.compute.priority_band import PRIORITY_BAND_RANK
+from api.compute.pools import BandedWorkItem, PoolWorkItem, pick_next_work_item, work_pick_key
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
 
 SingleStepSource = Literal["held", "would_dispatch"]
@@ -34,62 +33,84 @@ class SingleStepPreview:
     analytic_id: str
     step_kind: str | None
     step_index: int
-    priority_band: str | None
+    priority_band: ComputePriorityBand
     backend: str | None
     source: SingleStepSource
     orchestrator_id: int | None = None
 
 
+@dataclass(frozen=True)
+class SingleStepPin:
+    """The one compute step an armed single-step may release.
+
+    The pin carries no band: a band may change between preview and release,
+    and the pinned step stays the same step.
+    """
+
+    orchestrator_id: int | None
+    scope: ComputeScope
+    step_index: int
+
+    def matches(
+        self,
+        *,
+        orchestrator_id: int | None,
+        scope: ComputeScope,
+        step_index: int,
+    ) -> bool:
+        """Return whether a step is the pinned one (ignores focus and shell).
+
+        An unknown orchestrator id on either side does not reject the match.
+        """
+        if scope != self.scope or step_index != self.step_index:
+            return False
+        return (
+            self.orchestrator_id is None
+            or orchestrator_id is None
+            or orchestrator_id == self.orchestrator_id
+        )
+
+
 @dataclass
 class SingleStepArm:
-    """Mutable pin for one armed single-step release (grants + dispatch slots)."""
+    """Mutable state for one armed single-step release (pin, grants, dispatch slots)."""
 
     shell: ShellContextKey | None = None
-    target_scope: ComputeScope | None = None
-    target_priority_band: str | None = None
-    target_orchestrator_id: int | None = None
+    target: SingleStepPin | None = None
     grants_remaining: int = 0
     dispatch_slots_remaining: int = 0
 
     def clear(self) -> None:
         self.shell = None
-        self.target_scope = None
-        self.target_priority_band = None
-        self.target_orchestrator_id = None
+        self.target = None
         self.grants_remaining = 0
         self.dispatch_slots_remaining = 0
 
     def arm_from_preview(self, shell: ShellContextKey, preview: SingleStepPreview) -> None:
         self.shell = shell
-        self.target_scope = preview.scope
-        self.target_priority_band = preview.priority_band
-        self.target_orchestrator_id = preview.orchestrator_id
+        self.target = SingleStepPin(
+            orchestrator_id=preview.orchestrator_id,
+            scope=preview.scope,
+            step_index=preview.step_index,
+        )
         self.grants_remaining = 1
         self.dispatch_slots_remaining = 0 if preview.source == "held" else 1
 
 
-def single_step_release_sort_key(
-    priority_band: str | None,
-    step_index: int,
-) -> tuple[int, int]:
-    """Sort key matching pool dequeue: lower band rank, then initial step first."""
-    if priority_band in PRIORITY_BAND_RANK:
-        band_rank = PRIORITY_BAND_RANK[priority_band]  # type: ignore[index]
-    else:
-        band_rank = max(PRIORITY_BAND_RANK.values()) + 1
-    continuation = 0 if step_index == 0 else 1
-    return (band_rank, continuation)
+def _release_key(preview: SingleStepPreview) -> tuple[int, int]:
+    return work_pick_key(preview.priority_band, preview.step_index)
 
 
-def preview_from_held_pool_item(item: PoolWorkItem) -> SingleStepPreview:
-    """Build a held-source preview from a pool work item."""
+def preview_from_held_pool_item(held: BandedWorkItem) -> SingleStepPreview:
+    """Build a held-source preview from a queued pool item and its current band."""
+    item = held.item
     return SingleStepPreview(
         scope=item.scope,
         scope_key=format_compute_scope_key(item.scope),
         analytic_id=item.scope.analytic_id,
         step_kind=item.step_kind,
         step_index=item.step_index,
-        priority_band=item.priority_band,
+        priority_band=held.priority_band,
         backend=item.backend,
         source="held",
         orchestrator_id=item.orchestrator_id,
@@ -102,7 +123,7 @@ def preview_from_ready_node(
     *,
     orchestrator_id: int | None,
 ) -> SingleStepPreview:
-    """Build a would-dispatch preview from a ready DAG node."""
+    """Build a would-dispatch preview from a ready DAG node at its snapshot band."""
     step = profile_step_at(scope.analytic_id, node.profile_step_index)
     return SingleStepPreview(
         scope=scope,
@@ -126,10 +147,7 @@ def choose_held_or_ready_preview(
         return ready
     if ready is None:
         return held
-    if single_step_release_sort_key(
-        ready.priority_band,
-        ready.step_index,
-    ) < single_step_release_sort_key(held.priority_band, held.step_index):
+    if _release_key(ready) < _release_key(held):
         return ready
     return held
 
@@ -138,7 +156,7 @@ def resolve_single_step_preview(
     *,
     freeze_armed: bool,
     allowlist_empty: bool,
-    held: PoolWorkItem | None,
+    held: BandedWorkItem | None,
     ready: SingleStepPreview | None,
     has_running_focus: Callable[[], bool],
 ) -> tuple[SingleStepPreview | None, SingleStepDisabledReason | None]:
@@ -158,28 +176,17 @@ def resolve_single_step_preview(
 def select_best_ready_preview(
     candidates: Iterable[SingleStepPreview],
 ) -> SingleStepPreview | None:
-    """Pick the best would-dispatch preview by release sort key; ties keep first-seen."""
-    best: SingleStepPreview | None = None
-    best_key: tuple[int, int] | None = None
-    for candidate in candidates:
-        candidate_key = single_step_release_sort_key(
-            candidate.priority_band,
-            candidate.step_index,
-        )
-        if best is None or (best_key is not None and candidate_key < best_key):
-            best = candidate
-            best_key = candidate_key
-    return best
+    """Pick the best would-dispatch preview in pool pick order; ties keep first-seen."""
+    return min(candidates, key=_release_key, default=None)
 
 
 def find_held_focus_pool_item(
-    queue_items: Sequence[PoolWorkItem],
+    queue_items: Sequence[BandedWorkItem],
     *,
     is_focus_item: Callable[[PoolWorkItem], bool],
-) -> PoolWorkItem | None:
+) -> BandedWorkItem | None:
     """Return the focus pool item single-step would dequeue first, if any."""
-    queue = deque(queue_items)
-    return dequeue_next_work_item(queue, predicate=is_focus_item)
+    return pick_next_work_item(queued for queued in queue_items if is_focus_item(queued.item))
 
 
 def any_running_focus_node(
@@ -261,29 +268,6 @@ def preview_focus_ready_dispatch(
                 )
             )
     return select_best_ready_preview(candidates)
-
-
-def single_step_pin_matches(
-    *,
-    target_scope: ComputeScope | None,
-    target_priority_band: str | None,
-    target_orchestrator_id: int | None,
-    scope: ComputeScope,
-    priority_band: str | None,
-    orchestrator_id: int | None,
-) -> bool:
-    """Return whether ``scope`` matches an armed single-step pin (ignores focus/shell)."""
-    if target_scope is not None and scope != target_scope:
-        return False
-    if target_priority_band is not None and priority_band != target_priority_band:
-        return False
-    if (
-        target_orchestrator_id is not None
-        and orchestrator_id is not None
-        and orchestrator_id != target_orchestrator_id
-    ):
-        return False
-    return True
 
 
 def single_step_preview_to_wire(

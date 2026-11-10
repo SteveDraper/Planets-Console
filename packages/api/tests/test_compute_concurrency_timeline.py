@@ -50,7 +50,7 @@ def test_timeline_ring_drops_oldest_on_wrap():
     assert [event.scope_key for event in recent] == ["scope-2", "scope-3", "scope-4"]
 
 
-def test_open_execution_tracker_pairs_duration_and_backend():
+def test_open_execution_tracker_pairs_duration_backend_and_band():
     tracker = OpenExecutionTracker()
     key = format_execution_key(
         orchestrator_id=1,
@@ -58,13 +58,14 @@ def test_open_execution_tracker_pairs_duration_and_backend():
         step_kind="materialize",
         step_index=0,
     )
-    tracker.open(key, backend="thread")
+    tracker.open(key, backend="thread", priority_band="stream_attached")
     time.sleep(0.01)
-    duration_ms, backend = tracker.close(key)
-    assert backend == "thread"
-    assert duration_ms is not None
-    assert duration_ms >= 10.0
-    assert tracker.close(key) == (None, None)
+    closed = tracker.close(key)
+    assert closed is not None
+    assert closed.backend == "thread"
+    assert closed.priority_band == "stream_attached"
+    assert closed.duration_ms >= 10.0
+    assert tracker.close(key) is None
 
 
 def test_make_concurrency_event_carries_gauges():

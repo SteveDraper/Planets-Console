@@ -247,7 +247,7 @@ class DiagnosticsOrchestratorBindMixin:
             return False
         return self._single_step_may_release(
             node.scope,
-            priority_band=node.priority_band,
+            step_index=node.step_index,
             orchestrator_id=orchestrator_id,
         )
 
@@ -269,7 +269,7 @@ class DiagnosticsOrchestratorBindMixin:
                 return True
             if not self._single_step_may_release(
                 node.scope,
-                priority_band=node.priority_band,
+                step_index=node.step_index,
                 orchestrator_id=orchestrator_id,
             ):
                 return False

@@ -1,10 +1,12 @@
-"""Tests for compute worker pool priority dequeue and orchestrator integration."""
+"""Tests for compute worker pool dispatch and orchestrator integration.
+
+Pick-order and published-band tests live in ``test_compute_pool_published_bands``.
+"""
 
 from __future__ import annotations
 
 import threading
 import time
-from collections import deque
 
 import pytest
 from api.analytics.catalog import TurnAnalyticCatalogEntry
@@ -21,10 +23,8 @@ from api.compute import (
     PoolWorkItem,
     ScopeKeySpec,
     build_compute_registry,
-    dequeue_next_work_item,
     normalize_export_scope_to_compute_scope,
 )
-from api.compute.priority_band import ComputePriorityBand
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 
@@ -86,7 +86,6 @@ def _scope_for_player(sample_turn, player_id: int) -> ComputeScope:
 def _work_item(
     *,
     scope: ComputeScope,
-    priority_band: ComputePriorityBand = "background",
     step_index: int = 0,
     backend: str = "thread",
     orchestrator_id: int = 0,
@@ -97,113 +96,8 @@ def _work_item(
         scope=scope,
         step_kind=step_kind or ("tier1" if step_index == 0 else "tier2"),
         backend=backend,
-        priority_band=priority_band,
         step_index=step_index,
     )
-
-
-def test_dequeue_prefers_stream_attached_over_background(sample_turn):
-    player_a = next(row.ownerid for row in sample_turn.scores)
-    player_b = next(row.ownerid for row in sample_turn.scores if row.ownerid != player_a)
-    scope_a = _scope_for_player(sample_turn, player_a)
-    scope_b = _scope_for_player(sample_turn, player_b)
-    queue = deque(
-        [
-            _work_item(scope=scope_a, priority_band="background"),
-            _work_item(scope=scope_b, priority_band="stream_attached"),
-        ]
-    )
-
-    item = dequeue_next_work_item(queue)
-
-    assert item is not None
-    assert item.scope == scope_b
-    assert item.priority_band == "stream_attached"
-
-
-def test_dequeue_prefers_interactive_ensure_over_background(sample_turn):
-    player_a = next(row.ownerid for row in sample_turn.scores)
-    player_b = next(row.ownerid for row in sample_turn.scores if row.ownerid != player_a)
-    scope_a = _scope_for_player(sample_turn, player_a)
-    scope_b = _scope_for_player(sample_turn, player_b)
-    queue = deque(
-        [
-            _work_item(scope=scope_a, priority_band="background"),
-            _work_item(scope=scope_b, priority_band="interactive_ensure"),
-        ]
-    )
-
-    item = dequeue_next_work_item(queue)
-
-    assert item is not None
-    assert item.scope == scope_b
-
-
-def test_dequeue_prefers_stream_attached_over_interactive_ensure(sample_turn):
-    player_a = next(row.ownerid for row in sample_turn.scores)
-    player_b = next(row.ownerid for row in sample_turn.scores if row.ownerid != player_a)
-    scope_a = _scope_for_player(sample_turn, player_a)
-    scope_b = _scope_for_player(sample_turn, player_b)
-    queue = deque(
-        [
-            _work_item(scope=scope_a, priority_band="interactive_ensure"),
-            _work_item(scope=scope_b, priority_band="stream_attached"),
-        ]
-    )
-
-    item = dequeue_next_work_item(queue)
-
-    assert item is not None
-    assert item.scope == scope_b
-    assert item.priority_band == "stream_attached"
-
-
-def test_dequeue_tier_one_before_continuations_from_other_scopes(sample_turn):
-    """Port of inference scheduler fairness: tier-1 before continuation steps."""
-    player_ids = [row.ownerid for row in sample_turn.scores[:2]]
-    assert len(player_ids) >= 2
-    scope_a = _scope_for_player(sample_turn, player_ids[0])
-    scope_b = _scope_for_player(sample_turn, player_ids[1])
-    queue = deque(
-        [
-            _work_item(scope=scope_a, step_index=0),
-            _work_item(scope=scope_a, step_index=1),
-            _work_item(scope=scope_b, step_index=0),
-        ]
-    )
-
-    first = dequeue_next_work_item(queue)
-    second = dequeue_next_work_item(queue)
-    third = dequeue_next_work_item(queue)
-
-    assert first is not None and first.scope == scope_a and first.step_index == 0
-    assert second is not None and second.scope == scope_b and second.step_index == 0
-    assert third is not None and third.scope == scope_a and third.step_index == 1
-
-
-def test_dequeue_continuation_round_robin_across_scopes(sample_turn):
-    """Continuations dequeue in FIFO order when no tier-1 work remains."""
-    player_ids = [row.ownerid for row in sample_turn.scores[:2]]
-    scope_a = _scope_for_player(sample_turn, player_ids[0])
-    scope_b = _scope_for_player(sample_turn, player_ids[1])
-    queue = deque(
-        [
-            _work_item(scope=scope_a, step_index=1),
-            _work_item(scope=scope_b, step_index=1),
-            _work_item(scope=scope_a, step_index=2),
-            _work_item(scope=scope_b, step_index=2),
-        ]
-    )
-
-    order = [dequeue_next_work_item(queue) for _ in range(4)]
-
-    assert [item.step_index for item in order if item is not None] == [1, 1, 2, 2]
-    assert [item.scope for item in order if item is not None] == [
-        scope_a,
-        scope_b,
-        scope_a,
-        scope_b,
-    ]
 
 
 def _multi_step_thread_registration(
@@ -871,7 +765,7 @@ def test_on_item_enqueued_runs_outside_pool_lock(sample_turn):
             scope=scope, dependency_scopes=(), step_index=0, submission_open=SubmissionOpen()
         )
         step = ComputeStepSpec(step_kind="materialize", backend="thread")
-        pool.submit(0, node, step, priority_band="background")
+        pool.submit(0, node, step)
 
         assert seen.get("acquired_pool_from_hook") is True
         assert seen.get("depth") == 1
@@ -907,6 +801,9 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
             second_finished.set()
 
     class OkOrch:
+        def published_band(self, scope):
+            return None
+
         def execute_pool_step(self, scope):
             return {"ok": True}
 

@@ -176,7 +176,7 @@ class ConcurrencyTimelineRecorder:
         orchestrator_id: int | None,
         step_kind: str | None,
         step_index: int,
-        priority_band: ComputePriorityBand | None = None,
+        priority_band: ComputePriorityBand,
         backend: str | None = None,
         open_execution: bool = False,
         global_queue_depth: int | None = None,
@@ -191,7 +191,11 @@ class ConcurrencyTimelineRecorder:
             step_index=step_index,
         )
         if open_execution:
-            self._open_executions.open(execution_key, backend=backend)
+            self._open_executions.open(
+                execution_key,
+                backend=backend,
+                priority_band=priority_band,
+            )
         gauges = self._occupancy_gauges(
             shell,
             global_queue_depth=global_queue_depth,
@@ -226,7 +230,9 @@ class ConcurrencyTimelineRecorder:
         """One finish sink: timeline complete/inline_complete + completion history.
 
         ``step_index`` must be the index of the step that finished (captured before
-        any continue that advances ``node.step_index``).
+        any continue that advances ``node.step_index``). Both records carry the band
+        the step started at (its picked band for a pool step); ``node.priority_band``
+        stands in only when this recorder saw no start for the step.
         """
         scope_key = format_compute_scope_key(scope)
         execution_key = format_execution_key(
@@ -235,8 +241,16 @@ class ConcurrencyTimelineRecorder:
             step_kind=step_kind,
             step_index=step_index,
         )
-        duration_ms, opened_backend = self._open_executions.close(execution_key)
-        resolved_backend = backend if backend is not None else opened_backend
+        closed = self._open_executions.close(execution_key)
+        if closed is None:
+            duration_ms, started_backend, priority_band = None, None, node.priority_band
+        else:
+            duration_ms, started_backend, priority_band = (
+                closed.duration_ms,
+                closed.backend,
+                closed.priority_band,
+            )
+        resolved_backend = backend if backend is not None else started_backend
         # Use the ready-queue cache only. Live ``diagnostics_snapshot`` here deadlocks:
         # finish listeners run from ``drain_post_lock_callbacks`` while a peer may hold
         # the scores scheduler lock and wait on an orchestrator condition (or the reverse
@@ -255,7 +269,7 @@ class ConcurrencyTimelineRecorder:
             gauges=gauges,
             step_kind=step_kind,
             step_index=step_index,
-            priority_band=node.priority_band,
+            priority_band=priority_band,
             backend=resolved_backend,
             terminal_state=terminal_state,
             duration_ms=duration_ms,
@@ -266,7 +280,7 @@ class ConcurrencyTimelineRecorder:
             terminal_state=terminal_state,
             step_kind=step_kind,
             step_index=step_index,
-            priority_band=node.priority_band,
+            priority_band=priority_band,
             backend=resolved_backend,
             duration_ms=duration_ms,
         )
