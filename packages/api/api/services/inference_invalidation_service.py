@@ -17,7 +17,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reschedule_all_inference_rows,
     reschedule_inference_row,
 )
-from api.analytics.off_mode import MarkPersist, off_mode_persist_decision
+from api.analytics.off_mode import MarkPersist, off_mode_mark_persist
 from api.analytics.on_walk import scoreboard_persist_belongs_to_on_walk
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
@@ -264,7 +264,7 @@ class InferenceInvalidationService:
     ) -> None:
         """Durable scores evidence.
 
-        Classify with ``off_mode_persist_decision``, then stamp or wake.
+        Classify with ``off_mode_mark_persist``, then stamp or wake.
         A stamp leaves the mark unchanged. First persist and bump both advance
         it: an absent mark becomes generation 1, and an existing mark increments.
         Ledger files stay in place.
@@ -318,18 +318,11 @@ class InferenceInvalidationService:
             wake_backfill=wake_backfill,
             live_turns_by_analytic=live_turns_by_analytic,
         )
-        # The carried choice classifies the mark. Catch-up and the stored
-        # generation stay unset; they do not change this classification.
-        # An absent carried choice leaves the open turn unset, so this cannot stamp.
+        # The carried choice classifies the mark. An absent carried choice
+        # leaves the open turn unset, so the open-turn rule cannot stamp.
         # An in-flight on-walk stamps the generation it started with instead.
         carried = evidence.decision_backfill
-        decision = off_mode_persist_decision(
-            backfill_enabled=False if carried is None else carried,
-            open_turn=evidence.open_turn,
-            is_catch_up=False,
-            host_turn=host_turn,
-            mark=mark,
-            stored_generation=None,
+        mark_persist = off_mode_mark_persist(
             on_walk=scoreboard_persist_belongs_to_on_walk(
                 orchestrator,
                 game_id=game_id,
@@ -337,8 +330,12 @@ class InferenceInvalidationService:
                 player_id=player_id,
                 host_turn=host_turn,
             ),
+            mark=mark,
+            backfill_enabled=False if carried is None else carried,
+            open_turn=evidence.open_turn,
+            host_turn=host_turn,
         )
-        if decision.mark_persist is MarkPersist.STAMP:
+        if mark_persist is MarkPersist.STAMP:
             return
         recompute = evidence.recompute
         if isinstance(recompute, DeferRecompute):

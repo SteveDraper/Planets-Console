@@ -185,14 +185,14 @@ def test_observation_persist_and_ledger_read_call_counts(tmp_path, sample_turn):
     ledger_key = persistence.ledger_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
     mark_key = persistence.evidence_mark_key(GAME_ID, PERSPECTIVE, player_id)
     # This payload has no openTurn, so persist does not consult the backfill
-    # setting. The mark is read to classify the merge, then the ledger write
-    # uses that cached mark.
+    # setting. The merge generation does not read the mark; the ledger write
+    # reads the stored ledger, then the mark under the generation lock.
     assert counts.protocol_counts() == {"get": 3, "put": 1, "list": 0, "delete": 0}, (
         counts.protocol_counts(),
         counts.get_keys,
         counts.list_prefixes,
     )
-    assert counts.get_keys == [prior_key, mark_key, ledger_key]
+    assert counts.get_keys == [prior_key, ledger_key, mark_key]
     assert counts.json_load_calls == 0
     assert counts.json_dump_calls == 1
     assert counts.open_read_calls == 3
