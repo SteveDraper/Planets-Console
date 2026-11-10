@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import EnsureDependency, ExportScope
-from api.analytics.fleet.eliminated_player import player_has_on_walk_root
+from api.analytics.fleet.eliminated_player import fleet_player_eliminated_at_turn
 from api.analytics.fleet.injected_services import (
     FleetComputeServices,
     lookup_fleet_compute_services,
@@ -34,35 +34,35 @@ def off_mode_ensure_dependencies(
     """Shared prior-fleet edge for this scope, or no edges.
 
     * A non-integer player keeps the edge.
-    * Backfill earlier turns on: the edge applies unless the player is
-      eliminated on ``scope.turn``, which has no on-walk and so no prior-fleet
-      dependency. A turn that cannot be loaded keeps the edge, because
-      elimination cannot be shown. The dependency walk then reports a prior
-      turn that is not stored, or stops at the ensure floor.
+    * A player eliminated on ``scope.turn`` has no edge in either mode: nothing
+      walks for that player and its final fleet reads no prior turn. A turn that
+      cannot be loaded cannot show elimination, so the rules below decide.
+    * Backfill earlier turns on: the edge applies. The dependency walk reports
+      a prior turn that is not stored, or stops at the ensure floor.
     * Backfill earlier turns off: missing fleet services keep the edge. Without
       a loadable ``scope.turn`` there are no settings to classify the hop, so
       there are no edges. Otherwise the edge applies only when
       ``scope.turn - 1`` still needs a hop inside ``appliesFromTurn``. An absent
-      mark does not walk backward. This branch does not consult elimination; the
-      fleet export applies that check before calling here in both modes.
+      mark does not walk backward.
     """
-    if not isinstance(scope.player_id, int):
+    player_id = scope.player_id
+    if not isinstance(player_id, int):
         return OFF_MODE_PRIOR_FLEET
+    turn = ctx.load_turn(scope.turn)
+    if turn is not None and fleet_player_eliminated_at_turn(turn, player_id):
+        return ()
     if backfill_earlier_turns:
-        turn = ctx.load_turn(scope.turn)
-        has_on_walk_root = turn is None or player_has_on_walk_root(turn, scope.player_id)
-        return OFF_MODE_PRIOR_FLEET if has_on_walk_root else ()
+        return OFF_MODE_PRIOR_FLEET
     services = lookup_fleet_compute_services(ctx)
     if services is None:
         return OFF_MODE_PRIOR_FLEET
-    turn = ctx.load_turn(scope.turn)
     if turn is None:
         return ()
     return _off_mode_prior_dependency(
         ctx,
         scope,
         services,
-        player_id=scope.player_id,
+        player_id=player_id,
         turn=turn,
     )
 
