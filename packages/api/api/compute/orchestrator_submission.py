@@ -136,11 +136,11 @@ class OrchestratorSubmissionMixin:
                 )
             with self._condition:
                 submission = self._submit_locked(resolved, wake_if_parked_only=False)
-            if submission is None:
-                raise RuntimeError("submit_locked returned None without wake_if_parked_only")
-            handle, pending_inline, pending_pool, planned = submission
-            if planned is not None:
-                root_plan.plan_registered(planned)
+                if submission is None:
+                    raise RuntimeError("submit_locked returned None without wake_if_parked_only")
+                handle, pending_inline, pending_pool, planned = submission
+                if planned is not None:
+                    root_plan.plan_registered(planned)
         return self._finish_submission((handle, pending_inline, pending_pool))
 
     def wake_if_parked(

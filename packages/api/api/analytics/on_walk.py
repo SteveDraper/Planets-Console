@@ -50,8 +50,9 @@ class _OnWalkShell:
 
         An empty plan writes nothing. An absent mark becomes generation 1 at
         the ensure baseline. ``appliesFromTurn`` moves backward only, to the
-        earliest planned turn. Runs outside the orchestrator lock and before
-        the first persist.
+        earliest planned turn. Runs under the orchestrator lock that
+        registers the plan, so no walk node is dispatched, and nothing on the
+        walk persists, before the mark is stored.
         """
         earliest_turn = earliest_planned_turn(planned)
         if earliest_turn is None:

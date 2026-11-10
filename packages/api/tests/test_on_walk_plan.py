@@ -9,10 +9,12 @@ import pytest
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.constants import FLEET_MATERIALIZATION_VERSION
 from api.analytics.fleet.types import FleetEvidenceMark, FleetMaterializationProvenance
+from api.analytics.on_walk import _OnWalkShell
 from api.analytics.scores.exports import is_scores_export_ensure_satisfied
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.dag import plan_compute_dag
-from api.compute.orchestrator import ComputeOrchestrator
+from api.compute.errors import ComputeWaitTimeoutError
+from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
 from api.compute.scope import compute_scope_to_export_scope
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.errors import ValidationError
@@ -27,6 +29,7 @@ from tests.export_chain_test_fixtures import (
 )
 from tests.fleet_exports_helpers import host_turn_at
 from tests.off_mode_catch_up_helpers import (
+    FLEET_SCORES_REGISTRY,
     context_at_turn,
     planned_scope_keys,
     player_ledger,
@@ -406,6 +409,83 @@ def test_absent_mark_is_generation_one_at_the_baseline_before_persist(sample_tur
     assert (
         persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 1
     )
+
+
+def _submit_walk(orchestrator: ComputeOrchestrator, request: ComputeRequest) -> None:
+    orchestrator.submit(request)
+
+
+def _ensure_walk(orchestrator: ComputeOrchestrator, request: ComputeRequest) -> None:
+    with pytest.raises(ComputeWaitTimeoutError):
+        orchestrator.ensure_scopes((request,), timeout=0)
+
+
+@pytest.mark.parametrize("enter_walk", [_submit_walk, _ensure_walk], ids=["submit", "ensure"])
+def test_no_walk_node_is_dispatched_before_the_mark_is_established(
+    sample_turn,
+    monkeypatch,
+    enter_walk,
+):
+    """Another thread cannot dispatch a walk node while the plan registers its mark.
+
+    The assumed mark is visible only to the planning thread. A dispatch gate
+    keeps the walk's first ready node queued past the submitting thread's own
+    dispatch, then opens while the mark is being established. The competing
+    dispatch finds the orchestrator lock held, so the walk step reaches the
+    pool only after the mark is stored.
+    """
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    persistence = fleet_persistence(ctx)
+    marks_at_pool_submit: list[FleetEvidenceMark] = []
+
+    def record_pool_submit(*_args, **_kwargs) -> None:
+        marks_at_pool_submit.append(
+            persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
+        )
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=FLEET_SCORES_REGISTRY,
+        pool_submitter=record_pool_submit,
+    )
+    is_gate_open = False
+    orchestrator.observers.register_dispatch_gate(lambda _node: is_gate_open)
+    competing_dispatch: list[str] = []
+
+    def compete() -> None:
+        nonlocal is_gate_open
+        is_gate_open = True
+        if not orchestrator._condition.acquire(blocking=False):
+            competing_dispatch.append("blocked")
+            return
+        orchestrator._condition.release()
+        orchestrator.dispatch_ready_work()
+        competing_dispatch.append("dispatched")
+
+    real_plan_registered = _OnWalkShell.plan_registered
+
+    def plan_registered_with_competitor(shell, planned):
+        competitor = threading.Thread(target=compete)
+        competitor.start()
+        competitor.join()
+        real_plan_registered(shell, planned)
+
+    monkeypatch.setattr(_OnWalkShell, "plan_registered", plan_registered_with_competitor)
+
+    enter_walk(
+        orchestrator,
+        ComputeRequest(scope=shell_scope(ctx, FLEET_ANALYTIC_ID, 10, player_id), ctx=ctx),
+    )
+    orchestrator.dispatch_ready_work()
+
+    assert competing_dispatch == ["blocked"]
+    assert marks_at_pool_submit == [
+        FleetEvidenceMark(
+            evidence_generation=1,
+            applies_from_turn=accelerated_ensure_floor(host.settings, 10),
+        )
+    ]
 
 
 def test_existing_mark_moves_applies_from_backward_only(sample_turn):

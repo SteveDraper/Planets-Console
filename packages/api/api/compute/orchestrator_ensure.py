@@ -126,7 +126,6 @@ class OrchestratorEnsureMixin:
                         )
                 pending_inline: list[PendingInlineExecution] = []
                 pending_pool: list[PendingPoolSubmission] = []
-                planned_by_index: dict[int, tuple[PlannedComputeNode, ...]] = {}
                 with self._condition:
                     for index, resolved in resolved_unsatisfied:
                         handle, inlines, pools, planned = self._ensure_submit_locked(resolved)
@@ -134,9 +133,7 @@ class OrchestratorEnsureMixin:
                         pending_inline.extend(inlines)
                         pending_pool.extend(pools)
                         if planned is not None:
-                            planned_by_index[index] = planned
-                for index, planned in planned_by_index.items():
-                    root_plan_by_index[index].plan_registered(planned)
+                            root_plan_by_index[index].plan_registered(planned)
             self._execute_pending_inlines(tuple(pending_inline))
             self._flush_pending_pool_submissions(tuple(pending_pool))
             self._observers.drain_post_lock_callbacks()
