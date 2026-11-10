@@ -54,19 +54,12 @@ class AnalyticExportCatalog:
     is_ensure_satisfied: ProbeEnsureSatisfiedFn | None = None
     is_in_progress: ProbeInProgressFn | None = None
     is_empty: bool = False
+    # While Backfill earlier turns is on, a satisfied scope of this catalog
+    # still walks its dependencies and is queued again only when that walk
+    # schedules dependency work. Set when satisfied output can rest on
+    # dependencies that backfill would still redo (a stored scoreboard row is
+    # not fleet ensure-final). Off: a satisfied scope ends the walk.
     backfill_rewalks_satisfied_scope: bool = False
-
-    def walks_dependencies_of_satisfied_scope(self, *, backfill_earlier_turns: bool) -> bool:
-        """Whether an ensure-satisfied scope still walks its dependencies.
-
-        Off by default: a satisfied scope ends the walk. A catalog sets
-        ``backfill_rewalks_satisfied_scope`` when its satisfied output can rest
-        on dependencies that Backfill earlier turns would still redo (a stored
-        scoreboard row is not fleet ensure-final). With backfill on, such a
-        scope walks its dependencies and is queued again only when that walk
-        schedules dependency work, so a finished scope is not re-queued.
-        """
-        return backfill_earlier_turns and self.backfill_rewalks_satisfied_scope
 
     def applicable_ensure_dependencies(
         self,

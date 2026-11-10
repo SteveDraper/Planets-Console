@@ -75,8 +75,8 @@ def walk_dependency_tree(
 
     A scope is queued when it needs ensure work itself (or ``force_root``) or
     when its own dependency walk scheduled work. A satisfied scope walks its
-    dependencies only when its catalog says so
-    (:meth:`AnalyticExportCatalog.walks_dependencies_of_satisfied_scope`).
+    dependencies only while Backfill earlier turns is on and its catalog sets
+    ``backfill_rewalks_satisfied_scope``.
     """
     result = DependencyWalkResult()
     seen_pending: set[tuple[str, ExportScope]] = set()
@@ -94,8 +94,8 @@ def walk_dependency_tree(
         if catalog is None or catalog.is_empty:
             return result
         needs_scope = force_root or _dependency_needs_processing(ctx, analytic_id, scope, catalog)
-        walks_dependencies = needs_scope or catalog.walks_dependencies_of_satisfied_scope(
-            backfill_earlier_turns=backfill_earlier_turns,
+        walks_dependencies = needs_scope or (
+            backfill_earlier_turns and catalog.backfill_rewalks_satisfied_scope
         )
         if not walks_dependencies:
             return result

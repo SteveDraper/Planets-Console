@@ -262,6 +262,9 @@ def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) 
         ctx = shell.scanned.ctx
         if not shell.scanned.stream.is_live():
             continue
+        # Re-check the stored setting immediately before submit so a thread
+        # that lost the race to a toggle-off does not submit; the submission
+        # open is resolved separately at submit.
         if not ctx.backfill_earlier_turns_enabled():
             continue
         try:
