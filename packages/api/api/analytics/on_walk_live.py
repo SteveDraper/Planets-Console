@@ -87,22 +87,46 @@ def submit_on_walks_for_live_streams(
         by_player.setdefault(_PlayerKey.of(shell.compute_scope), []).append(shell)
     for player, player_shells in by_player.items():
         if _has_off_setting_walk(orch, player):
-            _OffSettingWalkWaiter.wait(orch, player, player_shells)
+            orch.attachment(_PendingOnWalks).wait(orch, player, player_shells)
         else:
             _submit_shells(orch, player_shells)
 
 
-class _WaiterKey(NamedTuple):
-    orchestrator: ComputeOrchestrator
-    player: _PlayerKey
+class _PendingOnWalks:
+    """One orchestrator's pending off-setting waiters, at most one per player.
+
+    Held through ``ComputeOrchestrator.attachment``, so a waiter whose blocker
+    never becomes terminal lives no longer than its orchestrator.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.waiters: dict[_PlayerKey, _OffSettingWalkWaiter] = {}
+
+    def wait(
+        self,
+        orchestrator: ComputeOrchestrator,
+        player: _PlayerKey,
+        shells: list[_LiveShell],
+    ) -> None:
+        """Submit ``shells`` once the player's off-setting nodes are terminal.
+
+        A later wait for a pending player replaces the shells that waiter submits.
+        """
+        with self.lock:
+            pending = self.waiters.get(player)
+            if pending is not None:
+                pending.shells = shells
+                return
+            waiter = _OffSettingWalkWaiter(self, orchestrator, player, shells)
+            self.waiters[player] = waiter
+        waiter.start()
 
 
 class _OffSettingWalkWaiter:
     """Submits one player's shells once that player's off-setting nodes are terminal.
 
-    There is at most one pending waiter per orchestrator and player. A later
-    wait for that player replaces the shells the pending waiter submits, so a
-    blocker that clears submits each live shell once. The pending entry is
+    A blocker that clears submits each live shell once. The pending entry is
     removed when the waiter finishes, and its listener is unregistered.
 
     The listener is registered before the first check, and the listener and
@@ -112,36 +136,22 @@ class _OffSettingWalkWaiter:
     on-walk is not attached to the node that walk opened.
     """
 
-    _pending_lock = threading.Lock()
-    _pending: dict[_WaiterKey, _OffSettingWalkWaiter] = {}
-
-    def __init__(self, key: _WaiterKey, shells: list[_LiveShell]) -> None:
-        self._key = key
-        self._shells = shells
-        self._unregister: Callable[[], None] | None = None
-
-    @classmethod
-    def wait(
-        cls,
+    def __init__(
+        self,
+        pending: _PendingOnWalks,
         orchestrator: ComputeOrchestrator,
         player: _PlayerKey,
         shells: list[_LiveShell],
     ) -> None:
-        key = _WaiterKey(orchestrator, player)
-        with cls._pending_lock:
-            pending = cls._pending.get(key)
-            if pending is not None:
-                pending._shells = shells
-                return
-            waiter = cls(key, shells)
-            cls._pending[key] = waiter
-        waiter._start()
+        self._pending = pending
+        self._orchestrator = orchestrator
+        self._player = player
+        self.shells = shells
+        self._unregister: Callable[[], None] | None = None
 
-    def _start(self) -> None:
-        unregister = self._key.orchestrator.observers.register_scope_outcome_listener(
-            self._on_outcome
-        )
-        with self._pending_lock:
+    def start(self) -> None:
+        unregister = self._orchestrator.observers.register_scope_outcome_listener(self._on_outcome)
+        with self._pending.lock:
             self._unregister = unregister
             is_pending = self._is_pending_locked()
         if not is_pending:
@@ -150,29 +160,28 @@ class _OffSettingWalkWaiter:
         self._try_finish()
 
     def _is_pending_locked(self) -> bool:
-        return self._pending.get(self._key) is self
+        return self._pending.waiters.get(self._player) is self
 
     def _on_outcome(self, snapshot: ScopeLifecycleSnapshot) -> None:
         if (
             snapshot.state in {"complete", "failed"}
             and snapshot.scope.analytic_id in FLEET_WALK_ANALYTIC_IDS
-            and _PlayerKey.of(snapshot.scope) == self._key.player
+            and _PlayerKey.of(snapshot.scope) == self._player
         ):
             self._try_finish()
 
     def _try_finish(self) -> None:
-        orchestrator = self._key.orchestrator
-        if _has_off_setting_walk(orchestrator, self._key.player):
+        if _has_off_setting_walk(self._orchestrator, self._player):
             return
-        with self._pending_lock:
+        with self._pending.lock:
             if not self._is_pending_locked():
                 return
-            del self._pending[self._key]
-            shells = self._shells
+            del self._pending.waiters[self._player]
+            shells = self.shells
             unregister = self._unregister
         if unregister is not None:
             unregister()
-        _submit_shells(orchestrator, shells)
+        _submit_shells(self._orchestrator, shells)
 
 
 def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) -> None:

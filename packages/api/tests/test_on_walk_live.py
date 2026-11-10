@@ -11,7 +11,7 @@ from api.analytics.fleet.fleet_table_stream_registry import (
     reset_fleet_table_stream_registry_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.analytics.on_walk_live import submit_on_walks_for_live_streams
+from api.analytics.on_walk_live import _PendingOnWalks, submit_on_walks_for_live_streams
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
@@ -199,3 +199,44 @@ def test_a_deduplicated_waiter_skips_when_the_setting_turned_off_and_then_lets_g
         reset_fleet_table_stream_registry_for_tests()
 
     assert len(_requests_for(submitted[before_clear:], player_id)) == 1
+
+
+def _pending_players(orchestrator: ComputeOrchestrator) -> set[int]:
+    return {player.player_id for player in orchestrator.attachment(_PendingOnWalks).waiters}
+
+
+def test_pending_waiters_belong_to_their_orchestrator_and_end_when_they_finish(
+    sample_turn, monkeypatch
+):
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    attach_stream(
+        get_fleet_table_stream_registry(),
+        FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
+        host,
+        ctx,
+        [player_id],
+    )
+    first, first_submitted = recording_orchestrator(monkeypatch)
+    second, second_submitted = recording_orchestrator(monkeypatch)
+    first_blocker = _off_setting_fleet_blocker(first, ctx, player_id)
+    second_blocker = _off_setting_fleet_blocker(second, ctx, player_id)
+    try:
+        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=first)
+        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=second)
+        assert _pending_players(first) == {player_id}
+        assert _pending_players(second) == {player_id}
+
+        _finish(first, first_blocker, "complete")
+        assert _pending_players(first) == set()
+        assert _pending_players(second) == {player_id}
+        assert len(_requests_for(first_submitted, player_id)) == 1
+        assert _requests_for(second_submitted, player_id) == []
+
+        _finish(second, second_blocker, "complete")
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+
+    assert _pending_players(second) == set()
+    assert len(_requests_for(second_submitted, player_id)) == 1
