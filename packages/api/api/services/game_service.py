@@ -36,7 +36,8 @@ _backfill_earlier_turns_write_lock = threading.Lock()
 # (game_id, previous_or_None, refreshed) -- listeners decide feature-specific invalidation.
 OnGameInfoRefreshed = Callable[[int, GameInfo | None, GameInfo], None]
 # Fired when Backfill earlier turns transitions from off to on for one game.
-OnBackfillEnabled = Callable[[int], None]
+# The listener must not block on the work it starts; its return value is ignored.
+OnBackfillEnabled = Callable[[int], object]
 
 
 def clear_sector_title_cache() -> None:
@@ -214,10 +215,11 @@ class GameService:
         """Store one Backfill earlier turns choice for ``game_id``.
 
         The Settings checkbox is the only writer. The value is shared by every
-        perspective of the game. Turning the setting from off to on submits
-        on-walks for live fleet and scoreboard streams of this game. A
-        submit that fails is logged and the stored value stays. Turning it
-        off leaves an accepted walk running.
+        perspective of the game. Turning the setting from off to on starts
+        on-walks for live fleet and scoreboard streams of this game and
+        returns without waiting for their submits. A submit that fails is
+        logged and the stored value stays. Turning it off leaves an accepted
+        walk running.
         """
         if not isinstance(enabled, bool):
             raise ValidationError("backfillEarlierTurns must be a boolean.")

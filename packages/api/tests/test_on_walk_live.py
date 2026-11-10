@@ -1,8 +1,10 @@
-"""Live on-walk submission: one failing player and one pending waiter per player."""
+"""Live on-walk submission: players submit independently, one pending waiter per player."""
 
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import FIRST_COMPLETED, wait
 from dataclasses import replace
 
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -22,7 +24,13 @@ from api.serialization.backfill_earlier_turns import (
 
 from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.off_mode_catch_up_helpers import context_at_turn
-from tests.on_walk_live_helpers import attach_stream, recording_orchestrator, roster_player_ids
+from tests.on_walk_live_helpers import (
+    SUBMIT_TIMEOUT_SECONDS,
+    attach_stream,
+    recording_orchestrator,
+    roster_player_ids,
+    wait_for_submits,
+)
 from tests.scores_exports_helpers import first_player_id
 
 _WORK_ACCEPTED = {"type": "work_accepted"}
@@ -76,6 +84,21 @@ def _failing_orchestrator(failing_player_id: int) -> tuple[ComputeOrchestrator, 
     return orchestrator, submitted
 
 
+def _slow_orchestrator(slow_player_id: int) -> tuple[ComputeOrchestrator, list, threading.Event]:
+    """Orchestrator whose submit for ``slow_player_id`` holds until released."""
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    submitted: list = []
+    release = threading.Event()
+
+    def submit(request):
+        if request.scope.player_id == slow_player_id:
+            assert release.wait(timeout=SUBMIT_TIMEOUT_SECONDS)
+        submitted.append(request)
+
+    orchestrator.submit = submit
+    return orchestrator, submitted, release
+
+
 def _error_records_for(caplog, game_id: int, player_id: int) -> list[logging.LogRecord]:
     return [
         record
@@ -101,7 +124,9 @@ def test_one_failing_player_is_logged_and_the_others_still_submit(sample_turn, c
     orchestrator, submitted = _failing_orchestrator(failing)
     try:
         with caplog.at_level(logging.ERROR):
-            submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+            wait_for_submits(
+                submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+            )
     finally:
         reset_fleet_table_stream_registry_for_tests()
 
@@ -110,6 +135,38 @@ def test_one_failing_player_is_logged_and_the_others_still_submit(sample_turn, c
     for player_id in player_ids[1:]:
         assert stream.accepted_events(player_id) == [_WORK_ACCEPTED]
     assert _error_records_for(caplog, ctx.game_id, failing)
+
+
+def test_a_slow_player_holds_neither_the_caller_nor_another_player(sample_turn):
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    slow, other = roster_player_ids(host)[:2]
+    stream = attach_stream(
+        get_fleet_table_stream_registry(),
+        FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
+        host,
+        ctx,
+        [slow, other],
+    )
+    orchestrator, submitted, release = _slow_orchestrator(slow)
+    try:
+        started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        try:
+            finished, still_running = wait(
+                started, timeout=SUBMIT_TIMEOUT_SECONDS, return_when=FIRST_COMPLETED
+            )
+            assert len(finished) == 1 and len(still_running) == 1
+            assert [request.scope.player_id for request in submitted] == [other]
+            assert stream.accepted_events(other) == [_WORK_ACCEPTED]
+            assert stream.accepted_events(slow) == []
+        finally:
+            release.set()
+        wait_for_submits(started)
+    finally:
+        reset_fleet_table_stream_registry_for_tests()
+
+    assert {request.scope.player_id for request in submitted} == {slow, other}
+    assert stream.accepted_events(slow) == [_WORK_ACCEPTED]
 
 
 def test_a_failing_deferred_submission_is_logged_and_does_not_escape_the_drain(sample_turn, caplog):
@@ -126,9 +183,10 @@ def test_a_failing_deferred_submission_is_logged_and_does_not_escape_the_drain(s
     orchestrator, submitted = _failing_orchestrator(player_id)
     node = _off_setting_fleet_blocker(orchestrator, ctx, player_id)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         with caplog.at_level(logging.ERROR):
             _finish(orchestrator, node, "complete")
+            wait_for_submits(started)
     finally:
         reset_fleet_table_stream_registry_for_tests()
 
@@ -149,14 +207,16 @@ def test_on_off_on_while_blocked_submits_each_shell_once_with_the_latest_stream(
     node = _off_setting_fleet_blocker(orchestrator, ctx, player_id)
     latest_ctx = replace(ctx)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        first_started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         _store_backfill(ctx, False)
         _store_backfill(ctx, True)
         latest_stream = attach_stream(registry, scope, host, latest_ctx, [player_id])
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        latest_started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        assert latest_started == first_started
         assert _requests_for(submitted, player_id) == []
 
         _finish(orchestrator, node, "complete")
+        wait_for_submits(latest_started)
     finally:
         reset_fleet_table_stream_registry_for_tests()
 
@@ -183,18 +243,20 @@ def test_a_deduplicated_waiter_skips_when_the_setting_turned_off_and_then_lets_g
     orchestrator, submitted = recording_orchestrator(monkeypatch)
     first_blocker = _off_setting_fleet_blocker(orchestrator, ctx, player_id)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        first_started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         _store_backfill(ctx, False)
         _finish(orchestrator, first_blocker, "complete")
+        wait_for_submits(first_started)
         assert _requests_for(submitted, player_id) == []
 
         _store_backfill(ctx, True)
         second_blocker = _off_setting_fleet_blocker(orchestrator, ctx, player_id)
         before_clear = len(submitted)
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        second_started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         assert _requests_for(submitted[before_clear:], player_id) == []
         _finish(orchestrator, second_blocker, "failed")
+        wait_for_submits(second_started)
     finally:
         reset_fleet_table_stream_registry_for_tests()
 
@@ -223,18 +285,20 @@ def test_pending_waiters_belong_to_their_orchestrator_and_end_when_they_finish(
     first_blocker = _off_setting_fleet_blocker(first, ctx, player_id)
     second_blocker = _off_setting_fleet_blocker(second, ctx, player_id)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=first)
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=second)
+        first_started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=first)
+        second_started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=second)
         assert _pending_players(first) == {player_id}
         assert _pending_players(second) == {player_id}
 
         _finish(first, first_blocker, "complete")
+        wait_for_submits(first_started)
         assert _pending_players(first) == set()
         assert _pending_players(second) == {player_id}
         assert len(_requests_for(first_submitted, player_id)) == 1
         assert _requests_for(second_submitted, player_id) == []
 
         _finish(second, second_blocker, "complete")
+        wait_for_submits(second_started)
     finally:
         reset_fleet_table_stream_registry_for_tests()
 

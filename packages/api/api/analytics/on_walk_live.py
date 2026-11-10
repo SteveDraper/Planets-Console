@@ -12,9 +12,14 @@ off-setting node is terminal for the wait. A running off-setting scoreboard
 does not absorb the on-walk by attach. Streams are not re-admitted, so stored
 rows do not return to turn load.
 
-A shell whose submit raises is logged and skipped, so one player's failure
-does not stop the others. The setting stays stored: a stream attached while
-the setting is on submits its own on-walk.
+Each player's submits run on that player's own background thread, off the
+thread that turned the setting on and off the orchestrator listener that saw
+the blocker finish. A submit may fetch missing earlier turns from Planets.nu
+before it plans the walk, so one player's slow fetch does not hold another
+player's submit, the settings write, or the listener. A shell whose submit
+raises is logged and skipped, so one player's failure does not stop the
+others. The setting stays stored: a stream attached while the setting is on
+submits its own on-walk.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol, runtime_checkable
 
@@ -76,24 +82,31 @@ def submit_on_walks_for_live_streams(
     game_id: int,
     *,
     orchestrator: ComputeOrchestrator | None = None,
-) -> None:
-    """Submit one on-walk per roster player on each live fleet or scoreboard stream.
+) -> list[Future[None]]:
+    """Start one on-walk per roster player on each live fleet or scoreboard stream.
 
+    Returns without waiting for any submit, with one future per player that
+    resolves once that player's shells have been submitted or skipped. A
+    player waiting on an off-setting walk shares the pending waiter's future.
     No live stream does not create an orchestrator. Homeworld streams are not
     scanned.
     """
     shells = _live_shells(game_id)
     if not shells:
-        return
+        return []
     orch = orchestrator if orchestrator is not None else get_compute_orchestrator()
     by_player: dict[_PlayerKey, list[_LiveShell]] = {}
     for shell in shells:
         by_player.setdefault(_PlayerKey.of(shell.compute_scope), []).append(shell)
+    submitted: list[Future[None]] = []
     for player, player_shells in by_player.items():
         if _has_off_setting_walk(orch, player):
-            orch.attachment(_PendingOnWalks).wait(orch, player, player_shells)
+            submitted.append(orch.attachment(_PendingOnWalks).wait(orch, player, player_shells))
         else:
-            _submit_shells(orch, player_shells)
+            player_submitted: Future[None] = Future()
+            _start_submit(orch, player, player_shells, player_submitted)
+            submitted.append(player_submitted)
+    return submitted
 
 
 class _PendingOnWalks:
@@ -112,26 +125,29 @@ class _PendingOnWalks:
         orchestrator: ComputeOrchestrator,
         player: _PlayerKey,
         shells: list[_LiveShell],
-    ) -> None:
+    ) -> Future[None]:
         """Submit ``shells`` once the player's off-setting nodes are terminal.
 
-        A later wait for a pending player replaces the shells that waiter submits.
+        A later wait for a pending player replaces the shells that waiter
+        submits and returns that waiter's future.
         """
         with self.lock:
             pending = self.waiters.get(player)
             if pending is not None:
                 pending.shells = shells
-                return
+                return pending.submitted
             waiter = _OffSettingWalkWaiter(self, orchestrator, player, shells)
             self.waiters[player] = waiter
         waiter.start()
+        return waiter.submitted
 
 
 class _OffSettingWalkWaiter:
     """Submits one player's shells once that player's off-setting nodes are terminal.
 
-    A blocker that clears submits each live shell once. The pending entry is
-    removed when the waiter finishes, and its listener is unregistered.
+    A blocker that clears starts one background submit of each live shell, and
+    ``submitted`` resolves when it ends. The pending entry is removed when the
+    waiter finishes, and its listener is unregistered.
 
     The listener is registered before the first check, and the listener and
     that check share one ``_try_finish``, so a node that completes in between
@@ -151,6 +167,7 @@ class _OffSettingWalkWaiter:
         self._orchestrator = orchestrator
         self._player = player
         self.shells = shells
+        self.submitted: Future[None] = Future()
         self._unregister: Callable[[], None] | None = None
 
     def start(self) -> None:
@@ -185,7 +202,36 @@ class _OffSettingWalkWaiter:
             unregister = self._unregister
         if unregister is not None:
             unregister()
-        _submit_shells(self._orchestrator, shells)
+        _start_submit(self._orchestrator, self._player, shells, self.submitted)
+
+
+def _start_submit(
+    orchestrator: ComputeOrchestrator,
+    player: _PlayerKey,
+    shells: list[_LiveShell],
+    submitted: Future[None],
+) -> None:
+    """Submit one player's ``shells`` on a new thread and resolve ``submitted`` when done."""
+
+    def run() -> None:
+        try:
+            _submit_shells(orchestrator, shells)
+        except Exception as exc:
+            logger.exception(
+                "On-walk submits failed for game %s perspective %s player %s",
+                player.game_id,
+                player.perspective,
+                player.player_id,
+            )
+            submitted.set_exception(exc)
+            return
+        submitted.set_result(None)
+
+    threading.Thread(
+        target=run,
+        name=f"on-walk-submit-{player.game_id}-{player.perspective}-{player.player_id}",
+        daemon=True,
+    ).start()
 
 
 def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) -> None:

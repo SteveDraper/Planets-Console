@@ -27,7 +27,13 @@ from api.serialization.backfill_earlier_turns import (
 from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.off_mode_catch_up_helpers import context_at_turn
 from tests.on_walk_helpers import fleet_persistence, held_pool_orchestrator, shell_scope
-from tests.on_walk_live_helpers import attach_stream, recording_orchestrator, roster_player_ids
+from tests.on_walk_live_helpers import (
+    attach_stream,
+    recording_orchestrator,
+    roster_player_ids,
+    wait_for_submits,
+    wait_for_unblocked_submits,
+)
 from tests.scores_exports_helpers import first_player_id
 from tests.test_fleet_eliminated_player import _stamp_player
 
@@ -44,7 +50,7 @@ def test_live_streams_submit_one_force_fresh_walk_per_player(sample_turn, monkey
     )
     orchestrator, submitted = recording_orchestrator(monkeypatch)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        wait_for_submits(submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator))
     finally:
         reset_fleet_table_stream_registry_for_tests()
         reset_inference_table_stream_registry_for_tests()
@@ -82,7 +88,7 @@ def test_a_stream_submits_only_the_players_it_was_opened_for(sample_turn, monkey
     fleet = attach_stream(get_fleet_table_stream_registry(), fleet_scope, host, ctx, opened_for)
     orchestrator, submitted = recording_orchestrator(monkeypatch)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        wait_for_submits(submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator))
     finally:
         reset_fleet_table_stream_registry_for_tests()
 
@@ -112,7 +118,7 @@ def test_an_eliminated_player_is_neither_submitted_nor_told_work_was_accepted(
     scores = attach_stream(get_inference_table_stream_registry(), scores_scope, host, ctx, roster)
     orchestrator, submitted = recording_orchestrator(monkeypatch)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        wait_for_submits(submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator))
     finally:
         reset_fleet_table_stream_registry_for_tests()
         reset_inference_table_stream_registry_for_tests()
@@ -130,7 +136,7 @@ def test_no_live_stream_does_not_create_an_orchestrator(sample_turn, monkeypatch
 
     monkeypatch.setattr("api.analytics.on_walk_live.get_compute_orchestrator", refuse)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id)
+        assert submit_on_walks_for_live_streams(ctx.game_id) == []
         attach_stream(
             get_fleet_table_stream_registry(),
             FleetTableStreamScope(ctx.game_id, ctx.perspective, 10),
@@ -173,7 +179,8 @@ def test_off_setting_fleet_defers_one_player_until_the_node_is_terminal(sample_t
     )
     orchestrator.nodes[blocker] = node
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        wait_for_unblocked_submits(orchestrator, started)
         submitted_ids = {request.scope.player_id for request in submitted}
         assert free in submitted_ids
         assert blocked not in submitted_ids
@@ -186,6 +193,7 @@ def test_off_setting_fleet_defers_one_player_until_the_node_is_terminal(sample_t
         node.state = "failed"
         orchestrator.observers.notify_scope_outcome(node)
         orchestrator.observers.drain_post_lock_callbacks()
+        wait_for_submits(started)
         assert blocked in {request.scope.player_id for request in submitted}
         blocked_request = next(
             request for request in submitted if request.scope.player_id == blocked
@@ -223,7 +231,7 @@ def test_off_setting_scoreboard_defers_until_terminal_then_registers_the_walk(sa
     orchestrator.nodes[scores_scope] = node
     prior = shell_scope(ctx, FLEET_ANALYTIC_ID, 9, player_id)
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         assert orchestrator.nodes[scores_scope] is node
         assert node.submission_open.backfill_earlier_turns is False
         assert prior not in orchestrator.nodes
@@ -237,6 +245,7 @@ def test_off_setting_scoreboard_defers_until_terminal_then_registers_the_walk(sa
         node.state = "failed"
         orchestrator.observers.notify_scope_outcome(node)
         orchestrator.observers.drain_post_lock_callbacks()
+        wait_for_submits(started)
         registered = orchestrator.nodes[scores_scope]
         assert registered is not node
         assert registered.submission_open.backfill_earlier_turns is True
@@ -270,7 +279,7 @@ def test_deferred_on_walk_skips_a_closed_stream_or_a_setting_that_turned_off(
     )
     orchestrator.nodes[blocker] = node
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         assert player_id not in {request.scope.player_id for request in submitted}
         fleet_persistence(ctx)._storage.put(
             backfill_earlier_turns_store_key(ctx.game_id),
@@ -279,6 +288,7 @@ def test_deferred_on_walk_skips_a_closed_stream_or_a_setting_that_turned_off(
         node.state = "complete"
         orchestrator.observers.notify_scope_outcome(node)
         orchestrator.observers.drain_post_lock_callbacks()
+        wait_for_submits(started)
         assert player_id not in {request.scope.player_id for request in submitted}
     finally:
         reset_fleet_table_stream_registry_for_tests()
@@ -304,12 +314,13 @@ def test_deferred_on_walk_skips_a_closed_stream_or_a_setting_that_turned_off(
     )
     orchestrator.nodes[blocker] = node
     try:
-        submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
+        started = submit_on_walks_for_live_streams(ctx.game_id, orchestrator=orchestrator)
         assert player_id not in {request.scope.player_id for request in submitted}
         reset_fleet_table_stream_registry_for_tests()
         node.state = "failed"
         orchestrator.observers.notify_scope_outcome(node)
         orchestrator.observers.drain_post_lock_callbacks()
+        wait_for_submits(started)
         assert player_id not in {request.scope.player_id for request in submitted}
     finally:
         reset_fleet_table_stream_registry_for_tests()

@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterable
+from concurrent.futures import Future
 from dataclasses import dataclass
 
+from api.analytics.on_walk_live import _PendingOnWalks
 from api.analytics.turn_roster import iter_turn_players
 from api.compute.orchestrator import ComputeOrchestrator
+
+SUBMIT_TIMEOUT_SECONDS = 5.0
 
 
 class _EventQueue:
@@ -70,3 +75,19 @@ def recording_orchestrator(monkeypatch) -> tuple[ComputeOrchestrator, list]:
 
     monkeypatch.setattr(orchestrator, "submit", record)
     return orchestrator, submitted
+
+
+def wait_for_submits(futures: Iterable[Future[None]]) -> None:
+    """Wait until every player's background on-walk submit has ended."""
+    for future in futures:
+        future.result(timeout=SUBMIT_TIMEOUT_SECONDS)
+
+
+def wait_for_unblocked_submits(
+    orchestrator: ComputeOrchestrator, futures: Iterable[Future[None]]
+) -> None:
+    """Wait for every submit except those still behind an off-setting walk."""
+    waiting = {
+        waiter.submitted for waiter in orchestrator.attachment(_PendingOnWalks).waiters.values()
+    }
+    wait_for_submits(future for future in futures if future not in waiting)
