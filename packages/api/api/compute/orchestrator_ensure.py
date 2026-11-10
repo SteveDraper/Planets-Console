@@ -8,8 +8,11 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
-from api.compute.dag import PlannedComputeNode
-from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
+from api.compute.orchestrator_pending import (
+    AcceptedSubmission,
+    PendingInlineExecution,
+    PendingPoolSubmission,
+)
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
 from api.compute.orchestrator_submission import (
     prepare_compute_request_dependency_chain,
@@ -128,12 +131,12 @@ class OrchestratorEnsureMixin:
                 pending_pool: list[PendingPoolSubmission] = []
                 with self._condition:
                     for index, resolved in resolved_unsatisfied:
-                        handle, inlines, pools, planned = self._ensure_submit_locked(resolved)
-                        handles_by_index[index] = handle
-                        pending_inline.extend(inlines)
-                        pending_pool.extend(pools)
-                        if planned is not None:
-                            root_plan_by_index[index].plan_registered(planned)
+                        submission = self._ensure_submit_locked(resolved)
+                        handles_by_index[index] = submission.handle
+                        pending_inline.extend(submission.pending_inline)
+                        pending_pool.extend(submission.pending_pool)
+                        if submission.planned is not None:
+                            root_plan_by_index[index].plan_registered(submission.planned)
             self._execute_pending_inlines(tuple(pending_inline))
             self._flush_pending_pool_submissions(tuple(pending_pool))
             self._observers.drain_post_lock_callbacks()
@@ -146,12 +149,7 @@ class OrchestratorEnsureMixin:
     def _ensure_submit_locked(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
-    ) -> tuple[
-        ComputeHandle,
-        tuple[PendingInlineExecution, ...],
-        tuple[PendingPoolSubmission, ...],
-        tuple[PlannedComputeNode, ...] | None,
-    ]:
+    ) -> AcceptedSubmission:
         """Submit one unsatisfied ensure scope. Caller holds the orchestrator lock."""
         existing = self._nodes.get(request.scope)
         # Hollow terminal: durable gone, node still complete/failed. Drop so
@@ -159,7 +157,4 @@ class OrchestratorEnsureMixin:
         # nodes alone for attach / singleflight; parked wake stays explicit.
         if existing is not None and existing.is_terminal and not request.force_fresh:
             self._replace_terminal_node(existing)
-        submission = self._submit_locked(request, wake_if_parked_only=False)
-        if submission is None:
-            raise RuntimeError("ensure submit_locked returned None without wake_if_parked_only")
-        return submission
+        return self._submit_locked(request)

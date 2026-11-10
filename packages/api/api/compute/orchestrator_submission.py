@@ -11,7 +11,7 @@ from api.analytics.export_turn_fill import prepare_dependency_chain_turns
 from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_compute_dag
 from api.compute.errors import ComputeScopeAbortedError, UnresolvedSubmissionOpenError
 from api.compute.orchestration_bundle import OrchestrationBundle
-from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
+from api.compute.orchestrator_pending import AcceptedSubmission
 from api.compute.orchestrator_state import (
     ComputeHandle,
     ComputeNodeRun,
@@ -135,13 +135,10 @@ class OrchestratorSubmissionMixin:
                     backfill_earlier_turns=resolved.submission_open.backfill_earlier_turns,
                 )
             with self._condition:
-                submission = self._submit_locked(resolved, wake_if_parked_only=False)
-                if submission is None:
-                    raise RuntimeError("submit_locked returned None without wake_if_parked_only")
-                handle, pending_inline, pending_pool, planned = submission
-                if planned is not None:
-                    root_plan.plan_registered(planned)
-        return self._finish_submission((handle, pending_inline, pending_pool))
+                submission = self._submit_locked(resolved)
+                if submission.planned is not None:
+                    root_plan.plan_registered(submission.planned)
+        return self._finish_submission(submission)
 
     def wake_if_parked(
         self: ComputeOrchestrator,
@@ -160,11 +157,10 @@ class OrchestratorSubmissionMixin:
                 return None
         resolved = resolve_submission_open(request)
         with self._condition:
-            submission = self._submit_locked(resolved, wake_if_parked_only=True)
-        if submission is None:
-            return None
-        handle, pending_inline, pending_pool, _planned = submission
-        return self._finish_submission((handle, pending_inline, pending_pool))
+            if not _is_parked_node(self._nodes.get(resolved.scope)):
+                return None
+            submission = self._submit_locked(resolved)
+        return self._finish_submission(submission)
 
     def _open_root_plan(
         self: ComputeOrchestrator,
@@ -184,31 +180,17 @@ class OrchestratorSubmissionMixin:
     def _submit_locked(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
-        *,
-        wake_if_parked_only: bool,
-    ) -> (
-        tuple[
-            ComputeHandle,
-            tuple[PendingInlineExecution, ...],
-            tuple[PendingPoolSubmission, ...],
-            tuple[PlannedComputeNode, ...] | None,
-        ]
-        | None
-    ):
+    ) -> AcceptedSubmission:
         """Apply one submission under the orchestrator lock.
 
         ``request.submission_open`` is the open for this submission. Callers
         run ``resolve_submission_open`` before taking this lock, so this method
-        does not read the backfill record. The last element is the plan a fresh
-        root registered, or None when the submission attached to existing work.
+        does not read the backfill record. ``planned`` on the result is the plan
+        a fresh root registered, or None when the submission attached to
+        existing work.
         """
         scope = request.scope
         existing = self._nodes.get(scope)
-        if wake_if_parked_only and not _is_parked_node(existing):
-            return None
-
-        pending_inline: tuple[PendingInlineExecution, ...] = ()
-        pending_pool: tuple[PendingPoolSubmission, ...] = ()
         if existing is not None:
             if not (request.force_fresh and existing.is_terminal):
                 if request.force_fresh:
@@ -228,7 +210,7 @@ class OrchestratorSubmissionMixin:
                             self._schedule_recreate_aborted_dependencies(existing)
                 handle = self._attach_to_existing(existing, request)
                 pending_inline, pending_pool = self._dispatch()
-                return handle, pending_inline, pending_pool, None
+                return AcceptedSubmission(handle, pending_inline, pending_pool, None)
             self._emit_force_fresh_lifecycle(
                 kind="force_fresh_replace",
                 node=existing,
@@ -240,12 +222,7 @@ class OrchestratorSubmissionMixin:
     def _plan_submission_locked(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
-    ) -> tuple[
-        ComputeHandle,
-        tuple[PendingInlineExecution, ...],
-        tuple[PendingPoolSubmission, ...],
-        tuple[PlannedComputeNode, ...],
-    ]:
+    ) -> AcceptedSubmission:
         """Plan a fresh scope and select its first dispatchable work."""
         submission_open = request.submission_open
         scope = request.scope
@@ -259,30 +236,27 @@ class OrchestratorSubmissionMixin:
         )
         for node in self._nodes.values():
             self._refresh_node_readiness(node)
-        return (
-            ComputeHandle(
+        pending_inline, pending_pool = self._dispatch()
+        return AcceptedSubmission(
+            handle=ComputeHandle(
                 scope=scope,
                 _node=self._nodes[scope],
                 _condition=self._condition,
             ),
-            *self._dispatch(),
-            planned,
+            pending_inline=pending_inline,
+            pending_pool=pending_pool,
+            planned=planned,
         )
 
     def _finish_submission(
         self: ComputeOrchestrator,
-        submission: tuple[
-            ComputeHandle,
-            tuple[PendingInlineExecution, ...],
-            tuple[PendingPoolSubmission, ...],
-        ],
+        submission: AcceptedSubmission,
     ) -> ComputeHandle:
         """Run work selected by a submission after releasing the lock."""
-        handle, pending_inline, pending_pool = submission
-        self._execute_pending_inlines(pending_inline)
-        self._flush_pending_pool_submissions(pending_pool)
+        self._execute_pending_inlines(submission.pending_inline)
+        self._flush_pending_pool_submissions(submission.pending_pool)
         self._observers.drain_post_lock_callbacks()
-        return handle
+        return submission.handle
 
     def _require_bundle(
         self: ComputeOrchestrator,

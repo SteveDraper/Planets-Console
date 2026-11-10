@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from api.compute.orchestrator_state import ComputeNodeRun
+from api.compute.dag import PlannedComputeNode
+from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.wire import DependencyOutputs
 
 __all__ = [
+    "AcceptedSubmission",
     "PendingInlineExecution",
     "PendingPoolSubmission",
 ]
@@ -43,3 +45,18 @@ class PendingPoolSubmission:
     registration: AnalyticComputeRegistration
     step: ComputeStepSpec
     dependency_outputs: DependencyOutputs
+
+
+@dataclass(frozen=True)
+class AcceptedSubmission:
+    """One submission applied under the orchestrator lock.
+
+    ``planned`` is the plan a fresh root registered, or None when the
+    submission attached to existing work. The pending work runs after the
+    lock is released.
+    """
+
+    handle: ComputeHandle
+    pending_inline: tuple[PendingInlineExecution, ...]
+    pending_pool: tuple[PendingPoolSubmission, ...]
+    planned: tuple[PlannedComputeNode, ...] | None
