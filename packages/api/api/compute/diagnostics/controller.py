@@ -38,9 +38,6 @@ from api.compute.diagnostics.single_step_preview import (
     SingleStepArm,
     SingleStepDisabledReason,
     SingleStepPreview,
-    find_held_focus_pool_item,
-    has_running_focus_work,
-    preview_focus_ready_dispatch,
     resolve_single_step_preview,
 )
 from api.compute.orchestrator import OrchestratorNodeSnapshot
@@ -198,20 +195,38 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         Selection matches :meth:`single_step` and approximates unfrozen pool order:
         compare the best held focus pool item and the best focus ready node by
         priority band (then initial step before continuation). On a tie, prefer
-        the held item (already queued).
+        the held item (already queued). A held item left by an aborted or
+        replaced execution of its scope is not a candidate.
 
         ``pool_queue_items`` when provided is the authoritative queue snapshot for
         this decision (same tuple used to render ``poolQueue``) so held preview
         cannot race ahead of an emptied queue wire.
         """
-        held = self._preview_held_focus_pool_item(shell, pool_queue_items=pool_queue_items)
-        ready = self._preview_focus_ready_dispatch(shell)
+        if pool_queue_items is not None:
+            queue_items = pool_queue_items
+        elif self._pool is not None:
+            queue_items = self._pool.snapshot_work_queue()
+        else:
+            queue_items = ()
+        ancestor_turns = self._ancestor_turns_for_shell(shell)
+
+        def is_focus_scope(scope: ComputeScope) -> bool:
+            if not scope_in_diagnostic_scope(
+                scope,
+                game_id=shell.game_id,
+                perspective=shell.perspective,
+                ancestor_turns=ancestor_turns,
+            ):
+                return False
+            return self._scope_in_focus(scope, shell)
+
         return resolve_single_step_preview(
             freeze_armed=self._freeze_state.freeze_armed_for_game(shell.game_id),
             allowlist_empty=not self._freeze_state.allowlisted_player_ids(shell),
-            held=held,
-            ready=ready,
-            has_running_focus=lambda: self._has_running_focus_work(shell),
+            queue_items=queue_items,
+            bound_orchestrators=self._bound_orchestrators_snapshot(),
+            shell=shell,
+            is_focus_scope=is_focus_scope,
         )
 
     def set_freeze_armed(self, shell: ShellContextKey, *, freeze_armed: bool) -> None:
@@ -494,59 +509,6 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         if player_id is None:
             return False
         return player_id in allowlisted
-
-    def _has_running_focus_work(self, shell: ShellContextKey) -> bool:
-        """Return whether any focus node in diagnostic scope is still ``running``.
-
-        Covers persist-before-complete: the pool step may have finished (and cleared
-        queues) while durable write is still outstanding and the node stays running.
-        """
-        return has_running_focus_work(
-            self._bound_orchestrators_snapshot(),
-            shell,
-            ancestor_turns=self._ancestor_turns_for_shell(shell),
-            scope_in_focus=lambda scope: self._scope_in_focus(scope, shell),
-        )
-
-    def _preview_held_focus_pool_item(
-        self,
-        shell: ShellContextKey,
-        *,
-        pool_queue_items: tuple[BandedWorkItem, ...] | None = None,
-    ) -> BandedWorkItem | None:
-        """Return the focus pool item single-step would dequeue first, if any."""
-        if pool_queue_items is not None:
-            queue_items = pool_queue_items
-        elif self._pool is not None:
-            queue_items = self._pool.snapshot_work_queue()
-        else:
-            return None
-        ancestor_turns = self._ancestor_turns_for_shell(shell)
-
-        def is_focus_item(item: PoolWorkItem) -> bool:
-            if not scope_in_diagnostic_scope(
-                item.scope,
-                game_id=shell.game_id,
-                perspective=shell.perspective,
-                ancestor_turns=ancestor_turns,
-            ):
-                return False
-            return self._scope_in_focus(item.scope, shell)
-
-        return find_held_focus_pool_item(queue_items, is_focus_item=is_focus_item)
-
-    def _preview_focus_ready_dispatch(self, shell: ShellContextKey) -> SingleStepPreview | None:
-        """Return the focus ready node single-step would dispatch first, if any.
-
-        Across bound orchestrators, pick by the same priority-band / initial-step
-        rules as the global pool. Ties keep bind order then ready-queue order.
-        """
-        return preview_focus_ready_dispatch(
-            self._bound_orchestrators_snapshot(),
-            shell,
-            ancestor_turns=self._ancestor_turns_for_shell(shell),
-            scope_in_focus=lambda scope: self._scope_in_focus(scope, shell),
-        )
 
     def _scope_matches_single_step_shell(self, scope: ComputeScope) -> bool:
         if self._single_step.shell is None:

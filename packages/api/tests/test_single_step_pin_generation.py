@@ -1,17 +1,24 @@
-"""A single-step pin names the execution of its scope that it releases.
+"""Single-step targets the live execution of its scope.
 
 Under diagnostics freeze, a pool item left by an aborted execution can wait in
 the queue next to the item its ``force_fresh`` replacement dispatched, with the
-same scope and step index. A grant armed for the newer execution's item must
-release that item, not the stale one, which is still dropped when it runs.
+same scope and step index. The pin names the execution it releases, so a grant
+armed for the newer execution's item releases that item, not the stale one.
+The preview never offers the stale item, so one step advances the scope. The
+stale item is still dropped when a worker picks it.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
+from api.analytics.export_context import AnalyticQueryContext
 from api.compute import (
     ComputeOrchestrator,
     ComputeRequest,
+    ComputeScope,
+    ComputeWorkerPool,
     build_compute_registry,
     reset_compute_worker_pool_for_tests,
 )
@@ -20,6 +27,7 @@ from api.compute.diagnostics import (
     get_compute_diagnostics_controller,
     reset_compute_diagnostics_for_tests,
 )
+from api.compute.diagnostics.controller import ComputeDiagnosticsController
 from api.compute.diagnostics.single_step_preview import preview_from_held_pool_item
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.runtime import reset_orchestrators_for_tests
@@ -42,7 +50,30 @@ def _diagnostics_enabled():
     set_config(ApiConfig(storage_backend="ephemeral", compute_diagnostics=False))
 
 
-def test_pin_for_the_newer_execution_is_not_used_up_by_a_stale_item(sample_turn):
+@dataclass(frozen=True)
+class _AbortedScope:
+    """One scope whose first execution was aborted while its pool item waits."""
+
+    pool: ComputeWorkerPool
+    orchestrator: ComputeOrchestrator
+    controller: ComputeDiagnosticsController
+    ctx: AnalyticQueryContext
+    shell: ShellContextKey
+    scope: ComputeScope
+    thread_runs: list[int]
+
+    def focus(self) -> None:
+        """Arm freeze with the scope's player as the only focus player."""
+        self.controller.set_freeze_armed(self.shell, freeze_armed=True)
+        self.controller.set_allowlist(self.shell, frozenset({self.scope.player_id}))
+
+    def submit_force_fresh(self) -> int:
+        """Replace the aborted node and return its new execution generation."""
+        self.orchestrator.submit(ComputeRequest(ctx=self.ctx, scope=self.scope, force_fresh=True))
+        return self.orchestrator.nodes[self.scope].execution_generation
+
+
+def _aborted_with_held_item(sample_turn) -> _AbortedScope:
     thread_runs: list[int] = []
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
@@ -54,22 +85,37 @@ def test_pin_for_the_newer_execution_is_not_used_up_by_a_stale_item(sample_turn)
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     scope = _scope_for_player(sample_turn, sample_turn.scores[0].ownerid)
     controller = get_compute_diagnostics_controller()
-    controller.bind_orchestrator(orchestrator, ctx)
+    # Process-wide, as the runtime binds its singleton orchestrator.
+    controller.bind_orchestrator(orchestrator)
     shell = ShellContextKey(game_id=scope.game_id, perspective=scope.perspective, turn=scope.turn)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert orchestrator.abort_scope(scope, ComputeScopeAbortedError("cancelled"))
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
-    fresh_generation = orchestrator.nodes[scope].execution_generation
+    return _AbortedScope(
+        pool=pool,
+        orchestrator=orchestrator,
+        controller=controller,
+        ctx=ctx,
+        shell=shell,
+        scope=scope,
+        thread_runs=thread_runs,
+    )
+
+
+def test_pin_for_the_newer_execution_is_not_used_up_by_a_stale_item(sample_turn):
+    aborted = _aborted_with_held_item(sample_turn)
+    pool, controller, orchestrator = aborted.pool, aborted.controller, aborted.orchestrator
+    fresh_generation = aborted.submit_force_fresh()
     stale_held, fresh_held = pool.snapshot_work_queue()
     assert stale_held.item.step_index == fresh_held.item.step_index
     assert fresh_held.item.execution_generation == fresh_generation
     assert stale_held.item.execution_generation != fresh_generation
 
-    controller.set_freeze_armed(shell, freeze_armed=True)
-    controller.set_allowlist(shell, frozenset({scope.player_id}))
+    aborted.focus()
     with controller._lock:
-        controller._single_step.arm_from_preview(shell, preview_from_held_pool_item(fresh_held))
+        controller._single_step.arm_from_preview(
+            aborted.shell, preview_from_held_pool_item(fresh_held)
+        )
 
     released = pool.take_next_item_for_tests()
 
@@ -77,15 +123,76 @@ def test_pin_for_the_newer_execution_is_not_used_up_by_a_stale_item(sample_turn)
     assert controller._single_step.grants_remaining == 0
     assert pool.take_next_item_for_tests() is None
 
-    controller.set_freeze_armed(shell, freeze_armed=False)
+    controller.set_freeze_armed(aborted.shell, freeze_armed=False)
     stale_picked = pool.take_next_item_for_tests()
     assert stale_picked is not None and stale_picked.item is stale_held.item
     pool._execute_item(stale_picked)
 
-    assert thread_runs == []
-    assert orchestrator.nodes[scope].state == "running"
+    assert aborted.thread_runs == []
+    assert orchestrator.nodes[aborted.scope].state == "running"
 
     pool._execute_item(released)
 
-    assert thread_runs == [fresh_generation]
-    assert orchestrator.nodes[scope].state == "complete"
+    assert aborted.thread_runs == [fresh_generation]
+    assert orchestrator.nodes[aborted.scope].state == "complete"
+
+
+def test_preview_offers_the_newer_held_item_and_one_step_completes_it(sample_turn):
+    aborted = _aborted_with_held_item(sample_turn)
+    pool, controller = aborted.pool, aborted.controller
+    fresh_generation = aborted.submit_force_fresh()
+    _stale_held, fresh_held = pool.snapshot_work_queue()
+    aborted.focus()
+
+    preview, disabled_reason = controller.preview_single_step(aborted.shell)
+
+    assert disabled_reason is None
+    assert preview is not None
+    assert (preview.source, preview.execution_generation) == ("held", fresh_generation)
+
+    assert controller.single_step(aborted.shell)
+    released = pool.take_next_item_for_tests()
+    assert released is not None and released.item is fresh_held.item
+    pool._execute_item(released)
+
+    assert aborted.thread_runs == [fresh_generation]
+    assert aborted.orchestrator.nodes[aborted.scope].state == "complete"
+
+
+def test_preview_offers_the_newer_ready_node_over_a_stale_held_item(sample_turn):
+    aborted = _aborted_with_held_item(sample_turn)
+    pool, controller = aborted.pool, aborted.controller
+    (stale_held,) = pool.snapshot_work_queue()
+    aborted.focus()
+    fresh_generation = aborted.submit_force_fresh()
+    assert pool.snapshot_work_queue() == (stale_held,)
+    assert aborted.orchestrator.nodes[aborted.scope].state == "ready"
+
+    preview, disabled_reason = controller.preview_single_step(aborted.shell)
+
+    assert disabled_reason is None
+    assert preview is not None
+    assert (preview.source, preview.execution_generation) == (
+        "would_dispatch",
+        fresh_generation,
+    )
+
+    assert controller.single_step(aborted.shell)
+    released = pool.take_next_item_for_tests()
+    assert released is not None
+    assert released.item.execution_generation == fresh_generation
+    pool._execute_item(released)
+
+    assert aborted.thread_runs == [fresh_generation]
+    assert aborted.orchestrator.nodes[aborted.scope].state == "complete"
+
+
+def test_preview_does_not_offer_a_stale_held_item_alone(sample_turn):
+    aborted = _aborted_with_held_item(sample_turn)
+    aborted.focus()
+
+    preview, disabled_reason = aborted.controller.preview_single_step(aborted.shell)
+
+    assert preview is None
+    assert disabled_reason == "nothing_steppable"
+    assert not aborted.controller.single_step(aborted.shell)

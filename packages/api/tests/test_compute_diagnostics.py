@@ -41,7 +41,7 @@ from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
 from tests.compute_pool_test_helpers import QUEUED_ONLY_STEP_WORK, complete_running_pool_step
-from tests.compute_published_band_helpers import publish_queued_node_band
+from tests.compute_published_band_helpers import enqueue_held_item
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
@@ -799,7 +799,7 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({ready_scope.player_id, held_scope.player_id}))
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=ready_scope))
-    pool.enqueue_for_tests(held_item)
+    enqueue_held_item(pool, held_item)
     assert orchestrator.nodes[ready_scope].state == "ready"
 
     preview, reason = controller.preview_single_step(shell)
@@ -872,7 +872,7 @@ def test_single_step_prefers_interactive_ready_over_background_held(sample_turn)
     orchestrator.submit(
         ComputeRequest(ctx=ctx, scope=interactive_scope, priority_band="interactive_ensure"),
     )
-    pool.enqueue_for_tests(held_item)
+    enqueue_held_item(pool, held_item)
     assert orchestrator.nodes[interactive_scope].state == "ready"
 
     preview, reason = controller.preview_single_step(shell)
@@ -1119,8 +1119,8 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({focus_scope.player_id}))
     # Non-focus higher-priority item is first; focus item second.
-    pool.enqueue_for_tests(other_item)
-    pool.enqueue_for_tests(focus_item)
+    enqueue_held_item(pool, other_item)
+    enqueue_held_item(pool, focus_item)
 
     assert controller.single_step(shell) is True
     assert controller._pool_item_is_runnable(other_item) is False
@@ -1138,7 +1138,7 @@ def test_single_step_pool_dequeue_releases_one_held_item(sample_turn):
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({item.scope.player_id}))
-    pool.enqueue_for_tests(item)
+    enqueue_held_item(pool, item)
     assert controller._pool_item_is_runnable(item) is False
     controller.single_step(shell)
     assert controller._pool_item_is_runnable(item) is True
@@ -1181,11 +1181,9 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
         shell,
         frozenset({low_item.scope.player_id, high_scope.player_id}),
     )
-    bound = controller._bound_orchestrators_snapshot()[0]
-    publish_queued_node_band(bound.orchestrator, high_scope, "interactive_ensure")
     # Lower-priority frozen item is first in the queue; higher-priority second.
-    pool.enqueue_for_tests(low_item)
-    pool.enqueue_for_tests(high_item)
+    enqueue_held_item(pool, low_item)
+    enqueue_held_item(pool, high_item, "interactive_ensure")
     assert controller.single_step(shell) is True
     assert controller._single_step.grants_remaining == 1
 
@@ -1225,8 +1223,8 @@ def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({focus_player}))
-    pool.enqueue_for_tests(frozen_item)
-    pool.enqueue_for_tests(focus_item)
+    enqueue_held_item(pool, frozen_item)
+    enqueue_held_item(pool, focus_item)
     assert controller.single_step(shell) is True
 
     first = _take_queued_item(pool)
@@ -1266,8 +1264,8 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
         shell,
         frozenset({first_item.scope.player_id, second_scope.player_id}),
     )
-    pool.enqueue_for_tests(first_item)
-    pool.enqueue_for_tests(second_item)
+    enqueue_held_item(pool, first_item)
+    enqueue_held_item(pool, second_item)
     assert controller.single_step(shell) is True
     assert controller._single_step.grants_remaining == 1
 
@@ -1366,7 +1364,7 @@ def test_snapshot_does_not_consume_single_step_grant(sample_turn):
 
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({item.scope.player_id}))
-    pool.enqueue_for_tests(item)
+    enqueue_held_item(pool, item)
     assert controller._pool_item_is_runnable(item) is False
 
     assert controller.single_step(shell) is True
@@ -2405,8 +2403,8 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         step_index=0,
         work=QUEUED_ONLY_STEP_WORK,
     )
-    pool.enqueue_for_tests(non_focus_held)
-    pool.enqueue_for_tests(focus_held)
+    enqueue_held_item(pool, non_focus_held)
+    enqueue_held_item(pool, focus_held)
     assert controller._pool_item_is_runnable(non_focus_held) is False
     assert controller._pool_item_is_runnable(focus_held) is False
     assert controller.single_step(operator_shell) is True

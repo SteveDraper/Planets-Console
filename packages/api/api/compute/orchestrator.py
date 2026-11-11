@@ -19,6 +19,7 @@ from api.compute.orchestrator_state import (
     ComputeHandle,
     ComputeNodeRun,
     ComputeRequest,
+    NodeExecutionBinding,
     NodeState,
 )
 from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
@@ -60,7 +61,7 @@ class OrchestratorMetrics:
 
 
 @dataclass(frozen=True)
-class OrchestratorNodeSnapshot:
+class OrchestratorNodeSnapshot(NodeExecutionBinding):
     """Immutable copy of one node's diagnostics-visible fields."""
 
     scope: ComputeScope

@@ -150,8 +150,29 @@ class ComputeHandle:
             return self
 
 
+class NodeExecutionBinding:
+    """The rule binding a pool item to the execution of its scope that dispatched it.
+
+    Shared by the live node and its diagnostics snapshot, so the worker that
+    drops a stale item and the single-step preview that skips it apply one
+    definition of stale.
+    """
+
+    state: NodeState
+    execution_generation: int
+
+    def is_running_execution(self, execution_generation: int) -> bool:
+        """Whether this node is ``running`` as the execution ``execution_generation``.
+
+        A pool item is bound to the execution that dispatched it. Abort and a
+        ``force_fresh`` replace give the scope a node of a newer generation, so
+        the older item no longer matches it.
+        """
+        return self.state == "running" and self.execution_generation == execution_generation
+
+
 @dataclass
-class ComputeNodeRun:
+class ComputeNodeRun(NodeExecutionBinding):
     """Mutable orchestrator state for one compute scope."""
 
     scope: ComputeScope
@@ -202,15 +223,6 @@ class ComputeNodeRun:
         until an explicit ``force_fresh`` wake.
         """
         return self.state in TERMINAL_NODE_STATES
-
-    def is_running_execution(self, execution_generation: int) -> bool:
-        """Whether this node is ``running`` as the execution ``execution_generation``.
-
-        A pool item is bound to the execution that dispatched it. Abort and a
-        ``force_fresh`` replace give the scope a node of a newer generation, so
-        the older item no longer matches it.
-        """
-        return self.state == "running" and self.execution_generation == execution_generation
 
     @property
     def blocks_readiness_refresh(self) -> bool:
