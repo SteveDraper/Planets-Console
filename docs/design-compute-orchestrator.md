@@ -390,7 +390,7 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 |------------|--------|
 | **Submit** | Record `generation_at_submit` |
 | **Complete** | If `generation != generation_at_submit`, discard result and re-queue node |
-| **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist`. `generation_at_submit` is kept through persist-then-complete (post-lock). If the epoch advances before persist or before `_complete_node`, discard and re-queue -- do not stamp `complete` over a deleted ledger. |
+| **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist`. `generation_at_submit` is kept through persist-then-complete (post-lock). If the epoch advances before persist or before `_complete_node`, discard and re-queue -- do not stamp `complete` over a deleted ledger. Post-lock callbacks (persist, the notification `persist` returns, outcome listeners, dependent dispatch) run in one drain; one that raises is logged with its stack trace and the rest of the drain still runs. |
 
 Which mechanism catches which stale-work race:
 

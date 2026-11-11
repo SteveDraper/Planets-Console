@@ -7,6 +7,7 @@ semantics stay in one place without thin wrappers on the orchestrator.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
     from api.compute.orchestrator_state import ComputeNodeRun
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -361,6 +364,14 @@ class OrchestratorObservers:
             self._post_lock_callbacks.append(_notify)
 
     def drain_post_lock_callbacks(self) -> None:
+        """Run queued callbacks, and any they schedule, until the queue is empty.
+
+        Each callback runs even when an earlier one raises. A failure is logged
+        with its stack trace and is not re-raised: the batch mixes callbacks
+        scheduled by other nodes and threads, so the draining thread is not
+        their owner, and a pool worker draining after its own step must keep
+        running. Persist failures are handled inside their own callback.
+        """
         while True:
             with self._condition:
                 callbacks = tuple(self._post_lock_callbacks)
@@ -368,4 +379,7 @@ class OrchestratorObservers:
             if not callbacks:
                 return
             for callback in callbacks:
-                callback()
+                try:
+                    callback()
+                except Exception:
+                    logger.exception("Post-lock callback %r failed; draining the rest", callback)

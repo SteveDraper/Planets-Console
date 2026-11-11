@@ -3,15 +3,16 @@
 Most tests plan a real fleet or scoreboard walk on an orchestrator whose pool
 has no workers, so queued steps wait until the test picks them. A step's band
 is the one the pool would pick it at now (``published_band``), or the band a
-pick returned. The T1 test instead runs a whole walk on the process
+pick returned. The T1 tests instead run a whole walk on the process
 orchestrator and pool, with real steps and persists.
 """
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Iterator
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 
 import pytest
 from api.analytics.export_context import AnalyticQueryContext
@@ -26,6 +27,7 @@ from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
+from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     detach_inference_table_stream,
@@ -36,7 +38,7 @@ from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_regist
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeWorkerPool, build_compute_registry
 from api.compute.errors import ComputeScopeAbortedError
-from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
+from api.compute.orchestrator import ComputeHandle, ComputeOrchestrator, ComputeRequest
 from api.compute.persistence import PersistDependencyRecovery
 from api.compute.pools import reset_compute_worker_pool_for_tests
 from api.compute.priority_band import ComputePriorityBand, ComputeRequestBand
@@ -191,7 +193,7 @@ class _HeldOpenFleetStreamPolicy:
 def _connect_fleet_stream(walk: _Walk) -> Iterator[dict[str, object]]:
     """Open a fleet stream through the scoped connect entry and hold it open."""
     scope = FleetTableStreamScope(walk.ctx.game_id, walk.ctx.perspective, SHELL_TURN)
-    controller = LiveStream(None, walk.ctx, [walk.player_id])
+    controller = LiveStream(scope, None, walk.ctx, [walk.player_id])
     stream = iter_table_stream_connect_with_scope(
         begin_scope=lambda: controller.stream_token,
         end_scope=lambda _token: None,
@@ -202,11 +204,11 @@ def _connect_fleet_stream(walk: _Walk) -> Iterator[dict[str, object]]:
     return stream
 
 
-# --- T1: a walk whose streams close still reaches the ensure baseline ---
+# --- T1: a walk reaches the ensure baseline whether its streams close or stay open ---
 
 # The sample game's ensure baseline is turn 3, so the walk hops at turns 3 and 4.
-CLOSING_WALK_SHELL_TURN = 5
-CLOSING_WALK_TURNS = (3, 4, 5)
+BASELINE_WALK_SHELL_TURN = 5
+BASELINE_WALK_TURNS = (3, 4, 5)
 WALK_GENERATION = 1
 WALK_TIMEOUT_SECONDS = 30.0
 
@@ -232,7 +234,7 @@ def _quiet_walk_context(sample_turn) -> tuple[AnalyticQueryContext, int]:
     The walk player's scoreboard row has no deltas, so each scores step solves
     in one cheap tier and the walk's real steps and persists finish quickly.
     """
-    host, _stored = host_turn_at(sample_turn, CLOSING_WALK_SHELL_TURN)
+    host, _stored = host_turn_at(sample_turn, BASELINE_WALK_SHELL_TURN)
     player_id = inference_target_player_id(host)
     quiet_host = replace(
         host,
@@ -258,37 +260,61 @@ def _quiet_walk_context(sample_turn) -> tuple[AnalyticQueryContext, int]:
     return ctx, player_id
 
 
-@pytest.mark.usefixtures("_no_scores_row_runs")
-def test_closing_both_streams_mid_walk_still_reaches_the_ensure_baseline(sample_turn):
+@dataclass(frozen=True)
+class _BaselineWalk:
+    """A whole fleet walk on the process orchestrator, held at its baseline hop's persist."""
+
+    ctx: AnalyticQueryContext
+    player_id: int
+    fleet_stream: LiveStream
+    scores_stream: LiveStream
+    handle: ComputeHandle
+    release_baseline_hop: threading.Event
+
+
+def _start_walk_held_at_the_baseline_persist(sample_turn) -> _BaselineWalk:
+    """Open both shell streams, submit the shell, and wait for the baseline hop's persist."""
     ctx, player_id = _quiet_walk_context(sample_turn)
-    baseline_turn = CLOSING_WALK_TURNS[0]
-    shell_settings = ctx.load_turn(CLOSING_WALK_SHELL_TURN).settings
-    assert accelerated_ensure_floor(shell_settings, CLOSING_WALK_SHELL_TURN) == baseline_turn
-    persistence = fleet_persistence(ctx)
+    baseline_turn = BASELINE_WALK_TURNS[0]
+    shell_settings = ctx.load_turn(BASELINE_WALK_SHELL_TURN).settings
+    assert accelerated_ensure_floor(shell_settings, BASELINE_WALK_SHELL_TURN) == baseline_turn
     baseline_hop_persisting = threading.Event()
     release_baseline_hop = threading.Event()
     install_mid_chain_put_ledger_gate(
-        persistence,
+        fleet_persistence(ctx),
         player_id=player_id,
         turn_number=baseline_turn,
         leader_mid_chain=baseline_hop_persisting,
         release_leader=release_baseline_hop,
     )
     orchestrator = get_compute_orchestrator()
-    shell = shell_scope(ctx, FLEET_ANALYTIC_ID, CLOSING_WALK_SHELL_TURN, player_id)
-    fleet_stream = _open_fleet_stream(ctx, player_id, CLOSING_WALK_SHELL_TURN)
-    scores_stream = _open_scores_stream(ctx, player_id, CLOSING_WALK_SHELL_TURN)
+    shell = shell_scope(ctx, FLEET_ANALYTIC_ID, BASELINE_WALK_SHELL_TURN, player_id)
+    fleet_stream = _open_fleet_stream(ctx, player_id, BASELINE_WALK_SHELL_TURN)
+    scores_stream = _open_scores_stream(ctx, player_id, BASELINE_WALK_SHELL_TURN)
 
     handle = orchestrator.submit(ComputeRequest(scope=shell, force_fresh=True, ctx=ctx))
     assert orchestrator.published_band(shell) == "stream_attached"
     assert baseline_hop_persisting.wait(timeout=WALK_TIMEOUT_SECONDS)
-    detach_fleet_table_stream(fleet_stream.stream_token)
-    detach_inference_table_stream(scores_stream.stream_token)
-    release_baseline_hop.set()
-    handle.wait(timeout=WALK_TIMEOUT_SECONDS)
+    return _BaselineWalk(
+        ctx=ctx,
+        player_id=player_id,
+        fleet_stream=fleet_stream,
+        scores_stream=scores_stream,
+        handle=handle,
+        release_baseline_hop=release_baseline_hop,
+    )
 
-    assert handle.state == "complete"
-    for turn in CLOSING_WALK_TURNS:
+
+def _finish_walk(walk: _BaselineWalk) -> None:
+    walk.release_baseline_hop.set()
+    walk.handle.wait(timeout=WALK_TIMEOUT_SECONDS)
+
+
+def _assert_walk_stamped_the_ensure_baseline_without_bumping(walk: _BaselineWalk) -> None:
+    ctx, player_id = walk.ctx, walk.player_id
+    persistence = fleet_persistence(ctx)
+    assert walk.handle.state == "complete"
+    for turn in BASELINE_WALK_TURNS:
         ledger = persistence.get_ledger(ctx.game_id, ctx.perspective, turn, player_id)
         assert ledger is not None
         assert ledger.evidence_generation == WALK_GENERATION
@@ -297,8 +323,35 @@ def test_closing_both_streams_mid_walk_still_reaches_the_ensure_baseline(sample_
     assert mark.evidence_generation == WALK_GENERATION
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 0
     scores_rows = ctx.export_services[SCORES_ANALYTIC_ID].persistence
-    for turn in CLOSING_WALK_TURNS:
+    for turn in BASELINE_WALK_TURNS:
         assert scores_rows.get_row(ctx.game_id, ctx.perspective, turn, player_id) is not None
+
+
+@pytest.mark.usefixtures("_no_scores_row_runs")
+def test_closing_both_streams_mid_walk_still_reaches_the_ensure_baseline(sample_turn):
+    walk = _start_walk_held_at_the_baseline_persist(sample_turn)
+
+    detach_fleet_table_stream(walk.fleet_stream.stream_token)
+    detach_inference_table_stream(walk.scores_stream.stream_token)
+    _finish_walk(walk)
+
+    _assert_walk_stamped_the_ensure_baseline_without_bumping(walk)
+
+
+@pytest.mark.usefixtures("_no_scores_row_runs")
+def test_a_walk_with_both_streams_open_reaches_the_ensure_baseline(sample_turn, caplog):
+    walk = _start_walk_held_at_the_baseline_persist(sample_turn)
+
+    with caplog.at_level(logging.ERROR):
+        _finish_walk(walk)
+
+    _assert_walk_stamped_the_ensure_baseline_without_bumping(walk)
+    assert [record for record in caplog.records if record.levelno >= logging.ERROR] == []
+    assert walk.fleet_stream.rescheduled_player_ids == []
+    assert walk.scores_stream.rescheduled_player_ids == [walk.player_id]
+    [(delivered_player_id, delivered_event)] = walk.scores_stream.delivered_events
+    assert delivered_player_id == walk.player_id
+    assert isinstance(delivered_event, RowComplete)
 
 
 # --- T2: closing both streams drops unpicked steps to background ---
