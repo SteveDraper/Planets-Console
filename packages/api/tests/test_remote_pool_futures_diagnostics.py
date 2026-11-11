@@ -11,7 +11,7 @@ from api.compute.diagnostics.snapshot import (
     build_compute_diagnostics_snapshot,
     snapshot_to_wire,
 )
-from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem
+from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem, RemoteStepWork
 from api.compute.remote_futures import (
     classify_future_state,
     future_exception_type,
@@ -124,8 +124,10 @@ def test_pool_registers_remote_future_on_interpreter_submit_and_clears_after_don
             step_kind="materialization_leg",
             backend="interpreter",
             step_index=0,
-            job_wire={"x": 1},
-            run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            work=RemoteStepWork(
+                job_wire={"x": 1},
+                run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            ),
         )
         pool._interpreter_executor = executor  # type: ignore[assignment]
         pool._execute_item(BandedWorkItem(item=item, priority_band="stream_attached"))
@@ -168,8 +170,10 @@ def test_remote_future_unregister_does_not_take_pool_condition_under_controller(
             step_kind="materialization_leg",
             backend="interpreter",
             step_index=0,
-            job_wire={"x": 1},
-            run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            work=RemoteStepWork(
+                job_wire={"x": 1},
+                run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            ),
         )
         future: Future[object] = Future()
         pool._register_remote_future(BandedWorkItem(item=item, priority_band="background"), future)

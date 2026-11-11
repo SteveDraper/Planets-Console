@@ -480,7 +480,7 @@ def test_ready_to_waiting_deps_notifies_ready_queue_depth(sample_turn):
     )
     orchestrator = ComputeOrchestrator(
         compute_registry=compute_registry,
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
     snapshots: list[tuple] = []
     orchestrator.observers.register_ready_queue_listener(lambda scopes: snapshots.append(scopes))

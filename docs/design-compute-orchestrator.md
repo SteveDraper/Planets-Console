@@ -307,6 +307,8 @@ Thread steps (scores tiers) resolve per-row adapter state (`RowRun`) by `run_id`
 
 ### Job wire and dependency outputs
 
+The orchestrator snapshots a step's builder inputs (`BuildStepJobWireKwargs`) once, under its lock, when it dispatches the step. Builders run outside the lock from that snapshot: inline, interpreter and process wires are built before the step runs or is submitted, and a thread step carries the snapshot to its pool worker (`ThreadStepWork`), which builds the wire there.
+
 Wire builders run on the **orchestration plane** and may use the node's orchestration bundle (`export_services`, ensure-memo, shell-scoped `load_turn`) to assemble inputs:
 
 ```python

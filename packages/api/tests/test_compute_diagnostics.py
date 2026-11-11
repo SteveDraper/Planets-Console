@@ -40,6 +40,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
+from tests.compute_pool_test_helpers import QUEUED_ONLY_STEP_WORK
 from tests.compute_published_band_helpers import publish_queued_node_band
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
@@ -199,7 +200,7 @@ def _bound_pool_orchestrator(sample_turn):
     )
     pool_submissions: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -369,7 +370,7 @@ def test_pool_persist_failure_under_freeze_matches_ghost_running_fingerprint(sam
     )
     pool_submissions: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -472,7 +473,7 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
     )
     pool_submissions: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -640,6 +641,7 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
         step_kind="materialize",
         backend="thread",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
     pool.enqueue_for_tests(later_held)
     assert controller._pool_item_is_runnable(later_held) is False
@@ -654,7 +656,7 @@ def test_single_step_releases_exactly_one_of_multiple_ready_scopes(sample_turn):
     )
     pool_submissions: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -708,7 +710,7 @@ def test_single_step_only_releases_focus_ready_scope(sample_turn):
     )
     pool_submissions: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -787,6 +789,7 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
         step_kind="materialize",
         backend="thread",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
@@ -856,6 +859,7 @@ def test_single_step_prefers_interactive_ready_over_background_held(sample_turn)
         step_kind="materialize",
         backend="thread",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
@@ -883,7 +887,7 @@ def test_single_step_prefers_interactive_ready_on_singleton(sample_turn):
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
     submissions: list[tuple[ComputeScope, ComputePriorityBand]] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         submissions.append((node.scope, node.priority_band))
 
     ctx = make_fixture_query_context(
@@ -1010,7 +1014,7 @@ def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
     pool_submissions: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope)
 
     ctx = make_fixture_query_context(
@@ -1093,6 +1097,7 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
         step_kind="materialize",
         backend="thread",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
     focus_item = PoolWorkItem(
         orchestrator_id=registration_id,
@@ -1100,6 +1105,7 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
         step_kind="materialize",
         backend="thread",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
@@ -1158,6 +1164,7 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
         step_kind="materialize",
         backend="inline",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
@@ -1203,6 +1210,7 @@ def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
         step_kind="materialize",
         backend="inline",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
@@ -1239,6 +1247,7 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
         step_kind="materialize",
         backend="inline",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
@@ -1335,6 +1344,7 @@ def _pool_held_item_fixture(sample_turn, *, worker_count: int = 0):
         step_kind="materialize",
         backend="inline",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
     return controller, pool, shell, item
 
@@ -1482,6 +1492,7 @@ def test_in_flight_clear_is_scoped_to_orchestrator_id(sample_turn):
         step_kind=item_a.step_kind,
         backend=item_a.backend,
         step_index=item_a.step_index,
+        work=item_a.work,
     )
     pool.enqueue_for_tests(item_a)
     pool.enqueue_for_tests(item_b)
@@ -1558,6 +1569,7 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
         step_kind=item.step_kind,
         backend=item.backend,
         step_index=item.step_index,
+        work=item.work,
     )
     pool.enqueue_for_tests(item)
     pool.enqueue_for_tests(other_item)
@@ -1645,6 +1657,7 @@ def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
         step_kind=item.step_kind,
         backend=item.backend,
         step_index=item.step_index,
+        work=item.work,
     )
     pool.enqueue_for_tests(item)
     pool.enqueue_for_tests(other_item)
@@ -2238,6 +2251,7 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
         step_kind="materialize",
         backend="thread",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
     assert controller._pool_item_is_runnable(in_item) is False
     for out_of_scope in (other_perspective_scope, non_ancestor_turn_scope):
@@ -2247,6 +2261,7 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
             step_kind="materialize",
             backend="thread",
             step_index=0,
+            work=QUEUED_ONLY_STEP_WORK,
         )
         assert controller._pool_item_is_runnable(out_item) is True
 
@@ -2361,6 +2376,7 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         step_kind="materialize",
         backend="thread",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
     focus_held = PoolWorkItem(
         orchestrator_id=registration_id,
@@ -2368,6 +2384,7 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         step_kind="materialize",
         backend="thread",
         step_index=0,
+        work=QUEUED_ONLY_STEP_WORK,
     )
     pool.enqueue_for_tests(non_focus_held)
     pool.enqueue_for_tests(focus_held)

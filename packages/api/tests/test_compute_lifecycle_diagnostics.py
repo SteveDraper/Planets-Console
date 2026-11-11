@@ -52,7 +52,7 @@ def test_force_fresh_replace_and_stale_pool_finish_appear_on_timeline(sample_tur
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     pool_submissions: list[object] = []
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         del step
         pool_submissions.append(node.scope)
 
@@ -145,7 +145,7 @@ def test_persist_deferred_lifecycle_event_includes_related_scope(sample_turn):
     deferred_persistence = _DeferredOncePersistence()
     pool_submissions: list[object] = []
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         del step
         pool_submissions.append(node.scope)
 
@@ -197,7 +197,7 @@ def test_epoch_retry_lifecycle_event_reports_canonical_step_index(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     persistence = _RecordingPersistencePolicy()
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         del node, step
 
     registry = build_compute_registry(
@@ -235,7 +235,7 @@ def test_step_parked_lifecycle_event_reports_canonical_step_index(sample_turn):
     export_scope = _export_scope(sample_turn)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         del node, step
 
     registry = build_compute_registry((_pool_compute_registration(SHARED_ID, backend="thread"),))

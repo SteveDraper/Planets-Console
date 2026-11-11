@@ -23,7 +23,7 @@ from api.compute.orchestrator_state import (
 )
 from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
-from api.compute.pools import ComputeWorkerPool, PoolSubmitter
+from api.compute.pools import ComputeWorkerPool, PoolSubmitter, ThreadStepWork
 from api.compute.priority_band import ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
@@ -285,19 +285,17 @@ class ComputeOrchestrator(
                 ready_scopes=self._ready_scopes_snapshot(),
             )
 
-    def execute_pool_step(self, scope: ComputeScope) -> object:
-        """Run the current pool step for one scope on the calling thread."""
+    def execute_pool_step(self, scope: ComputeScope, work: ThreadStepWork) -> object:
+        """Build and run a dispatched thread step for one scope on the calling thread.
+
+        The job wire is built from the builder inputs ``work`` snapshotted at
+        dispatch. The lock is held only to check that the node is still running.
+        """
         with self._condition:
-            node = self._nodes[scope]
-            if node.state != "running":
-                raise RuntimeError(f"cannot execute pool step for node in state {node.state!r}")
-            registration = self._compute_registry[node.scope.analytic_id]
-            step = self._current_step_spec(node, registration)
-            job_wire_kwargs = self._snapshot_job_wire_kwargs(node)
-            run_step = registration.run_step[step.step_kind]
-            builder = registration.build_step_job_wire[step.step_kind]
-        job_wire = builder(scope, **job_wire_kwargs)
-        return run_step(job_wire)
+            state = self._nodes[scope].state
+        if state != "running":
+            raise RuntimeError(f"cannot execute pool step for node in state {state!r}")
+        return work.run_step(work.build_job_wire(scope, **work.job_wire_kwargs))
 
     def run_until_idle(self) -> None:
         """Drain ready inline work until no ready or running nodes remain."""

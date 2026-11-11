@@ -244,7 +244,7 @@ def test_picked_band_stays_fixed_when_the_published_band_changes(sample_turn):
     assert in_flight.priority_band == "background"
     orchestrator.complete_pool_step(
         scope,
-        result_wire=orchestrator.execute_pool_step(scope),
+        result_wire=orchestrator.execute_pool_step(scope, picked.item.work),
         step_kind=picked.item.step_kind,
         step_index=picked.item.step_index,
     )

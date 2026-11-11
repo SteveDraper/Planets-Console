@@ -20,8 +20,11 @@ from api.compute import (
     ComputeScope,
     ComputeStepSpec,
     ComputeWorkerPool,
+    PoolStepWork,
     PoolWorkItem,
+    RemoteStepWork,
     ScopeKeySpec,
+    ThreadStepWork,
     build_compute_registry,
     normalize_export_scope_to_compute_scope,
 )
@@ -29,8 +32,10 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
+    QUEUED_ONLY_STEP_WORK,
     run_interpreter_materialize,
     run_process_materialize,
+    unbuilt_thread_step_work,
 )
 from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
 from tests.fixtures.export_framework.harness import make_fixture_query_context
@@ -90,6 +95,7 @@ def _work_item(
     backend: str = "thread",
     orchestrator_id: int = 0,
     step_kind: str | None = None,
+    work: PoolStepWork = QUEUED_ONLY_STEP_WORK,
 ) -> PoolWorkItem:
     return PoolWorkItem(
         orchestrator_id=orchestrator_id,
@@ -97,6 +103,7 @@ def _work_item(
         step_kind=step_kind or ("tier1" if step_index == 0 else "tier2"),
         backend=backend,
         step_index=step_index,
+        work=work,
     )
 
 
@@ -765,7 +772,7 @@ def test_on_item_enqueued_runs_outside_pool_lock(sample_turn):
             scope=scope, dependency_scopes=(), step_index=0, submission_open=SubmissionOpen()
         )
         step = ComputeStepSpec(step_kind="materialize", backend="thread")
-        pool.submit(0, node, step)
+        pool.submit(0, node, step, work=QUEUED_ONLY_STEP_WORK)
 
         assert seen.get("acquired_pool_from_hook") is True
         assert seen.get("depth") == 1
@@ -804,7 +811,7 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
         def published_band(self, scope):
             return None
 
-        def execute_pool_step(self, scope):
+        def execute_pool_step(self, scope, work):
             return {"ok": True}
 
         def complete_pool_step(self, *args, **kwargs):
@@ -815,8 +822,11 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
         pool.set_on_item_finished(on_finished)
         orch_id = pool.register(OkOrch())  # type: ignore[arg-type]
         scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
-        pool.enqueue_for_tests(_work_item(scope=scope, orchestrator_id=orch_id, step_index=0))
-        pool.enqueue_for_tests(_work_item(scope=scope, orchestrator_id=orch_id, step_index=1))
+        work = unbuilt_thread_step_work(make_fixture_query_context(sample_turn))
+        for step_index in (0, 1):
+            pool.enqueue_for_tests(
+                _work_item(scope=scope, orchestrator_id=orch_id, step_index=step_index, work=work)
+            )
 
         assert second_finished.wait(timeout=3.0), "worker did not recover after on_dequeued boom"
         health = pool.worker_health()
@@ -879,14 +889,16 @@ def test_flush_prebuilds_wire_when_effective_backend_stays_interpreter(sample_tu
         built.append(wire)
         return wire
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None):
-        del node, step, run_step
-        submitted.append(job_wire)
+    def pool_submitter(node, step, *, work):
+        del node, step
+        submitted.append(work)
 
     _submit_interpreter_step(sample_turn, pool_submitter=pool_submitter, build_wire=build_wire)
 
     assert built == [{"built": True}]
-    assert submitted == [{"built": True}]
+    (work,) = submitted
+    assert isinstance(work, RemoteStepWork)
+    assert work.job_wire == {"built": True}
 
 
 def test_flush_skips_wire_when_interpreter_remapped_to_thread(sample_turn, monkeypatch):
@@ -902,32 +914,44 @@ def test_flush_skips_wire_when_interpreter_remapped_to_thread(sample_turn, monke
         built.append(1)
         return {"built": True}
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None):
-        del node, step, run_step
-        submitted.append(job_wire)
+    def pool_submitter(node, step, *, work):
+        del node, step
+        submitted.append(work)
 
     _submit_interpreter_step(sample_turn, pool_submitter=pool_submitter, build_wire=build_wire)
 
     assert built == []
-    assert submitted == [None]
+    (work,) = submitted
+    assert isinstance(work, ThreadStepWork)
 
 
-def test_remapped_interpreter_step_builds_wire_once_in_execute_pool_step(sample_turn, monkeypatch):
+def test_remapped_interpreter_step_builds_its_wire_on_the_worker_from_the_dispatch_snapshot(
+    sample_turn, monkeypatch
+):
     from api.config import ApiConfig, set_config
 
     set_config(ApiConfig(storage_backend="ephemeral", remap_interpreter_backend_to_thread=True))
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
-    built: list[int] = []
+    built: list[dict] = []
+    snapshots: list[dict] = []
 
-    def build_wire(scope, **_kwargs):
-        del scope, _kwargs
-        built.append(1)
+    def build_wire(scope, **kwargs):
+        del scope
+        built.append(kwargs)
+        assert threading.current_thread() in pool._workers  # noqa: SLF001
         return {"built": True}
 
     compute_registry = build_compute_registry((_interpreter_wire_registration(build_wire),))
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
+    take_snapshot = orchestrator._snapshot_job_wire_kwargs  # noqa: SLF001
+
+    def record_snapshot(node):
+        snapshots.append(take_snapshot(node))
+        return snapshots[-1]
+
+    monkeypatch.setattr(orchestrator, "_snapshot_job_wire_kwargs", record_snapshot)
     scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -944,6 +968,8 @@ def test_remapped_interpreter_step_builds_wire_once_in_execute_pool_step(sample_
         time.sleep(0.01)
     pool.shutdown()
     assert handle.state == "complete", handle.error
-    assert built == [1]
+    assert len(snapshots) == 1
+    assert built == snapshots
+    assert built[0]["dependency_outputs"] is snapshots[0]["dependency_outputs"]
     assert pool.metrics.thread_executions == 1
     assert pool.metrics.interpreter_executions == 0

@@ -46,6 +46,7 @@ from api.analytics.scores.tier_row_run_registry import (
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
+from api.compute.pools import ThreadStepWork
 from api.compute.runtime import reset_orchestrators_for_tests
 from api.compute.wire import DependencyOutputs
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
@@ -238,9 +239,10 @@ class _ShellLadder:
             seed_fleet_prerequisites_for=self.player_id,
         )
         self.scope = _scope(sample_turn, self.player_id)
+        self.submitted_work: list[ThreadStepWork] = []
         self.orchestrator = ComputeOrchestrator(
             compute_registry=build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION)),
-            pool_submitter=lambda _node, _step, **_kwargs: None,
+            pool_submitter=lambda _node, _step, *, work: self.submitted_work.append(work),
         )
         self.tier_runs: list[str] = []
 
@@ -256,7 +258,7 @@ class _ShellLadder:
         )
 
     def run_tier(self, outcome: TierJobOutcome | BaseException) -> None:
-        """Build and run the node's current tier step, then hand the result back."""
+        """Build and run the node's last submitted tier step, then hand the result back."""
 
         def tier_job(run: RowRun, _callbacks) -> TierJobOutcome:
             self.tier_runs.append(run.run_id)
@@ -269,7 +271,9 @@ class _ShellLadder:
             side_effect=tier_job,
         ):
             try:
-                result_wire = self.orchestrator.execute_pool_step(self.scope)
+                result_wire = self.orchestrator.execute_pool_step(
+                    self.scope, self.submitted_work[-1]
+                )
             except Exception as exc:
                 self.orchestrator.complete_pool_step(self.scope, error=exc)
                 return

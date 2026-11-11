@@ -248,7 +248,7 @@ def test_blocked_nodes_are_not_ready_until_dependencies_complete(sample_turn):
     export_scope = _export_scope(sample_turn)
     pool_submissions: list[str] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope.analytic_id)
 
     thread_registry = build_compute_registry(
@@ -309,7 +309,7 @@ def test_attach_inflight_while_leader_not_terminal(sample_turn):
     )
     deps_orchestrator = ComputeOrchestrator(
         compute_registry=diamond_registry,
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
     root_scope = _compute_scope(ROOT_ID, export_scope)
     deps_leader = deps_orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
@@ -339,7 +339,7 @@ def test_compute_scope_aborted_does_not_cascade_fail_dependents(sample_turn):
     )
     orchestrator = ComputeOrchestrator(
         compute_registry=compute_registry,
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
     root_scope = _compute_scope(ROOT_ID, export_scope)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
@@ -392,7 +392,7 @@ def test_attach_inflight_does_not_double_pool_workers(sample_turn):
     thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
     pool_submissions: list[str] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope.analytic_id)
 
     orchestrator = ComputeOrchestrator(
@@ -711,7 +711,7 @@ def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
     compute_registry = build_compute_registry(registrations)
     orchestrator = ComputeOrchestrator(
         compute_registry=compute_registry,
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     root_scope = _compute_scope(ROOT_ID, export_scope)
@@ -753,7 +753,7 @@ def test_run_until_idle_terminates_after_ancestor_failure(sample_turn):
     )
     orchestrator = ComputeOrchestrator(
         compute_registry=thread_registry,
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     root_scope = _compute_scope(ROOT_ID, export_scope)
@@ -848,7 +848,7 @@ def test_leader_handle_exposes_error_after_pool_failure(sample_turn):
     pool_failure = RuntimeError("pool step failed")
     orchestrator = ComputeOrchestrator(
         compute_registry=thread_registry,
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
     shared_scope = _compute_scope(SHARED_ID, export_scope)
 
@@ -1473,7 +1473,7 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
     pool_submissions: list[str] = []
     gated_analytic_id = BRANCH_B_ID
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope.analytic_id)
 
     thread_registry = build_compute_registry(
@@ -1669,7 +1669,7 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
     )
     pool_submissions: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1745,7 +1745,7 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
     deferred_persistence = _DeferredOncePersistence()
     pool_submissions: list[tuple[str, str | None]] = []
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         pool_submissions.append((node.scope.analytic_id, step.step_kind))
 
     registry = build_compute_registry(
@@ -1855,7 +1855,7 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
     deferred_persistence = _DeferredOncePersistence()
     pool_submissions: list[tuple[str, str | None]] = []
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         pool_submissions.append((node.scope.analytic_id, step.step_kind))
 
     registry = build_compute_registry(
@@ -1948,7 +1948,7 @@ def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
     deferred_persistence = _DeferredOncePersistence()
     pool_submissions: list[tuple[str, str | None]] = []
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         pool_submissions.append((node.scope.analytic_id, step.step_kind))
 
     registry = build_compute_registry(
@@ -2121,7 +2121,7 @@ def test_force_fresh_diamond_recreates_shared_abort_failed_dep_once(sample_turn)
     deferred_c = _DeferredOncePersistence()
     pool_submissions: list[tuple[str, str | None]] = []
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         pool_submissions.append((node.scope.analytic_id, step.step_kind))
 
     registry = build_compute_registry(
@@ -2224,7 +2224,7 @@ def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn)
     deferred_b = _DeferredOncePersistence()
     pool_submissions: list[tuple[str, str | None]] = []
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         pool_submissions.append((node.scope.analytic_id, step.step_kind))
 
     registry = build_compute_registry(
@@ -2337,7 +2337,7 @@ def test_force_fresh_waiting_deps_does_not_recreate_non_abort_failed_dep(sample_
     deferred_persistence = _DeferredOncePersistence()
     pool_submissions: list[tuple[str, str | None]] = []
 
-    def pool_submitter(node, step) -> None:
+    def pool_submitter(node, step, **_kwargs) -> None:
         pool_submissions.append((node.scope.analytic_id, step.step_kind))
 
     registry = build_compute_registry(
@@ -2397,7 +2397,7 @@ def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_tur
     export_scope = _export_scope(sample_turn)
     pool_submissions: list[str] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope.analytic_id)
 
     thread_registry = build_compute_registry(
@@ -2445,7 +2445,7 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
     pool_submissions: list[ComputeScope] = []
     is_paused = False
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope)
 
     compute_registry = build_compute_registry(
@@ -2577,7 +2577,7 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
     pause_blocks = False
     freeze_blocks_branch_b = False
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         pool_submissions.append(node.scope.analytic_id)
 
     thread_registry = build_compute_registry(

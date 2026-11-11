@@ -90,7 +90,7 @@ def test_handle_wait_returns_when_pool_step_completes(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -131,7 +131,7 @@ def test_handle_wait_timeout_fails_waiter_only(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     leader = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -160,7 +160,7 @@ def test_handle_wait_raises_node_failure(sample_turn):
     pool_failure = RuntimeError("pool step failed")
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -204,7 +204,7 @@ def test_ensure_scope_short_circuits_when_already_satisfied(sample_turn):
         compute_registry=build_compute_registry(
             (_thread_registration(SHARED_ID, persistence_policy=policy),)
         ),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     handle = orchestrator.ensure_scope(
@@ -237,7 +237,7 @@ def test_ensure_scope_rebuilds_hollow_terminal_without_force_fresh(sample_turn):
         compute_registry=build_compute_registry(
             (_thread_registration(SHARED_ID, persistence_policy=policy),)
         ),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     # Seed a terminal node as if a prior ensure completed, then durable state wiped.
@@ -342,7 +342,7 @@ def test_ensure_scope_rebuilds_hollow_dependency_terminals(sample_turn):
                 ),
             )
         ),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     first = orchestrator.ensure_scope(
@@ -377,7 +377,7 @@ def test_ensure_scope_submit_and_wait_until_complete(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     result_box: list[object] = []
@@ -424,7 +424,7 @@ def test_ensure_scope_timeout_leaves_inflight_running(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     with pytest.raises(ComputeWaitTimeoutError):
@@ -467,7 +467,7 @@ def test_ensure_scopes_submits_all_before_wait(sample_turn):
     )
     submitted: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         submitted.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -538,7 +538,7 @@ def test_ensure_scopes_returns_handles_in_request_order(sample_turn):
 
     submitted: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         submitted.append(node.scope)
 
     orchestrator = ComputeOrchestrator(

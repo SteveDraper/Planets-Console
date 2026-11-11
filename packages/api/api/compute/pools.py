@@ -15,14 +15,15 @@ from collections import deque
 from collections.abc import Callable, Iterable
 from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from api.compute.backend_runtime import effective_compute_backend, process_is_frozen
+from api.compute.backend_runtime import process_is_frozen
 from api.compute.priority_band import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.profile import ComputeBackend, ComputeStepSpec
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
-from api.compute.wire import RunStepFn
+from api.compute.wire import BuildStepJobWireFn, BuildStepJobWireKwargs, RunStepFn
 from api.compute.worker_turn_cache import init_worker_turn_cache, worker_deserialize_calls
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,35 @@ _DEFAULT_WORKER_COUNT = 8
 _DEQUEUE_WAIT_SECONDS = 0.25
 
 
+@dataclass(frozen=True)
+class ThreadStepWork:
+    """A thread step as dispatched: its builder inputs and the functions that use them.
+
+    The orchestrator snapshots ``job_wire_kwargs`` under its lock at dispatch.
+    The pool worker builds the job wire from that snapshot and runs the step.
+    """
+
+    build_job_wire: BuildStepJobWireFn
+    job_wire_kwargs: BuildStepJobWireKwargs
+    run_step: RunStepFn
+
+
+@dataclass(frozen=True)
+class RemoteStepWork:
+    """An interpreter or process step: its serializable job wire, built before submit.
+
+    The orchestrator builds ``job_wire`` from its dispatch-time snapshot of the
+    builder inputs. An executor runs ``run_step`` on it.
+    """
+
+    job_wire: object
+    run_step: RunStepFn
+
+
+# The orchestrator chooses the kind from the effective backend; the pool runs by kind.
+PoolStepWork = ThreadStepWork | RemoteStepWork
+
+
 class PoolSubmitter(Protocol):
     """Callback the orchestrator uses to enqueue ready steps on a worker pool."""
 
@@ -45,8 +75,7 @@ class PoolSubmitter(Protocol):
         node: ComputeNodeRun,
         step: ComputeStepSpec,
         *,
-        job_wire: object | None = None,
-        run_step: RunStepFn | None = None,
+        work: PoolStepWork,
     ) -> None: ...
 
 
@@ -59,15 +88,17 @@ def configured_worker_count() -> int:
 
 @dataclass(frozen=True)
 class PoolWorkItem:
-    """One schedulable pool unit. Its band is read from its orchestrator at each pick."""
+    """One schedulable pool unit. Its band is read from its orchestrator at each pick.
+
+    ``backend`` is the step's declared backend; ``work`` says how the step runs.
+    """
 
     orchestrator_id: int
     scope: ComputeScope
     step_kind: str
     backend: ComputeBackend
     step_index: int
-    job_wire: object | None = None
-    run_step: RunStepFn | None = None
+    work: PoolStepWork
 
 
 @dataclass(frozen=True)
@@ -295,7 +326,7 @@ class ComputeWorkerPool:
 
     def submitter_for(self, orchestrator_id: int) -> PoolSubmitter:
         """Return a pool submitter callback bound to one orchestrator registration."""
-        return self._make_submitter(orchestrator_id)
+        return partial(self.submit, orchestrator_id)
 
     def submit(
         self,
@@ -303,8 +334,7 @@ class ComputeWorkerPool:
         node: ComputeNodeRun,
         step: ComputeStepSpec,
         *,
-        job_wire: object | None = None,
-        run_step: RunStepFn | None = None,
+        work: PoolStepWork,
     ) -> None:
         """Enqueue one ready orchestrator step for pool execution."""
         item = PoolWorkItem(
@@ -313,8 +343,7 @@ class ComputeWorkerPool:
             step_kind=step.step_kind,
             backend=step.backend,
             step_index=node.step_index,
-            job_wire=job_wire,
-            run_step=run_step,
+            work=work,
         )
         with self._condition:
             self._work_queue.append(item)
@@ -343,24 +372,6 @@ class ComputeWorkerPool:
             if executor is None:
                 return 0
         return executor.submit(worker_deserialize_calls).result()
-
-    def _make_submitter(self, orchestrator_id: int) -> PoolSubmitter:
-        def _submit_from_orchestrator(
-            node: ComputeNodeRun,
-            step: ComputeStepSpec,
-            *,
-            job_wire: object | None = None,
-            run_step: RunStepFn | None = None,
-        ) -> None:
-            self.submit(
-                orchestrator_id,
-                node,
-                step,
-                job_wire=job_wire,
-                run_step=run_step,
-            )
-
-        return _submit_from_orchestrator
 
     def _worker_loop(self) -> None:
         while True:
@@ -450,61 +461,57 @@ class ComputeWorkerPool:
     def _execute_item(self, picked: BandedWorkItem) -> None:
         """Run one dequeued item.
 
-        Thread-backend work runs synchronously on the pool worker. Interpreter and
-        process backends submit to their executors and complete via done callbacks
-        so a stuck remote future cannot pin a pool worker thread (and stall the
-        rest of the queue under freeze single-step).
+        ``ThreadStepWork`` runs synchronously on the pool worker. ``RemoteStepWork``
+        goes to the executor for its declared backend and completes via a done
+        callback, so a stuck remote future cannot pin a pool worker thread (and
+        stall the rest of the queue under freeze single-step).
 
         Frozen processes and ``api.remap_interpreter_backend_to_thread`` remap
-        ``interpreter`` to ``thread`` before dispatch: PyInstaller
-        subinterpreters cannot import application modules.
+        ``interpreter`` to ``thread`` when the orchestrator chooses the work kind:
+        PyInstaller subinterpreters cannot import application modules. A thread
+        work item whose declared backend is not ``thread`` is such a remap.
         """
         item = picked.item
         orchestrator = self._lookup_orchestrator(item.orchestrator_id)
         if orchestrator is None:
             self._notify_item_finished(item)
             return
-        backend = effective_compute_backend(item.backend)
-        if backend != item.backend:
-            self._log_backend_remap(item.backend, backend)
-        if backend == "thread":
+        work = item.work
+        if isinstance(work, ThreadStepWork):
+            if item.backend != "thread":
+                self._log_backend_remap(item.backend, "thread")
             try:
                 with self._condition:
-                    self._record_backend_execution_locked(backend)
+                    self._record_backend_execution_locked("thread")
                 self._complete_from_callable(
                     item.orchestrator_id,
                     item.scope,
-                    orchestrator.execute_pool_step,
+                    lambda scope: orchestrator.execute_pool_step(scope, work),
                     step_kind=item.step_kind,
                     step_index=item.step_index,
                 )
             finally:
                 self._notify_item_finished(item)
             return
-        if backend in {"interpreter", "process"}:
-            if item.job_wire is None or item.run_step is None:
-                self._notify_item_finished(item)
-                raise RuntimeError(
-                    f"pool step {item.step_kind!r} with backend {item.backend!r} "
-                    f"requires a pre-built job wire and run_step"
-                )
-            with self._condition:
-                self._record_backend_execution_locked(backend)
-                if backend == "interpreter":
-                    executor = self._interpreter_executor_locked()
-                else:
-                    executor = self._process_executor_locked()
-            future = executor.submit(item.run_step, item.job_wire)
-            self._register_remote_future(picked, future)
-            future.add_done_callback(
-                lambda completed, pool_item=item: self._on_remote_future_done(
-                    pool_item,
-                    completed,
-                )
+        if item.backend not in {"interpreter", "process"}:
+            self._notify_item_finished(item)
+            raise RuntimeError(
+                f"pool step {item.step_kind!r} with backend {item.backend!r} has no remote executor"
             )
-            return
-        self._notify_item_finished(item)
-        raise RuntimeError(f"unsupported pool backend {backend!r}")
+        with self._condition:
+            self._record_backend_execution_locked(item.backend)
+            if item.backend == "interpreter":
+                executor = self._interpreter_executor_locked()
+            else:
+                executor = self._process_executor_locked()
+        future = executor.submit(work.run_step, work.job_wire)
+        self._register_remote_future(picked, future)
+        future.add_done_callback(
+            lambda completed, pool_item=item: self._on_remote_future_done(
+                pool_item,
+                completed,
+            )
+        )
 
     def _log_backend_remap(
         self,

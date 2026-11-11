@@ -1333,8 +1333,8 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
     compute_registry = build_compute_registry((tier_registration,))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1418,8 +1418,8 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
     compute_registry = build_compute_registry((tier_registration,))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1538,8 +1538,8 @@ def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1709,8 +1709,8 @@ def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1782,8 +1782,8 @@ def test_enqueue_without_stream_token_wakes_parked_scores_node(
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from api.compute.backend_runtime import effective_compute_backend
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
+from api.compute.pools import PoolStepWork, RemoteStepWork, ThreadStepWork
 from api.compute.priority_band import (
     PRIORITY_BAND_RANK,
     derive_priority_bands,
@@ -121,8 +122,9 @@ class OrchestratorStepExecutionMixin:
     def _snapshot_job_wire_kwargs(self, node: ComputeNodeRun) -> BuildStepJobWireKwargs:
         """Snapshot the job-wire builder kwargs for ``node``'s current step.
 
-        Caller holds the orchestrator lock. Only the node and dependency fields
-        are read here; the builder itself runs after the lock is released.
+        Caller holds the orchestrator lock. Taken once per step, at dispatch:
+        inline, interpreter, process and thread builders all run from this
+        snapshot after the lock is released.
         """
         dependency_outputs = DependencyOutputs()
         for dependency_scope in node.dependency_scopes:
@@ -279,10 +281,12 @@ class OrchestratorStepExecutionMixin:
         self,
         pending: tuple[PendingPoolSubmission, ...],
     ) -> None:
-        """Build job wires for interpreter and process steps, then submit pool work.
+        """Turn each submission's dispatch-time builder inputs into pool work and submit it.
 
-        A declared ``interpreter`` step remapped to ``thread`` skips the prebuild.
-        ``execute_pool_step`` builds that wire once on the worker thread.
+        Interpreter and process steps get their job wire built here. A thread
+        step, including a declared ``interpreter`` step remapped to ``thread``,
+        carries the builder inputs to the pool worker, which builds the wire there.
+        Either way the wire is built from the one snapshot taken at dispatch.
         """
         if not pending:
             return
@@ -292,24 +296,24 @@ class OrchestratorStepExecutionMixin:
             node = submission.node
             step = submission.step
             try:
-                if effective_compute_backend(step.backend) in {"interpreter", "process"}:
-                    builder = submission.registration.build_step_job_wire[step.step_kind]
-                    job_wire = builder(node.scope, **submission.job_wire_kwargs)
-                    with self._condition:
-                        if node.state != "running":
-                            continue
-                    run_step = submission.registration.run_step[step.step_kind]
-                    self._pool_submitter(
-                        node,
-                        step,
-                        job_wire=job_wire,
+                build_job_wire = submission.registration.build_step_job_wire[step.step_kind]
+                run_step = submission.registration.run_step[step.step_kind]
+                work: PoolStepWork
+                if effective_compute_backend(step.backend) == "thread":
+                    work = ThreadStepWork(
+                        build_job_wire=build_job_wire,
+                        job_wire_kwargs=submission.job_wire_kwargs,
                         run_step=run_step,
                     )
                 else:
-                    with self._condition:
-                        if node.state != "running":
-                            continue
-                    self._pool_submitter(node, step)
+                    work = RemoteStepWork(
+                        job_wire=build_job_wire(node.scope, **submission.job_wire_kwargs),
+                        run_step=run_step,
+                    )
+                with self._condition:
+                    if node.state != "running":
+                        continue
+                self._pool_submitter(node, step, work=work)
                 self._metrics.pool_submissions += 1
             except BaseException as exc:
                 with self._condition:

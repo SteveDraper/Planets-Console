@@ -348,7 +348,7 @@ def test_the_ready_pick_is_by_band_then_first_in_first_out(sample_turn):
     gate_open = threading.Event()
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_single_step_thread_registration(),)),
-        pool_submitter=lambda node, _step: dispatched.append(node.scope),
+        pool_submitter=lambda node, _step, **_kwargs: dispatched.append(node.scope),
     )
     orchestrator.observers.register_dispatch_gate(lambda _node: gate_open.is_set())
     bands: tuple[ComputeRequestBand, ...] = ("background", "interactive_ensure", "background")
