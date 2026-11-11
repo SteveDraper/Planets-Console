@@ -615,7 +615,6 @@ class InferenceRowScheduler(
             root_scope,
             ctx=_query_context_for_session(session, scheduler=self),
             reason=ScoresWakeReason.ROW_RUN_ADOPTED,
-            priority_band="background",
         )
         self._remember_execution_generation_for_scope(root_scope)
 
