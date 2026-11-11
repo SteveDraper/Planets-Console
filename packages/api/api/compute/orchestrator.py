@@ -68,6 +68,7 @@ class OrchestratorNodeSnapshot:
     profile_step_index: int
     step_index: int
     priority_band: ComputePriorityBand
+    execution_generation: int
 
 
 @dataclass(frozen=True)
@@ -277,6 +278,7 @@ class ComputeOrchestrator(
                     profile_step_index=node.profile_step_index,
                     step_index=node.step_index,
                     priority_band=node.priority_band,
+                    execution_generation=node.execution_generation,
                 )
                 for node in self._nodes.values()
             )

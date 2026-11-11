@@ -247,8 +247,9 @@ class DiagnosticsOrchestratorBindMixin:
             return False
         return self._single_step_may_release(
             node.scope,
-            step_index=node.step_index,
             orchestrator_id=orchestrator_id,
+            execution_generation=node.execution_generation,
+            step_index=node.step_index,
         )
 
     def _commit_single_step_dispatch(
@@ -269,8 +270,9 @@ class DiagnosticsOrchestratorBindMixin:
                 return True
             if not self._single_step_may_release(
                 node.scope,
-                step_index=node.step_index,
                 orchestrator_id=orchestrator_id,
+                execution_generation=node.execution_generation,
+                step_index=node.step_index,
             ):
                 return False
             self._single_step.dispatch_slots_remaining -= 1

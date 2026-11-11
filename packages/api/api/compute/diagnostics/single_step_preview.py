@@ -32,6 +32,7 @@ class SingleStepPreview:
     scope_key: str
     analytic_id: str
     step_kind: str | None
+    execution_generation: int
     step_index: int
     priority_band: ComputePriorityBand
     backend: str | None
@@ -43,12 +44,15 @@ class SingleStepPreview:
 class SingleStepPin:
     """The one compute step an armed single-step may release.
 
+    The pin names the execution of ``scope`` it releases, so a pool item left
+    by an older execution of the same scope and step index cannot use it up.
     The pin carries no band: a band may change between preview and release,
     and the pinned step stays the same step.
     """
 
     orchestrator_id: int | None
     scope: ComputeScope
+    execution_generation: int
     step_index: int
 
     def matches(
@@ -56,13 +60,18 @@ class SingleStepPin:
         *,
         orchestrator_id: int | None,
         scope: ComputeScope,
+        execution_generation: int,
         step_index: int,
     ) -> bool:
         """Return whether a step is the pinned one (ignores focus and shell).
 
         An unknown orchestrator id on either side does not reject the match.
         """
-        if scope != self.scope or step_index != self.step_index:
+        if (scope, execution_generation, step_index) != (
+            self.scope,
+            self.execution_generation,
+            self.step_index,
+        ):
             return False
         return (
             self.orchestrator_id is None
@@ -91,6 +100,7 @@ class SingleStepArm:
         self.target = SingleStepPin(
             orchestrator_id=preview.orchestrator_id,
             scope=preview.scope,
+            execution_generation=preview.execution_generation,
             step_index=preview.step_index,
         )
         self.grants_remaining = 1
@@ -109,6 +119,7 @@ def preview_from_held_pool_item(held: BandedWorkItem) -> SingleStepPreview:
         scope_key=format_compute_scope_key(item.scope),
         analytic_id=item.scope.analytic_id,
         step_kind=item.step_kind,
+        execution_generation=item.execution_generation,
         step_index=item.step_index,
         priority_band=held.priority_band,
         backend=item.backend,
@@ -130,6 +141,7 @@ def preview_from_ready_node(
         scope_key=format_compute_scope_key(scope),
         analytic_id=scope.analytic_id,
         step_kind=None if step is None else step.step_kind,
+        execution_generation=node.execution_generation,
         step_index=node.step_index,
         priority_band=node.priority_band,
         backend=None if step is None else step.backend,

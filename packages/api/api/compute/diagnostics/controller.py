@@ -237,8 +237,9 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         has no target. When the target is a held focus pool item, arm a dequeue grant
         only. When the target would dispatch, arm one focus dispatch slot plus one
         dequeue grant so that item can run. The armed target's orchestrator id, scope,
-        and step index are pinned so no other step can steal the release. The pin
-        carries no band, so a band change between preview and release keeps the target.
+        execution generation, and step index are pinned so no other step (nor an older
+        execution's pool item) can steal the release. The pin carries no band, so a
+        band change between preview and release keeps the target.
 
         If the armed dispatch slot is consumed by an inline step (no pool enqueue),
         the commit hook clears the unused dequeue grant immediately so it cannot
@@ -562,13 +563,15 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         self,
         scope: ComputeScope,
         *,
-        step_index: int,
         orchestrator_id: int | None,
+        execution_generation: int,
+        step_index: int,
     ) -> bool:
         """Return whether an armed single-step may release this step (pin, shell, focus).
 
-        The step must match the armed pin's orchestrator id, scope, and step index,
-        so the same compute scope on another orchestrator cannot steal the release.
+        The step must match the armed pin's orchestrator id, scope, execution
+        generation, and step index, so the same compute scope on another
+        orchestrator, or an older execution of it, cannot steal the release.
         """
         shell = self._single_step.shell
         target = self._single_step.target
@@ -577,6 +580,7 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         if not target.matches(
             orchestrator_id=orchestrator_id,
             scope=scope,
+            execution_generation=execution_generation,
             step_index=step_index,
         ):
             return False
@@ -589,8 +593,9 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         with self._lock:
             if self._single_step.grants_remaining > 0 and self._single_step_may_release(
                 item.scope,
-                step_index=item.step_index,
                 orchestrator_id=item.orchestrator_id,
+                execution_generation=item.execution_generation,
+                step_index=item.step_index,
             ):
                 return True
             operator_shell = self._last_shell_context
@@ -614,8 +619,9 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             if self._single_step.grants_remaining > 0:
                 if self._single_step_may_release(
                     item.scope,
-                    step_index=item.step_index,
                     orchestrator_id=item.orchestrator_id,
+                    execution_generation=item.execution_generation,
+                    step_index=item.step_index,
                 ):
                     self._single_step.grants_remaining -= 1
                     if self._single_step.grants_remaining == 0:

@@ -988,6 +988,7 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
         controller._single_step.target = SingleStepPin(
             orchestrator_id=id_a,
             scope=scope,
+            execution_generation=0,
             step_index=0,
         )
         controller._single_step.dispatch_slots_remaining = 1
