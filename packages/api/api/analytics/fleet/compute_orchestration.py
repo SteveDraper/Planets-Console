@@ -174,6 +174,7 @@ def build_fleet_finalization_leg_job_wire(
     ctx: AnalyticQueryContext | None = None,
     node_result_wire: object | None = None,
     submission_open: SubmissionOpen,
+    **_kwargs: object,
 ) -> dict[str, Any]:
     """Pass the observation continue wire into the inline finalization leg."""
     del dependency_outputs

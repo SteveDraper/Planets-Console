@@ -100,6 +100,9 @@ class BuildStepJobWireKwargs(TypedDict, total=False):
     node_result_wire: object | None
     # Root turn and backfill choice of the submission that owns this node.
     submission_open: SubmissionOpen
+    # Identity of the node execution the wire is built for. A replaced node
+    # gets a new one; requeues of the same node keep it.
+    execution_generation: int
 
 
 # Orchestration plane: scope + dependency outputs -> serializable job payload.

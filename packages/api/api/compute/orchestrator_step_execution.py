@@ -230,6 +230,7 @@ class OrchestratorStepExecutionMixin:
                 ctx=ctx,
                 node_result_wire=node.result_wire,
                 submission_open=node.submission_open,
+                execution_generation=node.execution_generation,
             )
         except BaseException as exc:
             with self._condition:
@@ -298,6 +299,7 @@ class OrchestratorStepExecutionMixin:
                         ctx=ctx,
                         node_result_wire=node.result_wire,
                         submission_open=node.submission_open,
+                        execution_generation=node.execution_generation,
                     )
                     with self._condition:
                         if node.state != "running":

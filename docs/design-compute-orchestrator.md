@@ -471,7 +471,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 | Op | RowRun shell | PersistAdmission | Stream resolution / drain | Compute token / abort |
 |----|--------------|------------------|---------------------------|------------------------|
-| detach | `REGISTERED` → `DETACHED` (retained) | `ALLOW` | unchanged | no token cancel; no `abort_scope` |
+| detach | `REGISTERED` → `DETACHED` (retained); a started tier ladder stays resumable by the same scores node execution and epoch | `ALLOW` | unchanged | no token cancel; no `abort_scope` |
 | cancel | drop immediately (no cancel phase) | `CANCEL_DENY` (scope-keyed compact memory) | `CANCELED` + drain closed via `stream_drain.seal_canceled` | cancel token, then `abort_scope` outside scheduler lock. Stream `reschedule_row` that cancelled a run re-admits with `force_schedule` (`force_fresh` submit when scheduled) while the stream still includes the player -- cached-complete must not skip replace of the aborted node; Immediate/skip admission still applies. |
 | retire | drop | clear (`ABSENT`) | leave resolution (evict only on full invalidate) | -- |
 

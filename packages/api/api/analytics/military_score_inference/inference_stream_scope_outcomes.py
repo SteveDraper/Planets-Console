@@ -38,6 +38,18 @@ class InferenceStreamScopeOutcomesMixin:
         scope = snapshot.scope
         if not _is_scores_player_turn_scope(scope):
             return
+        if snapshot.state in {"complete", "failed"}:
+            # The node's tier ladder ends here: a DETACHED run it was resuming
+            # must not outlive it. Imported here because the registry imports
+            # this scheduler package at module load.
+            from api.analytics.scores.tier_row_run_registry import (
+                release_tier_ladder_for_scope,
+            )
+
+            release_tier_ladder_for_scope(
+                scope,
+                execution_generation=snapshot.execution_generation,
+            )
         # Intentional row-run cancel aborts in-flight DAG nodes. Do not fail (or
         # orphan-complete) the open multiplex -- reschedule will admit a replacement.
         if self._is_cancel_abort_failure(snapshot):
