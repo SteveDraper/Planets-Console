@@ -20,6 +20,7 @@ from api.analytics.fleet.serialization import (
 )
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.off_mode_wire import parse_off_mode_wire, stamp_submission_open
+from api.compute.priority_band import ComputeRequestBand
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import (
     WILDCARD,
@@ -661,7 +662,7 @@ FLEET_PERSISTENCE_POLICY = FleetPersistencePolicy()
 def wake_fleet_scope(
     scope: ComputeScope,
     *,
-    priority_band: str = "background",
+    priority_band: ComputeRequestBand = "background",
     orchestrator: ComputeOrchestrator | None = None,
 ) -> bool:
     """force_fresh-submit a fleet scope after durable wipe when no table stream is open.

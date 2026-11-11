@@ -31,7 +31,7 @@ from api.compute.priority_band import ComputePriorityBand
 from api.compute.runtime import reset_orchestrators_for_tests
 from api.config import ApiConfig, set_config
 
-from tests.compute_published_band_helpers import publish_node_band
+from tests.compute_published_band_helpers import publish_queued_node_band
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.test_compute_pools import (
     _ANALYTIC_ID,
@@ -185,13 +185,13 @@ def test_queued_item_is_picked_at_its_node_band_raised_after_enqueue(sample_turn
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b))
     assert _queued_bands(pool) == [(scope_a, "background"), (scope_b, "background")]
 
-    publish_node_band(orchestrator, scope_b, "stream_attached")
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b, priority_band="interactive_ensure"))
 
-    assert _queued_bands(pool) == [(scope_a, "background"), (scope_b, "stream_attached")]
+    assert _queued_bands(pool) == [(scope_a, "background"), (scope_b, "interactive_ensure")]
     picked = pool.take_next_item_for_tests()
     assert picked is not None
     assert picked.item.scope == scope_b
-    assert picked.priority_band == "stream_attached"
+    assert picked.priority_band == "interactive_ensure"
 
 
 def test_item_without_a_published_band_ranks_as_background(sample_turn):
@@ -202,9 +202,9 @@ def test_item_without_a_published_band_ranks_as_background(sample_turn):
     )
     registration_id = orchestrator.pool_registration_id
     assert registration_id is not None
-    publish_node_band(orchestrator, terminal_scope, "stream_attached")
+    publish_queued_node_band(orchestrator, terminal_scope, "interactive_ensure")
     orchestrator.nodes[terminal_scope].state = "complete"
-    publish_node_band(orchestrator, interactive_scope, "interactive_ensure")
+    publish_queued_node_band(orchestrator, interactive_scope, "interactive_ensure")
     assert orchestrator.published_band(terminal_scope) is None
     pool.enqueue_for_tests(
         _work_item(scope=unknown_orchestrator_scope, orchestrator_id=registration_id + 1)
@@ -237,8 +237,8 @@ def test_picked_band_stays_fixed_when_the_published_band_changes(sample_turn):
     picked = pool.take_next_item_for_tests()
     assert picked is not None
     assert picked.priority_band == "background"
-    publish_node_band(orchestrator, scope, "stream_attached")
-    assert orchestrator.published_band(scope) == "stream_attached"
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, priority_band="interactive_ensure"))
+    assert orchestrator.published_band(scope) == "interactive_ensure"
 
     (in_flight,) = controller._in_flight_snapshot()
     assert in_flight.priority_band == "background"
@@ -272,15 +272,15 @@ def test_single_step_pin_matches_a_ready_node_whose_band_rose_after_preview(samp
     with controller._lock:
         controller._single_step.arm_from_preview(shell, preview)
 
-    # A stream-attached attach adopts the ready node, then dispatches it.
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, priority_band="stream_attached"))
+    # An interactive attach raises the ready node's band, then dispatches it.
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, priority_band="interactive_ensure"))
 
     node = orchestrator.nodes[scope]
-    assert (node.state, node.priority_band) == ("running", "stream_attached")
+    assert (node.state, node.priority_band) == ("running", "interactive_ensure")
     assert controller._single_step.dispatch_slots_remaining == 0
     picked = pool.take_next_item_for_tests()
     assert picked is not None
-    assert (picked.item.scope, picked.priority_band) == (scope, "stream_attached")
+    assert (picked.item.scope, picked.priority_band) == (scope, "interactive_ensure")
     assert controller._single_step.grants_remaining == 0
 
 
@@ -296,9 +296,9 @@ def test_single_step_pin_matches_a_held_item_whose_band_rose_after_preview(sampl
     assert (preview.source, preview.priority_band) == ("held", "background")
     assert controller.single_step(shell) is True
 
-    publish_node_band(orchestrator, scope, "stream_attached")
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, priority_band="interactive_ensure"))
 
     picked = pool.take_next_item_for_tests()
     assert picked is not None
-    assert (picked.item.scope, picked.priority_band) == (scope, "stream_attached")
+    assert (picked.item.scope, picked.priority_band) == (scope, "interactive_ensure")
     assert controller._single_step.grants_remaining == 0

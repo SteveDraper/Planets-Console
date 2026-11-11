@@ -266,7 +266,6 @@ def _submit_shells(orchestrator: ComputeOrchestrator, shells: list[_LiveShell]) 
             orchestrator.submit(
                 ComputeRequest(
                     scope=shell.compute_scope,
-                    priority_band="stream_attached",
                     force_fresh=True,
                     ctx=ctx,
                 )

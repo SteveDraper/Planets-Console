@@ -40,7 +40,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
-from tests.compute_published_band_helpers import publish_node_band
+from tests.compute_published_band_helpers import publish_queued_node_band
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
@@ -397,7 +397,6 @@ def test_pool_persist_failure_under_freeze_matches_ghost_running_fingerprint(sam
             ctx=ctx,
             scope=scope,
             step_kind="tier_solve",
-            priority_band="stream_attached",
         )
     )
     assert orchestrator.nodes[scope].state == "ready"
@@ -506,7 +505,6 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
             ctx=ctx,
             scope=scope,
             step_kind="tier_solve",
-            priority_band="stream_attached",
         )
     )
     assert controller.single_step(shell) is True
@@ -819,7 +817,7 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     assert controller._pool_item_is_runnable(held_item) is False
 
 
-def test_single_step_prefers_stream_attached_ready_over_background_held(sample_turn):
+def test_single_step_prefers_interactive_ready_over_background_held(sample_turn):
     """Higher-band ready dispatch outranks lower-band held pool work."""
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
     ctx = make_fixture_query_context(
@@ -838,7 +836,7 @@ def test_single_step_prefers_stream_attached_ready_over_background_held(sample_t
         perspective=ctx.perspective,
         turn=ctx.ambient_turn,
     )
-    stream_scope = _player_scope(
+    interactive_scope = _player_scope(
         ctx,
         player_id=sample_turn.scores[0].ownerid,
         analytic_id=SHARED_ID,
@@ -861,27 +859,27 @@ def test_single_step_prefers_stream_attached_ready_over_background_held(sample_t
     )
 
     controller.set_freeze_armed(shell, freeze_armed=True)
-    controller.set_allowlist(shell, frozenset({stream_scope.player_id, held_scope.player_id}))
+    controller.set_allowlist(shell, frozenset({interactive_scope.player_id, held_scope.player_id}))
     orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=stream_scope, priority_band="stream_attached"),
+        ComputeRequest(ctx=ctx, scope=interactive_scope, priority_band="interactive_ensure"),
     )
     pool.enqueue_for_tests(held_item)
-    assert orchestrator.nodes[stream_scope].state == "ready"
+    assert orchestrator.nodes[interactive_scope].state == "ready"
 
     preview, reason = controller.preview_single_step(shell)
     assert reason is None
     assert preview is not None
     assert preview.source == "would_dispatch"
-    assert preview.priority_band == "stream_attached"
-    assert preview.scope_key == format_compute_scope_key(stream_scope)
+    assert preview.priority_band == "interactive_ensure"
+    assert preview.scope_key == format_compute_scope_key(interactive_scope)
 
     assert controller.single_step(shell) is True
-    assert orchestrator.nodes[stream_scope].state == "running"
+    assert orchestrator.nodes[interactive_scope].state == "running"
     assert controller._pool_item_is_runnable(held_item) is False
 
 
-def test_single_step_prefers_stream_attached_ready_on_singleton(sample_turn):
-    """Band order wins when background then stream_attached share one orchestrator."""
+def test_single_step_prefers_interactive_ready_on_singleton(sample_turn):
+    """Band order wins when background then interactive_ensure share one orchestrator."""
     compute_registry = build_compute_registry((_thread_pool_registration(SHARED_ID),))
     submissions: list[tuple[ComputeScope, ComputePriorityBand]] = []
 
@@ -917,21 +915,21 @@ def test_single_step_prefers_stream_attached_ready_on_singleton(sample_turn):
         ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="background"),
     )
     orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="stream_attached"),
+        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="interactive_ensure"),
     )
     assert submissions == []
 
     preview, reason = controller.preview_single_step(shell)
     assert reason is None
     assert preview is not None
-    assert preview.priority_band == "stream_attached"
+    assert preview.priority_band == "interactive_ensure"
     assert preview.source == "would_dispatch"
     assert preview.scope_key == format_compute_scope_key(shared_scope)
 
     assert controller.single_step(shell) is True
-    assert submissions == [(shared_scope, "stream_attached")]
+    assert submissions == [(shared_scope, "interactive_ensure")]
     assert orchestrator.nodes[shared_scope].state == "running"
-    assert orchestrator.nodes[shared_scope].priority_band == "stream_attached"
+    assert orchestrator.nodes[shared_scope].priority_band == "interactive_ensure"
 
 
 def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
@@ -990,7 +988,6 @@ def test_dispatch_gate_rejects_wrong_orchestrator_when_pin_armed(sample_turn):
         scope=scope,
         dependency_scopes=(),
         state="ready",
-        priority_band="background",
         submission_open=SubmissionOpen(),
     )
     # Bound gates capture each orchestrator's registration id at bind time.
@@ -1042,7 +1039,7 @@ def test_single_step_does_not_burn_slot_when_later_gate_rejects(sample_turn):
     )
     controller.set_freeze_armed(shell, freeze_armed=True)
     controller.set_allowlist(shell, frozenset({player_id}))
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, priority_band="stream_attached"))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert orchestrator.nodes[scope].state == "ready"
 
     assert controller.single_step(shell) is False
@@ -1169,7 +1166,7 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
         frozenset({low_item.scope.player_id, high_scope.player_id}),
     )
     bound = controller._bound_orchestrators_snapshot()[0]
-    publish_node_band(bound.orchestrator, high_scope, "stream_attached")
+    publish_queued_node_band(bound.orchestrator, high_scope, "interactive_ensure")
     # Lower-priority frozen item is first in the queue; higher-priority second.
     pool.enqueue_for_tests(low_item)
     pool.enqueue_for_tests(high_item)
@@ -1457,7 +1454,6 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
         state="succeeded",
         profile_step_index=0,
         step_index=item.step_index,
-        priority_band="background",
         submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
@@ -1513,7 +1509,6 @@ def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
         state="failed",
         profile_step_index=0,
         step_index=item.step_index,
-        priority_band="background",
         submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
@@ -1581,7 +1576,6 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
         state="failed",
         profile_step_index=0,
         step_index=item.step_index,
-        priority_band="background",
         submission_open=SubmissionOpen(),
     )
     controller._on_step_complete(
@@ -2394,7 +2388,6 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
         state="succeeded",
         profile_step_index=0,
         step_index=0,
-        priority_band="interactive",
         submission_open=SubmissionOpen(),
     )
     from api.analytics.fleet.compute_orchestration import FLEET_OBSERVATION_LEG

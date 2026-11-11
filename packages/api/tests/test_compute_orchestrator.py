@@ -320,66 +320,6 @@ def test_attach_inflight_while_leader_not_terminal(sample_turn):
     assert deps_waiter.state == "attach_inflight"
 
 
-def test_attach_adopts_priority_band_before_execution_seal(sample_turn):
-    """Higher-priority attach upgrades band until expensive execution seals (#209)."""
-    ctx = make_fixture_query_context(
-        sample_turn,
-        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
-    )
-    export_scope = _export_scope(sample_turn)
-    thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-
-    # No pool submitter: node stays ready (unsealed) so adopt can still run.
-    orchestrator = ComputeOrchestrator(
-        compute_registry=thread_registry,
-        pool_submitter=None,
-    )
-    orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="background"),
-    )
-    assert orchestrator.nodes[shared_scope].priority_band == "background"
-    assert orchestrator.nodes[shared_scope].execution_sealed is False
-
-    waiter = orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="stream_attached"),
-    )
-    assert waiter.state == "attach_inflight"
-    assert orchestrator.nodes[shared_scope].priority_band == "stream_attached"
-
-
-def test_attach_does_not_adopt_priority_after_execution_seal(sample_turn):
-    ctx = make_fixture_query_context(
-        sample_turn,
-        registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
-    )
-    export_scope = _export_scope(sample_turn)
-    thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    pool_submissions: list[str] = []
-
-    def pool_submitter(node, _step) -> None:
-        pool_submissions.append(node.scope.analytic_id)
-
-    orchestrator = ComputeOrchestrator(
-        compute_registry=thread_registry,
-        pool_submitter=pool_submitter,
-    )
-    orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="background"),
-    )
-    assert orchestrator.nodes[shared_scope].state == "running"
-    assert orchestrator.nodes[shared_scope].execution_sealed is True
-    assert orchestrator.nodes[shared_scope].priority_band == "background"
-
-    waiter = orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="stream_attached"),
-    )
-    assert waiter.state == "attach_inflight"
-    assert orchestrator.nodes[shared_scope].priority_band == "background"
-    assert pool_submissions == [SHARED_ID]
-
-
 def test_compute_scope_aborted_does_not_cascade_fail_dependents(sample_turn):
     """Scores row cancel must not fail fleet dependents on the singleton DAG (#209)."""
     from api.compute.errors import ComputeScopeAbortedError
@@ -1742,7 +1682,6 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
             ctx=ctx,
             scope=scope,
             step_kind="tier_solve",
-            priority_band="stream_attached",
         )
     )
     assert pool_submissions == [scope]
@@ -2112,7 +2051,7 @@ def test_recreate_aborted_dependencies_enqueues_shared_dep_once(sample_turn):
         dependency_scopes=(branch_b_scope, branch_c_scope),
         state="waiting_deps",
         bundle=bundle,
-        priority_band="stream_attached",
+        standing_band="interactive_ensure",
         submission_open=SubmissionOpen(),
     )
 
@@ -2136,7 +2075,8 @@ def test_recreate_aborted_dependencies_enqueues_shared_dep_once(sample_turn):
 
     assert [request.scope for request in recreate_requests] == [shared_scope]
     assert recreate_requests[0].force_fresh is True
-    assert recreate_requests[0].priority_band == "stream_attached"
+    # The recreate asks for no band: the waiting root gives it one by derivation.
+    assert recreate_requests[0].priority_band == "background"
     assert recreate_requests[0].bundle is bundle
 
 

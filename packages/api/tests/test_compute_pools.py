@@ -171,12 +171,12 @@ def test_pool_tier_one_jobs_run_before_continuations_from_other_scopes(sample_tu
     scope_b = _scope_for_player(sample_turn, player_ids[1])
 
     orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=scope_a, priority_band="stream_attached"),
+        ComputeRequest(ctx=ctx, scope=scope_a, priority_band="interactive_ensure"),
     )
     gate.clear()
     time.sleep(0.05)
     orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=scope_b, priority_band="stream_attached"),
+        ComputeRequest(ctx=ctx, scope=scope_b, priority_band="interactive_ensure"),
     )
     gate.set()
 
@@ -209,8 +209,8 @@ def test_pool_continuation_jobs_round_robin_across_scopes(sample_turn):
     scope_a = _scope_for_player(sample_turn, player_ids[0])
     scope_b = _scope_for_player(sample_turn, player_ids[1])
 
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_a, priority_band="stream_attached"))
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b, priority_band="stream_attached"))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_a, priority_band="interactive_ensure"))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b, priority_band="interactive_ensure"))
     gate.set()
 
     deadline = time.monotonic() + 3.0

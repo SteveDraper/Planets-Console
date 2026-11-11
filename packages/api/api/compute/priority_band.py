@@ -7,7 +7,9 @@ depends on it, is watched by a live shell stream.
 
 A registration names the :class:`ShellStreamWatch` whose keys can make its
 nodes watched. A watch's keys apply only to nodes registered with that watch,
-so ``compute/`` never checks analytic ids to decide liveness.
+so ``compute/`` never checks analytic ids to decide liveness. Each dispatch
+pass reads every distinct watch once (``snapshot_watched_keys``) and derives
+the bands of all non-terminal nodes from that snapshot.
 """
 
 from __future__ import annotations
@@ -80,6 +82,14 @@ class _Unwatched(ShellStreamWatch):
 
 UNWATCHED: ShellStreamWatch = _Unwatched()
 """The default watch: no stream ever watches the registration's nodes."""
+
+
+def snapshot_watched_keys(
+    registry: Mapping[str, AnalyticComputeRegistration],
+) -> Mapping[ShellStreamWatch, frozenset[WatchedShellKey]]:
+    """Read each distinct watch in ``registry`` once, for one derivation."""
+    watches = {registration.shell_stream_watch for registration in registry.values()}
+    return {watch: watch.watched_keys() for watch in watches}
 
 
 class BandDerivationNode(Protocol):

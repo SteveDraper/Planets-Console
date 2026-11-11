@@ -644,7 +644,6 @@ class InferenceRowScheduler(
             root_scope,
             ctx=binding.query_context,
             reason=ScoresWakeReason.STREAM_RESCHEDULED,
-            priority_band="stream_attached",
             orchestrator=binding.orchestrator,
         )
         self._remember_execution_generation_for_scope(

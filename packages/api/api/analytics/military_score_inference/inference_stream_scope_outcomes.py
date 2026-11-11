@@ -94,7 +94,7 @@ class InferenceStreamScopeOutcomesMixin:
 
         if snapshot.state == "failed":
             if sibling_still_active:
-                # Peer binding (e.g. stream_attached) still owns the shared RowRun.
+                # A peer binding (e.g. a table stream's) still owns the shared RowRun.
                 # Do not fail the stream or unregister -- the peer may still succeed.
                 return
             detail = (
@@ -171,7 +171,7 @@ class InferenceStreamScopeOutcomesMixin:
     def _scope_has_live_nonterminal_work(scope: ComputeScope) -> bool:
         """True when the singleton orchestrator still has non-terminal work for scope.
 
-        Background warm and stream_attached bindings share the singleton orchestrator's
+        Background warm and table-stream bindings share the singleton orchestrator's
         one DAG per scope; a still-running node means a sibling submission is in flight.
         """
         from api.compute.runtime import get_compute_orchestrator

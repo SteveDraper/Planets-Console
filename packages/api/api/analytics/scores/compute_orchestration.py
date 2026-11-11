@@ -33,6 +33,7 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
+from api.compute.priority_band import ComputeRequestBand
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
@@ -278,7 +279,7 @@ def wake_scores_scope(
     *,
     ctx: AnalyticQueryContext,
     reason: ScoresWakeReason,
-    priority_band: str = "background",
+    priority_band: ComputeRequestBand = "background",
     orchestrator: ComputeOrchestrator | None = None,
 ) -> bool:
     """Submit an encoded scores wake publisher through one coordinator.

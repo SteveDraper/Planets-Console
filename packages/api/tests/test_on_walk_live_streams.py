@@ -63,7 +63,8 @@ def test_live_streams_submit_one_force_fresh_walk_per_player(sample_turn, monkey
     by_player: dict[int, set[str]] = {}
     for request in submitted:
         assert request.force_fresh is True
-        assert request.priority_band == "stream_attached"
+        # The band comes from the live stream watching the shell, not the request.
+        assert request.priority_band == "background"
         assert request.submission_open is None
         assert request.scope.turn == 10
         by_player.setdefault(request.scope.player_id, set()).add(request.scope.analytic_id)
@@ -229,7 +230,7 @@ def test_off_setting_fleet_defers_one_player_until_the_node_is_terminal(sample_t
             request for request in submitted if request.scope.player_id == blocked
         )
         assert blocked_request.force_fresh is True
-        assert blocked_request.priority_band == "stream_attached"
+        assert blocked_request.priority_band == "background"
     finally:
         reset_fleet_table_stream_registry_for_tests()
 

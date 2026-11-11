@@ -5,6 +5,8 @@ Fleet and scores attach to the process orchestrator once per scheduler
 mutate scheduler maps, so a caller that already holds the orchestrator
 condition can finish them. Pause status peeks that orchestrator after
 releasing the scheduler lock, so the lock stays free while the peek waits.
+The band derivation reads the stream registries under the orchestrator
+condition without taking their locks.
 """
 
 from __future__ import annotations
@@ -15,6 +17,12 @@ from typing import cast
 
 import pytest
 from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet.fleet_table_stream_registry import (
+    detach_fleet_table_stream,
+    get_fleet_table_stream_registry,
+    reset_fleet_table_stream_registry_for_tests,
+)
 from api.analytics.fleet.fleet_table_stream_scheduler import FleetTableStreamScheduler
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -25,13 +33,22 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_stream_teardown import (
     InferenceStreamOrchestratorBinding,
 )
+from api.analytics.military_score_inference.inference_table_stream_registry import (
+    get_inference_table_stream_registry,
+)
 from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
 from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.orchestrator import ComputeNodeRun
 from api.compute.orchestrator_observers import OrchestratorObservers
 from api.compute.pools import reset_compute_worker_pool_for_tests
 from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 from api.compute.scope import ComputeScope
+from api.compute.submission_open import SubmissionOpen
+
+from tests.off_mode_catch_up_helpers import context_at_turn
+from tests.on_walk_live_helpers import attach_stream
+from tests.scores_exports_helpers import first_player_id
 
 
 @pytest.fixture(autouse=True)
@@ -233,3 +250,61 @@ def test_scores_pause_peek_leaves_scheduler_lock_free_and_detach_returns(
         detach_go.set()
         worker.join(timeout=2)
         scheduler.shutdown()
+
+
+def test_band_derivation_under_the_orchestrator_lock_reads_the_stream_registries_lock_free(
+    sample_turn,
+) -> None:
+    """A dispatch pass reads stream liveness while every registry writer lock is held.
+
+    The pass derives bands under the orchestrator condition. A registry writer
+    holding its compare-and-swap lock, or a stream generator ``finally`` run by
+    garbage collection on the pass's thread, must not block it.
+    """
+    host, ctx = context_at_turn(sample_turn, 6)
+    player_id = first_player_id(host)
+    orchestrator = get_compute_orchestrator()
+    scope = ComputeScope(
+        analytic_id=FLEET_ANALYTIC_ID,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=6,
+        player_id=player_id,
+    )
+    orchestrator._nodes[scope] = ComputeNodeRun(
+        scope=scope,
+        dependency_scopes=(),
+        state="waiting_deps",
+        submission_open=SubmissionOpen(),
+    )
+    fleet_registry = get_fleet_table_stream_registry()
+    scores_registry = get_inference_table_stream_registry()
+    stream = attach_stream(
+        fleet_registry,
+        FleetTableStreamScope(ctx.game_id, ctx.perspective, 6),
+        None,
+        ctx,
+        [player_id],
+    )
+    finished = threading.Event()
+
+    def _dispatch_pass() -> None:
+        orchestrator.dispatch_ready_work()
+        finished.set()
+
+    try:
+        with fleet_registry._lock, scores_registry._lock:
+            worker = threading.Thread(target=_dispatch_pass)
+            worker.start()
+            pass_finished = finished.wait(timeout=2)
+        worker.join(timeout=2)
+        assert pass_finished, "band derivation waited on a stream registry lock"
+        assert orchestrator.published_band(scope) == "stream_attached"
+
+        with orchestrator._condition:
+            detach_fleet_table_stream(stream.stream_token)
+            assert orchestrator.published_band(scope) == "stream_attached"
+        orchestrator.dispatch_ready_work()
+        assert orchestrator.published_band(scope) == "background"
+    finally:
+        reset_fleet_table_stream_registry_for_tests()

@@ -412,7 +412,7 @@ Inference is fetched **per scoreboard row** at the solver layer. Three wire path
 
 Thin stream adapter over the process-wide **compute orchestrator** (glossary: `CONTEXT.md` **Inference row scheduler**; [design-compute-orchestrator.md](design-compute-orchestrator.md)). Retains scope guard, per-row **inference row run** registry, **inference global pause** dispatch gate, and stream event emission via orchestrator **scope-outcome listeners**; submits `tier_solve` **compute step**s instead of draining a private worker queue. The legacy private `threading.Thread` worker pool and FIFO `_work_queue` dequeue path are removed.
 
-1. When the table stream schedules a row, construct a tier-1 **inference tier job** (deltas, player id, ladder entry state) and submit `tier_solve` on the scores scope (`stream_attached` band).
+1. When the table stream schedules a row, construct a tier-1 **inference tier job** (deltas, player id, ladder entry state) and submit `tier_solve` on the scores scope. The request asks for no band: the open stream watches the row's shell, so the node and its dependencies derive `stream_attached` ([design-compute-orchestrator.md](design-compute-orchestrator.md), Band derivation).
 2. When a tier step completes with `continue`, submit that row's tier-(n+1) continuation (seeds, held solutions, signatures). Per-row tier chains are strictly sequential on one analytic compute node.
 3. Cross-row fairness (tier-1-before-continuations) lives in the global orchestrator pool, not an adapter-owned queue.
 4. Emit `solution` events (full held top-K) from merge-admit hooks inside the tier step.
@@ -422,7 +422,7 @@ One schedulable step = one full **inference search tier** for one scoreboard row
 
 **Table stream multiplexing:** per-row event queues are round-robin drained into one NDJSON generator; `playerId` tags identify the row on the wire.
 
-**Global pause (soft):** pause broadcasts `globalPause` and blocks new `stream_attached` `tier_solve` dispatches via an orchestrator **dispatch gate**; deferred tier-1 and continuation steps stay in the adapter held buffer. In-flight pool work already running continues until the current tier step completes and may still emit `solution` events. Resume requeues held work through the orchestrator on the same connection. Applies only while the table stream stays connected. **Stream disconnect** clears server-side global pause and **detaches** row shells (does not cancel in-flight tokens); reconnect replays durable row persistence where present.
+**Global pause (soft):** pause broadcasts `globalPause` and blocks new `tier_solve` dispatches via an orchestrator **dispatch gate**; deferred tier-1 and continuation steps stay in the adapter held buffer. In-flight pool work already running continues until the current tier step completes and may still emit `solution` events. Resume requeues held work through the orchestrator on the same connection. Applies only while the table stream stays connected. **Stream disconnect** clears server-side global pause and **detaches** row shells (does not cancel in-flight tokens); reconnect replays durable row persistence where present.
 
 **Accelerated-start rows:** same scheduler path as normal rows in v1; internal accel segments stay inside the row path (no per-segment SPA time split).
 

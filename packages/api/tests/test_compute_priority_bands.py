@@ -16,6 +16,7 @@ from api.compute.priority_band import (
     WatchedShellKey,
     derive_priority_bands,
     highest_band,
+    snapshot_watched_keys,
 )
 from api.compute.profile import AnalyticComputeProfile
 from api.compute.registry import AnalyticComputeRegistration
@@ -265,6 +266,36 @@ def test_derived_bands_are_read_only() -> None:
 
 def test_unwatched_has_no_keys() -> None:
     assert UNWATCHED.watched_keys() == frozenset()
+
+
+class _CountingWatch(ShellStreamWatch):
+    def __init__(self, keys: frozenset[WatchedShellKey]) -> None:
+        self.keys = keys
+        self.reads = 0
+
+    def watched_keys(self) -> frozenset[WatchedShellKey]:
+        self.reads += 1
+        return self.keys
+
+
+def test_snapshot_reads_each_distinct_watch_once() -> None:
+    shared = _CountingWatch(frozenset({_key(10)}))
+    alone = _CountingWatch(frozenset())
+    registry = {
+        "fleet": _registration("fleet", shared),
+        "scores": _registration("scores", shared),
+        "locator": _registration("locator", alone),
+        "plain": _registration("plain", UNWATCHED),
+    }
+
+    snapshot = snapshot_watched_keys(registry)
+
+    assert dict(snapshot) == {
+        shared: frozenset({_key(10)}),
+        alone: frozenset(),
+        UNWATCHED: frozenset(),
+    }
+    assert (shared.reads, alone.reads) == (1, 1)
 
 
 @pytest.mark.parametrize(

@@ -123,17 +123,15 @@ class ComputeOrchestrator(
     life of the node -- later attaches with a different bundle do not change
     what wire build, persist, and satisfaction checks see.
 
-    A waiter with a higher-priority band than the node it attaches to upgrades
-    ``node.priority_band`` in place so the next dispatch pass sees the
-    higher band, unless the node has already sealed for execution (job wire
-    built inline, or handed to the pool) -- the adopt window has closed by
-    then and the waiter simply waits for the leader.
-
-    Every dispatch pass ends by publishing an immutable ``{scope: band}`` map
-    of its non-terminal nodes. The worker pool reads that map through
-    :meth:`published_band`, without the orchestrator lock, each time it picks
-    queued work, so a queued step ranks by its node's band at the last pass.
-    A step keeps the band it was picked at.
+    Bands are derived, not stored. A request raises the standing band of its
+    own scope only. Every dispatch pass starts by deriving each non-terminal
+    node's band: the highest standing band over the node and its non-terminal
+    transitive dependents, or ``stream_attached`` when a live shell stream
+    watches any of them (``priority_band.derive_priority_bands``). The pass
+    picks ready nodes by that band, FIFO within a band, and publishes the
+    derivation as an immutable ``{scope: band}`` map. The worker pool reads
+    that map through :meth:`published_band`, without the orchestrator lock,
+    each time it picks queued work. A step keeps the band it was picked at.
 
     There is no process-wide scope lease: singleflight here plus durable
     satisfaction short-circuit (``PersistencePolicy.is_satisfied``) is enough
@@ -266,7 +264,11 @@ class ComputeOrchestrator(
             return self._ready_scopes_snapshot()
 
     def diagnostics_snapshot(self) -> OrchestratorDiagnosticsSnapshot:
-        """Return immutable node and ready-queue data in one critical section."""
+        """Return immutable node and ready-queue data in one critical section.
+
+        Each node's band is the last dispatch pass's derivation. The snapshot
+        writes no node state.
+        """
         with self._condition:
             nodes = tuple(
                 OrchestratorNodeSnapshot(

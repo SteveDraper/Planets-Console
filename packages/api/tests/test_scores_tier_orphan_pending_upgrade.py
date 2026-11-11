@@ -74,7 +74,6 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
         orchestrator,
         scope,
         state="running",
-        priority_band="stream_attached",
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
@@ -136,7 +135,6 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
     )
 
@@ -215,7 +213,6 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(sample_tur
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
@@ -292,7 +289,6 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(sample_tur
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
     )
 
@@ -355,7 +351,6 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(sample_turn)
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
     )
 
@@ -416,7 +411,6 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
     )
 
@@ -488,7 +482,6 @@ def test_orphan_terminal_reaches_pending_wire_when_finished_without_client_event
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
     )
 
@@ -549,7 +542,6 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
         result_wire={"exportTree": {"ok": True}},
     )
 
@@ -613,7 +605,6 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
         result_wire={"runId": run.run_id, "rowComplete": row_complete},
     )
     scheduler._on_orchestrator_scope_outcome(
@@ -691,7 +682,6 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
         orchestrator,
         scope,
         state="complete",
-        priority_band="stream_attached",
         result_wire={"runId": solved_run.run_id, "rowComplete": row_complete},
     )
     scheduler._on_orchestrator_scope_outcome(

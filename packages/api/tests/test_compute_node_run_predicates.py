@@ -45,9 +45,3 @@ def test_blocks_readiness_refresh_covers_terminal_running_and_parked() -> None:
     blocking_states: set[NodeState] = {"complete", "failed", "running", "parked"}
     for state in NodeState.__args__:
         assert _node(state).blocks_readiness_refresh == (state in blocking_states), state
-
-
-def test_allows_priority_adopt_excludes_terminal_states() -> None:
-    adoptable_states: set[NodeState] = {"waiting_deps", "parked", "ready", "running"}
-    for state in NodeState.__args__:
-        assert _node(state).allows_priority_adopt == (state in adoptable_states), state

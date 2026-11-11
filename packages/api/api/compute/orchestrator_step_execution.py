@@ -1,20 +1,23 @@
 """Step dispatch and post-lock execution helpers for ComputeOrchestrator.
 
-Owns durable-satisfaction short-circuit, ready-queue dispatch into pending
-inline/pool work, the band map each dispatch pass publishes for the worker
-pool, and seal-before-expensive-work execute paths that must run
-only after the orchestrator lock is released. The DAG scheduler in
-``orchestrator`` stays focused on readiness, singleflight, and terminal
-lifecycle.
+Owns durable-satisfaction short-circuit, the band derivation each dispatch
+pass runs and publishes for the worker pool, band-ordered ready-queue dispatch
+into pending inline/pool work, and the execute paths that must run only after
+the orchestrator lock is released. The DAG scheduler in ``orchestrator`` stays
+focused on readiness, singleflight, and terminal lifecycle.
 """
 
 from __future__ import annotations
 
-from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from api.compute.backend_runtime import effective_compute_backend
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
+from api.compute.priority_band import (
+    PRIORITY_BAND_RANK,
+    derive_priority_bands,
+    snapshot_watched_keys,
+)
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.wire import DependencyOutputs
@@ -47,8 +50,10 @@ class OrchestratorStepExecutionMixin:
         Before execution, durable satisfaction short-circuits the node so a node
         whose durable artifact already satisfies this step never re-runs it.
 
-        The pass ends by publishing the band map the worker pool picks by.
+        The pass starts by deriving every non-terminal node's band, which
+        orders the ready pick and is published for the worker pool.
         """
+        self._derive_and_publish_bands()
         pending_inline: list[PendingInlineExecution] = []
         pending_pool: list[PendingPoolSubmission] = []
         initial_ready_depth = self._ready_depth()
@@ -93,22 +98,25 @@ class OrchestratorStepExecutionMixin:
         # ``_dequeue_ready`` notify on their own paths; this catches dispatch-only leaves.
         if self._ready_depth() != initial_ready_depth:
             self._notify_ready_queue_changed()
-        self._publish_bands()
         return tuple(pending_inline), tuple(pending_pool)
 
-    def _publish_bands(self) -> None:
-        """Replace the published band map with every non-terminal node's band.
+    def _derive_and_publish_bands(self) -> None:
+        """Derive every non-terminal node's band, write it, and publish the map.
 
-        Caller holds the orchestrator lock. Readers take no lock, so the map is
-        built whole and swapped in one assignment.
+        Caller holds the orchestrator lock. Each watch is read once, from
+        lock-free snapshots. Running nodes are written too: a pool step is not
+        picked until a worker takes it, and a picked step's band lives on its
+        execution records. Readers of the published map take no lock, so it is
+        swapped in one assignment.
         """
-        self._published_bands = MappingProxyType(
-            {
-                scope: node.priority_band
-                for scope, node in self._nodes.items()
-                if not node.is_terminal
-            }
+        bands = derive_priority_bands(
+            self._nodes,
+            snapshot_watched_keys(self._compute_registry),
+            self._compute_registry,
         )
+        for scope, band in bands.items():
+            self._nodes[scope].priority_band = band
+        self._published_bands = bands
 
     def _snapshot_dependency_outputs(self, node: ComputeNodeRun) -> DependencyOutputs:
         """Copy dependency result wires under the orchestrator lock."""
@@ -133,26 +141,33 @@ class OrchestratorStepExecutionMixin:
     def _dequeue_dispatchable_ready_node(
         self,
     ) -> tuple[ComputeScope | None, ComputeNodeRun | None]:
-        queue_len = len(self._ready_queue)
-        if queue_len == 0:
-            return None, None
-        for _ in range(queue_len):
-            scope = self._ready_queue.popleft()
+        """Remove and return the first dispatchable ready node by band, then FIFO.
+
+        Entries no longer ``ready`` leave the queue, and a ready node whose
+        dependencies are incomplete drops to ``waiting_deps``. A node a gate or
+        commit hook rejects keeps its queue position.
+        """
+        by_band = sorted(
+            self._ready_queue,
+            key=lambda scope: PRIORITY_BAND_RANK[self._nodes[scope].priority_band],
+        )
+        for scope in by_band:
             node = self._nodes[scope]
             if node.state != "ready":
+                self._ready_queue.remove(scope)
                 continue
             if not self._deps_complete(node):
+                self._ready_queue.remove(scope)
                 node.state = "waiting_deps"
                 continue
             # Gates first (side-effect free), then commit hooks (may consume slots).
             # Evaluating commits inside ``all(gate)`` burned single-step slots when a
             # later gate (e.g. scores global-pause) rejected the same node.
             if not all(gate(node) for gate in self._observers.dispatch_gates):
-                self._ready_queue.append(scope)
                 continue
             if not all(hook(node) for hook in self._observers.dispatch_commit_hooks):
-                self._ready_queue.append(scope)
                 continue
+            self._ready_queue.remove(scope)
             return scope, node
         return None, None
 
@@ -172,8 +187,6 @@ class OrchestratorStepExecutionMixin:
     def _begin_step_execution(self, node: ComputeNodeRun) -> None:
         registration = self._compute_registry[node.scope.analytic_id]
         node.state = "running"
-        # Adopt window reopens while the job wire for this step is (re)built.
-        node.execution_sealed = False
         ctx = self._ctx_for_node(node)
         node.generation_at_submit = registration.persistence_policy.invalidation_generation(
             ctx,
@@ -206,7 +219,7 @@ class OrchestratorStepExecutionMixin:
         return True
 
     def _run_inline_outside_lock(self, pending: PendingInlineExecution) -> None:
-        """Build wire, seal for execution, then run an inline step without the orch lock."""
+        """Build the wire, then run an inline step without the orchestrator lock."""
         node = pending.node
         ctx = self._ctx_for_node(node)
         try:
@@ -230,12 +243,9 @@ class OrchestratorStepExecutionMixin:
                 )
                 self._fail_node(node, exc)
             return
-        # Seal after job-wire build: a higher-priority peer can adopt during that
-        # window (see ``_maybe_adopt_priority``), but not once the run itself starts.
         with self._condition:
             if node.state != "running":
                 return
-            node.execution_sealed = True
         self._observers.notify_inline_start(node, pending.step.step_kind)
         try:
             result_wire = pending.registration.run_step[pending.step.step_kind](job_wire)
@@ -266,7 +276,7 @@ class OrchestratorStepExecutionMixin:
         self,
         pending: tuple[PendingPoolSubmission, ...],
     ) -> None:
-        """Build job wires for interpreter and process steps, seal, and submit pool work.
+        """Build job wires for interpreter and process steps, then submit pool work.
 
         A declared ``interpreter`` step remapped to ``thread`` skips the prebuild.
         ``execute_pool_step`` builds that wire once on the worker thread.
@@ -292,7 +302,6 @@ class OrchestratorStepExecutionMixin:
                     with self._condition:
                         if node.state != "running":
                             continue
-                        node.execution_sealed = True
                     run_step = submission.registration.run_step[step.step_kind]
                     self._pool_submitter(
                         node,
@@ -304,7 +313,6 @@ class OrchestratorStepExecutionMixin:
                     with self._condition:
                         if node.state != "running":
                             continue
-                        node.execution_sealed = True
                     self._pool_submitter(node, step)
                 self._metrics.pool_submissions += 1
             except BaseException as exc:
