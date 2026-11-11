@@ -1,17 +1,21 @@
 """A walk's band follows the live shell streams that watch it.
 
-Each test plans a real fleet or scoreboard walk on an orchestrator whose pool
+Most tests plan a real fleet or scoreboard walk on an orchestrator whose pool
 has no workers, so queued steps wait until the test picks them. A step's band
 is the one the pool would pick it at now (``published_band``), or the band a
-pick returned.
+pick returned. The T1 test instead runs a whole walk on the process
+orchestrator and pool, with real steps and persists.
 """
 
 from __future__ import annotations
 
 import threading
 from collections.abc import Iterator
+from dataclasses import fields, replace
 
 import pytest
+from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.fleet.compute_services import turn_chain_through
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_stream_registry import (
     detach_fleet_table_stream,
@@ -19,12 +23,16 @@ from api.analytics.fleet.fleet_table_stream_registry import (
     reset_fleet_table_stream_registry_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
+from api.analytics.military_score_inference.inference_scheduler import (
+    reset_inference_row_scheduler_for_tests,
+)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     detach_inference_table_stream,
     get_inference_table_stream_registry,
     reset_inference_table_stream_registry_for_tests,
 )
+from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeWorkerPool, build_compute_registry
 from api.compute.errors import ComputeScopeAbortedError
@@ -32,8 +40,14 @@ from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
 from api.compute.persistence import PersistDependencyRecovery
 from api.compute.pools import reset_compute_worker_pool_for_tests
 from api.compute.priority_band import ComputePriorityBand, ComputeRequestBand
+from api.compute.runtime import get_compute_orchestrator, peek_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.compute.wire import StepResult
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
+from api.models.player import Score
+from api.services.inference_invalidation_service import InferenceInvalidationService
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.storage.memory_asset import MemoryAssetBackend
 from api.streaming.table_stream.registry import TableStreamRegistry
 from api.streaming.table_stream.registry_bootstrap import (
     ensure_table_stream_registries_registered,
@@ -45,12 +59,17 @@ from api.streaming.table_stream.registry_catalog import (
 from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
-from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
+from tests.export_chain_test_fixtures import (
+    enable_backfill_earlier_turns,
+    export_chain_query_context,
+)
 from tests.fixtures.export_framework.harness import make_fixture_query_context
+from tests.fleet_exports_helpers import host_turn_at
+from tests.fleet_player_scoped_gap_fill_helpers import install_mid_chain_put_ledger_gate
 from tests.off_mode_catch_up_helpers import FLEET_SCORES_REGISTRY, context_at_turn
-from tests.on_walk_helpers import shell_scope
+from tests.on_walk_helpers import fleet_persistence, shell_scope
 from tests.on_walk_live_helpers import LiveStream, attach_stream
-from tests.scores_exports_helpers import first_player_id
+from tests.scores_exports_helpers import first_player_id, inference_target_player_id
 from tests.test_compute_pool_published_bands import _player_scopes
 from tests.test_compute_pools import _POOL_EXPORT_REGISTRY, _single_step_thread_registration
 
@@ -73,6 +92,16 @@ def walk(sample_turn) -> _Walk:
     host, ctx = context_at_turn(sample_turn, SHELL_TURN + 2)
     enable_backfill_earlier_turns(ctx)
     return _Walk(ctx, first_player_id(host))
+
+
+def _open_fleet_stream(ctx, player_id: int, turn: int) -> LiveStream:
+    scope = FleetTableStreamScope(ctx.game_id, ctx.perspective, turn)
+    return attach_stream(get_fleet_table_stream_registry(), scope, None, ctx, [player_id])
+
+
+def _open_scores_stream(ctx, player_id: int, turn: int) -> LiveStream:
+    scope = InferenceStreamScope(ctx.game_id, ctx.perspective, turn)
+    return attach_stream(get_inference_table_stream_registry(), scope, None, ctx, [player_id])
 
 
 class _Walk:
@@ -108,16 +137,10 @@ class _Walk:
         )
 
     def open_fleet_stream(self, turn: int = SHELL_TURN) -> LiveStream:
-        scope = FleetTableStreamScope(self.ctx.game_id, self.ctx.perspective, turn)
-        return attach_stream(
-            get_fleet_table_stream_registry(), scope, None, self.ctx, [self.player_id]
-        )
+        return _open_fleet_stream(self.ctx, self.player_id, turn)
 
     def open_scores_stream(self, turn: int = SHELL_TURN) -> LiveStream:
-        scope = InferenceStreamScope(self.ctx.game_id, self.ctx.perspective, turn)
-        return attach_stream(
-            get_inference_table_stream_registry(), scope, None, self.ctx, [self.player_id]
-        )
+        return _open_scores_stream(self.ctx, self.player_id, turn)
 
     def dispatch_pass(self) -> None:
         self.orchestrator.dispatch_ready_work()
@@ -177,6 +200,105 @@ def _connect_fleet_stream(walk: _Walk) -> Iterator[dict[str, object]]:
     )
     assert next(stream) == {"type": "preamble"}
     return stream
+
+
+# --- T1: a walk whose streams close still reaches the ensure baseline ---
+
+# The sample game's ensure baseline is turn 3, so the walk hops at turns 3 and 4.
+CLOSING_WALK_SHELL_TURN = 5
+CLOSING_WALK_TURNS = (3, 4, 5)
+WALK_GENERATION = 1
+WALK_TIMEOUT_SECONDS = 30.0
+
+
+@pytest.fixture
+def _no_scores_row_runs() -> Iterator[None]:
+    reset_tier_row_run_registry_for_tests()
+    reset_inference_row_scheduler_for_tests()
+    yield
+    reset_tier_row_run_registry_for_tests()
+    reset_inference_row_scheduler_for_tests()
+
+
+def _without_scoreboard_deltas(score: Score) -> Score:
+    return replace(
+        score, **{field.name: 0 for field in fields(score) if field.name.endswith("change")}
+    )
+
+
+def _quiet_walk_context(sample_turn) -> tuple[AnalyticQueryContext, int]:
+    """Backfill-on context with stored scores rows and production persist wiring.
+
+    The walk player's scoreboard row has no deltas, so each scores step solves
+    in one cheap tier and the walk's real steps and persists finish quickly.
+    """
+    host, _stored = host_turn_at(sample_turn, CLOSING_WALK_SHELL_TURN)
+    player_id = inference_target_player_id(host)
+    quiet_host = replace(
+        host,
+        scores=[
+            _without_scoreboard_deltas(score) if score.ownerid == player_id else score
+            for score in host.scores
+        ],
+    )
+    scores_rows = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+    ctx = export_chain_query_context(
+        quiet_host,
+        persistence=scores_rows,
+        stored_turns=turn_chain_through(quiet_host),
+    )
+    enable_backfill_earlier_turns(ctx)
+    invalidation = InferenceInvalidationService(
+        scores_rows,
+        fleet_persistence=fleet_persistence(ctx),
+        orchestrator=peek_compute_orchestrator,
+    )
+    invalidation.wire_fleet_invalidation_to_persistence()
+    invalidation.wire_scores_invalidation_to_fleet_persistence()
+    return ctx, player_id
+
+
+@pytest.mark.usefixtures("_no_scores_row_runs")
+def test_closing_both_streams_mid_walk_still_reaches_the_ensure_baseline(sample_turn):
+    ctx, player_id = _quiet_walk_context(sample_turn)
+    baseline_turn = CLOSING_WALK_TURNS[0]
+    shell_settings = ctx.load_turn(CLOSING_WALK_SHELL_TURN).settings
+    assert accelerated_ensure_floor(shell_settings, CLOSING_WALK_SHELL_TURN) == baseline_turn
+    persistence = fleet_persistence(ctx)
+    baseline_hop_persisting = threading.Event()
+    release_baseline_hop = threading.Event()
+    install_mid_chain_put_ledger_gate(
+        persistence,
+        player_id=player_id,
+        turn_number=baseline_turn,
+        leader_mid_chain=baseline_hop_persisting,
+        release_leader=release_baseline_hop,
+    )
+    orchestrator = get_compute_orchestrator()
+    shell = shell_scope(ctx, FLEET_ANALYTIC_ID, CLOSING_WALK_SHELL_TURN, player_id)
+    fleet_stream = _open_fleet_stream(ctx, player_id, CLOSING_WALK_SHELL_TURN)
+    scores_stream = _open_scores_stream(ctx, player_id, CLOSING_WALK_SHELL_TURN)
+
+    handle = orchestrator.submit(ComputeRequest(scope=shell, force_fresh=True, ctx=ctx))
+    assert orchestrator.published_band(shell) == "stream_attached"
+    assert baseline_hop_persisting.wait(timeout=WALK_TIMEOUT_SECONDS)
+    detach_fleet_table_stream(fleet_stream.stream_token)
+    detach_inference_table_stream(scores_stream.stream_token)
+    release_baseline_hop.set()
+    handle.wait(timeout=WALK_TIMEOUT_SECONDS)
+
+    assert handle.state == "complete"
+    for turn in CLOSING_WALK_TURNS:
+        ledger = persistence.get_ledger(ctx.game_id, ctx.perspective, turn, player_id)
+        assert ledger is not None
+        assert ledger.evidence_generation == WALK_GENERATION
+        assert persistence.has_final_ledger(ctx.game_id, ctx.perspective, turn, player_id)
+    mark = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
+    assert mark.evidence_generation == WALK_GENERATION
+    assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 0
+    scores_rows = ctx.export_services[SCORES_ANALYTIC_ID].persistence
+    for turn in CLOSING_WALK_TURNS:
+        assert scores_rows.get_row(ctx.game_id, ctx.perspective, turn, player_id) is not None
 
 
 # --- T2: closing both streams drops unpicked steps to background ---

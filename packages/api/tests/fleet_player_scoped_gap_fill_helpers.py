@@ -10,7 +10,7 @@ from typing import Any
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_services import turn_chain_through
 from api.analytics.fleet.injected_services import FleetComputeServices
-from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService, PutLedgerResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.turn_roster import iter_turn_players
 from api.models.game import TurnInfo
@@ -174,11 +174,11 @@ def install_mid_chain_put_ledger_gate(
     original_put_ledger = persistence.put_ledger
     mid_chain_puts = 0
 
-    def hooked_put_ledger(*args: Any, **kwargs: Any) -> None:
+    def hooked_put_ledger(*args: Any, **kwargs: Any) -> PutLedgerResult:
         nonlocal mid_chain_puts
         hooked_turn_number = args[2]
         hooked_player_id = args[3]
-        original_put_ledger(*args, **kwargs)
+        put_result = original_put_ledger(*args, **kwargs)
         if (
             hooked_player_id == player_id
             and hooked_turn_number == turn_number
@@ -187,5 +187,6 @@ def install_mid_chain_put_ledger_gate(
             mid_chain_puts += 1
             leader_mid_chain.set()
             assert release_leader.wait(timeout=5)
+        return put_result
 
     persistence.put_ledger = hooked_put_ledger  # type: ignore[method-assign]
