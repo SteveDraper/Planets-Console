@@ -20,7 +20,7 @@ from api.compute.priority_band import (
 )
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
-from api.compute.wire import DependencyOutputs
+from api.compute.wire import BuildStepJobWireKwargs, DependencyOutputs
 
 if TYPE_CHECKING:
     from api.compute.orchestrator_state import ComputeNodeRun
@@ -43,8 +43,8 @@ class OrchestratorStepExecutionMixin:
     ) -> tuple[tuple[PendingInlineExecution, ...], tuple[PendingPoolSubmission, ...]]:
         """Select and begin ready work under the orchestrator lock.
 
-        Inline and pool steps are prepared here (state → running, dependency wires
-        snapshotted) but job-wire construction and execution happen only after the
+        Inline and pool steps are prepared here (state → running, job-wire builder
+        kwargs snapshotted) but job-wire construction and execution happen only after the
         caller releases the orchestrator lock.
 
         Before execution, durable satisfaction short-circuits the node so a node
@@ -74,7 +74,7 @@ class OrchestratorStepExecutionMixin:
                         node=node,
                         registration=registration,
                         step=step,
-                        dependency_outputs=self._snapshot_dependency_outputs(node),
+                        job_wire_kwargs=self._snapshot_job_wire_kwargs(node),
                     )
                 )
                 continue
@@ -90,7 +90,7 @@ class OrchestratorStepExecutionMixin:
                     node=node,
                     registration=registration,
                     step=step,
-                    dependency_outputs=self._snapshot_dependency_outputs(node),
+                    job_wire_kwargs=self._snapshot_job_wire_kwargs(node),
                 )
             )
             break
@@ -118,8 +118,12 @@ class OrchestratorStepExecutionMixin:
             self._nodes[scope].priority_band = band
         self._published_bands = bands
 
-    def _snapshot_dependency_outputs(self, node: ComputeNodeRun) -> DependencyOutputs:
-        """Copy dependency result wires under the orchestrator lock."""
+    def _snapshot_job_wire_kwargs(self, node: ComputeNodeRun) -> BuildStepJobWireKwargs:
+        """Snapshot the job-wire builder kwargs for ``node``'s current step.
+
+        Caller holds the orchestrator lock. Only the node and dependency fields
+        are read here; the builder itself runs after the lock is released.
+        """
         dependency_outputs = DependencyOutputs()
         for dependency_scope in node.dependency_scopes:
             dependency_node = self._nodes[dependency_scope]
@@ -128,7 +132,13 @@ class OrchestratorStepExecutionMixin:
                     f"dependency {dependency_scope!r} is complete without a result wire"
                 )
             dependency_outputs.put(dependency_scope, dependency_node.result_wire)
-        return dependency_outputs
+        return BuildStepJobWireKwargs(
+            dependency_outputs=dependency_outputs,
+            ctx=self._ctx_for_node(node),
+            node_result_wire=node.result_wire,
+            submission_open=node.submission_open,
+            execution_generation=node.execution_generation,
+        )
 
     def _execute_pending_inlines(
         self,
@@ -221,17 +231,9 @@ class OrchestratorStepExecutionMixin:
     def _run_inline_outside_lock(self, pending: PendingInlineExecution) -> None:
         """Build the wire, then run an inline step without the orchestrator lock."""
         node = pending.node
-        ctx = self._ctx_for_node(node)
         try:
             builder = pending.registration.build_step_job_wire[pending.step.step_kind]
-            job_wire = builder(
-                node.scope,
-                dependency_outputs=pending.dependency_outputs,
-                ctx=ctx,
-                node_result_wire=node.result_wire,
-                submission_open=node.submission_open,
-                execution_generation=node.execution_generation,
-            )
+            job_wire = builder(node.scope, **pending.job_wire_kwargs)
         except BaseException as exc:
             with self._condition:
                 self._metrics.inline_executions += 1
@@ -289,18 +291,10 @@ class OrchestratorStepExecutionMixin:
         for submission in pending:
             node = submission.node
             step = submission.step
-            ctx = self._ctx_for_node(node)
             try:
                 if effective_compute_backend(step.backend) in {"interpreter", "process"}:
                     builder = submission.registration.build_step_job_wire[step.step_kind]
-                    job_wire = builder(
-                        node.scope,
-                        dependency_outputs=submission.dependency_outputs,
-                        ctx=ctx,
-                        node_result_wire=node.result_wire,
-                        submission_open=node.submission_open,
-                        execution_generation=node.execution_generation,
-                    )
+                    job_wire = builder(node.scope, **submission.job_wire_kwargs)
                     with self._condition:
                         if node.state != "running":
                             continue

@@ -12,7 +12,7 @@ from api.compute.dag import PlannedComputeNode
 from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
-from api.compute.wire import DependencyOutputs
+from api.compute.wire import BuildStepJobWireKwargs
 
 __all__ = [
     "AcceptedSubmission",
@@ -34,7 +34,7 @@ class PendingInlineExecution:
     node: ComputeNodeRun
     registration: AnalyticComputeRegistration
     step: ComputeStepSpec
-    dependency_outputs: DependencyOutputs
+    job_wire_kwargs: BuildStepJobWireKwargs
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class PendingPoolSubmission:
     node: ComputeNodeRun
     registration: AnalyticComputeRegistration
     step: ComputeStepSpec
-    dependency_outputs: DependencyOutputs
+    job_wire_kwargs: BuildStepJobWireKwargs
 
 
 @dataclass(frozen=True)

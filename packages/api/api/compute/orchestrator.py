@@ -293,22 +293,10 @@ class ComputeOrchestrator(
                 raise RuntimeError(f"cannot execute pool step for node in state {node.state!r}")
             registration = self._compute_registry[node.scope.analytic_id]
             step = self._current_step_spec(node, registration)
-            dependency_outputs = self._snapshot_dependency_outputs(node)
+            job_wire_kwargs = self._snapshot_job_wire_kwargs(node)
             run_step = registration.run_step[step.step_kind]
             builder = registration.build_step_job_wire[step.step_kind]
-            node_scope = node.scope
-            ctx = self._ctx_for_node(node)
-            node_result_wire = node.result_wire
-            submission_open = node.submission_open
-            execution_generation = node.execution_generation
-        job_wire = builder(
-            node_scope,
-            dependency_outputs=dependency_outputs,
-            ctx=ctx,
-            node_result_wire=node_result_wire,
-            submission_open=submission_open,
-            execution_generation=execution_generation,
-        )
+        job_wire = builder(scope, **job_wire_kwargs)
         return run_step(job_wire)
 
     def run_until_idle(self) -> None:
