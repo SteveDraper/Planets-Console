@@ -370,6 +370,8 @@ An accepted **Backfill earlier turns** walk with both the fleet analytic and the
 
 A queued pool step carries no band of its own. Each dispatch pass starts by deriving and publishing an immutable `{scope: band}` map of the orchestrator's non-terminal nodes, and the worker pool ranks every queued candidate by that map each time a worker picks, without taking the orchestrator lock. A step whose scope has no published band (orchestrator gone, or node terminal) ranks as background. A step keeps the band it was picked at: in-flight rows, remote-future rows, and completion history report that band.
 
+A pool item is bound to the execution of its scope that dispatched it (its `execution_generation`): once that execution is no longer running, for example aborted and replaced by a newer `force_fresh` execution, a worker drops the item without running its step, and a step that finishes late does not complete the newer node. Both are recorded as `pool_finish_ignored`.
+
 **Within each band:**
 
 | Analytic | Fairness rule |

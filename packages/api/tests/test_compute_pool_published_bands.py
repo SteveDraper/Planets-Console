@@ -31,6 +31,7 @@ from api.compute.priority_band import ComputePriorityBand
 from api.compute.runtime import reset_orchestrators_for_tests
 from api.config import ApiConfig, set_config
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.compute_published_band_helpers import publish_queued_node_band
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.test_compute_pools import (
@@ -242,9 +243,10 @@ def test_picked_band_stays_fixed_when_the_published_band_changes(sample_turn):
 
     (in_flight,) = controller._in_flight_snapshot()
     assert in_flight.priority_band == "background"
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         scope,
-        result_wire=orchestrator.execute_pool_step(scope, picked.item.work),
+        result_wire=picked.item.work.run(scope),
         step_kind=picked.item.step_kind,
         step_index=picked.item.step_index,
     )

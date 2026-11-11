@@ -659,8 +659,9 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
     def _on_pool_item_finished(self, item: PoolWorkItem) -> None:
         """Clear the matching in-flight record after a pool worker finishes the item.
 
-        Authoritative clear for success, error, orchestrator-gone, and
-        ``complete_pool_step`` early-return (node already aborted). Matches by
+        Authoritative clear for success, error, orchestrator-gone, and an item
+        its orchestrator ignores because the execution that dispatched it is no
+        longer running (dropped at pick, or finished late). Matches by
         orchestrator id so one scope's completion cannot clear another's slot.
         """
         self._clear_in_flight_for_step(

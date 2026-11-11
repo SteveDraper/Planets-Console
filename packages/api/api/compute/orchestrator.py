@@ -23,7 +23,7 @@ from api.compute.orchestrator_state import (
 )
 from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
-from api.compute.pools import ComputeWorkerPool, PoolSubmitter, ThreadStepWork
+from api.compute.pools import ComputeWorkerPool, PoolSubmitter
 from api.compute.priority_band import ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
@@ -285,17 +285,36 @@ class ComputeOrchestrator(
                 ready_scopes=self._ready_scopes_snapshot(),
             )
 
-    def execute_pool_step(self, scope: ComputeScope, work: ThreadStepWork) -> object:
-        """Build and run a dispatched thread step for one scope on the calling thread.
+    def begin_pool_step(
+        self,
+        scope: ComputeScope,
+        execution_generation: int,
+        *,
+        step_kind: str,
+        step_index: int,
+    ) -> bool:
+        """Return whether a picked pool item may run its step.
 
-        The job wire is built from the builder inputs ``work`` snapshotted at
-        dispatch. The lock is held only to check that the node is still running.
+        A pool item is bound to the execution that dispatched it. When that
+        execution of ``scope`` is no longer running (aborted, or replaced by a
+        newer execution), the item is dropped: this records
+        ``pool_finish_ignored`` and returns False. :meth:`complete_pool_step`
+        checks the binding again, since the execution can end while the step runs.
         """
         with self._condition:
-            state = self._nodes[scope].state
-        if state != "running":
-            raise RuntimeError(f"cannot execute pool step for node in state {state!r}")
-        return work.run_step(work.build_job_wire(scope, **work.job_wire_kwargs))
+            node = self._nodes.get(scope)
+            if node is not None and node.is_running_execution(execution_generation):
+                return True
+            self._notify_pool_item_ignored(
+                scope,
+                node,
+                execution_generation,
+                step_kind=step_kind,
+                step_index=step_index,
+                had_error=False,
+            )
+        self._observers.drain_post_lock_callbacks()
+        return False
 
     def run_until_idle(self) -> None:
         """Drain ready inline work until no ready or running nodes remain."""
@@ -316,47 +335,30 @@ class ComputeOrchestrator(
     def complete_pool_step(
         self,
         scope: ComputeScope,
+        execution_generation: int,
         *,
         result_wire: object | None = None,
         error: BaseException | None = None,
         step_kind: str | None = None,
         step_index: int | None = None,
     ) -> None:
-        """Mark a pool-submitted step complete (used by worker pool integration).
+        """Apply a finished pool step to the execution that dispatched it.
 
-        Optional ``step_kind`` / ``step_index`` come from the pool work item and are
-        used when the node is no longer ``running`` (stale finish after abort/replace).
+        When execution ``execution_generation`` of ``scope`` is no longer
+        running, the finish is ignored and recorded as ``pool_finish_ignored``.
+        Optional ``step_kind`` / ``step_index`` come from the pool work item and
+        name it in that record.
         """
         with self._condition:
             node = self._nodes.get(scope)
-            if node is None:
-                self._observers.notify_lifecycle(
-                    "pool_finish_ignored",
+            if node is None or not node.is_running_execution(execution_generation):
+                self._notify_pool_item_ignored(
                     scope,
+                    node,
+                    execution_generation,
                     step_kind=step_kind,
                     step_index=step_index,
-                    detail={
-                        "reason": "missing_node",
-                        "hadError": error is not None,
-                    },
-                )
-            elif node.state != "running":
-                # Already aborted/cancelled/replaced while the pool worker was finishing.
-                # step_kind / step_index identify the finishing pool work item, which
-                # may differ from the node's current (already-moved-on) step.
-                self._observers.notify_lifecycle(
-                    "pool_finish_ignored",
-                    scope,
-                    node=node,
-                    step_kind=step_kind,
-                    step_index=step_index,
-                    detail={
-                        "reason": "node_not_running",
-                        "priorState": node.state,
-                        "priorStepIndex": node.step_index,
-                        "priorProfileStepIndex": node.profile_step_index,
-                        "hadError": error is not None,
-                    },
+                    had_error=error is not None,
                 )
             else:
                 finished_step_kind = self._current_step_spec(
@@ -383,6 +385,43 @@ class ComputeOrchestrator(
                     )
                     self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
+
+    def _notify_pool_item_ignored(
+        self,
+        scope: ComputeScope,
+        node: ComputeNodeRun | None,
+        execution_generation: int,
+        *,
+        step_kind: str | None,
+        step_index: int | None,
+        had_error: bool,
+    ) -> None:
+        """Record a pool item left unapplied because its execution is not running.
+
+        Caller holds the orchestrator lock. ``step_kind`` / ``step_index`` name
+        the pool item, which may differ from the node's current step.
+        """
+        if node is None:
+            detail: dict[str, object] = {"reason": "missing_node"}
+        else:
+            detail = {
+                "reason": (
+                    "node_not_running"
+                    if node.execution_generation == execution_generation
+                    else "stale_execution"
+                ),
+                "priorState": node.state,
+                "priorStepIndex": node.step_index,
+                "priorProfileStepIndex": node.profile_step_index,
+            }
+        self._observers.notify_lifecycle(
+            "pool_finish_ignored",
+            scope,
+            node=node,
+            step_kind=step_kind,
+            step_index=step_index,
+            detail={**detail, "hadError": had_error},
+        )
 
     def _nodes_for_player(
         self,

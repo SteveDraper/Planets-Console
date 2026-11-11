@@ -50,6 +50,10 @@ class ThreadStepWork:
     job_wire_kwargs: BuildStepJobWireKwargs
     run_step: RunStepFn
 
+    def run(self, scope: ComputeScope) -> object:
+        """Build the job wire from the dispatch snapshot and run the step on this thread."""
+        return self.run_step(self.build_job_wire(scope, **self.job_wire_kwargs))
+
 
 @dataclass(frozen=True)
 class RemoteStepWork:
@@ -90,11 +94,15 @@ def configured_worker_count() -> int:
 class PoolWorkItem:
     """One schedulable pool unit. Its band is read from its orchestrator at each pick.
 
-    ``backend`` is the step's declared backend; ``work`` says how the step runs.
+    The item is bound to the execution of ``scope`` that dispatched it
+    (``execution_generation``). Its orchestrator neither runs nor completes it
+    for any other execution. ``backend`` is the step's declared backend;
+    ``work`` says how the step runs.
     """
 
     orchestrator_id: int
     scope: ComputeScope
+    execution_generation: int
     step_kind: str
     backend: ComputeBackend
     step_index: int
@@ -340,6 +348,7 @@ class ComputeWorkerPool:
         item = PoolWorkItem(
             orchestrator_id=orchestrator_id,
             scope=node.scope,
+            execution_generation=node.execution_generation,
             step_kind=step.step_kind,
             backend=step.backend,
             step_index=node.step_index,
@@ -459,12 +468,17 @@ class ComputeWorkerPool:
             return self._orchestrators.get(orchestrator_id)
 
     def _execute_item(self, picked: BandedWorkItem) -> None:
-        """Run one dequeued item.
+        """Run one dequeued item, or drop it when its execution is no longer running.
+
+        The item's orchestrator first confirms that the execution which
+        dispatched the item is still running (``begin_pool_step``). A stale
+        item finishes here without running its step.
 
         ``ThreadStepWork`` runs synchronously on the pool worker. ``RemoteStepWork``
         goes to the executor for its declared backend and completes via a done
         callback, so a stuck remote future cannot pin a pool worker thread (and
-        stall the rest of the queue under freeze single-step).
+        stall the rest of the queue under freeze single-step). The done callback
+        then owns the item's finish; every other path finishes it here.
 
         Frozen processes and ``api.remap_interpreter_backend_to_thread`` remap
         ``interpreter`` to ``thread`` when the orchestrator chooses the work kind:
@@ -472,46 +486,47 @@ class ComputeWorkerPool:
         work item whose declared backend is not ``thread`` is such a remap.
         """
         item = picked.item
-        orchestrator = self._lookup_orchestrator(item.orchestrator_id)
-        if orchestrator is None:
-            self._notify_item_finished(item)
-            return
-        work = item.work
-        if isinstance(work, ThreadStepWork):
-            if item.backend != "thread":
-                self._log_backend_remap(item.backend, "thread")
-            try:
+        is_finish_owned_by_future = False
+        try:
+            orchestrator = self._lookup_orchestrator(item.orchestrator_id)
+            if orchestrator is None or not orchestrator.begin_pool_step(
+                item.scope,
+                item.execution_generation,
+                step_kind=item.step_kind,
+                step_index=item.step_index,
+            ):
+                return
+            work = item.work
+            if isinstance(work, ThreadStepWork):
+                if item.backend != "thread":
+                    self._log_backend_remap(item.backend, "thread")
                 with self._condition:
                     self._record_backend_execution_locked("thread")
-                self._complete_from_callable(
-                    item.orchestrator_id,
-                    item.scope,
-                    lambda scope: orchestrator.execute_pool_step(scope, work),
-                    step_kind=item.step_kind,
-                    step_index=item.step_index,
+                self._complete_item(item, partial(work.run, item.scope))
+                return
+            if item.backend not in {"interpreter", "process"}:
+                raise RuntimeError(
+                    f"pool step {item.step_kind!r} with backend {item.backend!r} "
+                    "has no remote executor"
                 )
-            finally:
+            with self._condition:
+                self._record_backend_execution_locked(item.backend)
+                if item.backend == "interpreter":
+                    executor = self._interpreter_executor_locked()
+                else:
+                    executor = self._process_executor_locked()
+            future = executor.submit(work.run_step, work.job_wire)
+            self._register_remote_future(picked, future)
+            future.add_done_callback(
+                lambda completed, pool_item=item: self._on_remote_future_done(
+                    pool_item,
+                    completed,
+                )
+            )
+            is_finish_owned_by_future = True
+        finally:
+            if not is_finish_owned_by_future:
                 self._notify_item_finished(item)
-            return
-        if item.backend not in {"interpreter", "process"}:
-            self._notify_item_finished(item)
-            raise RuntimeError(
-                f"pool step {item.step_kind!r} with backend {item.backend!r} has no remote executor"
-            )
-        with self._condition:
-            self._record_backend_execution_locked(item.backend)
-            if item.backend == "interpreter":
-                executor = self._interpreter_executor_locked()
-            else:
-                executor = self._process_executor_locked()
-        future = executor.submit(work.run_step, work.job_wire)
-        self._register_remote_future(picked, future)
-        future.add_done_callback(
-            lambda completed, pool_item=item: self._on_remote_future_done(
-                pool_item,
-                completed,
-            )
-        )
 
     def _log_backend_remap(
         self,
@@ -561,13 +576,7 @@ class ComputeWorkerPool:
 
     def _on_remote_future_done(self, item: PoolWorkItem, future: Future[object]) -> None:
         try:
-            self._complete_from_future(
-                item.orchestrator_id,
-                item.scope,
-                future,
-                step_kind=item.step_kind,
-                step_index=item.step_index,
-            )
+            self._complete_item(item, future.result)
         finally:
             # Unregister after complete/persist so a mid-callback snapshot can still
             # observe futureState=done while the DAG node remains running.
@@ -610,81 +619,27 @@ class ComputeWorkerPool:
         if process is not None:
             process.shutdown(wait=wait, cancel_futures=wait)
 
-    def _complete_from_callable(
-        self,
-        orchestrator_id: int,
-        scope: ComputeScope,
-        run_step: Callable[[ComputeScope], object],
-        *,
-        step_kind: str | None = None,
-        step_index: int | None = None,
-    ) -> None:
-        try:
-            result_wire = run_step(scope)
-        except BaseException as exc:
-            self._complete_pool_step_if_registered(
-                orchestrator_id,
-                scope,
-                error=exc,
-                step_kind=step_kind,
-                step_index=step_index,
-            )
-            return
-        self._complete_pool_step_if_registered(
-            orchestrator_id,
-            scope,
-            result_wire=result_wire,
-            step_kind=step_kind,
-            step_index=step_index,
-        )
+    def _complete_item(self, item: PoolWorkItem, get_result_wire: Callable[[], object]) -> None:
+        """Report the step's result wire, or the error getting it, to the item's orchestrator.
 
-    def _complete_from_future(
-        self,
-        orchestrator_id: int,
-        scope: ComputeScope,
-        future: Future[object],
-        *,
-        step_kind: str | None = None,
-        step_index: int | None = None,
-    ) -> None:
+        The orchestrator applies it only to the execution that dispatched the item.
+        """
+        result_wire: object | None = None
+        error: BaseException | None = None
         try:
-            result_wire = future.result()
+            result_wire = get_result_wire()
         except BaseException as exc:
-            self._complete_pool_step_if_registered(
-                orchestrator_id,
-                scope,
-                error=exc,
-                step_kind=step_kind,
-                step_index=step_index,
-            )
-            return
-        self._complete_pool_step_if_registered(
-            orchestrator_id,
-            scope,
-            result_wire=result_wire,
-            step_kind=step_kind,
-            step_index=step_index,
-        )
-
-    def _complete_pool_step_if_registered(
-        self,
-        orchestrator_id: int,
-        scope: ComputeScope,
-        *,
-        result_wire: object | None = None,
-        error: BaseException | None = None,
-        step_kind: str | None = None,
-        step_index: int | None = None,
-    ) -> None:
-        orchestrator = self._lookup_orchestrator(orchestrator_id)
+            error = exc
+        orchestrator = self._lookup_orchestrator(item.orchestrator_id)
         if orchestrator is None:
             return
         orchestrator.complete_pool_step(
-            scope,
+            item.scope,
+            item.execution_generation,
             result_wire=result_wire,
             error=error,
-            step_kind=step_kind,
-            step_index=step_index,
+            step_kind=item.step_kind,
+            step_index=item.step_index,
         )
 
 

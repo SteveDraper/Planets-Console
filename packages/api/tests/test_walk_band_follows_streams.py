@@ -44,6 +44,7 @@ from api.streaming.table_stream.registry_catalog import (
 )
 from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.off_mode_catch_up_helpers import FLEET_SCORES_REGISTRY, context_at_turn
@@ -135,7 +136,9 @@ class _Walk:
 
     def complete_picked(self, scope: ComputeScope) -> None:
         """Finish a picked step with no persist, so the next hop becomes ready."""
-        self.orchestrator.complete_pool_step(scope, result_wire=StepResult(outcome="complete"))
+        complete_running_pool_step(
+            self.orchestrator, scope, result_wire=StepResult(outcome="complete")
+        )
 
 
 def _all(band: ComputePriorityBand, turns: tuple[int, ...] = WALK_TURNS) -> dict:

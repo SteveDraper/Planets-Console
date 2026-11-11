@@ -19,6 +19,7 @@ from api.compute.persistence import PersistDeferredError, PersistDependencyRecov
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
@@ -72,7 +73,8 @@ def test_force_fresh_replace_and_stale_pool_finish_appear_on_timeline(sample_tur
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert orchestrator.nodes[shared_scope].state == "running"
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
         step_kind="materialize",
@@ -86,7 +88,8 @@ def test_force_fresh_replace_and_stale_pool_finish_appear_on_timeline(sample_tur
     assert orchestrator.nodes[shared_scope].state == "running"
 
     orchestrator.abort_scope(shared_scope, ComputeScopeAbortedError("cancelled"))
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": "stale"},
         step_kind="materialize",
@@ -173,8 +176,9 @@ def test_persist_deferred_lifecycle_event_includes_related_scope(sample_turn):
     controller.on_shell_context(shell)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -218,7 +222,7 @@ def test_epoch_retry_lifecycle_event_reports_canonical_step_index(sample_turn):
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     persistence.invalidate(ctx, shared_scope)
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     wire = snapshot_to_wire(controller.snapshot(shell))
     retried = next(e for e in wire["concurrencyTimeline"] if e["kind"] == "epoch_retry")
@@ -253,7 +257,8 @@ def test_step_parked_lifecycle_event_reports_canonical_step_index(sample_turn):
     controller.on_shell_context(shell)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire=StepResult(outcome="park", park_reason="test_park"),
     )

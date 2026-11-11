@@ -72,6 +72,7 @@ from api.compute.dag import plan_compute_dag
 from api.compute.submission_open import SubmissionOpen
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import (
     enable_backfill_earlier_turns,
     export_chain_query_context,
@@ -1364,7 +1365,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         )
         assert submitted_scopes == [scope]
         result_wire = run_scores_tier_solve({"runId": run.run_id})
-        orchestrator.complete_pool_step(scope, result_wire=result_wire)
+        complete_running_pool_step(orchestrator, scope, result_wire=result_wire)
 
     assert handle.state == "complete", handle.error
     assert handle.result_wire is not None
@@ -1462,7 +1463,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
         )
         assert result_wire.outcome == "waiting_deps"
         assert result_wire.wait_recovery is None
-        orchestrator.complete_pool_step(scope, result_wire=result_wire)
+        complete_running_pool_step(orchestrator, scope, result_wire=result_wire)
 
     unregister()
     node = orchestrator.nodes[scope]

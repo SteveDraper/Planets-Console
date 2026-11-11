@@ -40,7 +40,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
-from tests.compute_pool_test_helpers import QUEUED_ONLY_STEP_WORK
+from tests.compute_pool_test_helpers import QUEUED_ONLY_STEP_WORK, complete_running_pool_step
 from tests.compute_published_band_helpers import publish_queued_node_band
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
@@ -406,7 +406,8 @@ def test_pool_persist_failure_under_freeze_matches_ghost_running_fingerprint(sam
     assert orchestrator.nodes[scope].state == "running"
 
     # Simulate pool worker finish: step succeeds, then deferred persist raises.
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         scope,
         result_wire=StepResult(outcome="persist", payload={"result": "tier"}),
     )
@@ -515,7 +516,8 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
 
     def complete_on_worker() -> None:
         try:
-            orchestrator.complete_pool_step(
+            complete_running_pool_step(
+                orchestrator,
                 scope,
                 result_wire=StepResult(outcome="persist", payload={"result": "tier"}),
             )
@@ -638,6 +640,7 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
             analytic_id="scores",
             scope_key_spec=compute_registry["scores"].scope_key_spec,
         ),
+        execution_generation=0,
         step_kind="materialize",
         backend="thread",
         step_index=0,
@@ -786,6 +789,7 @@ def test_single_step_prefers_held_pool_item_over_ready_dispatch(sample_turn):
     held_item = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=held_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="thread",
         step_index=0,
@@ -856,6 +860,7 @@ def test_single_step_prefers_interactive_ready_over_background_held(sample_turn)
     held_item = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=held_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="thread",
         step_index=0,
@@ -1094,6 +1099,7 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
     other_item = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=other_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="thread",
         step_index=0,
@@ -1102,6 +1108,7 @@ def test_single_step_prefers_focus_held_over_non_focus_held(sample_turn):
     focus_item = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=focus_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="thread",
         step_index=0,
@@ -1161,6 +1168,7 @@ def test_single_step_dequeue_selects_by_priority_without_burning_grant_on_filter
     high_item = PoolWorkItem(
         orchestrator_id=low_item.orchestrator_id,
         scope=high_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="inline",
         step_index=0,
@@ -1207,6 +1215,7 @@ def test_single_step_does_not_release_non_focus_held_when_focus_has_ready(
     focus_item = PoolWorkItem(
         orchestrator_id=frozen_item.orchestrator_id,
         scope=focus_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="inline",
         step_index=0,
@@ -1244,6 +1253,7 @@ def test_single_step_grant_releases_only_one_item_under_concurrent_dequeue(
     second_item = PoolWorkItem(
         orchestrator_id=first_item.orchestrator_id,
         scope=second_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="inline",
         step_index=0,
@@ -1341,6 +1351,7 @@ def _pool_held_item_fixture(sample_turn, *, worker_count: int = 0):
     item = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="inline",
         step_index=0,
@@ -1489,6 +1500,7 @@ def test_in_flight_clear_is_scoped_to_orchestrator_id(sample_turn):
     item_b = PoolWorkItem(
         orchestrator_id=item_a.orchestrator_id + 1,
         scope=item_a.scope,
+        execution_generation=0,
         step_kind=item_a.step_kind,
         backend=item_a.backend,
         step_index=item_a.step_index,
@@ -1566,6 +1578,7 @@ def test_orphan_in_flight_purged_on_lifecycle_reconcile(sample_turn):
             turn=item.scope.turn,
             player_id=(item.scope.player_id or 0) + 1,
         ),
+        execution_generation=0,
         step_kind=item.step_kind,
         backend=item.backend,
         step_index=item.step_index,
@@ -1654,6 +1667,7 @@ def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
     other_item = PoolWorkItem(
         orchestrator_id=item.orchestrator_id,
         scope=other_scope,
+        execution_generation=0,
         step_kind=item.step_kind,
         backend=item.backend,
         step_index=item.step_index,
@@ -2248,6 +2262,7 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
     in_item = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="thread",
         step_index=0,
@@ -2258,6 +2273,7 @@ def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):
         out_item = PoolWorkItem(
             orchestrator_id=registration_id,
             scope=out_of_scope,
+            execution_generation=0,
             step_kind="materialize",
             backend="thread",
             step_index=0,
@@ -2373,6 +2389,7 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
     non_focus_held = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=other_ancestor_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="thread",
         step_index=0,
@@ -2381,6 +2398,7 @@ def test_operator_shell_allowlist_and_history_cover_ancestor_turn_scopes(sample_
     focus_held = PoolWorkItem(
         orchestrator_id=registration_id,
         scope=ancestor_scope,
+        execution_generation=0,
         step_kind="materialize",
         backend="thread",
         step_index=0,

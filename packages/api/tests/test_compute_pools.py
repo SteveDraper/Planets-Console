@@ -33,9 +33,9 @@ from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
     QUEUED_ONLY_STEP_WORK,
+    ok_thread_step_work,
     run_interpreter_materialize,
     run_process_materialize,
-    unbuilt_thread_step_work,
 )
 from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
 from tests.fixtures.export_framework.harness import make_fixture_query_context
@@ -100,6 +100,7 @@ def _work_item(
     return PoolWorkItem(
         orchestrator_id=orchestrator_id,
         scope=scope,
+        execution_generation=0,
         step_kind=step_kind or ("tier1" if step_index == 0 else "tier2"),
         backend=backend,
         step_index=step_index,
@@ -811,8 +812,8 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
         def published_band(self, scope):
             return None
 
-        def execute_pool_step(self, scope, work):
-            return {"ok": True}
+        def begin_pool_step(self, *args, **kwargs):
+            return True
 
         def complete_pool_step(self, *args, **kwargs):
             return None
@@ -822,7 +823,7 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
         pool.set_on_item_finished(on_finished)
         orch_id = pool.register(OkOrch())  # type: ignore[arg-type]
         scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
-        work = unbuilt_thread_step_work(make_fixture_query_context(sample_turn))
+        work = ok_thread_step_work(make_fixture_query_context(sample_turn))
         for step_index in (0, 1):
             pool.enqueue_for_tests(
                 _work_item(scope=scope, orchestrator_id=orch_id, step_index=step_index, work=work)

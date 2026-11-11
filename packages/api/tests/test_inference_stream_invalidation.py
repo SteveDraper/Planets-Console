@@ -40,6 +40,7 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.scores_exports_helpers import minimal_stream_query_context
 from tests.scores_row_lifecycle_test_helpers import _patch_scores_dag_without_fleet_deps
 
@@ -370,7 +371,8 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     before_run_id = scheduled_rows[target_player_id].session.run_id
     scope = scheduler._root_scope_for_session(scheduled_rows[target_player_id].session)
 
-    binding.orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        binding.orchestrator,
         scope,
         result_wire=StepResult(
             outcome="complete",
@@ -394,7 +396,8 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     assert binding.orchestrator.nodes[scope].state == "running"
     assert binding.orchestrator.metrics.pool_submissions == len(player_ids) + 1
 
-    binding.orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        binding.orchestrator,
         scope,
         result_wire=StepResult(
             outcome="complete",

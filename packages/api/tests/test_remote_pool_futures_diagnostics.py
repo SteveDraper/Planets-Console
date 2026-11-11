@@ -121,6 +121,7 @@ def test_pool_registers_remote_future_on_interpreter_submit_and_clears_after_don
         item = PoolWorkItem(
             orchestrator_id=orch_id,
             scope=_scope(),
+            execution_generation=0,
             step_kind="materialization_leg",
             backend="interpreter",
             step_index=0,
@@ -167,6 +168,7 @@ def test_remote_future_unregister_does_not_take_pool_condition_under_controller(
         item = PoolWorkItem(
             orchestrator_id=0,
             scope=_scope(),
+            execution_generation=0,
             step_kind="materialization_leg",
             backend="interpreter",
             step_index=0,

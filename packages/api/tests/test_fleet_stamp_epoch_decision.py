@@ -17,6 +17,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.exceptions import DiscardedWorkRefused
 from api.services.off_mode_bump import discard_bumped_player_work
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fleet_exports_helpers import first_player_id
 from tests.off_mode_catch_up_helpers import (
     context_at_turn,
@@ -188,7 +189,8 @@ def _drive_epoch_lock_refusal_during_persist(sample_turn, monkeypatch, *, shell:
         return real_merge(*args, **kwargs)
 
     monkeypatch.setattr(fleet_persist, "observation_merge_generation", move_mark_then_merge)
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         scope,
         result_wire={
             "fleetPersistLeg": "observation",

@@ -24,6 +24,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
+    complete_running_pool_step,
     run_interpreter_materialize,
     run_process_materialize,
 )
@@ -409,7 +410,7 @@ def test_attach_inflight_does_not_double_pool_workers(sample_turn):
     assert pool_submissions == [SHARED_ID]
     assert orchestrator.metrics.pool_submissions == 1
 
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     assert leader.state == "complete"
     assert waiter.state == "complete"
@@ -725,12 +726,12 @@ def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
     assert orchestrator.nodes[root_scope].state == "waiting_deps"
     assert orchestrator.nodes[shared_scope].state == "running"
 
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
     assert inline_calls == []
     assert orchestrator.nodes[branch_b_scope].state == "running"
 
-    orchestrator.complete_pool_step(branch_b_scope, result_wire={"result": BRANCH_B_ID})
-    orchestrator.complete_pool_step(branch_c_scope, result_wire={"result": BRANCH_C_ID})
+    complete_running_pool_step(orchestrator, branch_b_scope, result_wire={"result": BRANCH_B_ID})
+    complete_running_pool_step(orchestrator, branch_c_scope, result_wire={"result": BRANCH_C_ID})
     orchestrator.run_until_idle()
 
     assert inline_calls == [ROOT_ID]
@@ -764,7 +765,7 @@ def test_run_until_idle_terminates_after_ancestor_failure(sample_turn):
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     shared_failure = RuntimeError("shared step failed")
-    orchestrator.complete_pool_step(shared_scope, error=shared_failure)
+    complete_running_pool_step(orchestrator, shared_scope, error=shared_failure)
 
     orchestrator.run_until_idle()
 
@@ -855,7 +856,7 @@ def test_leader_handle_exposes_error_after_pool_failure(sample_turn):
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert handle.state == "running"
 
-    orchestrator.complete_pool_step(shared_scope, error=pool_failure)
+    complete_running_pool_step(orchestrator, shared_scope, error=pool_failure)
 
     assert handle.state == "failed"
     assert handle.error is pool_failure
@@ -1001,7 +1002,7 @@ def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, back
     assert orchestrator.nodes[shared_scope].generation_at_submit == 0
 
     persistence.invalidate(ctx, shared_scope)
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     assert orchestrator.metrics.epoch_discards == 1
     assert orchestrator.metrics.persist_calls == 0
@@ -1010,7 +1011,7 @@ def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, back
     assert pool_submissions == [(SHARED_ID, backend), (SHARED_ID, backend)]
     assert orchestrator.nodes[shared_scope].generation_at_submit == 1
 
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     assert handle.state == "complete"
     assert orchestrator.metrics.epoch_discards == 1
@@ -1056,14 +1057,14 @@ def test_stale_epoch_during_persist_does_not_complete(sample_turn):
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert handle.state == "running"
 
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     assert handle.state == "running"
     assert orchestrator.metrics.epoch_discards == 1
     assert len(persistence.persist_calls) == 1
     assert len(pool_submissions) == 2
 
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     assert handle.state == "complete"
     assert orchestrator.metrics.epoch_discards == 1
@@ -1503,7 +1504,7 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
     assert orchestrator.nodes[branch_c_scope].state == "waiting_deps"
 
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     assert orchestrator.nodes[branch_c_scope].state == "running"
     assert orchestrator.nodes[branch_b_scope].state == "ready"
@@ -1694,7 +1695,8 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
 
     orchestrator.observers.register_step_complete_listener(on_step_complete)
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         scope,
         result_wire=StepResult(outcome="persist", payload={"result": SHARED_ID}),
     )
@@ -1768,7 +1770,8 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
     assert orchestrator.nodes[shared_scope].state == "running"
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
@@ -1779,7 +1782,8 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
         (BRANCH_B_ID, "materialize"),
     ]
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -1795,7 +1799,8 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
     ]
     assert orchestrator.metrics.epoch_discards == 1
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
@@ -1803,7 +1808,8 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
     assert orchestrator.nodes[branch_b_scope].state == "running"
     assert pool_submissions[-1] == (BRANCH_B_ID, "materialize")
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -1874,7 +1880,8 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
     )
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
@@ -1883,7 +1890,8 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
     # Simulate plan-time race: dependent ran with no ENSURE edge to the dependency.
     orchestrator.nodes[branch_b_scope].dependency_scopes = ()
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -1893,14 +1901,16 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
     assert shared_scope in orchestrator.nodes[branch_b_scope].dependency_scopes
     assert orchestrator.nodes[shared_scope].state == "running"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
     assert orchestrator.nodes[shared_scope].state == "complete"
     assert orchestrator.nodes[branch_b_scope].state == "running"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -1967,11 +1977,13 @@ def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
     )
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -1991,14 +2003,16 @@ def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
     assert orchestrator.nodes[shared_scope].state == "running"
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
     assert orchestrator.nodes[shared_scope].state == "complete"
     assert orchestrator.nodes[branch_b_scope].state == "running"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -2146,7 +2160,8 @@ def test_force_fresh_diamond_recreates_shared_abort_failed_dep_once(sample_turn)
     )
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
@@ -2154,11 +2169,13 @@ def test_force_fresh_diamond_recreates_shared_abort_failed_dep_once(sample_turn)
     orchestrator.dispatch_ready_work()
     assert orchestrator.nodes[branch_c_scope].state == "running"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_c_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_C_ID}),
     )
@@ -2245,17 +2262,20 @@ def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn)
     )
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
     orchestrator.dispatch_ready_work()
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_c_scope,
         result_wire={"result": BRANCH_C_ID},
     )
     assert orchestrator.nodes[branch_c_scope].state == "complete"
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -2276,7 +2296,8 @@ def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn)
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
     assert orchestrator.nodes[root_scope].state == "waiting_deps"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
@@ -2284,7 +2305,8 @@ def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn)
     assert orchestrator.nodes[branch_b_scope].state == "running"
     assert orchestrator.nodes[root_scope].state == "waiting_deps"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -2292,7 +2314,8 @@ def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn)
     assert orchestrator.nodes[branch_b_scope].state == "complete"
     assert orchestrator.nodes[root_scope].state == "running"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         root_scope,
         result_wire={"result": ROOT_ID},
     )
@@ -2356,11 +2379,13 @@ def test_force_fresh_waiting_deps_does_not_recreate_non_abort_failed_dep(sample_
     )
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         branch_b_scope,
         result_wire=StepResult(outcome="persist", payload={"result": BRANCH_B_ID}),
     )
@@ -2422,7 +2447,7 @@ def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_tur
     branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     view = orchestrator.diagnostics_snapshot()
     nodes_by_scope = {node.scope: node for node in view.nodes}
@@ -2460,7 +2485,9 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     is_paused = True
-    orchestrator.complete_pool_step(shared_scope, result_wire=StepResult(outcome="continue"))
+    complete_running_pool_step(
+        orchestrator, shared_scope, result_wire=StepResult(outcome="continue")
+    )
 
     assert pool_submissions == [shared_scope]
     assert orchestrator.nodes[shared_scope].state == "ready"
@@ -2607,7 +2634,7 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
 
     pause_blocks = True
     freeze_blocks_branch_b = True
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": SHARED_ID})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
 
     assert pool_submissions == [SHARED_ID]
     assert orchestrator.nodes[branch_b_scope].state == "ready"

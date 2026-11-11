@@ -203,6 +203,15 @@ class ComputeNodeRun:
         """
         return self.state in TERMINAL_NODE_STATES
 
+    def is_running_execution(self, execution_generation: int) -> bool:
+        """Whether this node is ``running`` as the execution ``execution_generation``.
+
+        A pool item is bound to the execution that dispatched it. Abort and a
+        ``force_fresh`` replace give the scope a node of a newer generation, so
+        the older item no longer matches it.
+        """
+        return self.state == "running" and self.execution_generation == execution_generation
+
     @property
     def blocks_readiness_refresh(self) -> bool:
         """Whether readiness refresh should skip this node.

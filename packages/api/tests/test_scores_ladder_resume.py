@@ -51,6 +51,7 @@ from api.compute.runtime import reset_orchestrators_for_tests
 from api.compute.wire import DependencyOutputs
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id, perspective
 from tests.submission_open_helpers import explicit_submission_open
@@ -271,13 +272,11 @@ class _ShellLadder:
             side_effect=tier_job,
         ):
             try:
-                result_wire = self.orchestrator.execute_pool_step(
-                    self.scope, self.submitted_work[-1]
-                )
+                result_wire = self.submitted_work[-1].run(self.scope)
             except Exception as exc:
-                self.orchestrator.complete_pool_step(self.scope, error=exc)
+                complete_running_pool_step(self.orchestrator, self.scope, error=exc)
                 return
-        self.orchestrator.complete_pool_step(self.scope, result_wire=result_wire)
+        complete_running_pool_step(self.orchestrator, self.scope, result_wire=result_wire)
 
     def persisted_summary(self) -> str | None:
         row = self.persistence.get_row(
