@@ -28,6 +28,7 @@ from api.compute.profile import (
 )
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
+from api.compute.step_execution_key import StepExecutionKey
 from api.compute.wire import BuildStepJobWireFn, BuildStepJobWireKwargs, RunStepFn
 from api.compute.worker_turn_cache import init_worker_turn_cache, worker_deserialize_calls
 
@@ -123,6 +124,17 @@ class PoolWorkItem:
     backend: ComputeBackend
     step_index: int
     work: PoolStepWork
+
+    @property
+    def step_key(self) -> StepExecutionKey:
+        """The step execution this item runs, as diagnostics records and matches it."""
+        return StepExecutionKey(
+            orchestrator_id=self.orchestrator_id,
+            scope=self.scope,
+            execution_generation=self.execution_generation,
+            step_kind=self.step_kind,
+            step_index=self.step_index,
+        )
 
 
 @dataclass(frozen=True)
@@ -560,12 +572,8 @@ class ComputeWorkerPool:
         backend: RemoteComputeBackend,
         future: Future[object],
     ) -> None:
-        item = picked.item
         record = remote_future_record(
-            orchestrator_id=item.orchestrator_id,
-            scope=item.scope,
-            step_kind=item.step_kind,
-            step_index=item.step_index,
+            step_key=picked.item.step_key,
             priority_band=picked.priority_band,
             backend=backend,
             future=future,

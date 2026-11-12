@@ -1459,13 +1459,10 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
     assert released is item
     assert len(controller._in_flight_snapshot()) == 1
     record = controller._in_flight_snapshot()[0]
-    assert record.scope == item.scope
+    assert record.step_key == item.step_key
     assert record.analytic_id == item.scope.analytic_id
-    assert record.step_kind == item.step_kind
-    assert record.step_index == item.step_index
     assert record.priority_band == "background"
     assert record.backend == item.backend
-    assert record.orchestrator_id == item.orchestrator_id
     assert isinstance(record.started_at, str) and record.started_at
 
     completed_node = ComputeNodeRun(
@@ -1514,7 +1511,7 @@ def test_in_flight_clear_is_scoped_to_orchestrator_id(sample_turn):
     controller._on_pool_item_finished(item_a)
     remaining = controller._in_flight_snapshot()
     assert len(remaining) == 1
-    assert remaining[0].orchestrator_id == item_b.orchestrator_id
+    assert remaining[0].step_key == item_b.step_key
 
 
 def test_in_flight_clears_when_pool_item_finishes_after_abort(sample_turn):
@@ -1683,10 +1680,10 @@ def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
     in_scope = [
         record
         for record in controller._in_flight_snapshot()
-        if record.scope.game_id == item.scope.game_id
+        if record.step_key.scope.game_id == item.scope.game_id
     ]
     assert len(in_scope) == 1
-    assert in_scope[0].orchestrator_id == item.orchestrator_id
+    assert in_scope[0].step_key == item.step_key
     assert item.scope.analytic_id in in_scope[0].scope_key
 
 

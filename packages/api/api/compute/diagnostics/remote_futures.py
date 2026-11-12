@@ -10,33 +10,33 @@ from api.compute.remote_futures import (
     classify_future_state,
     count_remote_futures_by_state,
     future_exception_type,
-    remote_future_key,
 )
 from api.compute.scope import format_compute_scope_key
+from api.compute.step_execution_key import StepExecutionKey
 
 
 def index_remote_futures_by_key(
     records: Sequence[RemotePoolFutureRecord],
-) -> dict[tuple, RemotePoolFutureRecord]:
-    """Index remote futures by execution key (first record wins on collision)."""
-    indexed: dict[tuple, RemotePoolFutureRecord] = {}
+) -> dict[StepExecutionKey, RemotePoolFutureRecord]:
+    """Index remote futures by step execution (first record wins on collision)."""
+    indexed: dict[StepExecutionKey, RemotePoolFutureRecord] = {}
     for record in records:
-        key = remote_future_key(record)
-        indexed.setdefault(key, record)
+        indexed.setdefault(record.step_key, record)
     return indexed
 
 
 def remote_future_to_wire(record: RemotePoolFutureRecord) -> dict[str, object]:
     """Return the camelCase diagnostics row for one remote future."""
     state = classify_future_state(record.future)
+    step_key = record.step_key
     row: dict[str, object] = {
-        "scopeKey": format_compute_scope_key(record.scope),
-        "analyticId": record.scope.analytic_id,
-        "stepKind": record.step_kind,
-        "stepIndex": record.step_index,
+        "scopeKey": format_compute_scope_key(step_key.scope),
+        "analyticId": step_key.scope.analytic_id,
+        "stepKind": step_key.step_kind,
+        "stepIndex": step_key.step_index,
         "priorityBand": record.priority_band,
         "backend": record.backend,
-        "orchestratorId": record.orchestrator_id,
+        "orchestratorId": step_key.orchestrator_id,
         "submittedAt": record.submitted_at,
         "futureState": state,
     }

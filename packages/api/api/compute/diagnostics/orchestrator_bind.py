@@ -8,6 +8,7 @@ step-complete, ready, inline-start, and lifecycle forwarding onto the timeline.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -18,6 +19,7 @@ from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import LifecycleEventKind, ScopeLifecycleSnapshot
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope, format_compute_scope_key
+from api.compute.step_execution_key import StepExecutionKey
 from api.config import get_config
 
 if TYPE_CHECKING:
@@ -127,17 +129,7 @@ class DiagnosticsOrchestratorBindMixin:
             self._on_scope_outcome
         )
         unregister_lifecycle = orchestrator.observers.register_lifecycle_listener(
-            lambda kind, scope, node, step_kind, step_index, detail, _orch_id=registration_id: (
-                self._on_lifecycle(
-                    kind,
-                    scope,
-                    node,
-                    step_kind,
-                    step_index,
-                    detail,
-                    orchestrator_id=_orch_id,
-                )
-            )
+            partial(self._on_lifecycle, orchestrator_id=registration_id)
         )
         with self._lock:
             for bound in self._bound_orchestrators:
@@ -189,7 +181,7 @@ class DiagnosticsOrchestratorBindMixin:
                 self._in_flight = [
                     record
                     for record in self._in_flight
-                    if record.orchestrator_id != registration_id
+                    if record.step_key.orchestrator_id != registration_id
                 ]
         if bound is None:
             return
@@ -298,16 +290,18 @@ class DiagnosticsOrchestratorBindMixin:
         *,
         orchestrator_id: int | None = None,
     ) -> None:
+        step = StepExecutionKey(
+            orchestrator_id=orchestrator_id,
+            scope=scope,
+            execution_generation=node.execution_generation,
+            step_kind=step_kind,
+            step_index=step_index,
+        )
         # Clear in-flight on pool failure immediately, then reconcile other orphans.
         # On success, leave the row until pool item finished so persist-before-complete
         # stays visible (node remains ``running`` through durable write).
         if surface == "pool" and terminal_state == "failed":
-            self._clear_in_flight_for_step(
-                scope,
-                step_kind=step_kind,
-                step_index=step_index,
-                orchestrator_id=orchestrator_id,
-            )
+            self._clear_in_flight_for_step(step)
             self._reconcile_orphan_in_flight()
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
@@ -321,13 +315,10 @@ class DiagnosticsOrchestratorBindMixin:
             backend = "inline" if surface == "inline" else step_spec.backend
         self._timeline.record_finish(
             shell,
-            scope=scope,
+            step=step,
             node=node,
-            step_kind=step_kind,
-            step_index=step_index,
             surface=surface,
             terminal_state=terminal_state,
-            orchestrator_id=orchestrator_id,
             backend=backend,
         )
 
@@ -366,16 +357,16 @@ class DiagnosticsOrchestratorBindMixin:
         step_spec = profile_step_at(scope.analytic_id, node.profile_step_index)
         # Cache-only gauges: ready listeners drain under paths that may hold the scores
         # scheduler lock (enqueue -> submit -> drain). Live orch sampling deadlocks.
-        self._timeline.record(
+        self._timeline.record_node_event(
             shell,
             kind="ready",
             scope=scope,
             orchestrator_id=orchestrator_id,
+            execution_generation=node.execution_generation,
             step_kind=step_spec.step_kind if step_spec is not None else None,
             step_index=node.step_index,
             priority_band=node.priority_band,
             backend=step_spec.backend if step_spec is not None else None,
-            sample_ready_from_orchestrators=False,
         )
 
     def _on_inline_start(
@@ -394,10 +385,13 @@ class DiagnosticsOrchestratorBindMixin:
         self._timeline.record(
             shell,
             kind="inline_start",
-            scope=scope,
-            orchestrator_id=orchestrator_id,
-            step_kind=step_kind,
-            step_index=node.step_index,
+            step=StepExecutionKey(
+                orchestrator_id=orchestrator_id,
+                scope=scope,
+                execution_generation=node.execution_generation,
+                step_kind=step_kind,
+                step_index=node.step_index,
+            ),
             priority_band=node.priority_band,
             backend="inline",
             open_execution=True,
@@ -409,6 +403,7 @@ class DiagnosticsOrchestratorBindMixin:
         kind: LifecycleEventKind,
         scope: ComputeScope,
         node: ComputeNodeRun | None,
+        execution_generation: int,
         step_kind: str | None,
         step_index: int | None,
         detail: Mapping[str, object],
@@ -419,11 +414,12 @@ class DiagnosticsOrchestratorBindMixin:
         if shell is None:
             return
         priority_band = node.priority_band if node is not None else None
-        self._timeline.record_lifecycle(
+        self._timeline.record_node_event(
             shell,
             kind=kind,
             scope=scope,
             orchestrator_id=orchestrator_id,
+            execution_generation=execution_generation,
             step_kind=step_kind,
             step_index=step_index,
             priority_band=priority_band,

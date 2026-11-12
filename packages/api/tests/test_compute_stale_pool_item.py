@@ -24,6 +24,7 @@ from api.compute import (
     build_compute_registry,
 )
 from api.compute.errors import ComputeScopeAbortedError
+from api.compute.orchestrator_observers import POOL_ITEM_IGNORED_KINDS
 from api.compute.profile import ComputeBackend
 
 from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
@@ -107,14 +108,16 @@ class _StaleItemHarness:
         )
         self.finished_items: list[PoolWorkItem] = []
         self.pool.set_on_item_finished(self.finished_items.append)
-        self.ignored_reasons: list[object] = []
+        self.ignored: list[tuple[str, object]] = []
         self.orchestrator.observers.register_lifecycle_listener(self._record_ignored)
         self.remote_executor = _ManualRemoteExecutor()
         self.pool._interpreter_executor = self.remote_executor  # type: ignore[assignment]
 
-    def _record_ignored(self, kind, _scope, _node, _step_kind, _step_index, detail) -> None:
-        if kind == "pool_finish_ignored":
-            self.ignored_reasons.append(detail["reason"])
+    def _record_ignored(
+        self, kind, _scope, _node, _generation, _step_kind, _step_index, detail
+    ) -> None:
+        if kind in POOL_ITEM_IGNORED_KINDS:
+            self.ignored.append((kind, detail["reason"]))
 
     def submit(self, *, force_fresh: bool = False) -> int:
         """Submit the scope and return the generation of the execution now running."""
@@ -164,7 +167,7 @@ def test_stale_thread_item_neither_runs_nor_completes_the_newer_execution(make_h
 
     assert harness.thread_runs == []
     assert harness.node_outcome() == ("running", None)
-    assert harness.ignored_reasons == ["stale_execution"]
+    assert harness.ignored == [("pool_item_dropped", "stale_execution")]
     assert len(harness.finished_items) == 1
 
     harness.run_next_item()
@@ -183,7 +186,7 @@ def test_stale_remote_item_is_not_submitted_to_its_executor(make_harness):
 
     assert harness.remote_executor.submitted == []
     assert harness.node_outcome() == ("running", None)
-    assert harness.ignored_reasons == ["stale_execution"]
+    assert harness.ignored == [("pool_item_dropped", "stale_execution")]
     assert len(harness.finished_items) == 1
 
     harness.run_next_item()
@@ -203,7 +206,7 @@ def test_stale_remote_future_finishing_late_does_not_complete_the_newer_executio
 
     assert harness.remote_executor.submitted[0][0] == {"generation": stale_generation}
     assert harness.node_outcome() == ("running", None)
-    assert harness.ignored_reasons == ["stale_execution"]
+    assert harness.ignored == [("pool_finish_ignored", "stale_execution")]
     assert len(harness.finished_items) == 1
 
     harness.run_next_item()

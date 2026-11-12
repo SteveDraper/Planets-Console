@@ -222,18 +222,16 @@ def build_compute_diagnostics_snapshot(
     scoped_remote_futures = tuple(
         record
         for record in remote_futures
-        if _scope_in_shell(record.scope, shell=shell, ancestor_turns=ancestor_turns)
+        if _scope_in_shell(record.step_key.scope, shell=shell, ancestor_turns=ancestor_turns)
     )
     futures_by_key = index_remote_futures_by_key(scoped_remote_futures)
 
     in_flight_rows: list[dict[str, Any]] = []
     for record in in_flight:
-        if not _scope_in_shell(record.scope, shell=shell, ancestor_turns=ancestor_turns):
+        if not _scope_in_shell(record.step_key.scope, shell=shell, ancestor_turns=ancestor_turns):
             continue
         row = in_flight_to_wire(record)
-        matched = futures_by_key.get(
-            (record.orchestrator_id, record.scope, record.step_kind, record.step_index)
-        )
+        matched = futures_by_key.get(record.step_key)
         if matched is None:
             row["futureState"] = None
         else:

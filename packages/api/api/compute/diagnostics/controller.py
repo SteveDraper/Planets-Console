@@ -18,7 +18,6 @@ from api.compute.diagnostics.history import (
     ComputeCompletionHistory,
 )
 from api.compute.diagnostics.in_flight import (
-    InFlightExecutionKey,
     InFlightPoolExecution,
     clear_in_flight_for_step,
     filter_live_in_flight,
@@ -49,6 +48,7 @@ from api.compute.pools import (
 )
 from api.compute.registry import COMPUTE_REGISTRY
 from api.compute.scope import ComputeScope
+from api.compute.step_execution_key import StepExecutionKey
 from api.config import get_config
 
 if TYPE_CHECKING:
@@ -371,9 +371,9 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         with self._lock:
             return tuple(self._in_flight)
 
-    def _running_in_flight_keys(self) -> set[InFlightExecutionKey]:
-        """Return keys for bound orchestrator nodes currently in ``running`` state."""
-        running_keys: set[InFlightExecutionKey] = set()
+    def _running_in_flight_keys(self) -> set[StepExecutionKey]:
+        """Return step keys for bound orchestrator nodes currently in ``running`` state."""
+        running_keys: set[StepExecutionKey] = set()
 
         def step_kind_for_node(node: OrchestratorNodeSnapshot) -> str | None:
             return registration_step_kind(node.scope.analytic_id, node.profile_step_index)
@@ -596,10 +596,7 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         self._timeline.record(
             shell,
             kind="start",
-            scope=item.scope,
-            orchestrator_id=item.orchestrator_id,
-            step_kind=item.step_kind,
-            step_index=item.step_index,
+            step=item.step_key,
             priority_band=picked.priority_band,
             backend=item.backend,
             open_execution=True,
@@ -615,46 +612,26 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         self._timeline.record(
             shell,
             kind="enqueue",
-            scope=item.scope,
-            orchestrator_id=item.orchestrator_id,
-            step_kind=item.step_kind,
-            step_index=item.step_index,
+            step=item.step_key,
             priority_band=enqueued.priority_band,
             backend=item.backend,
             global_queue_depth=queue_depth,
         )
 
     def _on_pool_item_finished(self, item: PoolWorkItem) -> None:
-        """Clear the matching in-flight record after a pool worker finishes the item.
+        """Clear the item's in-flight record after a pool worker finishes the item.
 
         Authoritative clear for success, error, orchestrator-gone, and an item
         its orchestrator ignores because the execution that dispatched it is no
-        longer running (dropped at pick, or finished late). Matches by
-        orchestrator id so one scope's completion cannot clear another's slot.
+        longer running (dropped at pick, or finished late). Matches the item's
+        step key, so neither another orchestrator's step nor a newer execution
+        of the same scope loses its row.
         """
-        self._clear_in_flight_for_step(
-            item.scope,
-            step_kind=item.step_kind,
-            step_index=item.step_index,
-            orchestrator_id=item.orchestrator_id,
-        )
+        self._clear_in_flight_for_step(item.step_key)
 
-    def _clear_in_flight_for_step(
-        self,
-        scope: ComputeScope,
-        *,
-        step_kind: str,
-        step_index: int,
-        orchestrator_id: int | None,
-    ) -> None:
+    def _clear_in_flight_for_step(self, step: StepExecutionKey) -> None:
         with self._lock:
-            clear_in_flight_for_step(
-                self._in_flight,
-                scope,
-                step_kind=step_kind,
-                step_index=step_index,
-                orchestrator_id=orchestrator_id,
-            )
+            clear_in_flight_for_step(self._in_flight, step)
 
 
 def get_compute_diagnostics_controller() -> ComputeDiagnosticsController:

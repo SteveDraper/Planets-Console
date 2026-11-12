@@ -20,6 +20,7 @@ from api.compute.remote_futures import (
     remote_future_record,
 )
 from api.compute.scope import ComputeScope
+from api.compute.step_execution_key import StepExecutionKey
 from api.compute.wire import StepResult
 
 
@@ -61,24 +62,25 @@ def test_snapshot_joins_remote_future_state_onto_in_flight():
     shell = ShellContextKey(game_id=scope.game_id, perspective=scope.perspective, turn=scope.turn)
     future: Future[object] = Future()
     future.set_result({"ok": True})
-    remote = remote_future_record(
+    step_key = StepExecutionKey(
         orchestrator_id=1,
         scope=scope,
+        execution_generation=1,
         step_kind="materialization_leg",
         step_index=0,
+    )
+    remote = remote_future_record(
+        step_key=step_key,
         priority_band="stream_attached",
         backend="interpreter",
         future=future,
     )
     in_flight = InFlightPoolExecution(
-        scope=scope,
+        step_key=step_key,
         scope_key="fleet@g628580@p11@t5@pl3",
         analytic_id="fleet",
-        step_kind="materialization_leg",
-        step_index=0,
         priority_band="stream_attached",
         backend="interpreter",
-        orchestrator_id=1,
         started_at="2026-07-13T00:00:00+00:00",
     )
     snapshot = build_compute_diagnostics_snapshot(

@@ -10,6 +10,8 @@ from typing import Literal
 
 from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.priority_band import ComputePriorityBand
+from api.compute.scope import format_compute_scope_key
+from api.compute.step_execution_key import StepExecutionKey
 
 DEFAULT_TIMELINE_CAPACITY = 5000
 
@@ -56,16 +58,11 @@ class ComputeConcurrencyEvent:
     detail: dict[str, object] | None = None
 
 
-def format_execution_key(
-    *,
-    orchestrator_id: int | None,
-    scope_key: str,
-    step_kind: str,
-    step_index: int,
-) -> str:
-    """Return a stable execution key for start/complete duration pairing."""
-    orch = "none" if orchestrator_id is None else str(orchestrator_id)
-    return f"{orch}|{scope_key}|{step_kind}|{step_index}"
+def format_execution_key(step: StepExecutionKey) -> str:
+    """Return the wire label naming ``step`` on every timeline event about it."""
+    orch = "none" if step.orchestrator_id is None else str(step.orchestrator_id)
+    scope_key = format_compute_scope_key(step.scope)
+    return f"{orch}|{scope_key}|g{step.execution_generation}|{step.step_kind}|{step.step_index}"
 
 
 class ComputeConcurrencyTimeline:
@@ -119,12 +116,12 @@ class OpenExecutionTracker:
     """Process-local map of open start events for duration pairing."""
 
     def __init__(self) -> None:
-        self._open: dict[str, OpenExecution] = {}
+        self._open: dict[StepExecutionKey, OpenExecution] = {}
         self._lock = threading.Lock()
 
     def open(
         self,
-        execution_key: str,
+        step: StepExecutionKey,
         *,
         backend: str | None,
         priority_band: ComputePriorityBand,
@@ -132,17 +129,17 @@ class OpenExecutionTracker:
     ) -> datetime:
         started = started_at if started_at is not None else datetime.now(UTC)
         with self._lock:
-            self._open[execution_key] = OpenExecution(
+            self._open[step] = OpenExecution(
                 started_at=started,
                 backend=backend,
                 priority_band=priority_band,
             )
         return started
 
-    def close(self, execution_key: str) -> ClosedExecution | None:
+    def close(self, step: StepExecutionKey) -> ClosedExecution | None:
         """Return the closed execution, or None when no matching start was recorded."""
         with self._lock:
-            opened = self._open.pop(execution_key, None)
+            opened = self._open.pop(step, None)
         if opened is None:
             return None
         return ClosedExecution(

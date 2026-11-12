@@ -10,6 +10,7 @@ stale item is still dropped when a worker picks it.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import pytest
@@ -26,6 +27,7 @@ from api.compute.diagnostics import (
     ShellContextKey,
     get_compute_diagnostics_controller,
     reset_compute_diagnostics_for_tests,
+    snapshot_to_wire,
 )
 from api.compute.diagnostics.controller import ComputeDiagnosticsController
 from api.compute.diagnostics.single_step_preview import preview_from_held_pool_item
@@ -36,6 +38,10 @@ from api.config import ApiConfig, set_config
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.test_compute_pools import _POOL_EXPORT_REGISTRY, _scope_for_player
 from tests.test_compute_stale_pool_item import _generation_echo_registration
+
+# How long the newer item runs before the stale item is picked, so a duration
+# measured from the stale item's start is visibly shorter.
+_FRESH_HEAD_START_SECONDS = 0.05
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +141,43 @@ def test_pin_for_the_newer_execution_is_not_used_up_by_a_stale_item(sample_turn)
 
     assert aborted.thread_runs == [fresh_generation]
     assert orchestrator.nodes[aborted.scope].state == "complete"
+
+
+def test_stale_item_dropped_after_the_newer_started_leaves_the_newer_records(sample_turn):
+    aborted = _aborted_with_held_item(sample_turn)
+    pool, controller = aborted.pool, aborted.controller
+    aborted.submit_force_fresh()
+    stale_held, fresh_held = pool.snapshot_work_queue()
+    aborted.focus()
+    with controller._lock:
+        controller._single_step.arm_from_preview(
+            aborted.shell, preview_from_held_pool_item(fresh_held)
+        )
+    fresh_picked = pool.take_next_item_for_tests()
+    assert fresh_picked is not None and fresh_picked.item is fresh_held.item
+    time.sleep(_FRESH_HEAD_START_SECONDS)
+    controller.set_freeze_armed(aborted.shell, freeze_armed=False)
+    stale_picked = pool.take_next_item_for_tests()
+    assert stale_picked is not None and stale_picked.item is stale_held.item
+
+    pool._execute_item(stale_picked)
+
+    in_flight = controller._in_flight_snapshot()
+    assert [row.step_key for row in in_flight] == [fresh_held.item.step_key]
+
+    pool._execute_item(fresh_picked)
+
+    timeline = snapshot_to_wire(controller.snapshot(aborted.shell))["concurrencyTimeline"]
+    fresh_start, stale_start = (event for event in timeline if event["kind"] == "start")
+    (stale_dropped,) = (event for event in timeline if event["kind"] == "pool_item_dropped")
+    (fresh_complete,) = (event for event in timeline if event["kind"] == "complete")
+    assert not any(event["kind"] == "pool_finish_ignored" for event in timeline)
+    assert stale_dropped["executionKey"] == stale_start["executionKey"]
+    assert fresh_complete["executionKey"] == fresh_start["executionKey"]
+    assert fresh_start["executionKey"] != stale_start["executionKey"]
+    assert fresh_complete["priorityBand"] == fresh_picked.priority_band
+    assert fresh_complete["durationMs"] >= _FRESH_HEAD_START_SECONDS * 1000.0
+    assert controller._timeline._open_executions.close(stale_picked.item.step_key) is None
 
 
 def test_preview_offers_the_newer_held_item_and_one_step_completes_it(sample_turn):

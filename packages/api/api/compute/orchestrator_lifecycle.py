@@ -36,6 +36,7 @@ class OrchestratorLifecycleMixin:
         self._observers.notify_lifecycle(
             kind,
             node.scope,
+            execution_generation=node.execution_generation,
             node=node,
             step_index=node.step_index,
             detail={
@@ -70,6 +71,7 @@ class OrchestratorLifecycleMixin:
         self._observers.notify_lifecycle(
             "epoch_retry",
             node.scope,
+            execution_generation=node.execution_generation,
             node=node,
             step_index=prior_step_index,
             detail={
@@ -141,6 +143,7 @@ class OrchestratorLifecycleMixin:
             self._observers.notify_lifecycle(
                 "persist_deferred",
                 node.scope,
+                execution_generation=node.execution_generation,
                 node=node,
                 step_index=prior_step_index,
                 detail={
@@ -426,6 +429,7 @@ class OrchestratorLifecycleMixin:
         self._observers.notify_lifecycle(
             "step_parked",
             node.scope,
+            execution_generation=node.execution_generation,
             node=node,
             step_index=prior_step_index,
             detail={

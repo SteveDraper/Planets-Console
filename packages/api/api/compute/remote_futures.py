@@ -10,23 +10,21 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from api.compute.profile import ComputeBackend
-from api.compute.scope import ComputeScope
+from api.compute.step_execution_key import StepExecutionKey
 
 ComputePriorityBand = Literal["stream_attached", "interactive_ensure", "background"]
 RemoteFutureState = Literal["pending", "running", "done", "cancelled"]
 
-# Matches in-flight / DAG running identity (orchestrator_id, scope, step_kind, step_index).
-RemoteFutureKey = tuple[int, ComputeScope, str, int]
-
 
 @dataclass(frozen=True)
 class RemotePoolFutureRecord:
-    """One interpreter/process future still tracked by the worker pool."""
+    """One interpreter/process future still tracked by the worker pool.
 
-    orchestrator_id: int
-    scope: ComputeScope
-    step_kind: str
-    step_index: int
+    ``step_key`` is the step execution the future runs, which joins it to that
+    execution's in-flight row.
+    """
+
+    step_key: StepExecutionKey
     priority_band: ComputePriorityBand
     backend: ComputeBackend
     future: Future[object]
@@ -35,30 +33,19 @@ class RemotePoolFutureRecord:
 
 def remote_future_record(
     *,
-    orchestrator_id: int,
-    scope: ComputeScope,
-    step_kind: str,
-    step_index: int,
+    step_key: StepExecutionKey,
     priority_band: ComputePriorityBand,
     backend: ComputeBackend,
     future: Future[object],
 ) -> RemotePoolFutureRecord:
     """Build a remote-future probe at executor submit time."""
     return RemotePoolFutureRecord(
-        orchestrator_id=orchestrator_id,
-        scope=scope,
-        step_kind=step_kind,
-        step_index=step_index,
+        step_key=step_key,
         priority_band=priority_band,
         backend=backend,
         future=future,
         submitted_at=datetime.now(UTC).isoformat(),
     )
-
-
-def remote_future_key(record: RemotePoolFutureRecord) -> RemoteFutureKey:
-    """Return the identity key used to join remote futures to in-flight rows."""
-    return (record.orchestrator_id, record.scope, record.step_kind, record.step_index)
 
 
 def classify_future_state(future: Future[object]) -> RemoteFutureState:

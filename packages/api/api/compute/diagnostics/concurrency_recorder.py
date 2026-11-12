@@ -22,9 +22,11 @@ from api.compute.diagnostics.timeline import (
     format_execution_key,
     make_concurrency_event,
 )
+from api.compute.orchestrator_observers import POOL_ITEM_IGNORED_KINDS
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.priority_band import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
+from api.compute.step_execution_key import StepExecutionKey
 
 
 class ConcurrencyTimelineRecorder:
@@ -38,7 +40,8 @@ class ConcurrencyTimelineRecorder:
     Lock order: this recorder's lock must never be held while acquiring a callback
     that takes the controller lock *after* the controller already holds its lock
     and is calling into the recorder. Callers must release the controller lock
-    before ``record`` / ``record_finish`` (pool dequeue already does this).
+    before ``record`` / ``record_finish`` / ``record_node_event`` (pool dequeue
+    already does this).
     """
 
     def __init__(
@@ -172,27 +175,17 @@ class ConcurrencyTimelineRecorder:
         shell: ShellContextKey,
         *,
         kind: TimelineEventKind,
-        scope: ComputeScope,
-        orchestrator_id: int | None,
-        step_kind: str | None,
-        step_index: int,
+        step: StepExecutionKey,
         priority_band: ComputePriorityBand,
         backend: str | None = None,
         open_execution: bool = False,
         global_queue_depth: int | None = None,
         sample_ready_from_orchestrators: bool = False,
     ) -> None:
-        """Append one lifecycle timeline event (ready / enqueue / start / inline_start)."""
-        scope_key = format_compute_scope_key(scope)
-        execution_key = format_execution_key(
-            orchestrator_id=orchestrator_id,
-            scope_key=scope_key,
-            step_kind=step_kind or "",
-            step_index=step_index,
-        )
+        """Append one event for a known step execution (enqueue / start / inline_start)."""
         if open_execution:
             self._open_executions.open(
-                execution_key,
+                step,
                 backend=backend,
                 priority_band=priority_band,
             )
@@ -204,11 +197,10 @@ class ConcurrencyTimelineRecorder:
         self._append(
             shell,
             kind=kind,
-            scope_key=scope_key,
-            execution_key=execution_key,
+            step=step,
             gauges=gauges,
-            step_kind=step_kind,
-            step_index=step_index,
+            step_kind=step.step_kind,
+            step_index=step.step_index,
             priority_band=priority_band,
             backend=backend,
         )
@@ -217,31 +209,22 @@ class ConcurrencyTimelineRecorder:
         self,
         shell: ShellContextKey,
         *,
-        scope: ComputeScope,
+        step: StepExecutionKey,
         node: ComputeNodeRun,
-        step_kind: str,
-        step_index: int,
         surface: CompletionSurface,
         terminal_state: CompletionTerminalState,
-        orchestrator_id: int | None,
         backend: str | None,
         global_queue_depth: int | None = None,
     ) -> None:
         """One finish sink: timeline complete/inline_complete + completion history.
 
-        ``step_index`` must be the index of the step that finished (captured before
-        any continue that advances ``node.step_index``). Both records carry the band
-        the step started at (its picked band for a pool step); ``node.priority_band``
-        stands in only when this recorder saw no start for the step.
+        ``step.step_index`` must be the index of the step that finished (captured
+        before any continue that advances ``node.step_index``). Both records carry
+        the band the step started at (its picked band for a pool step);
+        ``node.priority_band`` stands in only when this recorder saw no start for
+        the step.
         """
-        scope_key = format_compute_scope_key(scope)
-        execution_key = format_execution_key(
-            orchestrator_id=orchestrator_id,
-            scope_key=scope_key,
-            step_kind=step_kind,
-            step_index=step_index,
-        )
-        closed = self._open_executions.close(execution_key)
+        closed = self._open_executions.close(step)
         if closed is None:
             duration_ms, started_backend, priority_band = None, None, node.priority_band
         else:
@@ -264,47 +247,55 @@ class ConcurrencyTimelineRecorder:
         self._append(
             shell,
             kind=timeline_kind,
-            scope_key=scope_key,
-            execution_key=execution_key,
+            step=step,
             gauges=gauges,
-            step_kind=step_kind,
-            step_index=step_index,
+            step_kind=step.step_kind,
+            step_index=step.step_index,
             priority_band=priority_band,
             backend=resolved_backend,
             terminal_state=terminal_state,
             duration_ms=duration_ms,
         )
         self._history_for_shell(shell).append(
-            scope_key=scope_key,
+            scope_key=format_compute_scope_key(step.scope),
             surface=surface,
             terminal_state=terminal_state,
-            step_kind=step_kind,
-            step_index=step_index,
+            step_kind=step.step_kind,
+            step_index=step.step_index,
             priority_band=priority_band,
             backend=resolved_backend,
             duration_ms=duration_ms,
         )
 
-    def record_lifecycle(
+    def record_node_event(
         self,
         shell: ShellContextKey,
         *,
         kind: TimelineEventKind,
         scope: ComputeScope,
         orchestrator_id: int | None,
+        execution_generation: int,
         step_kind: str | None,
         step_index: int | None,
-        priority_band: ComputePriorityBand | None = None,
+        priority_band: ComputePriorityBand | None,
+        backend: str | None = None,
         detail: dict[str, object] | None = None,
     ) -> None:
-        """Append a causal lifecycle event (force_fresh / abort / stale pool finish)."""
-        scope_key = format_compute_scope_key(scope)
-        execution_key = format_execution_key(
+        """Append a node event (ready, or a causal lifecycle event such as abort).
+
+        A node event may not know its step kind or index; its execution key
+        then names an empty kind and index -1. An ignored pool item's execution
+        is over, so its event also closes that item's open start.
+        """
+        step = StepExecutionKey(
             orchestrator_id=orchestrator_id,
-            scope_key=scope_key,
+            scope=scope,
+            execution_generation=execution_generation,
             step_kind=step_kind or "",
             step_index=step_index if step_index is not None else -1,
         )
+        if kind in POOL_ITEM_IGNORED_KINDS:
+            self._open_executions.close(step)
         gauges = self._occupancy_gauges(
             shell,
             sample_ready_from_orchestrators=False,
@@ -312,12 +303,12 @@ class ConcurrencyTimelineRecorder:
         self._append(
             shell,
             kind=kind,
-            scope_key=scope_key,
-            execution_key=execution_key,
+            step=step,
             gauges=gauges,
             step_kind=step_kind,
             step_index=step_index,
             priority_band=priority_band,
+            backend=backend,
             detail=detail,
         )
 
@@ -394,7 +385,7 @@ class ConcurrencyTimelineRecorder:
             1
             for record in in_flight
             if scope_in_diagnostic_scope(
-                record.scope,
+                record.step_key.scope,
                 game_id=shell.game_id,
                 perspective=shell.perspective,
                 ancestor_turns=ancestor_turns,
@@ -418,8 +409,7 @@ class ConcurrencyTimelineRecorder:
         shell: ShellContextKey,
         *,
         kind: TimelineEventKind,
-        scope_key: str,
-        execution_key: str,
+        step: StepExecutionKey,
         gauges: OccupancyGauges,
         step_kind: str | None = None,
         step_index: int | None = None,
@@ -432,8 +422,8 @@ class ConcurrencyTimelineRecorder:
         self._timeline_for_shell(shell).append(
             make_concurrency_event(
                 kind=kind,
-                scope_key=scope_key,
-                execution_key=execution_key,
+                scope_key=format_compute_scope_key(step.scope),
+                execution_key=format_execution_key(step),
                 gauges=gauges,
                 step_kind=step_kind,
                 step_index=step_index,
