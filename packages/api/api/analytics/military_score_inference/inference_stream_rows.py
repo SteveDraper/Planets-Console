@@ -24,6 +24,7 @@ from api.analytics.military_score_inference.inference_path import (
 )
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    TierLadderRegistration,
     get_inference_row_scheduler,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -113,6 +114,14 @@ def _stamp_live_complete_evidence(
 class ScheduledInferenceRow:
     player_id: int
     session: InferenceRowStreamSession
+
+
+@dataclass(frozen=True)
+class RegisteredInferenceRow:
+    """A row whose RowRun ``schedule_inference_row`` registered, and how it was registered."""
+
+    row: ScheduledInferenceRow
+    registration: TierLadderRegistration
 
 
 @dataclass(frozen=True)
@@ -223,10 +232,12 @@ def schedule_inference_row(
     stream_token: str | None = None,
     query_context: AnalyticQueryContext | None = None,
     persistence: InferenceRowPersistenceService | None = None,
-) -> ScheduledInferenceRow | None:
-    """Admit one inference row and register its orchestrator accept.
+) -> RegisteredInferenceRow:
+    """Build one inference row session and register its RowRun.
 
-    Does not submit. The caller runs ``scheduler.accept_pending_run``.
+    ``enqueue_tier_ladder`` decides stream ownership and the result carries
+    that decision. Nothing is submitted here: for a ``STREAM_BOUND`` row the
+    caller runs ``scheduler.accept_pending_run``.
     """
     observation = build_inference_observation(
         score,
@@ -263,14 +274,15 @@ def schedule_inference_row(
         segments=_segments,
         load_scoreboard_turn=load_scoreboard_turn,
     )
-    scheduler.enqueue_tier_ladder(
+    registration = scheduler.enqueue_tier_ladder(
         session,
         orchestration=orchestration,
         stream_token=stream_token,
     )
-    if stream_token is not None and not scheduler.owns_table_stream(stream_token):
-        return None
-    return ScheduledInferenceRow(player_id=player_id, session=session)
+    return RegisteredInferenceRow(
+        row=ScheduledInferenceRow(player_id=player_id, session=session),
+        registration=registration,
+    )
 
 
 def _inference_multiplex_event_to_wire_events(

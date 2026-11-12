@@ -109,8 +109,7 @@ def _schedule_player_row(
         perspective=1,
         stream_token=stream_token,
         query_context=minimal_stream_query_context(sample_turn),
-    )
-    assert scheduled is not None
+    ).row
     scheduler.accept_pending_run(scheduled.session.run_id)
     return scheduled
 

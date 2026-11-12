@@ -369,7 +369,7 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
     )
     export_scope = compute_scope_to_export_scope(scope)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    scheduled = schedule_inference_row(
+    schedule_inference_row(
         scheduler,
         score=score,
         turn=sample_turn,
@@ -377,7 +377,6 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
     )
-    assert scheduled is not None
     run = scheduler.row_run_for_player(
         scores_inference_stream_scope(export_scope),
         player_id,
@@ -448,7 +447,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
     )
     export_scope = compute_scope_to_export_scope(scope)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    scheduled = schedule_inference_row(
+    schedule_inference_row(
         scheduler,
         score=score,
         turn=sample_turn,
@@ -456,7 +455,6 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
     )
-    assert scheduled is not None
     run = scheduler.row_run_for_player(
         scores_inference_stream_scope(export_scope),
         player_id,

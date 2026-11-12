@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
-from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+from api.analytics.military_score_inference.inference_scheduler import (
+    InferenceRowScheduler,
+    TierLadderRegistration,
+)
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     InferenceStreamDomainEvent,
     WorkAccepted,
@@ -84,6 +87,12 @@ class InferenceTableStreamController(
         )
 
     def schedule_player_row(self, player_id: int) -> ScheduledInferenceRow | None:
+        """Register this player's RowRun for this stream.
+
+        None when the turn has no scoreboard row for the player, or when this
+        stream no longer owns the scope and the run was registered in the
+        background. Connect reports either as ``schedule_failed``.
+        """
         score = next((row for row in self.turn.scores if row.ownerid == player_id), None)
         if score is None:
             return None
@@ -97,7 +106,7 @@ class InferenceTableStreamController(
             if self.resolve_fleet_torp_resolution_for_player is not None
             else PriorTurnFleetTorpResolution(overlay=None, input_status="unavailable")
         )
-        return schedule_inference_row(
+        registered = schedule_inference_row(
             self.scheduler,
             score=score,
             turn=self.turn,
@@ -115,6 +124,9 @@ class InferenceTableStreamController(
             query_context=self.query_context,
             persistence=self.persistence,
         )
+        if registered.registration is TierLadderRegistration.BACKGROUND:
+            return None
+        return registered.row
 
     def _deferred_schedule_dispatch(
         self,

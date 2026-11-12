@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import replace
+from enum import Enum
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
@@ -52,12 +53,32 @@ from api.streaming.table_stream.scope_guard import TableStreamScopeGuard
 
 __all__ = [
     "InferenceRowScheduler",
+    "TierLadderRegistration",
     "create_inference_row_scheduler",
     "get_inference_row_scheduler",
     "reset_inference_row_scheduler_for_tests",
 ]
 
 OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
+
+
+class TierLadderRegistration(Enum):
+    """How ``enqueue_tier_ladder`` registered a RowRun. The RowRun is registered in every case."""
+
+    # The scope's table stream owns the run: a stream binding exists and an
+    # accept is pending. The caller submits it with ``accept_pending_run``.
+    STREAM_BOUND = "stream_bound"
+    # No table stream owns the run: there was no stream token and no active
+    # stream, or the token no longer owns the scope. A deferred scores node for
+    # the scope is woken, and the run is never accepted by a stream.
+    BACKGROUND = "background"
+    # The owning stream is globally paused: a held submission is queued, and
+    # ``resume_globally`` submits it.
+    HELD = "held"
+    # The scheduler was built with ``defer_orchestrator_submit`` (tests and
+    # diagnostics): the run is registered and nothing is bound, accepted, held
+    # or woken, so stream ownership is not decided.
+    SUBMIT_DEFERRED = "submit_deferred"
 
 
 class InferenceRowScheduler(
@@ -391,22 +412,19 @@ class InferenceRowScheduler(
         *,
         orchestration: InferenceStreamOrchestration | None = None,
         stream_token: str | None = None,
-    ) -> None:
-        """Register one tier ladder and, when a stream can accept it, a pending accept.
+    ) -> TierLadderRegistration:
+        """Register one tier ladder RowRun and decide, once, which stream owns it.
 
-        Background ensure with no stream token wakes a parked scores node here.
-        A live stream registers the accept and returns; the caller runs
-        ``accept_pending_run``. Global pause stores a held submission instead.
-        ``_defer_orchestrator_submit`` registers the row and does not accept.
+        The RowRun is always registered. Under ``self._lock`` the owning stream
+        is ``stream_token`` when it still owns the scope, or the active stream
+        when no token is given. With an owner the run is ``STREAM_BOUND`` (the
+        caller runs ``accept_pending_run``) or ``HELD`` while globally paused.
+        With no owner, including a token that lost the scope to another stream,
+        the run is ``BACKGROUND`` and the scope's deferred scores node is woken
+        after the lock. A submit-deferred scheduler returns ``SUBMIT_DEFERRED``
+        after registering.
         """
-        wake_deferred_scope: ComputeScope | None = None
         with self._lock:
-            resolved_token = (
-                stream_token
-                if stream_token is not None
-                else self._scope_guard.active_table_stream_token
-            )
-
             row_run = RowRun(session)
             from api.analytics.scores.tier_row_run_registry import register_row_run
 
@@ -415,25 +433,17 @@ class InferenceRowScheduler(
             root_scope = self._root_scope_for_session(session)
             self._runs[session.run_id] = root_scope
             if self._defer_orchestrator_submit:
-                return
-            if resolved_token is None:
-                # Background ensure / adopt registered a RowRun with no stream submit.
-                # Soft-parked scores nodes must still get an explicit force_fresh wake.
-                wake_deferred_scope = root_scope
-            elif self._scope_guard.active_table_stream_token != resolved_token:
-                return
-            else:
+                return TierLadderRegistration.SUBMIT_DEFERRED
+            owning_token = self._owning_stream_token_locked(stream_token)
+            if owning_token is not None:
                 # Create the stream binding even when paused so resume can submit held
                 # work (``resume_globally`` looks up binding by stream_token).
-                binding = self._binding_for_stream_locked(
-                    resolved_token,
-                    session=session,
-                )
+                binding = self._binding_for_stream_locked(owning_token, session=session)
                 if self._globally_paused:
                     self._held_initial_submissions.append(
-                        HeldTierSubmission(stream_token=resolved_token, root_scope=root_scope)
+                        HeldTierSubmission(stream_token=owning_token, root_scope=root_scope)
                     )
-                    return
+                    return TierLadderRegistration.HELD
                 # Accept is separate so connect can paint every player before submit.
                 # Submit stays outside this lock: it drains listeners that re-enter
                 # the scheduler.
@@ -441,10 +451,24 @@ class InferenceRowScheduler(
                     session.run_id,
                     self._tier_accept(binding, root_scope, session.run_id),
                 )
-                return
+                return TierLadderRegistration.STREAM_BOUND
+        # No stream submits this run, so a soft-parked scores node needs an
+        # explicit force_fresh wake.
         self._orchestrator_attachment.ensure_registered()
-        if wake_deferred_scope is not None:
-            self._wake_deferred_scores_after_row_run_adopt(wake_deferred_scope, session)
+        self._wake_deferred_scores_after_row_run_adopt(root_scope, session)
+        return TierLadderRegistration.BACKGROUND
+
+    def _owning_stream_token_locked(self, stream_token: str | None) -> str | None:
+        """The stream that owns a new RowRun, or None. Caller holds ``self._lock``.
+
+        No token means the active stream, if any. A token owns only while it is
+        still the active stream token.
+        """
+        if stream_token is None:
+            return self._scope_guard.active_table_stream_token
+        if self._scope_guard.owns_table_stream_locked(stream_token):
+            return stream_token
+        return None
 
     def accept_pending_run(self, run_id: str) -> None:
         """Submit a run whose accept is still pending. A second call is a no-op."""

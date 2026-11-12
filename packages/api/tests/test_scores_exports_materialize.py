@@ -203,7 +203,7 @@ def test_in_progress_when_scheduler_pre_ladder(sample_turn):
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = inference_target_player_id(sample_turn)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    scheduled = schedule_inference_row(
+    schedule_inference_row(
         scheduler,
         score=score,
         turn=sample_turn,
@@ -211,7 +211,6 @@ def test_in_progress_when_scheduler_pre_ladder(sample_turn):
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
     )
-    assert scheduled is not None
     run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
     assert run is not None
     run.ladder_state = None

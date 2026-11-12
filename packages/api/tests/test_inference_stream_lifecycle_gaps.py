@@ -443,8 +443,7 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
         game_id=628580,
         perspective=1,
         stream_token=stream_token,
-    )
-    assert scheduled is not None
+    ).row
     _complete_row_via_scheduler(
         scheduler,
         scheduled.session,
