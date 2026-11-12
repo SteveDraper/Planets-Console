@@ -17,7 +17,6 @@ from api.analytics.export_types import (
 )
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.orchestrator_state import ComputeRequest
-from api.compute.pools import ComputePriorityBand
 from api.compute.scope import ComputeScope, normalize_export_scope_to_compute_scope
 
 if TYPE_CHECKING:
@@ -122,14 +121,14 @@ def ensure_export_scope_via_orchestrator(
     analytic_id: str,
     scope: ExportScope,
     *,
-    priority_band: ComputePriorityBand = "interactive_ensure",
     force_fresh: bool = False,
     timeout: float | None = ENSURE_WAIT_TIMEOUT_SEC,
 ) -> bool:
     """Bring one export scope to durable satisfaction via orchestrator submit+wait.
 
-    Submits with the caller's ``force_fresh`` (default ``False`` per F1). Returns
-    whether ``PersistencePolicy.is_satisfied`` holds after ensure.
+    Submits at ``interactive_ensure`` with the caller's ``force_fresh`` (default
+    ``False`` per F1). Returns whether ``PersistencePolicy.is_satisfied`` holds
+    after ensure.
     """
     from api.compute.runtime import get_compute_orchestrator
 
@@ -144,7 +143,7 @@ def ensure_export_scope_via_orchestrator(
         ComputeRequest(
             scope=compute_scope,
             ctx=ctx,
-            priority_band=priority_band,
+            priority_band="interactive_ensure",
             force_fresh=force_fresh,
         ),
         timeout=timeout,

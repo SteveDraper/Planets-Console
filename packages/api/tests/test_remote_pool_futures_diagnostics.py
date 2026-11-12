@@ -5,19 +5,22 @@ from __future__ import annotations
 from concurrent.futures import Future
 from unittest.mock import MagicMock
 
+import pytest
 from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.in_flight import InFlightPoolExecution
 from api.compute.diagnostics.snapshot import (
     build_compute_diagnostics_snapshot,
     snapshot_to_wire,
 )
-from api.compute.pools import ComputeWorkerPool, PoolWorkItem
+from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem, RemoteStepWork
+from api.compute.profile import REMOTE_COMPUTE_BACKENDS
 from api.compute.remote_futures import (
     classify_future_state,
     future_exception_type,
     remote_future_record,
 )
 from api.compute.scope import ComputeScope
+from api.compute.step_execution_key import StepExecutionKey
 from api.compute.wire import StepResult
 
 
@@ -59,24 +62,23 @@ def test_snapshot_joins_remote_future_state_onto_in_flight():
     shell = ShellContextKey(game_id=scope.game_id, perspective=scope.perspective, turn=scope.turn)
     future: Future[object] = Future()
     future.set_result({"ok": True})
-    remote = remote_future_record(
+    step_key = StepExecutionKey(
         orchestrator_id=1,
         scope=scope,
+        execution_generation=1,
         step_kind="materialization_leg",
         step_index=0,
+    )
+    remote = remote_future_record(
+        step_key=step_key,
         priority_band="stream_attached",
         backend="interpreter",
         future=future,
     )
     in_flight = InFlightPoolExecution(
-        scope=scope,
-        scope_key="fleet@g628580@p11@t5@pl3",
-        analytic_id="fleet",
-        step_kind="materialization_leg",
-        step_index=0,
+        step_key=step_key,
         priority_band="stream_attached",
         backend="interpreter",
-        orchestrator_id=1,
         started_at="2026-07-13T00:00:00+00:00",
     )
     snapshot = build_compute_diagnostics_snapshot(
@@ -108,32 +110,41 @@ def test_snapshot_joins_remote_future_state_onto_in_flight():
     assert wire["remotePool"]["interpreter"]["futures"][0]["futureState"] == "done"
 
 
-def test_pool_registers_remote_future_on_interpreter_submit_and_clears_after_done():
-    """Executor submit retains the Future until the done callback finishes."""
+@pytest.mark.parametrize("backend", REMOTE_COMPUTE_BACKENDS)
+def test_pool_submits_remote_work_to_its_backend_executor_and_clears_after_done(backend):
+    """The work's backend picks the executor; submit retains the Future until done."""
     pool = ComputeWorkerPool(worker_count=0)
     try:
         orch = MagicMock()
         orch_id = pool.register(orch)
         pending: Future[object] = Future()
-        executor = MagicMock()
-        executor.submit.return_value = pending
+        executors = {remote_backend: MagicMock() for remote_backend in REMOTE_COMPUTE_BACKENDS}
+        executors[backend].submit.return_value = pending
 
         item = PoolWorkItem(
             orchestrator_id=orch_id,
             scope=_scope(),
+            execution_generation=0,
             step_kind="materialization_leg",
-            backend="interpreter",
-            priority_band="background",
+            backend=backend,
             step_index=0,
-            job_wire={"x": 1},
-            run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            work=RemoteStepWork(
+                backend=backend,
+                job_wire={"x": 1},
+                run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            ),
         )
-        pool._interpreter_executor = executor  # type: ignore[assignment]
-        pool._execute_item(item)
+        pool._interpreter_executor = executors["interpreter"]  # type: ignore[assignment]
+        pool._process_executor = executors["process"]  # type: ignore[assignment]
+        pool._execute_item(BandedWorkItem(item=item, priority_band="stream_attached"))
 
+        for remote_backend, executor in executors.items():
+            assert executor.submit.called == (remote_backend == backend)
         records = pool.snapshot_remote_futures()
         assert len(records) == 1
         assert records[0].future is pending
+        assert records[0].backend == backend
+        assert records[0].priority_band == "stream_attached"
         assert classify_future_state(pending) == "pending"
         probe = pool.remote_executor_probe()
         assert probe["interpreterMaxWorkers"] == pool.worker_count
@@ -165,15 +176,22 @@ def test_remote_future_unregister_does_not_take_pool_condition_under_controller(
         item = PoolWorkItem(
             orchestrator_id=0,
             scope=_scope(),
+            execution_generation=0,
             step_kind="materialization_leg",
             backend="interpreter",
-            priority_band="background",
             step_index=0,
-            job_wire={"x": 1},
-            run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            work=RemoteStepWork(
+                backend="interpreter",
+                job_wire={"x": 1},
+                run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            ),
         )
         future: Future[object] = Future()
-        pool._register_remote_future(item, future)
+        pool._register_remote_future(
+            BandedWorkItem(item=item, priority_band="background"),
+            "interpreter",
+            future,
+        )
 
         def worker_holds_pool_then_controller() -> None:
             with pool._condition:

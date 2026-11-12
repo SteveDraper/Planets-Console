@@ -7,15 +7,18 @@ semantics stay in one place without thin wrappers on the orchestrator.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
     from api.compute.orchestrator_state import ComputeNodeRun
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -55,24 +58,33 @@ ReadyListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
 ReadyQueueChangedListener = Callable[[tuple[ComputeScope, ...]], None]
 # Fired when an inline step begins execution outside the orchestrator lock.
 InlineStartListener = Callable[[ComputeScope, "ComputeNodeRun", str], None]
-LifecycleEventKind = Literal[
-    "force_fresh_replace",
-    "force_fresh_attach",
-    "abort",
-    "epoch_retry",
-    "persist_deferred",
-    "step_parked",
-    "pool_finish_ignored",
-]
-# Causal restart / abort / stale-finish events for compute diagnostics.
-# ``step_kind`` / ``step_index`` are the canonical step identity for the event
-# (e.g. the step that was aborted, or the step a stale pool finish reported);
+# A pool item whose execution is no longer running: ``pool_item_dropped`` when
+# a worker picks it and drops it without running its step, and
+# ``pool_finish_ignored`` when its step finishes after the execution ended.
+PoolItemIgnoredKind = Literal["pool_item_dropped", "pool_finish_ignored"]
+POOL_ITEM_IGNORED_KINDS: frozenset[PoolItemIgnoredKind] = frozenset(get_args(PoolItemIgnoredKind))
+LifecycleEventKind = (
+    Literal[
+        "force_fresh_replace",
+        "force_fresh_attach",
+        "abort",
+        "epoch_retry",
+        "persist_deferred",
+        "step_parked",
+    ]
+    | PoolItemIgnoredKind
+)
+# Causal restart / abort / stale-item events for compute diagnostics.
+# ``execution_generation`` / ``step_kind`` / ``step_index`` are the canonical
+# step identity for the event (e.g. the step that was aborted, or the pool
+# item that was ignored, whose execution may be older than the node's);
 # ``detail`` carries only kind-specific auxiliary fields, never step identity.
 LifecycleListener = Callable[
     [
         LifecycleEventKind,
         ComputeScope,
         "ComputeNodeRun | None",
+        int,
         str | None,
         int | None,
         Mapping[str, Any],
@@ -329,17 +341,19 @@ class OrchestratorObservers:
         kind: LifecycleEventKind,
         scope: ComputeScope,
         *,
+        execution_generation: int,
         node: ComputeNodeRun | None = None,
         step_kind: str | None = None,
         step_index: int | None = None,
         detail: Mapping[str, Any] | None = None,
     ) -> None:
-        """Schedule causal lifecycle listeners (force_fresh / abort / stale finish).
+        """Schedule causal lifecycle listeners (force_fresh / abort / stale pool item).
 
-        ``step_kind`` / ``step_index`` are the canonical step identity for this
-        event; every call site passes them explicitly rather than burying a
-        differently-named equivalent inside ``detail``. ``detail`` is reserved
-        for kind-specific auxiliary fields (reason, prior state, and similar).
+        ``execution_generation`` / ``step_kind`` / ``step_index`` are the
+        canonical step identity for this event; every call site passes them
+        explicitly rather than burying a differently-named equivalent inside
+        ``detail``. ``detail`` is reserved for kind-specific auxiliary fields
+        (reason, prior state, and similar).
         """
         listeners = tuple(self._lifecycle_listeners)
         if not listeners:
@@ -352,15 +366,24 @@ class OrchestratorObservers:
                 kind=kind,
                 scope=scope,
                 node=node,
+                execution_generation=execution_generation,
                 step_kind=step_kind,
                 step_index=step_index,
                 payload=payload,
             ):
-                listener(kind, scope, node, step_kind, step_index, payload)
+                listener(kind, scope, node, execution_generation, step_kind, step_index, payload)
 
             self._post_lock_callbacks.append(_notify)
 
     def drain_post_lock_callbacks(self) -> None:
+        """Run queued callbacks, and any they schedule, until the queue is empty.
+
+        Each callback runs even when an earlier one raises. A failure is logged
+        with its stack trace and is not re-raised: the batch mixes callbacks
+        scheduled by other nodes and threads, so the draining thread is not
+        their owner, and a pool worker draining after its own step must keep
+        running. Persist failures are handled inside their own callback.
+        """
         while True:
             with self._condition:
                 callbacks = tuple(self._post_lock_callbacks)
@@ -368,4 +391,7 @@ class OrchestratorObservers:
             if not callbacks:
                 return
             for callback in callbacks:
-                callback()
+                try:
+                    callback()
+                except Exception:
+                    logger.exception("Post-lock callback %r failed; draining the rest", callback)

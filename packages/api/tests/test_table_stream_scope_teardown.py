@@ -25,10 +25,8 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_table_stream_controller import (
     InferenceTableStreamController,
 )
-from api.streaming.table_stream.connect import (
-    AdmissionDispatch,
-    iter_table_stream_connect_with_scope,
-)
+from api.streaming.table_stream.connect import AdmissionDispatch
+from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 

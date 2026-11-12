@@ -7,76 +7,69 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from api.compute.orchestrator import OrchestratorNodeSnapshot
-from api.compute.pools import ComputeBackend, ComputePriorityBand, PoolWorkItem
-from api.compute.scope import ComputeScope, format_compute_scope_key
-
-# (orchestrator_id, scope, step_kind, step_index) -- matches a running DAG node.
-InFlightExecutionKey = tuple[int, ComputeScope, str, int]
+from api.compute.pools import BandedWorkItem, ComputeBackend
+from api.compute.priority_band import ComputePriorityBand
+from api.compute.scope import format_compute_scope_key
+from api.compute.step_execution_key import StepExecutionKey
 
 
 @dataclass(frozen=True)
 class InFlightPoolExecution:
-    """One pool work item that has been dequeued and is not yet complete."""
+    """One pool work item that has been dequeued and is not yet complete.
 
-    scope: ComputeScope
-    scope_key: str
-    analytic_id: str
-    step_kind: str
-    step_index: int
+    ``step_key`` names the execution that dispatched the item, so a stale
+    item's row never matches the running step of a newer execution of its
+    scope. ``priority_band`` is the band the item was picked at; it does not
+    follow later band changes on its node.
+    """
+
+    step_key: StepExecutionKey
     priority_band: ComputePriorityBand
     backend: ComputeBackend
-    orchestrator_id: int
     started_at: str
 
 
-def in_flight_from_pool_item(item: PoolWorkItem) -> InFlightPoolExecution:
-    """Build an in-flight record at the dequeue boundary."""
+def in_flight_from_pool_item(picked: BandedWorkItem) -> InFlightPoolExecution:
+    """Build an in-flight record at the dequeue boundary, at the band ``picked`` was picked at."""
+    item = picked.item
     return InFlightPoolExecution(
-        scope=item.scope,
-        scope_key=format_compute_scope_key(item.scope),
-        analytic_id=item.scope.analytic_id,
-        step_kind=item.step_kind,
-        step_index=item.step_index,
-        priority_band=item.priority_band,
+        step_key=item.step_key,
+        priority_band=picked.priority_band,
         backend=item.backend,
-        orchestrator_id=item.orchestrator_id,
         started_at=datetime.now(UTC).isoformat(),
     )
 
 
 def in_flight_to_wire(record: InFlightPoolExecution) -> dict[str, object]:
     """Return the camelCase diagnostics snapshot row for one in-flight execution."""
+    step_key = record.step_key
     return {
-        "scopeKey": record.scope_key,
-        "analyticId": record.analytic_id,
-        "stepKind": record.step_kind,
-        "stepIndex": record.step_index,
+        "scopeKey": format_compute_scope_key(step_key.scope),
+        "analyticId": step_key.scope.analytic_id,
+        "stepKind": step_key.step_kind,
+        "stepIndex": step_key.step_index,
+        "executionGeneration": step_key.execution_generation,
         "priorityBand": record.priority_band,
         "backend": record.backend,
-        "orchestratorId": record.orchestrator_id,
+        "orchestratorId": step_key.orchestrator_id,
         "startedAt": record.started_at,
     }
-
-
-def in_flight_execution_key(record: InFlightPoolExecution) -> InFlightExecutionKey:
-    """Return the identity key used to match in-flight rows to running DAG nodes."""
-    return (record.orchestrator_id, record.scope, record.step_kind, record.step_index)
 
 
 def filter_live_in_flight(
     records: Sequence[InFlightPoolExecution],
     *,
-    running_keys: Iterable[InFlightExecutionKey],
+    running_keys: Iterable[StepExecutionKey],
 ) -> tuple[InFlightPoolExecution, ...]:
     """Return in-flight rows that still match a running DAG node (read-only)."""
     live_keys = frozenset(running_keys)
-    return tuple(record for record in records if in_flight_execution_key(record) in live_keys)
+    return tuple(record for record in records if record.step_key in live_keys)
 
 
 def orphan_in_flight_object_ids(
     records: Sequence[InFlightPoolExecution],
     *,
-    running_keys: Iterable[InFlightExecutionKey],
+    running_keys: Iterable[StepExecutionKey],
 ) -> set[int]:
     """Return ``id(record)`` for rows that do not match a running DAG node.
 
@@ -84,7 +77,7 @@ def orphan_in_flight_object_ids(
     in-flight rows are not swept away by a stale running-key snapshot.
     """
     live_keys = frozenset(running_keys)
-    return {id(record) for record in records if in_flight_execution_key(record) not in live_keys}
+    return {id(record) for record in records if record.step_key not in live_keys}
 
 
 def remove_in_flight_by_object_ids(
@@ -99,20 +92,11 @@ def remove_in_flight_by_object_ids(
 
 def clear_in_flight_for_step(
     records: list[InFlightPoolExecution],
-    scope: ComputeScope,
-    *,
-    step_kind: str,
-    step_index: int,
-    orchestrator_id: int | None,
+    step_key: StepExecutionKey,
 ) -> bool:
-    """Remove the first matching in-flight row. Return whether a row was removed."""
+    """Remove the row for ``step_key``. Return whether a row was removed."""
     for index, record in enumerate(records):
-        if (
-            record.scope == scope
-            and record.step_kind == step_kind
-            and record.step_index == step_index
-            and (orchestrator_id is None or record.orchestrator_id == orchestrator_id)
-        ):
+        if record.step_key == step_key:
             del records[index]
             return True
     return False
@@ -123,14 +107,22 @@ def running_in_flight_keys_for_nodes(
     orchestrator_id: int,
     nodes: Sequence[OrchestratorNodeSnapshot],
     step_kind_for_node: Callable[[OrchestratorNodeSnapshot], str | None],
-) -> set[InFlightExecutionKey]:
-    """Collect in-flight keys for ``running`` nodes on one orchestrator."""
-    keys: set[InFlightExecutionKey] = set()
+) -> set[StepExecutionKey]:
+    """Collect the step keys of ``running`` nodes on one orchestrator."""
+    keys: set[StepExecutionKey] = set()
     for node in nodes:
         if node.state != "running":
             continue
         step_kind = step_kind_for_node(node)
         if step_kind is None:
             continue
-        keys.add((orchestrator_id, node.scope, step_kind, node.step_index))
+        keys.add(
+            StepExecutionKey(
+                orchestrator_id=orchestrator_id,
+                scope=node.scope,
+                execution_generation=node.execution_generation,
+                step_kind=step_kind,
+                step_index=node.step_index,
+            )
+        )
     return keys

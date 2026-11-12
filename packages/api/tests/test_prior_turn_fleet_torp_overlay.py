@@ -363,6 +363,7 @@ def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, per
         dependency_outputs=dependency_outputs,
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
 
     assert run.session.fleet_torp_input_status == "applied"

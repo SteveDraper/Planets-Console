@@ -297,8 +297,7 @@ class InferenceInvalidationService:
 
         wake_backfill = fleet.backfill_earlier_turns_enabled(game_id)
         mark = fleet.evidence_mark(game_id, perspective, player_id)
-        # One pre-claim scan, split by analytic id. The scan takes its own
-        # locks, so it stays outside the claim.
+        # One pre-claim scan, split by analytic id.
         live_turns_by_analytic = live_turns_for_limited_recompute(
             game_id,
             perspective,

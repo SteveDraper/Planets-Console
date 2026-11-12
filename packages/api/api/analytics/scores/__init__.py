@@ -27,6 +27,7 @@ from api.analytics.scores.compute_orchestration import (
 from api.analytics.scores.inference import get_scores_row_inference as get_scores_row_inference
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.analytics.turn_roster import players_by_id as turn_players_by_id
+from api.analytics.walk_shell_watch import WALK_SHELL_STREAM_WATCH
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
@@ -165,4 +166,5 @@ REGISTRATION = TurnAnalyticRegistration(
         (SCORES_TIER_SOLVE, run_scores_tier_solve),
     ),
     open_root_plan=open_on_walk_root_plan,
+    shell_stream_watch=WALK_SHELL_STREAM_WATCH,
 )

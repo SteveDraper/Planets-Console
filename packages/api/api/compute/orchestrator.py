@@ -6,23 +6,26 @@ import threading
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_ensure import OrchestratorEnsureMixin
 from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
-from api.compute.orchestrator_observers import OrchestratorObservers
+from api.compute.orchestrator_observers import OrchestratorObservers, PoolItemIgnoredKind
 from api.compute.orchestrator_state import (
     TERMINAL_NODE_STATES,
     ComputeHandle,
     ComputeNodeRun,
     ComputeRequest,
+    NodeExecutionBinding,
     NodeState,
 )
 from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
-from api.compute.pools import ComputePriorityBand, ComputeWorkerPool, PoolSubmitter
+from api.compute.pools import ComputeWorkerPool, PoolSubmitter
+from api.compute.priority_band import ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
@@ -58,7 +61,7 @@ class OrchestratorMetrics:
 
 
 @dataclass(frozen=True)
-class OrchestratorNodeSnapshot:
+class OrchestratorNodeSnapshot(NodeExecutionBinding):
     """Immutable copy of one node's diagnostics-visible fields."""
 
     scope: ComputeScope
@@ -66,6 +69,7 @@ class OrchestratorNodeSnapshot:
     profile_step_index: int
     step_index: int
     priority_band: ComputePriorityBand
+    execution_generation: int
 
 
 @dataclass(frozen=True)
@@ -121,11 +125,15 @@ class ComputeOrchestrator(
     life of the node -- later attaches with a different bundle do not change
     what wire build, persist, and satisfaction checks see.
 
-    A waiter with a higher-priority band than the node it attaches to upgrades
-    ``node.priority_band`` in place so the next enqueue/dispatch sees the
-    higher band, unless the node has already sealed for execution (job wire
-    built inline, or handed to the pool) -- the adopt window has closed by
-    then and the waiter simply waits for the leader.
+    Bands are derived, not stored. A request raises the standing band of its
+    own scope only. Every dispatch pass starts by deriving each non-terminal
+    node's band: the highest standing band over the node and its non-terminal
+    transitive dependents, or ``stream_attached`` when a live shell stream
+    watches any of them (``priority_band.derive_priority_bands``). The pass
+    picks ready nodes by that band, FIFO within a band, and publishes the
+    derivation as an immutable ``{scope: band}`` map. The worker pool reads
+    that map through :meth:`published_band`, without the orchestrator lock,
+    each time it picks queued work. A step keeps the band it was picked at.
 
     There is no process-wide scope lease: singleflight here plus durable
     satisfaction short-circuit (``PersistencePolicy.is_satisfied``) is enough
@@ -155,6 +163,7 @@ class ComputeOrchestrator(
         self._pool_submitter = pool_submitter
         self._worker_pool = worker_pool
         self._nodes: dict[ComputeScope, ComputeNodeRun] = {}
+        self._published_bands: Mapping[ComputeScope, ComputePriorityBand] = MappingProxyType({})
         self._ready_queue: deque[ComputeScope] = deque()
         self._metrics = OrchestratorMetrics()
         self._next_execution_generation = 1
@@ -204,6 +213,15 @@ class ComputeOrchestrator(
         """Live node map for tests and diagnostics. Adapters must use peek APIs."""
         return self._nodes
 
+    def published_band(self, scope: ComputeScope) -> ComputePriorityBand | None:
+        """Return the band the last dispatch pass published for ``scope``.
+
+        Takes no lock: the map is immutable and replaced whole, so the worker
+        pool reads it while holding only its own lock. None when ``scope`` had
+        no non-terminal node at that pass.
+        """
+        return self._published_bands.get(scope)
+
     def peek_node_state(self, scope: ComputeScope) -> str | None:
         """Return ``node.state`` under the orchestrator lock, or None if absent."""
         with self._condition:
@@ -248,7 +266,11 @@ class ComputeOrchestrator(
             return self._ready_scopes_snapshot()
 
     def diagnostics_snapshot(self) -> OrchestratorDiagnosticsSnapshot:
-        """Return immutable node and ready-queue data in one critical section."""
+        """Return immutable node and ready-queue data in one critical section.
+
+        Each node's band is the last dispatch pass's derivation. The snapshot
+        writes no node state.
+        """
         with self._condition:
             nodes = tuple(
                 OrchestratorNodeSnapshot(
@@ -257,6 +279,7 @@ class ComputeOrchestrator(
                     profile_step_index=node.profile_step_index,
                     step_index=node.step_index,
                     priority_band=node.priority_band,
+                    execution_generation=node.execution_generation,
                 )
                 for node in self._nodes.values()
             )
@@ -265,29 +288,37 @@ class ComputeOrchestrator(
                 ready_scopes=self._ready_scopes_snapshot(),
             )
 
-    def execute_pool_step(self, scope: ComputeScope) -> object:
-        """Run the current pool step for one scope on the calling thread."""
+    def begin_pool_step(
+        self,
+        scope: ComputeScope,
+        execution_generation: int,
+        *,
+        step_kind: str,
+        step_index: int,
+    ) -> bool:
+        """Return whether a picked pool item may run its step.
+
+        A pool item is bound to the execution that dispatched it. When that
+        execution of ``scope`` is no longer running (aborted, or replaced by a
+        newer execution), the item is dropped: this records
+        ``pool_item_dropped`` and returns False. :meth:`complete_pool_step`
+        checks the binding again, since the execution can end while the step runs.
+        """
         with self._condition:
-            node = self._nodes[scope]
-            if node.state != "running":
-                raise RuntimeError(f"cannot execute pool step for node in state {node.state!r}")
-            registration = self._compute_registry[node.scope.analytic_id]
-            step = self._current_step_spec(node, registration)
-            dependency_outputs = self._snapshot_dependency_outputs(node)
-            run_step = registration.run_step[step.step_kind]
-            builder = registration.build_step_job_wire[step.step_kind]
-            node_scope = node.scope
-            ctx = self._ctx_for_node(node)
-            node_result_wire = node.result_wire
-            submission_open = node.submission_open
-        job_wire = builder(
-            node_scope,
-            dependency_outputs=dependency_outputs,
-            ctx=ctx,
-            node_result_wire=node_result_wire,
-            submission_open=submission_open,
-        )
-        return run_step(job_wire)
+            node = self._nodes.get(scope)
+            if node is not None and node.is_running_execution(execution_generation):
+                return True
+            self._notify_pool_item_ignored(
+                "pool_item_dropped",
+                scope,
+                node,
+                execution_generation,
+                step_kind=step_kind,
+                step_index=step_index,
+                had_error=False,
+            )
+        self._observers.drain_post_lock_callbacks()
+        return False
 
     def run_until_idle(self) -> None:
         """Drain ready inline work until no ready or running nodes remain."""
@@ -308,47 +339,31 @@ class ComputeOrchestrator(
     def complete_pool_step(
         self,
         scope: ComputeScope,
+        execution_generation: int,
         *,
         result_wire: object | None = None,
         error: BaseException | None = None,
         step_kind: str | None = None,
         step_index: int | None = None,
     ) -> None:
-        """Mark a pool-submitted step complete (used by worker pool integration).
+        """Apply a finished pool step to the execution that dispatched it.
 
-        Optional ``step_kind`` / ``step_index`` come from the pool work item and are
-        used when the node is no longer ``running`` (stale finish after abort/replace).
+        When execution ``execution_generation`` of ``scope`` is no longer
+        running, the finish is ignored and recorded as ``pool_finish_ignored``.
+        Optional ``step_kind`` / ``step_index`` come from the pool work item and
+        name it in that record.
         """
         with self._condition:
             node = self._nodes.get(scope)
-            if node is None:
-                self._observers.notify_lifecycle(
+            if node is None or not node.is_running_execution(execution_generation):
+                self._notify_pool_item_ignored(
                     "pool_finish_ignored",
                     scope,
+                    node,
+                    execution_generation,
                     step_kind=step_kind,
                     step_index=step_index,
-                    detail={
-                        "reason": "missing_node",
-                        "hadError": error is not None,
-                    },
-                )
-            elif node.state != "running":
-                # Already aborted/cancelled/replaced while the pool worker was finishing.
-                # step_kind / step_index identify the finishing pool work item, which
-                # may differ from the node's current (already-moved-on) step.
-                self._observers.notify_lifecycle(
-                    "pool_finish_ignored",
-                    scope,
-                    node=node,
-                    step_kind=step_kind,
-                    step_index=step_index,
-                    detail={
-                        "reason": "node_not_running",
-                        "priorState": node.state,
-                        "priorStepIndex": node.step_index,
-                        "priorProfileStepIndex": node.profile_step_index,
-                        "hadError": error is not None,
-                    },
+                    had_error=error is not None,
                 )
             else:
                 finished_step_kind = self._current_step_spec(
@@ -375,6 +390,46 @@ class ComputeOrchestrator(
                     )
                     self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
+
+    def _notify_pool_item_ignored(
+        self,
+        kind: PoolItemIgnoredKind,
+        scope: ComputeScope,
+        node: ComputeNodeRun | None,
+        execution_generation: int,
+        *,
+        step_kind: str | None,
+        step_index: int | None,
+        had_error: bool,
+    ) -> None:
+        """Record a pool item left unapplied because its execution is not running.
+
+        Caller holds the orchestrator lock. ``execution_generation`` /
+        ``step_kind`` / ``step_index`` name the pool item, which may differ from
+        the node's current execution and step.
+        """
+        if node is None:
+            detail: dict[str, object] = {"reason": "missing_node"}
+        else:
+            detail = {
+                "reason": (
+                    "node_not_running"
+                    if node.execution_generation == execution_generation
+                    else "stale_execution"
+                ),
+                "priorState": node.state,
+                "priorStepIndex": node.step_index,
+                "priorProfileStepIndex": node.profile_step_index,
+            }
+        self._observers.notify_lifecycle(
+            kind,
+            scope,
+            execution_generation=execution_generation,
+            node=node,
+            step_kind=step_kind,
+            step_index=step_index,
+            detail={**detail, "hadError": had_error},
+        )
 
     def _nodes_for_player(
         self,
@@ -645,6 +700,7 @@ class ComputeOrchestrator(
             self._observers.notify_lifecycle(
                 "abort",
                 scope,
+                execution_generation=node.execution_generation,
                 node=node,
                 step_kind=finished_step_kind,
                 step_index=finished_step_index,

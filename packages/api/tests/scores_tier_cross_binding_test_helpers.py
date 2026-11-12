@@ -90,14 +90,12 @@ def _set_scope_node(
     scope: ComputeScope,
     *,
     state: str,
-    priority_band: str = "background",
     **kwargs: object,
 ) -> ComputeNodeRun:
     node = ComputeNodeRun(
         scope=scope,
         dependency_scopes=(),
         state=state,
-        priority_band=priority_band,
         **kwargs,
         submission_open=SubmissionOpen(),
     )

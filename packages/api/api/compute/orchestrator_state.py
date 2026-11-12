@@ -5,13 +5,13 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import KW_ONLY, dataclass, field
-from typing import Literal
+from typing import Literal, get_args
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.errors import ComputeWaitTimeoutError
 from api.compute.orchestration_bundle import OrchestrationBundle
-from api.compute.pools import ComputePriorityBand
+from api.compute.priority_band import ComputePriorityBand, ComputeRequestBand, highest_band
 from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.compute.submission_open import SubmissionOpen
 
@@ -27,14 +27,21 @@ NodeState = Literal[
 
 TERMINAL_NODE_STATES: frozenset[NodeState] = frozenset({"complete", "failed"})
 
+_REQUEST_BANDS: tuple[ComputeRequestBand, ...] = get_args(ComputeRequestBand)
+
 
 @dataclass(frozen=True)
 class ComputeRequest:
-    """One orchestrator submission for a compute scope."""
+    """One orchestrator submission for a compute scope.
+
+    ``priority_band`` is the standing band the request raises on its own
+    scope. ``stream_attached`` is never requested: a node derives it from a
+    live shell stream watching it or a dependent.
+    """
 
     scope: ComputeScope
     step_kind: str | None = None
-    priority_band: ComputePriorityBand = "background"
+    priority_band: ComputeRequestBand = "background"
     force_fresh: bool = False
     bundle: OrchestrationBundle | None = None
     ctx: AnalyticQueryContext | None = None
@@ -42,6 +49,13 @@ class ComputeRequest:
     # A resubmitted hop passes the pair it was planned under. An explicit open
     # turn on that pair wins over the scope turn.
     submission_open: SubmissionOpen | None = None
+
+    def __post_init__(self) -> None:
+        if self.priority_band not in _REQUEST_BANDS:
+            raise ValueError(
+                f"ComputeRequest priority_band must be one of {_REQUEST_BANDS}, "
+                f"got {self.priority_band!r}"
+            )
 
     def resolved_bundle(self) -> OrchestrationBundle | None:
         """Return the caller-supplied bundle, or build one from ``ctx`` for convenience."""
@@ -136,8 +150,29 @@ class ComputeHandle:
             return self
 
 
+class NodeExecutionBinding:
+    """The rule binding a pool item to the execution of its scope that dispatched it.
+
+    Shared by the live node and its diagnostics snapshot, so the worker that
+    drops a stale item and the single-step preview that skips it apply one
+    definition of stale.
+    """
+
+    state: NodeState
+    execution_generation: int
+
+    def is_running_execution(self, execution_generation: int) -> bool:
+        """Whether this node is ``running`` as the execution ``execution_generation``.
+
+        A pool item is bound to the execution that dispatched it. Abort and a
+        ``force_fresh`` replace give the scope a node of a newer generation, so
+        the older item no longer matches it.
+        """
+        return self.state == "running" and self.execution_generation == execution_generation
+
+
 @dataclass
-class ComputeNodeRun:
+class ComputeNodeRun(NodeExecutionBinding):
     """Mutable orchestrator state for one compute scope."""
 
     scope: ComputeScope
@@ -145,7 +180,13 @@ class ComputeNodeRun:
     state: NodeState = "waiting_deps"
     profile_step_index: int = 0
     step_index: int = 0
-    priority_band: ComputePriorityBand = "background"
+    # The highest band a request for this scope asked for. Dependencies keep
+    # the default and take their band from their dependents.
+    standing_band: ComputeRequestBand = "background"
+    # The band this node would be picked at now. It starts as the standing
+    # band and is then written only by each dispatch pass's derivation. A step
+    # a worker already picked keeps its picked band on its execution records.
+    priority_band: ComputePriorityBand = field(init=False)
     execution_generation: int = 0
     generation_at_submit: int | None = None
     result_wire: object | None = None
@@ -155,8 +196,6 @@ class ComputeNodeRun:
     waiters: list[ComputeHandle] = field(default_factory=list)
     # Leader-retained query context / export services.
     bundle: OrchestrationBundle | None = None
-    # Closes priority adoption once expensive work begins.
-    execution_sealed: bool = False
     # Set when in-flight work must finish without persisting or stamping.
     # The worker may finish; persist and stamp are refused, and the step is
     # not retried.
@@ -168,6 +207,13 @@ class ComputeNodeRun:
     submission_open: SubmissionOpen
     # The one-shot for this root has already been applied. Hops leave this false.
     open_turn_consumed: bool = False
+
+    def __post_init__(self) -> None:
+        self.priority_band = self.standing_band
+
+    def raise_standing_band(self, band: ComputeRequestBand) -> None:
+        """Keep the higher of the current standing band and ``band``."""
+        self.standing_band = highest_band(self.standing_band, band)
 
     @property
     def is_terminal(self) -> bool:
@@ -186,12 +232,3 @@ class ComputeNodeRun:
         ``waiting_deps`` and ``ready`` nodes need their dependencies re-checked.
         """
         return self.state in {"complete", "failed", "running", "parked"}
-
-    @property
-    def allows_priority_adopt(self) -> bool:
-        """Whether an attaching request may still upgrade this node's priority band.
-
-        Closed once the node is terminal. Callers also gate on
-        ``execution_sealed`` separately.
-        """
-        return self.state in {"waiting_deps", "parked", "ready", "running"}

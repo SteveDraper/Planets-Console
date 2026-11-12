@@ -10,6 +10,7 @@ from api.compute.diagnostics.freeze import ShellContextKey
 from api.compute.diagnostics.history import ComputeCompletionHistory
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.scope import ComputeScope
+from api.compute.step_execution_key import StepExecutionKey
 from api.compute.submission_open import SubmissionOpen
 
 
@@ -26,6 +27,16 @@ def _recorder(
         ancestor_turns=lambda _shell: frozenset({8}),
         history_for_shell=lambda _shell: ComputeCompletionHistory(capacity=16),
         active_shell=lambda: shell,
+    )
+
+
+def _step(scope: ComputeScope, step_kind: str, step_index: int) -> StepExecutionKey:
+    return StepExecutionKey(
+        orchestrator_id=1,
+        scope=scope,
+        execution_generation=0,
+        step_kind=step_kind,
+        step_index=step_index,
     )
 
 
@@ -68,13 +79,11 @@ def test_record_finish_uses_ready_cache_not_live_orchestrator_snapshot() -> None
 
     recorder.record_finish(
         shell,
-        scope=scope,
+        step=_step(scope, "tier_solve", node.step_index),
+        closed=None,
         node=node,
-        step_kind="tier_solve",
-        step_index=node.step_index,
         surface="pool",
         terminal_state="success",
-        orchestrator_id=1,
         backend="thread",
     )
 
@@ -97,14 +106,15 @@ def test_record_ready_default_does_not_sample_live_orchestrators() -> None:
         player_id=3,
     )
 
-    recorder.record(
+    recorder.record_node_event(
         shell,
         kind="ready",
         scope=scope,
         orchestrator_id=1,
+        execution_generation=0,
         step_kind="tier_solve",
         step_index=0,
-        sample_ready_from_orchestrators=False,
+        priority_band="background",
     )
 
     orchestrator.diagnostics_snapshot.assert_not_called()
@@ -132,40 +142,41 @@ def test_listener_gauges_use_last_known_global_queue_depth() -> None:
         scope=scope, dependency_scopes=(), step_index=0, submission_open=SubmissionOpen()
     )
 
-    recorder.record(
+    step = _step(scope, "materialize", 0)
+    recorder.record_node_event(
         shell,
         kind="ready",
         scope=scope,
         orchestrator_id=1,
+        execution_generation=0,
         step_kind="materialize",
         step_index=0,
+        priority_band="background",
     )
     recorder.record(
         shell,
         kind="inline_start",
-        scope=scope,
-        orchestrator_id=1,
-        step_kind="materialize",
-        step_index=0,
+        step=step,
+        priority_band="background",
     )
     recorder.record_finish(
         shell,
-        scope=scope,
+        step=step,
+        closed=recorder.close_execution(step),
         node=node,
-        step_kind="materialize",
-        step_index=0,
         surface="inline",
         terminal_state="success",
-        orchestrator_id=1,
         backend="thread",
     )
-    recorder.record_lifecycle(
+    recorder.record_node_event(
         shell,
         kind="abort",
         scope=scope,
         orchestrator_id=1,
+        execution_generation=0,
         step_kind="materialize",
         step_index=0,
+        priority_band=None,
     )
 
     events = recorder.recent(shell)
@@ -186,19 +197,19 @@ def test_explicit_global_queue_depth_updates_last_known() -> None:
     recorder.record(
         shell,
         kind="enqueue",
-        scope=scope,
-        orchestrator_id=1,
-        step_kind="materialize",
-        step_index=0,
+        step=_step(scope, "materialize", 0),
+        priority_band="background",
         global_queue_depth=3,
     )
-    recorder.record(
+    recorder.record_node_event(
         shell,
         kind="ready",
         scope=scope,
         orchestrator_id=1,
+        execution_generation=0,
         step_kind="materialize",
         step_index=0,
+        priority_band="background",
     )
 
     events = recorder.recent(shell)

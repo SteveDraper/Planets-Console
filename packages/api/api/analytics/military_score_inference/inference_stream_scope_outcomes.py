@@ -38,6 +38,18 @@ class InferenceStreamScopeOutcomesMixin:
         scope = snapshot.scope
         if not _is_scores_player_turn_scope(scope):
             return
+        if snapshot.state in {"complete", "failed"}:
+            # The node's tier ladder ends here: a DETACHED run it was resuming
+            # must not outlive it. Imported here because the registry imports
+            # this scheduler package at module load.
+            from api.analytics.scores.tier_row_run_registry import (
+                release_tier_ladder_for_scope,
+            )
+
+            release_tier_ladder_for_scope(
+                scope,
+                execution_generation=snapshot.execution_generation,
+            )
         # Intentional row-run cancel aborts in-flight DAG nodes. Do not fail (or
         # orphan-complete) the open multiplex -- reschedule will admit a replacement.
         if self._is_cancel_abort_failure(snapshot):
@@ -94,7 +106,7 @@ class InferenceStreamScopeOutcomesMixin:
 
         if snapshot.state == "failed":
             if sibling_still_active:
-                # Peer binding (e.g. stream_attached) still owns the shared RowRun.
+                # A peer binding (e.g. a table stream's) still owns the shared RowRun.
                 # Do not fail the stream or unregister -- the peer may still succeed.
                 return
             detail = (
@@ -171,7 +183,7 @@ class InferenceStreamScopeOutcomesMixin:
     def _scope_has_live_nonterminal_work(scope: ComputeScope) -> bool:
         """True when the singleton orchestrator still has non-terminal work for scope.
 
-        Background warm and stream_attached bindings share the singleton orchestrator's
+        Background warm and table-stream bindings share the singleton orchestrator's
         one DAG per scope; a still-running node means a sibling submission is in flight.
         """
         from api.compute.runtime import get_compute_orchestrator

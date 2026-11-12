@@ -52,7 +52,7 @@ _QUERY_CONTEXT_KEY = "queryContext"
 def build_homeworld_baseline_job_wire(
     scope: ComputeScope,
     *,
-    ctx: AnalyticQueryContext | None = None,
+    ctx: AnalyticQueryContext,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a job wire for baseline-only homeworld compute.
@@ -60,8 +60,6 @@ def build_homeworld_baseline_job_wire(
     Attaches ``queryContext`` for the inline step (same process; not pool-safe).
     Orchestrator dependency outputs are not an input.
     """
-    if ctx is None:
-        raise RuntimeError("homeworld baseline job wire requires AnalyticQueryContext")
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
         raise ValueError("homeworld baseline requires concrete turn")
     if scope.perspective == WILDCARD or not isinstance(scope.perspective, int):
@@ -124,7 +122,7 @@ def run_homeworld_baseline(job_wire: dict[str, Any]) -> StepResult:
 def build_homeworld_refine_job_wire(
     scope: ComputeScope,
     *,
-    ctx: AnalyticQueryContext | None = None,
+    ctx: AnalyticQueryContext,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a refine job wire from the query context.
@@ -132,8 +130,6 @@ def build_homeworld_refine_job_wire(
     Prior-turn evidence is loaded from persistence. Orchestrator dependency
     outputs are not an input.
     """
-    if ctx is None:
-        raise RuntimeError("homeworld refine job wire requires AnalyticQueryContext")
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
         raise ValueError("homeworld refine requires concrete turn")
     if scope.perspective == WILDCARD or not isinstance(scope.perspective, int):

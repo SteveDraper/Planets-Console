@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import FrozenInstanceError, dataclass, field
 from typing import TYPE_CHECKING, Generic, Protocol, TypeVar
 
 from api.streaming.table_stream.connect import AdmissionDispatch
@@ -56,12 +56,24 @@ class OnWalkStreamController(WorkAcceptedSink, Protocol):
 
 @dataclass(kw_only=True)
 class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
+    """Shared state for one stream.
+
+    ``player_ids`` is the roster the stream was opened for. It is set once at
+    construction and cannot be reassigned, so a lock-free liveness scan reads
+    the same players the stream serves.
+    """
+
     stream_token: str
     player_ids: tuple[int, ...]
     scheduled_rows: dict[int, ScheduledT] = field(default_factory=dict)
     pending_wire_events: list[dict[str, object]] = field(default_factory=list)
     stream_lock: threading.Lock = field(default_factory=threading.Lock)
     wake_multiplex: threading.Event = field(default_factory=threading.Event)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name == "player_ids" and "player_ids" in self.__dict__:
+            raise FrozenInstanceError("cannot assign to field 'player_ids'")
+        super().__setattr__(name, value)
 
     def drain_pending_wire_events(self) -> list[dict[str, object]]:
         with self.stream_lock:

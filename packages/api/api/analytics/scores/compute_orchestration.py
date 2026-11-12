@@ -26,10 +26,12 @@ from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
+    get_resumable_row_run_for_scope,
     get_row_run,
     get_row_run_for_scope,
     get_tier_callbacks,
     register_row_run,
+    stamp_tier_ladder,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
@@ -83,7 +85,7 @@ def build_scores_materialize_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext | None = None,
+    ctx: AnalyticQueryContext,
     submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
@@ -94,8 +96,6 @@ def build_scores_materialize_job_wire(
     )
 
     del dependency_outputs
-    if ctx is None:
-        raise RuntimeError("scores materialize job wire requires AnalyticQueryContext")
     export_scope = compute_scope_to_export_scope(scope)
     # Admit only -- never ensure_scope / wait. Fleet deps are already terminal on the DAG.
     admit_scores_export_work(
@@ -112,8 +112,9 @@ def build_scores_tier_solve_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext | None = None,
+    ctx: AnalyticQueryContext,
     submission_open: SubmissionOpen,
+    execution_generation: int,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
@@ -133,10 +134,12 @@ def build_scores_tier_solve_job_wire(
     must attach a ``runId`` (tier registry or successful scheduler adopt). Parking
     on ``{runId: None}`` with open evidence is forbidden -- that state has no armed
     wake publisher and hung dependents (Birds hang). Raise instead.
-    """
-    if ctx is None:
-        raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
 
+    The RowRun comes from ``get_resumable_row_run_for_scope`` first, so a
+    continuation whose stream closed mid-ladder resumes its own ``DETACHED``
+    run. The chosen run is then stamped with this node execution and the
+    scores epoch.
+    """
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
         raise ValueError("scores tier_solve requires concrete scores scope")
@@ -146,7 +149,12 @@ def build_scores_tier_solve_job_wire(
         return horwasp_skip
 
     backfill_earlier_turns = submission_open.backfill_earlier_turns
-    run = get_row_run_for_scope(scope)
+    scores_epoch = SCORES_PERSISTENCE_POLICY.invalidation_generation(ctx, scope)
+    run = get_resumable_row_run_for_scope(
+        scope,
+        execution_generation=execution_generation,
+        scores_epoch=scores_epoch,
+    )
     ensure_satisfied = True
     if run is None:
         # Materialize already admits; re-admit covers tier_solve entry submits and
@@ -172,6 +180,11 @@ def build_scores_tier_solve_job_wire(
             f"(game_id={scope.game_id}, perspective={scope.perspective}, "
             f"turn={scope.turn}, player_id={scope.player_id})"
         )
+    stamp_tier_ladder(
+        run,
+        execution_generation=execution_generation,
+        scores_epoch=scores_epoch,
+    )
 
     turn = ctx.load_turn(export_scope.turn)
     if turn is None or export_scope.player_id is None:
@@ -278,7 +291,6 @@ def wake_scores_scope(
     *,
     ctx: AnalyticQueryContext,
     reason: ScoresWakeReason,
-    priority_band: str = "background",
     orchestrator: ComputeOrchestrator | None = None,
 ) -> bool:
     """Submit an encoded scores wake publisher through one coordinator.
@@ -295,7 +307,6 @@ def wake_scores_scope(
         step_kind=SCORES_TIER_SOLVE,
         force_fresh=True,
         ctx=ctx,
-        priority_band=priority_band,
     )
     if reason is ScoresWakeReason.STREAM_RESCHEDULED:
         resolved_orchestrator.submit(request)

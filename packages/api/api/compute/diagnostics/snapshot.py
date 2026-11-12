@@ -28,7 +28,7 @@ from api.compute.diagnostics.single_step_preview import (
 )
 from api.compute.diagnostics.timeline import ComputeConcurrencyEvent
 from api.compute.orchestrator import OrchestratorNodeSnapshot
-from api.compute.pools import PoolWorkItem
+from api.compute.pools import BandedWorkItem, PoolWorkItem
 from api.compute.remote_futures import (
     RemotePoolFutureRecord,
     classify_future_state,
@@ -122,16 +122,17 @@ def _node_wire(
 
 
 def _pool_item_wire(
-    item: PoolWorkItem,
+    queued: BandedWorkItem,
     *,
     runnable: bool,
 ) -> dict[str, Any]:
+    item = queued.item
     return {
         "scopeKey": format_compute_scope_key(item.scope),
         "analyticId": item.scope.analytic_id,
         "stepKind": item.step_kind,
         "stepIndex": item.step_index,
-        "priorityBand": item.priority_band,
+        "priorityBand": queued.priority_band,
         "backend": item.backend,
         "state": "held" if not runnable else "queued",
     }
@@ -158,7 +159,7 @@ def build_compute_diagnostics_snapshot(
     freeze_armed: bool,
     allowlisted_player_ids: frozenset[int],
     bound_orchestrators: tuple[BoundOrchestrator, ...],
-    pool_queue_items: tuple[PoolWorkItem, ...],
+    pool_queue_items: tuple[BandedWorkItem, ...],
     pool_item_is_runnable: Callable[[PoolWorkItem], bool] | None,
     in_flight: tuple[InFlightPoolExecution, ...],
     next_single_step: SingleStepPreview | None,
@@ -209,27 +210,28 @@ def build_compute_diagnostics_snapshot(
             )
 
     pool_queue: list[dict[str, Any]] = []
-    for item in pool_queue_items:
-        if not _scope_in_shell(item.scope, shell=shell, ancestor_turns=ancestor_turns):
-            continue
-        runnable = pool_item_is_runnable(item) if pool_item_is_runnable is not None else True
-        pool_queue.append(_pool_item_wire(item, runnable=runnable))
+    shell_queue_items = tuple(
+        queued
+        for queued in pool_queue_items
+        if _scope_in_shell(queued.item.scope, shell=shell, ancestor_turns=ancestor_turns)
+    )
+    for queued in shell_queue_items:
+        runnable = pool_item_is_runnable(queued.item) if pool_item_is_runnable is not None else True
+        pool_queue.append(_pool_item_wire(queued, runnable=runnable))
 
     scoped_remote_futures = tuple(
         record
         for record in remote_futures
-        if _scope_in_shell(record.scope, shell=shell, ancestor_turns=ancestor_turns)
+        if _scope_in_shell(record.step_key.scope, shell=shell, ancestor_turns=ancestor_turns)
     )
     futures_by_key = index_remote_futures_by_key(scoped_remote_futures)
 
     in_flight_rows: list[dict[str, Any]] = []
     for record in in_flight:
-        if not _scope_in_shell(record.scope, shell=shell, ancestor_turns=ancestor_turns):
+        if not _scope_in_shell(record.step_key.scope, shell=shell, ancestor_turns=ancestor_turns):
             continue
         row = in_flight_to_wire(record)
-        matched = futures_by_key.get(
-            (record.orchestrator_id, record.scope, record.step_kind, record.step_index)
-        )
+        matched = futures_by_key.get(record.step_key)
         if matched is None:
             row["futureState"] = None
         else:
@@ -261,10 +263,8 @@ def build_compute_diagnostics_snapshot(
     backend_mix: dict[str, int] = {}
     for record in in_flight:
         backend_mix[record.backend] = backend_mix.get(record.backend, 0) + 1
-    for item in pool_queue_items:
-        if not _scope_in_shell(item.scope, shell=shell, ancestor_turns=ancestor_turns):
-            continue
-        backend_mix[item.backend] = backend_mix.get(item.backend, 0) + 1
+    for queued in shell_queue_items:
+        backend_mix[queued.item.backend] = backend_mix.get(queued.item.backend, 0) + 1
 
     live_occupancy = live_occupancy_to_wire(
         configured_workers=configured_workers,

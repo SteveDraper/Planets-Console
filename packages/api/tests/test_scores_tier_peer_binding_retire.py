@@ -73,7 +73,6 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
         orchestrator,
         scope,
         state="running",
-        priority_band="stream_attached",
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
@@ -127,7 +126,6 @@ def test_peer_failure_does_not_retire_while_sibling_running(sample_turn, monkeyp
         orchestrator,
         scope,
         state="running",
-        priority_band="stream_attached",
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)

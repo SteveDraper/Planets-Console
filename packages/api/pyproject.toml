@@ -23,4 +23,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "slow: full inference-corpus or OR-Tools solver integration (excluded from make ci; run make test_api_full)",
+    "allows_post_lock_callback_errors: the test makes a post-lock callback raise on purpose, so the suite guard does not fail it",
 ]

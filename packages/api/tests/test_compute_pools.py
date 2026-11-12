@@ -1,10 +1,13 @@
-"""Tests for compute worker pool priority dequeue and orchestrator integration."""
+"""Tests for compute worker pool dispatch and orchestrator integration.
+
+Pick-order and published-band tests live in ``test_compute_pool_published_bands``.
+"""
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
-from collections import deque
 
 import pytest
 from api.analytics.catalog import TurnAnalyticCatalogEntry
@@ -14,21 +17,28 @@ from api.analytics.registration import TurnAnalyticRegistration
 from api.compute import (
     AnalyticComputeProfile,
     ComputeOrchestrator,
-    ComputePriorityBand,
     ComputeRequest,
     ComputeScope,
     ComputeStepSpec,
     ComputeWorkerPool,
+    PoolStepWork,
     PoolWorkItem,
+    RemoteStepWork,
     ScopeKeySpec,
+    ThreadStepWork,
     build_compute_registry,
-    dequeue_next_work_item,
     normalize_export_scope_to_compute_scope,
+)
+from api.compute.backend_runtime import (
+    CONFIGURED_INTERPRETER_REMAP_REASON,
+    FROZEN_INTERPRETER_REMAP_REASON,
 )
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import (
+    QUEUED_ONLY_STEP_WORK,
+    ok_thread_step_work,
     run_interpreter_materialize,
     run_process_materialize,
 )
@@ -86,124 +96,21 @@ def _scope_for_player(sample_turn, player_id: int) -> ComputeScope:
 def _work_item(
     *,
     scope: ComputeScope,
-    priority_band: ComputePriorityBand = "background",
     step_index: int = 0,
     backend: str = "thread",
     orchestrator_id: int = 0,
     step_kind: str | None = None,
+    work: PoolStepWork = QUEUED_ONLY_STEP_WORK,
 ) -> PoolWorkItem:
     return PoolWorkItem(
         orchestrator_id=orchestrator_id,
         scope=scope,
+        execution_generation=0,
         step_kind=step_kind or ("tier1" if step_index == 0 else "tier2"),
         backend=backend,
-        priority_band=priority_band,
         step_index=step_index,
+        work=work,
     )
-
-
-def test_dequeue_prefers_stream_attached_over_background(sample_turn):
-    player_a = next(row.ownerid for row in sample_turn.scores)
-    player_b = next(row.ownerid for row in sample_turn.scores if row.ownerid != player_a)
-    scope_a = _scope_for_player(sample_turn, player_a)
-    scope_b = _scope_for_player(sample_turn, player_b)
-    queue = deque(
-        [
-            _work_item(scope=scope_a, priority_band="background"),
-            _work_item(scope=scope_b, priority_band="stream_attached"),
-        ]
-    )
-
-    item = dequeue_next_work_item(queue)
-
-    assert item is not None
-    assert item.scope == scope_b
-    assert item.priority_band == "stream_attached"
-
-
-def test_dequeue_prefers_interactive_ensure_over_background(sample_turn):
-    player_a = next(row.ownerid for row in sample_turn.scores)
-    player_b = next(row.ownerid for row in sample_turn.scores if row.ownerid != player_a)
-    scope_a = _scope_for_player(sample_turn, player_a)
-    scope_b = _scope_for_player(sample_turn, player_b)
-    queue = deque(
-        [
-            _work_item(scope=scope_a, priority_band="background"),
-            _work_item(scope=scope_b, priority_band="interactive_ensure"),
-        ]
-    )
-
-    item = dequeue_next_work_item(queue)
-
-    assert item is not None
-    assert item.scope == scope_b
-
-
-def test_dequeue_prefers_stream_attached_over_interactive_ensure(sample_turn):
-    player_a = next(row.ownerid for row in sample_turn.scores)
-    player_b = next(row.ownerid for row in sample_turn.scores if row.ownerid != player_a)
-    scope_a = _scope_for_player(sample_turn, player_a)
-    scope_b = _scope_for_player(sample_turn, player_b)
-    queue = deque(
-        [
-            _work_item(scope=scope_a, priority_band="interactive_ensure"),
-            _work_item(scope=scope_b, priority_band="stream_attached"),
-        ]
-    )
-
-    item = dequeue_next_work_item(queue)
-
-    assert item is not None
-    assert item.scope == scope_b
-    assert item.priority_band == "stream_attached"
-
-
-def test_dequeue_tier_one_before_continuations_from_other_scopes(sample_turn):
-    """Port of inference scheduler fairness: tier-1 before continuation steps."""
-    player_ids = [row.ownerid for row in sample_turn.scores[:2]]
-    assert len(player_ids) >= 2
-    scope_a = _scope_for_player(sample_turn, player_ids[0])
-    scope_b = _scope_for_player(sample_turn, player_ids[1])
-    queue = deque(
-        [
-            _work_item(scope=scope_a, step_index=0),
-            _work_item(scope=scope_a, step_index=1),
-            _work_item(scope=scope_b, step_index=0),
-        ]
-    )
-
-    first = dequeue_next_work_item(queue)
-    second = dequeue_next_work_item(queue)
-    third = dequeue_next_work_item(queue)
-
-    assert first is not None and first.scope == scope_a and first.step_index == 0
-    assert second is not None and second.scope == scope_b and second.step_index == 0
-    assert third is not None and third.scope == scope_a and third.step_index == 1
-
-
-def test_dequeue_continuation_round_robin_across_scopes(sample_turn):
-    """Continuations dequeue in FIFO order when no tier-1 work remains."""
-    player_ids = [row.ownerid for row in sample_turn.scores[:2]]
-    scope_a = _scope_for_player(sample_turn, player_ids[0])
-    scope_b = _scope_for_player(sample_turn, player_ids[1])
-    queue = deque(
-        [
-            _work_item(scope=scope_a, step_index=1),
-            _work_item(scope=scope_b, step_index=1),
-            _work_item(scope=scope_a, step_index=2),
-            _work_item(scope=scope_b, step_index=2),
-        ]
-    )
-
-    order = [dequeue_next_work_item(queue) for _ in range(4)]
-
-    assert [item.step_index for item in order if item is not None] == [1, 1, 2, 2]
-    assert [item.scope for item in order if item is not None] == [
-        scope_a,
-        scope_b,
-        scope_a,
-        scope_b,
-    ]
 
 
 def _multi_step_thread_registration(
@@ -277,12 +184,12 @@ def test_pool_tier_one_jobs_run_before_continuations_from_other_scopes(sample_tu
     scope_b = _scope_for_player(sample_turn, player_ids[1])
 
     orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=scope_a, priority_band="stream_attached"),
+        ComputeRequest(ctx=ctx, scope=scope_a, priority_band="interactive_ensure"),
     )
     gate.clear()
     time.sleep(0.05)
     orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=scope_b, priority_band="stream_attached"),
+        ComputeRequest(ctx=ctx, scope=scope_b, priority_band="interactive_ensure"),
     )
     gate.set()
 
@@ -315,8 +222,8 @@ def test_pool_continuation_jobs_round_robin_across_scopes(sample_turn):
     scope_a = _scope_for_player(sample_turn, player_ids[0])
     scope_b = _scope_for_player(sample_turn, player_ids[1])
 
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_a, priority_band="stream_attached"))
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b, priority_band="stream_attached"))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_a, priority_band="interactive_ensure"))
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope_b, priority_band="interactive_ensure"))
     gate.set()
 
     deadline = time.monotonic() + 3.0
@@ -413,7 +320,37 @@ def test_effective_compute_backend_remaps_interpreter_when_config_flag_set(monke
     assert effective_compute_backend("thread") == "thread"
 
 
-def test_pool_remaps_interpreter_backend_to_thread_when_frozen(sample_turn, monkeypatch):
+def test_interpreter_remap_reason_names_the_cause_in_force(monkeypatch):
+    from api.compute.backend_runtime import interpreter_remap_reason
+    from api.config import ApiConfig, set_config
+
+    cases = (
+        (False, False, None),
+        (False, True, CONFIGURED_INTERPRETER_REMAP_REASON),
+        (True, False, FROZEN_INTERPRETER_REMAP_REASON),
+        (True, True, FROZEN_INTERPRETER_REMAP_REASON),
+    )
+    for is_frozen, is_flag_set, expected_reason in cases:
+        monkeypatch.setattr(
+            "api.compute.backend_runtime.process_is_frozen", lambda frozen=is_frozen: frozen
+        )
+        set_config(
+            ApiConfig(storage_backend="ephemeral", remap_interpreter_backend_to_thread=is_flag_set)
+        )
+        assert interpreter_remap_reason() == expected_reason, (is_frozen, is_flag_set)
+
+
+def _logged_remap_reasons(caplog) -> list[str]:
+    return [
+        record.args[2]
+        for record in caplog.records
+        if record.name == "api.compute.pools"
+        and record.msg.startswith("Compute backend %r remapped")
+    ]
+
+
+def test_pool_remaps_interpreter_backend_to_thread_when_frozen(sample_turn, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="api.compute.pools")
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
 
     def _forbidden_interpreter_pool(*_args, **_kwargs):
@@ -449,9 +386,13 @@ def test_pool_remaps_interpreter_backend_to_thread_when_frozen(sample_turn, monk
     assert handle.result_wire == {"result": _FLEET_ANALYTIC_ID}
     assert pool.metrics.thread_executions == 1
     assert pool.metrics.interpreter_executions == 0
+    assert _logged_remap_reasons(caplog) == [FROZEN_INTERPRETER_REMAP_REASON]
 
 
-def test_pool_remaps_interpreter_backend_to_thread_when_config_flag_set(sample_turn, monkeypatch):
+def test_pool_remaps_interpreter_backend_to_thread_when_config_flag_set(
+    sample_turn, monkeypatch, caplog
+):
+    caplog.set_level(logging.INFO, logger="api.compute.pools")
     from api.config import ApiConfig, set_config
 
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
@@ -492,6 +433,7 @@ def test_pool_remaps_interpreter_backend_to_thread_when_config_flag_set(sample_t
     assert handle.result_wire == {"result": _FLEET_ANALYTIC_ID}
     assert pool.metrics.thread_executions == 1
     assert pool.metrics.interpreter_executions == 0
+    assert _logged_remap_reasons(caplog) == [CONFIGURED_INTERPRETER_REMAP_REASON]
 
 
 def test_shutdown_releases_pool_condition_before_waiting_on_executors():
@@ -764,10 +706,8 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
     from api.analytics.fleet.compute_plane.finalization_leg import run_fleet_finalization_leg
     from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
 
-    def build_job_wire(scope, *, dependency_outputs, ctx=None, **_kwargs):
+    def build_job_wire(scope, *, dependency_outputs, ctx, **_kwargs):
         del dependency_outputs, _kwargs
-        if ctx is None:
-            raise RuntimeError("fleet leg test job wire requires AnalyticQueryContext")
         if ctx.load_turn(scope.turn) is None:
             raise RuntimeError(f"turn {scope.turn} required for fleet leg test job wire")
         return {
@@ -781,11 +721,10 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
         scope,
         *,
         dependency_outputs,
-        ctx=None,
-        node_result_wire=None,
+        node_result_wire,
         **_kwargs,
     ):
-        del scope, dependency_outputs, ctx, _kwargs
+        del scope, dependency_outputs, _kwargs
         if not isinstance(node_result_wire, dict):
             raise RuntimeError("fleet finalization test wire requires observation result")
         return dict(node_result_wire)
@@ -871,7 +810,7 @@ def test_on_item_enqueued_runs_outside_pool_lock(sample_turn):
             scope=scope, dependency_scopes=(), step_index=0, submission_open=SubmissionOpen()
         )
         step = ComputeStepSpec(step_kind="materialize", backend="thread")
-        pool.submit(0, node, step, priority_band="background")
+        pool.submit(0, node, step, work=QUEUED_ONLY_STEP_WORK)
 
         assert seen.get("acquired_pool_from_hook") is True
         assert seen.get("depth") == 1
@@ -907,8 +846,11 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
             second_finished.set()
 
     class OkOrch:
-        def execute_pool_step(self, scope):
-            return {"ok": True}
+        def published_band(self, scope):
+            return None
+
+        def begin_pool_step(self, *args, **kwargs):
+            return True
 
         def complete_pool_step(self, *args, **kwargs):
             return None
@@ -918,8 +860,11 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
         pool.set_on_item_finished(on_finished)
         orch_id = pool.register(OkOrch())  # type: ignore[arg-type]
         scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
-        pool.enqueue_for_tests(_work_item(scope=scope, orchestrator_id=orch_id, step_index=0))
-        pool.enqueue_for_tests(_work_item(scope=scope, orchestrator_id=orch_id, step_index=1))
+        work = ok_thread_step_work(make_fixture_query_context(sample_turn))
+        for step_index in (0, 1):
+            pool.enqueue_for_tests(
+                _work_item(scope=scope, orchestrator_id=orch_id, step_index=step_index, work=work)
+            )
 
         assert second_finished.wait(timeout=3.0), "worker did not recover after on_dequeued boom"
         health = pool.worker_health()
@@ -982,14 +927,23 @@ def test_flush_prebuilds_wire_when_effective_backend_stays_interpreter(sample_tu
         built.append(wire)
         return wire
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None):
-        del node, step, run_step
-        submitted.append(job_wire)
+    def pool_submitter(node, step, *, work):
+        del node, step
+        submitted.append(work)
 
     _submit_interpreter_step(sample_turn, pool_submitter=pool_submitter, build_wire=build_wire)
 
     assert built == [{"built": True}]
-    assert submitted == [{"built": True}]
+    (work,) = submitted
+    assert isinstance(work, RemoteStepWork)
+    assert work.backend == "interpreter"
+    assert work.job_wire == {"built": True}
+
+
+@pytest.mark.parametrize("backend", ["inline", "thread"])
+def test_remote_step_work_rejects_a_backend_without_a_remote_executor(backend):
+    with pytest.raises(ValueError, match="RemoteStepWork backend"):
+        RemoteStepWork(backend=backend, job_wire=None, run_step=lambda _job: None)
 
 
 def test_flush_skips_wire_when_interpreter_remapped_to_thread(sample_turn, monkeypatch):
@@ -1005,32 +959,44 @@ def test_flush_skips_wire_when_interpreter_remapped_to_thread(sample_turn, monke
         built.append(1)
         return {"built": True}
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None):
-        del node, step, run_step
-        submitted.append(job_wire)
+    def pool_submitter(node, step, *, work):
+        del node, step
+        submitted.append(work)
 
     _submit_interpreter_step(sample_turn, pool_submitter=pool_submitter, build_wire=build_wire)
 
     assert built == []
-    assert submitted == [None]
+    (work,) = submitted
+    assert isinstance(work, ThreadStepWork)
 
 
-def test_remapped_interpreter_step_builds_wire_once_in_execute_pool_step(sample_turn, monkeypatch):
+def test_remapped_interpreter_step_builds_its_wire_on_the_worker_from_the_dispatch_snapshot(
+    sample_turn, monkeypatch
+):
     from api.config import ApiConfig, set_config
 
     set_config(ApiConfig(storage_backend="ephemeral", remap_interpreter_backend_to_thread=True))
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
-    built: list[int] = []
+    built: list[dict] = []
+    snapshots: list[dict] = []
 
-    def build_wire(scope, **_kwargs):
-        del scope, _kwargs
-        built.append(1)
+    def build_wire(scope, **kwargs):
+        del scope
+        built.append(kwargs)
+        assert threading.current_thread() in pool._workers  # noqa: SLF001
         return {"built": True}
 
     compute_registry = build_compute_registry((_interpreter_wire_registration(build_wire),))
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
+    take_snapshot = orchestrator._snapshot_job_wire_kwargs  # noqa: SLF001
+
+    def record_snapshot(node):
+        snapshots.append(take_snapshot(node))
+        return snapshots[-1]
+
+    monkeypatch.setattr(orchestrator, "_snapshot_job_wire_kwargs", record_snapshot)
     scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
     scope = ComputeScope(
         analytic_id=_FLEET_ANALYTIC_ID,
@@ -1047,6 +1013,8 @@ def test_remapped_interpreter_step_builds_wire_once_in_execute_pool_step(sample_
         time.sleep(0.01)
     pool.shutdown()
     assert handle.state == "complete", handle.error
-    assert built == [1]
+    assert len(snapshots) == 1
+    assert built == snapshots
+    assert built[0]["dependency_outputs"] is snapshots[0]["dependency_outputs"]
     assert pool.metrics.thread_executions == 1
     assert pool.metrics.interpreter_executions == 0

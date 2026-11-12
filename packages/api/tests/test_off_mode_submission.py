@@ -23,6 +23,7 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
 from api.compute.orchestrator_state import ResolvedComputeRequest
 from api.compute.orchestrator_submission import resolve_submission_open
+from api.compute.pools import PoolStepWork, RemoteStepWork
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
@@ -202,9 +203,9 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
     store_generation(persistence, ctx.game_id, ctx.perspective, 40, player_id, 1, ship_id=40)
     wires: list[object] = []
 
-    def capture(_node, _step, *, job_wire=None, run_step=None) -> None:
-        del run_step
-        wires.append(job_wire)
+    def capture(_node, _step, *, work: PoolStepWork) -> None:
+        if isinstance(work, RemoteStepWork):
+            wires.append(work.job_wire)
 
     orchestrator = ComputeOrchestrator(
         compute_registry=FLEET_SCORES_REGISTRY,
@@ -319,9 +320,9 @@ def test_submission_reads_backfill_setting_once_and_carries_it(sample_turn):
     )
     wires: list[object] = []
 
-    def capture(_node, _step, *, job_wire=None, run_step=None) -> None:
-        del run_step
-        wires.append(job_wire)
+    def capture(_node, _step, *, work: PoolStepWork) -> None:
+        if isinstance(work, RemoteStepWork):
+            wires.append(work.job_wire)
 
     orchestrator = ComputeOrchestrator(
         compute_registry=FLEET_SCORES_REGISTRY,
@@ -383,7 +384,7 @@ def test_locked_submit_does_not_resolve_again_and_idle_wake_skips_the_read(
     )
     orchestrator = ComputeOrchestrator(
         compute_registry=FLEET_SCORES_REGISTRY,
-        pool_submitter=lambda _node, _step, *, job_wire=None, run_step=None: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     absent = orchestrator.wake_if_parked(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
@@ -449,9 +450,9 @@ def test_second_open_schedules_no_hop_when_priors_are_on_the_mark(sample_turn):
     def submit(turn: int) -> tuple[ComputeOrchestrator, list[object]]:
         wires: list[object] = []
 
-        def capture(_node, _step, *, job_wire=None, run_step=None) -> None:
-            del run_step
-            wires.append(job_wire)
+        def capture(_node, _step, *, work: PoolStepWork) -> None:
+            if isinstance(work, RemoteStepWork):
+                wires.append(work.job_wire)
 
         orchestrator = ComputeOrchestrator(
             compute_registry=FLEET_SCORES_REGISTRY,

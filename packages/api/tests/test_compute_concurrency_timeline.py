@@ -11,6 +11,8 @@ from api.compute.diagnostics.timeline import (
     format_execution_key,
     make_concurrency_event,
 )
+from api.compute.scope import ComputeScope
+from api.compute.step_execution_key import StepExecutionKey
 
 
 def _gauges(**overrides: int) -> OccupancyGauges:
@@ -50,21 +52,42 @@ def test_timeline_ring_drops_oldest_on_wrap():
     assert [event.scope_key for event in recent] == ["scope-2", "scope-3", "scope-4"]
 
 
-def test_open_execution_tracker_pairs_duration_and_backend():
-    tracker = OpenExecutionTracker()
-    key = format_execution_key(
+def _materialize_step(*, execution_generation: int) -> StepExecutionKey:
+    return StepExecutionKey(
         orchestrator_id=1,
-        scope_key="g1/p1/t1/pl1/scores",
+        scope=ComputeScope(analytic_id="scores", game_id=1, perspective=1, turn=1, player_id=1),
+        execution_generation=execution_generation,
         step_kind="materialize",
         step_index=0,
     )
-    tracker.open(key, backend="thread")
+
+
+def test_open_execution_tracker_pairs_duration_backend_and_band():
+    tracker = OpenExecutionTracker()
+    key = _materialize_step(execution_generation=1)
+    tracker.open(key, backend="thread", priority_band="stream_attached")
     time.sleep(0.01)
-    duration_ms, backend = tracker.close(key)
-    assert backend == "thread"
-    assert duration_ms is not None
-    assert duration_ms >= 10.0
-    assert tracker.close(key) == (None, None)
+    closed = tracker.close(key)
+    assert closed is not None
+    assert closed.backend == "thread"
+    assert closed.priority_band == "stream_attached"
+    assert closed.duration_ms >= 10.0
+    assert tracker.close(key) is None
+
+
+def test_open_execution_tracker_keeps_executions_of_one_step_apart():
+    tracker = OpenExecutionTracker()
+    older = _materialize_step(execution_generation=1)
+    newer = _materialize_step(execution_generation=2)
+    tracker.open(newer, backend="thread", priority_band="stream_attached")
+    tracker.open(older, backend="thread", priority_band="background")
+
+    closed_older = tracker.close(older)
+    closed_newer = tracker.close(newer)
+
+    assert closed_older is not None and closed_older.priority_band == "background"
+    assert closed_newer is not None and closed_newer.priority_band == "stream_attached"
+    assert format_execution_key(older) != format_execution_key(newer)
 
 
 def test_make_concurrency_event_carries_gauges():

@@ -92,14 +92,21 @@ class DependencyOutputs:
         return self._by_scope
 
 
-class BuildStepJobWireKwargs(TypedDict, total=False):
-    """Keyword arguments passed to job-wire builders by the orchestrator."""
+class BuildStepJobWireKwargs(TypedDict):
+    """Keyword arguments passed to job-wire builders by the orchestrator.
+
+    The orchestrator snapshots every field under its lock in one helper, so a
+    new builder input is added here and there only.
+    """
 
     dependency_outputs: DependencyOutputs
-    ctx: AnalyticQueryContext | None
+    ctx: AnalyticQueryContext
     node_result_wire: object | None
     # Root turn and backfill choice of the submission that owns this node.
     submission_open: SubmissionOpen
+    # Identity of the node execution the wire is built for. A replaced node
+    # gets a new one; requeues of the same node keep it.
+    execution_generation: int
 
 
 # Orchestration plane: scope + dependency outputs -> serializable job payload.

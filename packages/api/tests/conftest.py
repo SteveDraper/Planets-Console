@@ -33,6 +33,7 @@ from tests.fixtures.military_score_inference import (  # noqa: F401
 from tests.fixtures.military_score_inference_prior_weights import (  # noqa: F401
     minimal_prior_catalog,
 )
+from tests.post_lock_callback_guard import failing_on_post_lock_callback_errors
 
 pytest_plugins = [
     "tests.scores_exports_helpers",
@@ -41,7 +42,21 @@ pytest_plugins = [
 
 
 @pytest.fixture(autouse=True)
-def _isolate_compute_orchestrator_singleton():
+def _fail_on_post_lock_callback_errors(request: pytest.FixtureRequest):
+    """Fail a test whose post-lock callbacks raised, unless it raises them on purpose.
+
+    Every autouse fixture that resets or drains compute state requests this one,
+    so the guard is active across their setup and teardown as well as the test.
+    """
+    if request.node.get_closest_marker("allows_post_lock_callback_errors"):
+        yield
+        return
+    with failing_on_post_lock_callback_errors():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_compute_orchestrator_singleton(_fail_on_post_lock_callback_errors):
     """Drop process-wide orchestrator DAG state between tests (#204 ensure uses singleton).
 
     If a prior test left the worker pool at ``worker_count=0`` (the default for
@@ -63,7 +78,10 @@ def _isolate_compute_orchestrator_singleton():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_global_compute_worker_pool(request: pytest.FixtureRequest):
+def _isolate_global_compute_worker_pool(
+    request: pytest.FixtureRequest,
+    _fail_on_post_lock_callback_errors,
+):
     yield
     if request.path.name != "test_compute_pools.py":
         return
@@ -73,7 +91,10 @@ def _isolate_global_compute_worker_pool(request: pytest.FixtureRequest):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_compute_diagnostics_state(request: pytest.FixtureRequest):
+def _isolate_compute_diagnostics_state(
+    request: pytest.FixtureRequest,
+    _fail_on_post_lock_callback_errors,
+):
     """Drop diagnostics observer state so later tests do not inherit freeze or pool gates."""
     if request.path.name == "test_compute_diagnostics.py":
         yield
@@ -119,7 +140,24 @@ def _isolate_compute_diagnostics_state(request: pytest.FixtureRequest):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_fleet_table_stream_compute_state(request: pytest.FixtureRequest):
+def _catalog_table_stream_registries():
+    """Catalog the table-stream registries as a stream connect does.
+
+    Tests that attach a controller straight to a registry skip connect, so the
+    catalog scans would not see it otherwise.
+    """
+    from api.streaming.table_stream.registry_bootstrap import (
+        ensure_table_stream_registries_registered,
+    )
+
+    ensure_table_stream_registries_registered()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_fleet_table_stream_compute_state(
+    request: pytest.FixtureRequest,
+    _fail_on_post_lock_callback_errors,
+):
     """Reset orchestrator and worker pool between fleet stream tests."""
     if "test_fleet_table_stream" not in request.path.name:
         yield

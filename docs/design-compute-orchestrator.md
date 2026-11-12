@@ -196,7 +196,7 @@ Fleet finalization refuses persist while same-turn scores evidence is open
 `ComputeRequest` may name an entry `step_kind` so one registration profile serves multiple callers on the same scope. Example scores profile: `(materialize, tier_solve)`.
 
 - **Export ensure / DAG satisfaction** -- submit from profile step 0 (`materialize`, inline).
-- **Inference table stream** -- submit with `step_kind="tier_solve"` and `priority_band="stream_attached"`.
+- **Inference table stream** -- submit with `step_kind="tier_solve"`. The request asks for no band: the live stream watching the shell gives the node `stream_attached` (see [Band derivation](#band-derivation)).
 
 The orchestrator honors the entry step when creating or attaching to a node.
 
@@ -248,9 +248,16 @@ running → parked   (soft park; wake only on force_fresh → ready | waiting_de
 
 Same-scope dedupe is **only** in-orchestrator singleflight on the singleton DAG. The former process-wide scope lease ([#222](https://github.com/SteveDraper/Planets-Console/issues/222)) is **retired** by [#209](https://github.com/SteveDraper/Planets-Console/issues/209) -- it compensated for multiple per-context orchestrator DAGs. Soft-park uses the first-class node state `parked` above (see [Compute step outcome](#compute-step-outcome)), not that retired lease.
 
-### Priority adopt on attach
+### Band derivation
 
-When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `stream_attached` joining `background` warm) and the node is not yet past the point where adopt is allowed (not mid expensive inline/pool execution -- same rule as the former lease “seal”), upgrade `node.priority_band` and adjust ready-queue ordering as needed. No mid-run preempt once expensive work has started.
+A node's band is derived, not stored. `ComputeRequest.priority_band` is a **standing band**, `interactive_ensure` or `background`; `stream_attached` is never requested. A submission raises the standing band of its own scope only, whether it plans the scope or attaches to it. Planned dependencies keep the default standing band.
+
+Every dispatch pass starts by deriving each non-terminal node's band (`priority_band.derive_priority_bands`):
+
+- A node's own band is `stream_attached` when its registration's `shell_stream_watch` reports the node's `(game, perspective, turn, player)` as watched, and its standing band otherwise. Fleet and scores register the walk watch (`walk_shell_watch.WALK_SHELL_STREAM_WATCH`), which reports every player on a live fleet or scoreboard table stream. Other registrations default to `UNWATCHED`.
+- Its derived band is the highest own band over the node and every non-terminal node that transitively depends on it. Parked dependents count; terminal nodes carry no band.
+
+Each watch is read once per pass, from lock-free registry snapshots. The pass writes the derived band to every non-terminal node, picks ready nodes by band (FIFO within a band), and publishes the derivation for the worker pool. A hop, a persist-deferred dependency and a recreated abort-failed dependency ask for no band: their dependents' bands reach them through the derivation. No mid-run preempt: a step keeps the band a worker picked it at.
 
 **Scores `tier_solve` empty complete:** the skip sentinel (`runId: null`, `evidenceClosed: true`) is allowed only when turn evidence is already closed under the **same materialization probe fleet uses** (no ensure-ephemeral). Cheap ImmediateRowAdmission ensure admits write fallback-complete inference rows to disk so that probe can close; when evidence is still open, wire build must attach a `RowRun` (or fail loud if ensure claimed satisfaction without an attachable row) -- not empty-complete and not a bare open-evidence wait wire. Empty-complete falsely unlocked same-turn fleet and left the scoreboard without `rowComplete`.
 
@@ -261,7 +268,7 @@ When a higher-priority `ComputeRequest` attaches to an in-flight node (e.g. `str
 | `force_fresh` | Existing node state | Behavior |
 |---------------|---------------------|----------|
 | `False` (default) | `complete` or `failed` | Attach to the terminal node; return its cached `result_wire` or error. No new pool work. |
-| `False` (default) | `waiting_deps`, `ready`, `running` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. May **priority-adopt** (see above). |
+| `False` (default) | `waiting_deps`, `ready`, `running` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. Raises the node's standing band (see [Band derivation](#band-derivation)). |
 | `False` (default) | `parked` | Attach / singleflight; node stays `parked` (no wake without `force_fresh`). |
 | `True` | `complete` or `failed` | **Supersede** the terminal node: remove it from the orchestrator map, clear any waiters, re-plan the DAG from the request's entry `step_kind`, and dispatch fresh work. |
 | `True` | `parked` | **Wake** the soft-parked node: re-ready if deps complete, else `waiting_deps`; then attach / dispatch. |
@@ -300,6 +307,8 @@ Thread steps (scores tiers) resolve per-row adapter state (`RowRun`) by `run_id`
 
 ### Job wire and dependency outputs
 
+The orchestrator snapshots a step's builder inputs (`BuildStepJobWireKwargs`) once, under its lock, when it dispatches the step. Builders run outside the lock from that snapshot: inline, interpreter and process wires are built before the step runs or is submitted, and a thread step carries the snapshot to its pool worker (`ThreadStepWork`), which builds the wire there.
+
 Wire builders run on the **orchestration plane** and may use the node's orchestration bundle (`export_services`, ensure-memo, shell-scoped `load_turn`) to assemble inputs:
 
 ```python
@@ -331,7 +340,7 @@ Scores `ENSURE_DEPENDENCIES` already declare `fleet@(host_turn - 1, same player)
 
 1. **No `ensure_fleet_export` inside workers or tier steps.**
 2. **Pending-first, then refresh** -- first `tier_solve` wire may use `fleetTorpInputStatus: pending` when `fleet@(host_turn - 1)` is not yet terminal; when that fleet node completes, fleet invalidation bumps scores epoch, drops inference row persistence, and reschedules the open-stream row so later wires read overlay from `DependencyOutputs`.
-3. **Stream open** submits orchestrator `background`-band `fleet@(host_turn - 1)` per player (replaces ad-hoc warm threads).
+3. **Stream open** submits orchestrator `fleet@(host_turn - 1)` per player with the `background` standing band (replaces ad-hoc warm threads). The node is stream-attached while a watched scores node depends on it.
 4. **Readers** of prior-turn fleet for overlay must use `has_final_ledger`, not `has_ledger` ([#200](https://github.com/SteveDraper/Planets-Console/issues/200) fixes `prior_turn_fleet_torp_overlay`).
 
 ---
@@ -353,11 +362,15 @@ Defer cross-process shared mutable caches; parent and worker heaps stay separate
 
 **Priority bands** (high → low):
 
-1. **Stream-attached** -- scope has active table-stream token (`TableStreamScopeGuard`).
-2. **Interactive ensure** -- user-confirmed BFF export-ensure job ([#109](https://github.com/SteveDraper/Planets-Console/issues/109)).
-3. **Background** -- export warm, dependency-only materialization.
+1. **Stream-attached** -- a live shell watches the node or a non-terminal dependent of it. Never requested; derived each pass (see [Band derivation](#band-derivation)).
+2. **Interactive ensure** -- the standing band of a user-confirmed BFF export-ensure job ([#109](https://github.com/SteveDraper/Planets-Console/issues/109)), or of any node it depends on.
+3. **Background** -- export warm, dependency-only materialization, and any node nothing above it reaches.
 
-An accepted **Backfill earlier turns** walk with both the fleet analytic and the scoreboard disabled keeps running. Steps not yet inside expensive execution run at background. A shell-turn change while either toggle stays on leaves the walk you left running in that same waiting band. Reopening that turn adopts not-yet-executing steps back to stream-attached. A perspective change uses that same waiting band. On a turn or perspective change an in-flight scoreboard step may persist. A scope the shell you are watching submits may adopt upward when it is not yet inside expensive execution. A game change stops that game's accepted walks: queued hops are dropped, an in-flight scoreboard step does not persist, and an in-flight fleet step may still stamp. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2.
+An accepted **Backfill earlier turns** walk with both the fleet analytic and the scoreboard disabled keeps running. Steps no worker has picked yet, and later hops, run at background. A shell-turn change while either toggle stays on leaves the walk you left running in that same waiting band, except for the turns the new shell's walk reaches: a later shell turn reaches the whole earlier walk and keeps it stream-attached, and an earlier one leaves the turns above it at background. Reopening that turn makes every step not yet picked stream-attached again. A perspective change uses that same waiting band. On a turn or perspective change an in-flight scoreboard step may persist. A homeworld locator stream watches nothing, so it never lifts a walk. A game change stops that game's accepted walks: queued hops are dropped, an in-flight scoreboard step does not persist, and an in-flight fleet step may still stamp. See [design-fleet-analytic.md](design-fleet-analytic.md) section 5.2.
+
+A queued pool step carries no band of its own. Each dispatch pass starts by deriving and publishing an immutable `{scope: band}` map of the orchestrator's non-terminal nodes, and the worker pool ranks every queued candidate by that map each time a worker picks, without taking the orchestrator lock. A step whose scope has no published band (orchestrator gone, or node terminal) ranks as background. A step keeps the band it was picked at: in-flight rows, remote-future rows, and completion history report that band.
+
+A pool item is bound to the execution of its scope that dispatched it (its `execution_generation`): once that execution is no longer running, for example aborted and replaced by a newer `force_fresh` execution, a worker drops the item without running its step (recorded as `pool_item_dropped`), and a step that finishes late does not complete the newer node (recorded as `pool_finish_ignored`). Compute diagnostics identify a pool step by orchestrator registration id, scope, execution generation, step kind, and step index, so an older execution's item never clears or overwrites the newer execution's in-flight row or open timeline execution, and its drop closes its own open timeline execution.
 
 **Within each band:**
 
@@ -377,7 +390,7 @@ Fleet (and similar) expose per-player **invalidation generation** today. Orchest
 |------------|--------|
 | **Submit** | Record `generation_at_submit` |
 | **Complete** | If `generation != generation_at_submit`, discard result and re-queue node |
-| **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist`. `generation_at_submit` is kept through persist-then-complete (post-lock). If the epoch advances before persist or before `_complete_node`, discard and re-queue -- do not stamp `complete` over a deleted ledger. |
+| **Persist** | Orchestrator calls analytic `persist` hook only after epoch check and only when step outcome is `persist`. `generation_at_submit` is kept through persist-then-complete (post-lock). If the epoch advances before persist or before `_complete_node`, discard and re-queue -- do not stamp `complete` over a deleted ledger. Post-lock callbacks (persist, the notification `persist` returns, outcome listeners, dependent dispatch) run in one drain; one that raises is logged with its stack trace and the rest of the drain still runs. |
 
 Which mechanism catches which stale-work race:
 
@@ -450,7 +463,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 **Thin adapters** (same template for fleet and scores):
 
-- Submit `ComputeRequest` scopes to the **process-wide** orchestrator (`stream_attached` band for interactive work; `background` for warm-up deps).
+- Submit `ComputeRequest` scopes to the **process-wide** orchestrator with the default `background` standing band. An open stream's work is stream-attached because the stream watches it, not because the request asks.
 - Register one process-wide `scope_outcome` listener per scheduler, and at most one pause **dispatch gate**, through `SchedulerOrchestratorAttachment`. Both live for the scheduler, outside the scheduler lock. The listener and gate filter on analytic id (and, for pause, `_globally_paused`). Adapters do **not** own an orchestrator instance, and disconnect does not unregister these callbacks.
 - Retain stream-only state (scope guard, per-row run registry, global pause flag). Stream bindings store query context only.
 - **Do not** own durable persistence -- that is `PersistencePolicy.persist`.
@@ -462,7 +475,7 @@ Export catalog (`ENSURE_DEPENDENCIES`, materializers) stays on `export_catalog`;
 
 | Op | RowRun shell | PersistAdmission | Stream resolution / drain | Compute token / abort |
 |----|--------------|------------------|---------------------------|------------------------|
-| detach | `REGISTERED` → `DETACHED` (retained) | `ALLOW` | unchanged | no token cancel; no `abort_scope` |
+| detach | `REGISTERED` → `DETACHED` (retained); a started tier ladder stays resumable by the same scores node execution and epoch | `ALLOW` | unchanged | no token cancel; no `abort_scope` |
 | cancel | drop immediately (no cancel phase) | `CANCEL_DENY` (scope-keyed compact memory) | `CANCELED` + drain closed via `stream_drain.seal_canceled` | cancel token, then `abort_scope` outside scheduler lock. Stream `reschedule_row` that cancelled a run re-admits with `force_schedule` (`force_fresh` submit when scheduled) while the stream still includes the player -- cached-complete must not skip replace of the aborted node; Immediate/skip admission still applies. |
 | retire | drop | clear (`ABSENT`) | leave resolution (evict only on full invalidate) | -- |
 
@@ -470,7 +483,7 @@ Cancel silence is one operation (`stream_drain.seal_canceled`) with two justifie
 
 **Fleet cancel (intentional asymmetry).** Fleet does **not** retain row-run shells or compact cancel admission. `FleetTableStreamScheduler.cancel_player_run` is **token-only**: cancel the session token and drop the scheduler map entry. Drain silence comes from the generic multiplex token-observed `stream_drain.seal_canceled` path; fleet does not call an immediate seal or `abort_scope`. Reschedule uses `force_fresh=True` on submit. Do not copy scores shell/admission machinery into fleet -- see [ADR 0006](adr/0006-table-stream-lifecycle-invariants.md).
 
-**Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `stream_attached` `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
+**Inference global pause** (scores): soft freeze via a **dispatch gate** -- orchestrator checks adapter pause state before submitting `tier_solve` to the pool. In-flight tier steps finish; deferred continuations stay in adapter held buffer. Background fleet warm and gap-fill legs are not paused.
 
 **Replaced (#199, #200, #209):**
 
@@ -503,7 +516,7 @@ BFF table/map contracts are unchanged.
 |------|------|
 | Mechanism | One engine only — nested sync ensure production work and **`FleetGapFillCoordinator`** are retired (no thin Event-wait shim). Walk-time unavailability is `dependency_walk_unavailable` only (no second ensure walker). |
 | Callers | All production ensure paths (fleet, scores, homeworld, `ctx.query` when not `ensure_blocked`) migrate in #204. |
-| Priority | Inherit context: `stream_attached` / adopt; cold ensure `interactive_ensure`; warm `background`. |
+| Priority | Standing band: cold ensure `interactive_ensure`; warm `background`. `stream_attached` is derived from live streams, never requested. |
 | `force_fresh` | Ensure defaults `false` (attach / `is_satisfied` short-circuit). Wipe / reschedule callers pass `true` when they must replace a terminal; ensure does not silently override to `true` on the unsatisfied path. Hollow terminals (durable wiped, node still `complete`) are dropped for the ensure root and for every unsatisfied planned DAG scope so `force_fresh=False` rebuilds dependency chains instead of treating hollow dep `complete` as ready. |
 | Wait timeout | Fails the **waiter** only; in-flight DAG continues for attach/retry/streams. |
 | `#109` | Separate BFF probe + opt-in job UX; preserve Core `probe` / `ensure_blocked` so oversized `query` does not auto full-DAG wait. |

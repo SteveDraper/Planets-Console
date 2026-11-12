@@ -72,6 +72,7 @@ from api.compute.dag import plan_compute_dag
 from api.compute.submission_open import SubmissionOpen
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import (
     enable_backfill_earlier_turns,
     export_chain_query_context,
@@ -249,6 +250,7 @@ def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
     assert job_wire.get("runId") is not None
     assert get_row_run_for_scope(scope) is not None
@@ -294,6 +296,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
                 submission_open=explicit_submission_open(),
+                execution_generation=1,
             )
 
     put_persisted_row(
@@ -314,6 +317,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
     assert skip_wire["runId"] is None
     assert skip_wire["evidenceClosed"] is True
@@ -393,6 +397,7 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
             submission_open=explicit_submission_open(),
+            execution_generation=1,
         )
     assert wire["runId"] == run.run_id
     assert wire["gameId"] == scope.game_id
@@ -480,6 +485,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
                 submission_open=explicit_submission_open(),
+                execution_generation=1,
             )
 
 
@@ -531,6 +537,7 @@ def test_build_scores_tier_solve_job_wire_raises_when_ensure_satisfied_without_a
                 dependency_outputs=DependencyOutputs(),
                 ctx=ctx,
                 submission_open=explicit_submission_open(),
+                execution_generation=1,
             )
 
 
@@ -625,6 +632,7 @@ def test_cheap_immediate_admission_closes_materialization_evidence_and_skip_comp
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
             submission_open=explicit_submission_open(),
+            execution_generation=1,
         )
         for _ in range(3)
     ]
@@ -737,6 +745,7 @@ def test_missing_full_alliance_row_restores_skip_instead_of_tier_solve_invariant
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
     assert skip_wire["runId"] is None
     assert skip_wire["evidenceClosed"] is True
@@ -831,6 +840,7 @@ def test_horwasp_tier_solve_closes_evidence_before_solve_work(
             dependency_outputs=DependencyOutputs(),
             ctx=ctx,
             submission_open=explicit_submission_open(),
+            execution_generation=1,
         )
 
     assert skip_wire["runId"] is None
@@ -897,6 +907,7 @@ def test_historical_materialize_schedules_row_run_for_tier_solve(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
     assert tier_wire.get("runId") is not None
 
@@ -960,6 +971,7 @@ def test_historical_materialize_skips_tier_when_already_persisted(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
     assert tier_wire["runId"] is None
     assert tier_wire["evidenceClosed"] is True
@@ -1019,6 +1031,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
         dependency_outputs=DependencyOutputs(),
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
     assert tier_wire.get("runId") is not None
 
@@ -1084,6 +1097,7 @@ def test_build_scores_tier_solve_job_wire_uses_fleet_dependency_output(sample_tu
         dependency_outputs=dependency_outputs,
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
 
     assert run.session.fleet_torp_input_status == "applied"
@@ -1165,6 +1179,7 @@ def test_scores_tier_wire_stale_dependency_prior_must_not_override_final_disk(
         dependency_outputs=dependency_outputs,
         ctx=ctx,
         submission_open=explicit_submission_open(),
+        execution_generation=1,
     )
 
     assert run.session.fleet_torp_input_status == "applied"
@@ -1319,8 +1334,8 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
     compute_registry = build_compute_registry((tier_registration,))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1350,7 +1365,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         )
         assert submitted_scopes == [scope]
         result_wire = run_scores_tier_solve({"runId": run.run_id})
-        orchestrator.complete_pool_step(scope, result_wire=result_wire)
+        complete_running_pool_step(orchestrator, scope, result_wire=result_wire)
 
     assert handle.state == "complete", handle.error
     assert handle.result_wire is not None
@@ -1404,8 +1419,8 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
     compute_registry = build_compute_registry((tier_registration,))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1448,7 +1463,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
         )
         assert result_wire.outcome == "waiting_deps"
         assert result_wire.wait_recovery is None
-        orchestrator.complete_pool_step(scope, result_wire=result_wire)
+        complete_running_pool_step(orchestrator, scope, result_wire=result_wire)
 
     unregister()
     node = orchestrator.nodes[scope]
@@ -1524,8 +1539,8 @@ def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1695,8 +1710,8 @@ def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1709,7 +1724,6 @@ def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -
         scope=scope,
         dependency_scopes=(),
         state="waiting_deps",
-        priority_band="background",
         profile_step_index=1,
         step_index=1,
         bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
@@ -1769,8 +1783,8 @@ def test_enqueue_without_stream_token_wakes_parked_scores_node(
     compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
     submitted_scopes: list[ComputeScope] = []
 
-    def pool_submitter(node, step, *, job_wire=None, run_step=None) -> None:
-        del step, job_wire, run_step
+    def pool_submitter(node, step, **_kwargs) -> None:
+        del step
         submitted_scopes.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -1782,7 +1796,6 @@ def test_enqueue_without_stream_token_wakes_parked_scores_node(
         scope=scope,
         dependency_scopes=(),
         state="parked",
-        priority_band="background",
         profile_step_index=1,
         step_index=1,
         bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),

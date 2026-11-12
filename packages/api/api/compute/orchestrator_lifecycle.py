@@ -36,6 +36,7 @@ class OrchestratorLifecycleMixin:
         self._observers.notify_lifecycle(
             kind,
             node.scope,
+            execution_generation=node.execution_generation,
             node=node,
             step_index=node.step_index,
             detail={
@@ -44,12 +45,12 @@ class OrchestratorLifecycleMixin:
                 "priorProfileStepIndex": node.profile_step_index,
                 "wasRunning": node.state == "running",
                 "entryStepKind": request.step_kind,
-                "priorityBand": request.priority_band,
+                "priorityBand": node.priority_band,
             },
         )
 
     def _reset_for_requeue(self: ComputeOrchestrator, node: ComputeNodeRun) -> int:
-        """Clear submit-generation seal so the node can re-enter the dispatch loop.
+        """Clear the submit generation so the node can re-enter the dispatch loop.
 
         Shared by epoch-retry, persist-deferred recovery, and soft park -- the three
         paths that leave an in-flight step and must reopen the node for later work.
@@ -57,7 +58,6 @@ class OrchestratorLifecycleMixin:
         """
         prior_step_index = node.step_index
         node.generation_at_submit = None
-        node.execution_sealed = False
         return prior_step_index
 
     def _retry_step_after_epoch_bump(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
@@ -71,6 +71,7 @@ class OrchestratorLifecycleMixin:
         self._observers.notify_lifecycle(
             "epoch_retry",
             node.scope,
+            execution_generation=node.execution_generation,
             node=node,
             step_index=prior_step_index,
             detail={
@@ -121,8 +122,9 @@ class OrchestratorLifecycleMixin:
         never refreshes this node and ``force_fresh_attach`` alone leaves it stuck
         in ``waiting_deps`` (0% CPU hang). Never graft the node's own scope -- that
         self-edge can never become ``complete`` while this node is ``waiting_deps``.
+        The force_fresh dependency submit asks for no band of its own: the
+        grafted edge gives it this node's band at the next dispatch pass.
         """
-        priority_band = node.priority_band
         bundle = node.bundle
         with self._condition:
             if node.state != "running":
@@ -141,6 +143,7 @@ class OrchestratorLifecycleMixin:
             self._observers.notify_lifecycle(
                 "persist_deferred",
                 node.scope,
+                execution_generation=node.execution_generation,
                 node=node,
                 step_index=prior_step_index,
                 detail={
@@ -149,7 +152,7 @@ class OrchestratorLifecycleMixin:
                     "relatedScopeKey": format_compute_scope_key(dependency_scope),
                     "forceFresh": recovery.force_fresh,
                     "dependencyStepKind": recovery.step_kind,
-                    "priorityBand": priority_band,
+                    "priorityBand": node.priority_band,
                 },
             )
 
@@ -163,7 +166,6 @@ class OrchestratorLifecycleMixin:
             self.submit(
                 ComputeRequest(
                     scope=dependency_scope,
-                    priority_band=priority_band,
                     force_fresh=True,
                     step_kind=step_kind,
                     bundle=bundle,
@@ -354,7 +356,6 @@ class OrchestratorLifecycleMixin:
                 # peers cannot rematerialize while this node is still non-terminal.
                 node.profile_step_index = next_profile_index
         node.state = "ready"
-        node.execution_sealed = False
         self._enqueue_ready(node.scope)
         self._observers.notify_ready(node)
         # Defer dispatch so pool submit is never nested under this lock.
@@ -428,6 +429,7 @@ class OrchestratorLifecycleMixin:
         self._observers.notify_lifecycle(
             "step_parked",
             node.scope,
+            execution_generation=node.execution_generation,
             node=node,
             step_index=prior_step_index,
             detail={
@@ -442,7 +444,6 @@ class OrchestratorLifecycleMixin:
             return
         node.park_reason = None
         node.generation_at_submit = None
-        node.execution_sealed = False
         if self._deps_complete(node):
             node.state = "ready"
             self._enqueue_ready(node.scope)

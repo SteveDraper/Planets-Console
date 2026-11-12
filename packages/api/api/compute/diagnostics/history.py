@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from api.compute.pools import ComputePriorityBand
+from api.compute.priority_band import ComputePriorityBand
 
 DEFAULT_COMPLETION_HISTORY_CAP = 500
 

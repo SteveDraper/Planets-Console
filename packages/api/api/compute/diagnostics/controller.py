@@ -18,7 +18,6 @@ from api.compute.diagnostics.history import (
     ComputeCompletionHistory,
 )
 from api.compute.diagnostics.in_flight import (
-    InFlightExecutionKey,
     InFlightPoolExecution,
     clear_in_flight_for_step,
     filter_live_in_flight,
@@ -38,20 +37,18 @@ from api.compute.diagnostics.single_step_preview import (
     SingleStepArm,
     SingleStepDisabledReason,
     SingleStepPreview,
-    find_held_focus_pool_item,
-    has_running_focus_work,
-    preview_focus_ready_dispatch,
     resolve_single_step_preview,
-    single_step_pin_matches,
 )
 from api.compute.orchestrator import OrchestratorNodeSnapshot
 from api.compute.pools import (
+    BandedWorkItem,
     ComputeWorkerPool,
     PoolWorkItem,
     get_compute_worker_pool,
 )
 from api.compute.registry import COMPUTE_REGISTRY
 from api.compute.scope import ComputeScope
+from api.compute.step_execution_key import StepExecutionKey
 from api.config import get_config
 
 if TYPE_CHECKING:
@@ -191,27 +188,45 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         self,
         shell: ShellContextKey,
         *,
-        pool_queue_items: tuple[PoolWorkItem, ...] | None = None,
+        pool_queue_items: tuple[BandedWorkItem, ...] | None = None,
     ) -> tuple[SingleStepPreview | None, SingleStepDisabledReason | None]:
         """Return the next single-step target and why stepping is disabled, if at all.
 
         Selection matches :meth:`single_step` and approximates unfrozen pool order:
         compare the best held focus pool item and the best focus ready node by
         priority band (then initial step before continuation). On a tie, prefer
-        the held item (already queued).
+        the held item (already queued). A held item left by an aborted or
+        replaced execution of its scope is not a candidate.
 
         ``pool_queue_items`` when provided is the authoritative queue snapshot for
         this decision (same tuple used to render ``poolQueue``) so held preview
         cannot race ahead of an emptied queue wire.
         """
-        held = self._preview_held_focus_pool_item(shell, pool_queue_items=pool_queue_items)
-        ready = self._preview_focus_ready_dispatch(shell)
+        if pool_queue_items is not None:
+            queue_items = pool_queue_items
+        elif self._pool is not None:
+            queue_items = self._pool.snapshot_work_queue()
+        else:
+            queue_items = ()
+        ancestor_turns = self._ancestor_turns_for_shell(shell)
+
+        def is_focus_scope(scope: ComputeScope) -> bool:
+            if not scope_in_diagnostic_scope(
+                scope,
+                game_id=shell.game_id,
+                perspective=shell.perspective,
+                ancestor_turns=ancestor_turns,
+            ):
+                return False
+            return self._scope_in_focus(scope, shell)
+
         return resolve_single_step_preview(
             freeze_armed=self._freeze_state.freeze_armed_for_game(shell.game_id),
             allowlist_empty=not self._freeze_state.allowlisted_player_ids(shell),
-            held=held,
-            ready=ready,
-            has_running_focus=lambda: self._has_running_focus_work(shell),
+            queue_items=queue_items,
+            bound_orchestrators=self._bound_orchestrators_snapshot(),
+            shell=shell,
+            is_focus_scope=is_focus_scope,
         )
 
     def set_freeze_armed(self, shell: ShellContextKey, *, freeze_armed: bool) -> None:
@@ -236,8 +251,10 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         unfrozen pool dequeue). No-op (return ``False``, leave grants at 0) when preview
         has no target. When the target is a held focus pool item, arm a dequeue grant
         only. When the target would dispatch, arm one focus dispatch slot plus one
-        dequeue grant so that item can run. The armed target scope, priority band, and
-        orchestrator id are pinned so a lower-band ready node cannot steal the release.
+        dequeue grant so that item can run. The armed target's orchestrator id, scope,
+        execution generation, and step index are pinned so no other step (nor an older
+        execution's pool item) can steal the release. The pin carries no band, so a
+        band change between preview and release keeps the target.
 
         If the armed dispatch slot is consumed by an inline step (no pool enqueue),
         the commit hook clears the unused dequeue grant immediately so it cannot
@@ -354,9 +371,9 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         with self._lock:
             return tuple(self._in_flight)
 
-    def _running_in_flight_keys(self) -> set[InFlightExecutionKey]:
-        """Return keys for bound orchestrator nodes currently in ``running`` state."""
-        running_keys: set[InFlightExecutionKey] = set()
+    def _running_in_flight_keys(self) -> set[StepExecutionKey]:
+        """Return step keys for bound orchestrator nodes currently in ``running`` state."""
+        running_keys: set[StepExecutionKey] = set()
 
         def step_kind_for_node(node: OrchestratorNodeSnapshot) -> str | None:
             return registration_step_kind(node.scope.analytic_id, node.profile_step_index)
@@ -493,59 +510,6 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             return False
         return player_id in allowlisted
 
-    def _has_running_focus_work(self, shell: ShellContextKey) -> bool:
-        """Return whether any focus node in diagnostic scope is still ``running``.
-
-        Covers persist-before-complete: the pool step may have finished (and cleared
-        queues) while durable write is still outstanding and the node stays running.
-        """
-        return has_running_focus_work(
-            self._bound_orchestrators_snapshot(),
-            shell,
-            ancestor_turns=self._ancestor_turns_for_shell(shell),
-            scope_in_focus=lambda scope: self._scope_in_focus(scope, shell),
-        )
-
-    def _preview_held_focus_pool_item(
-        self,
-        shell: ShellContextKey,
-        *,
-        pool_queue_items: tuple[PoolWorkItem, ...] | None = None,
-    ) -> PoolWorkItem | None:
-        """Return the focus pool item single-step would dequeue first, if any."""
-        if pool_queue_items is not None:
-            queue_items = pool_queue_items
-        elif self._pool is not None:
-            queue_items = self._pool.snapshot_work_queue()
-        else:
-            return None
-        ancestor_turns = self._ancestor_turns_for_shell(shell)
-
-        def is_focus_item(item: PoolWorkItem) -> bool:
-            if not scope_in_diagnostic_scope(
-                item.scope,
-                game_id=shell.game_id,
-                perspective=shell.perspective,
-                ancestor_turns=ancestor_turns,
-            ):
-                return False
-            return self._scope_in_focus(item.scope, shell)
-
-        return find_held_focus_pool_item(queue_items, is_focus_item=is_focus_item)
-
-    def _preview_focus_ready_dispatch(self, shell: ShellContextKey) -> SingleStepPreview | None:
-        """Return the focus ready node single-step would dispatch first, if any.
-
-        Across bound orchestrators, pick by the same priority-band / initial-step
-        rules as the global pool. Ties keep bind order then ready-queue order.
-        """
-        return preview_focus_ready_dispatch(
-            self._bound_orchestrators_snapshot(),
-            shell,
-            ancestor_turns=self._ancestor_turns_for_shell(shell),
-            scope_in_focus=lambda scope: self._scope_in_focus(scope, shell),
-        )
-
     def _scope_matches_single_step_shell(self, scope: ComputeScope) -> bool:
         if self._single_step.shell is None:
             return False
@@ -561,24 +525,25 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         self,
         scope: ComputeScope,
         *,
-        priority_band: str | None = None,
-        orchestrator_id: int | None = None,
+        orchestrator_id: int | None,
+        execution_generation: int,
+        step_index: int,
     ) -> bool:
-        """Return whether an armed single-step may release ``scope`` (shell + focus).
+        """Return whether an armed single-step may release this step (pin, shell, focus).
 
-        When a target is armed, scope, priority band, and orchestrator id must match
-        so the same compute scope on another orchestrator cannot steal the release.
+        The step must match the armed pin's orchestrator id, scope, execution
+        generation, and step index, so the same compute scope on another
+        orchestrator, or an older execution of it, cannot steal the release.
         """
         shell = self._single_step.shell
-        if shell is None:
+        target = self._single_step.target
+        if shell is None or target is None:
             return False
-        if not single_step_pin_matches(
-            target_scope=self._single_step.target_scope,
-            target_priority_band=self._single_step.target_priority_band,
-            target_orchestrator_id=self._single_step.target_orchestrator_id,
-            scope=scope,
-            priority_band=priority_band,
+        if not target.matches(
             orchestrator_id=orchestrator_id,
+            scope=scope,
+            execution_generation=execution_generation,
+            step_index=step_index,
         ):
             return False
         if not self._scope_matches_single_step_shell(scope):
@@ -590,8 +555,9 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         with self._lock:
             if self._single_step.grants_remaining > 0 and self._single_step_may_release(
                 item.scope,
-                priority_band=item.priority_band,
                 orchestrator_id=item.orchestrator_id,
+                execution_generation=item.execution_generation,
+                step_index=item.step_index,
             ):
                 return True
             operator_shell = self._last_shell_context
@@ -603,19 +569,21 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             return True
         return not self._is_scope_frozen(item.scope, shell)
 
-    def _on_pool_item_dequeued(self, item: PoolWorkItem, queue_depth: int = 0) -> None:
-        """Record in-flight work and consume a single-step grant when applicable.
+    def _on_pool_item_dequeued(self, picked: BandedWorkItem, queue_depth: int = 0) -> None:
+        """Record in-flight work at its picked band and consume a single-step grant.
 
         Invoked under the pool lock after pop so concurrent workers cannot both
         observe a remaining grant before either burns it.
         """
+        item = picked.item
         with self._lock:
-            self._in_flight.append(in_flight_from_pool_item(item))
+            self._in_flight.append(in_flight_from_pool_item(picked))
             if self._single_step.grants_remaining > 0:
                 if self._single_step_may_release(
                     item.scope,
-                    priority_band=item.priority_band,
                     orchestrator_id=item.orchestrator_id,
+                    execution_generation=item.execution_generation,
+                    step_index=item.step_index,
                 ):
                     self._single_step.grants_remaining -= 1
                     if self._single_step.grants_remaining == 0:
@@ -628,63 +596,42 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         self._timeline.record(
             shell,
             kind="start",
-            scope=item.scope,
-            orchestrator_id=item.orchestrator_id,
-            step_kind=item.step_kind,
-            step_index=item.step_index,
-            priority_band=item.priority_band,
+            step=item.step_key,
+            priority_band=picked.priority_band,
             backend=item.backend,
             open_execution=True,
             global_queue_depth=queue_depth,
         )
 
-    def _on_pool_item_enqueued(self, item: PoolWorkItem, queue_depth: int) -> None:
+    def _on_pool_item_enqueued(self, enqueued: BandedWorkItem, queue_depth: int) -> None:
         """Record a pool enqueue timeline event when the scope matches the operator shell."""
+        item = enqueued.item
         shell = self._scope_matches_active_shell(item.scope)
         if shell is None:
             return
         self._timeline.record(
             shell,
             kind="enqueue",
-            scope=item.scope,
-            orchestrator_id=item.orchestrator_id,
-            step_kind=item.step_kind,
-            step_index=item.step_index,
-            priority_band=item.priority_band,
+            step=item.step_key,
+            priority_band=enqueued.priority_band,
             backend=item.backend,
             global_queue_depth=queue_depth,
         )
 
     def _on_pool_item_finished(self, item: PoolWorkItem) -> None:
-        """Clear the matching in-flight record after a pool worker finishes the item.
+        """Clear the item's in-flight record after a pool worker finishes the item.
 
-        Authoritative clear for success, error, orchestrator-gone, and
-        ``complete_pool_step`` early-return (node already aborted). Matches by
-        orchestrator id so one scope's completion cannot clear another's slot.
+        Authoritative clear for success, error, orchestrator-gone, and an item
+        its orchestrator ignores because the execution that dispatched it is no
+        longer running (dropped at pick, or finished late). Matches the item's
+        step key, so neither another orchestrator's step nor a newer execution
+        of the same scope loses its row.
         """
-        self._clear_in_flight_for_step(
-            item.scope,
-            step_kind=item.step_kind,
-            step_index=item.step_index,
-            orchestrator_id=item.orchestrator_id,
-        )
+        self._clear_in_flight_for_step(item.step_key)
 
-    def _clear_in_flight_for_step(
-        self,
-        scope: ComputeScope,
-        *,
-        step_kind: str,
-        step_index: int,
-        orchestrator_id: int | None,
-    ) -> None:
+    def _clear_in_flight_for_step(self, step: StepExecutionKey) -> None:
         with self._lock:
-            clear_in_flight_for_step(
-                self._in_flight,
-                scope,
-                step_kind=step_kind,
-                step_index=step_index,
-                orchestrator_id=orchestrator_id,
-            )
+            clear_in_flight_for_step(self._in_flight, step)
 
 
 def get_compute_diagnostics_controller() -> ComputeDiagnosticsController:

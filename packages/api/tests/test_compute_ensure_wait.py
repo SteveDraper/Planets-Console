@@ -22,6 +22,7 @@ from api.compute import (
     normalize_export_scope_to_compute_scope,
 )
 
+from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
@@ -90,7 +91,7 @@ def test_handle_wait_returns_when_pool_step_completes(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -112,7 +113,8 @@ def test_handle_wait_returns_when_pool_step_completes(sample_turn):
     time.sleep(0.05)
     assert not done.is_set()
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
@@ -131,7 +133,7 @@ def test_handle_wait_timeout_fails_waiter_only(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     leader = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -160,7 +162,7 @@ def test_handle_wait_raises_node_failure(sample_turn):
     pool_failure = RuntimeError("pool step failed")
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -178,7 +180,7 @@ def test_handle_wait_raises_node_failure(sample_turn):
     thread = threading.Thread(target=wait_for_failure, daemon=True)
     thread.start()
     time.sleep(0.05)
-    orchestrator.complete_pool_step(shared_scope, error=pool_failure)
+    complete_running_pool_step(orchestrator, shared_scope, error=pool_failure)
     assert done.wait(timeout=2.0)
     assert errors == [pool_failure]
     thread.join(timeout=1.0)
@@ -204,7 +206,7 @@ def test_ensure_scope_short_circuits_when_already_satisfied(sample_turn):
         compute_registry=build_compute_registry(
             (_thread_registration(SHARED_ID, persistence_policy=policy),)
         ),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     handle = orchestrator.ensure_scope(
@@ -237,14 +239,14 @@ def test_ensure_scope_rebuilds_hollow_terminal_without_force_fresh(sample_turn):
         compute_registry=build_compute_registry(
             (_thread_registration(SHARED_ID, persistence_policy=policy),)
         ),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     # Seed a terminal node as if a prior ensure completed, then durable state wiped.
     first = orchestrator.submit(
         ComputeRequest(ctx=ctx, scope=shared_scope, priority_band="interactive_ensure"),
     )
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": "stale"})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": "stale"})
     assert first.wait(timeout=1.0).state == "complete"
     prior_generation = orchestrator.nodes[shared_scope].execution_generation
 
@@ -277,7 +279,7 @@ def test_ensure_scope_rebuilds_hollow_terminal_without_force_fresh(sample_turn):
     assert rebuilt.state == "running"
     assert rebuilt.execution_generation != prior_generation
 
-    orchestrator.complete_pool_step(shared_scope, result_wire={"result": "fresh"})
+    complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": "fresh"})
     thread.join(timeout=2.0)
     assert errors == []
     assert len(result_box) == 1
@@ -342,7 +344,7 @@ def test_ensure_scope_rebuilds_hollow_dependency_terminals(sample_turn):
                 ),
             )
         ),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     first = orchestrator.ensure_scope(
@@ -377,7 +379,7 @@ def test_ensure_scope_submit_and_wait_until_complete(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     result_box: list[object] = []
@@ -405,7 +407,8 @@ def test_ensure_scope_submit_and_wait_until_complete(sample_turn):
     time.sleep(0.05)
     assert orchestrator.nodes[shared_scope].state == "running"
 
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
@@ -424,7 +427,7 @@ def test_ensure_scope_timeout_leaves_inflight_running(sample_turn):
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_thread_registration(SHARED_ID),)),
-        pool_submitter=lambda _node, _step: None,
+        pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
     with pytest.raises(ComputeWaitTimeoutError):
@@ -438,7 +441,8 @@ def test_ensure_scope_timeout_leaves_inflight_running(sample_turn):
     # Later attach can still complete the shared in-flight work.
     late = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert late.state == "attach_inflight"
-    orchestrator.complete_pool_step(
+    complete_running_pool_step(
+        orchestrator,
         shared_scope,
         result_wire={"result": SHARED_ID},
     )
@@ -467,7 +471,7 @@ def test_ensure_scopes_submits_all_before_wait(sample_turn):
     )
     submitted: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         submitted.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -503,7 +507,7 @@ def test_ensure_scopes_submits_all_before_wait(sample_turn):
     assert set(submitted) == set(scopes)
 
     for scope in scopes:
-        orchestrator.complete_pool_step(scope, result_wire={"result": SHARED_ID})
+        complete_running_pool_step(orchestrator, scope, result_wire={"result": SHARED_ID})
     assert done.wait(timeout=2.0)
     assert errors == []
     thread.join(timeout=1.0)
@@ -538,7 +542,7 @@ def test_ensure_scopes_returns_handles_in_request_order(sample_turn):
 
     submitted: list[ComputeScope] = []
 
-    def pool_submitter(node, _step) -> None:
+    def pool_submitter(node, _step, **_kwargs) -> None:
         submitted.append(node.scope)
 
     orchestrator = ComputeOrchestrator(
@@ -570,7 +574,7 @@ def test_ensure_scopes_returns_handles_in_request_order(sample_turn):
     assert submitted == [miss_first, miss_last]
 
     for scope in (miss_first, miss_last):
-        orchestrator.complete_pool_step(scope, result_wire={"result": scope.player_id})
+        complete_running_pool_step(orchestrator, scope, result_wire={"result": scope.player_id})
     assert done.wait(timeout=2.0)
     assert errors == []
     thread.join(timeout=1.0)

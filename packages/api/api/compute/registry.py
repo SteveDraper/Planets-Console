@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from api.analytics.registration import TurnAnalyticRegistration
 from api.compute.persistence import PersistencePolicy
+from api.compute.priority_band import ShellStreamWatch
 from api.compute.profile import (
     VALID_COMPUTE_BACKENDS,
     AnalyticComputeProfile,
@@ -29,6 +30,7 @@ class AnalyticComputeRegistration:
     build_step_job_wire: Mapping[str, BuildStepJobWireFn]
     run_step: Mapping[str, RunStepFn]
     open_root_plan: OpenRootPlanFn
+    shell_stream_watch: ShellStreamWatch
 
 
 def _mapping_from_pairs(
@@ -151,6 +153,13 @@ def validate_turn_analytic_compute_registration(
             f"Turn analytic {analytic_id!r} unknown run_step step_kind(s): {unknown_runners!r}"
         )
 
+    shell_stream_watch = registration.shell_stream_watch
+    if not isinstance(shell_stream_watch, ShellStreamWatch):
+        raise RuntimeError(
+            f"Turn analytic {analytic_id!r} shell_stream_watch must be a ShellStreamWatch, "
+            f"got {type(shell_stream_watch).__name__}"
+        )
+
     return AnalyticComputeRegistration(
         analytic_id=analytic_id,
         scope_key_spec=scope_key_spec,
@@ -159,6 +168,7 @@ def validate_turn_analytic_compute_registration(
         build_step_job_wire=build_step_job_wire,
         run_step=run_step,
         open_root_plan=registration.open_root_plan,
+        shell_stream_watch=shell_stream_watch,
     )
 
 

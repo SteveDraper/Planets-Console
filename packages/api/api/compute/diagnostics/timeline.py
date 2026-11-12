@@ -9,7 +9,9 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from api.compute.orchestrator_observers import LifecycleEventKind
-from api.compute.pools import ComputePriorityBand
+from api.compute.priority_band import ComputePriorityBand
+from api.compute.scope import ComputeScope, format_compute_scope_key
+from api.compute.step_execution_key import StepExecutionKey
 
 DEFAULT_TIMELINE_CAPACITY = 5000
 
@@ -56,16 +58,33 @@ class ComputeConcurrencyEvent:
     detail: dict[str, object] | None = None
 
 
-def format_execution_key(
+def format_execution_key(step: StepExecutionKey) -> str:
+    """Return the wire label naming ``step`` on every timeline event about it."""
+    orch = "none" if step.orchestrator_id is None else str(step.orchestrator_id)
+    scope_key = format_compute_scope_key(step.scope)
+    return f"{orch}|{scope_key}|g{step.execution_generation}|{step.step_kind}|{step.step_index}"
+
+
+def node_event_step_key(
     *,
     orchestrator_id: int | None,
-    scope_key: str,
-    step_kind: str,
-    step_index: int,
-) -> str:
-    """Return a stable execution key for start/complete duration pairing."""
-    orch = "none" if orchestrator_id is None else str(orchestrator_id)
-    return f"{orch}|{scope_key}|{step_kind}|{step_index}"
+    scope: ComputeScope,
+    execution_generation: int,
+    step_kind: str | None,
+    step_index: int | None,
+) -> StepExecutionKey:
+    """Return the step a node event names.
+
+    A node event may not know its step kind or index; its key then names an
+    empty kind and index -1.
+    """
+    return StepExecutionKey(
+        orchestrator_id=orchestrator_id,
+        scope=scope,
+        execution_generation=execution_generation,
+        step_kind=step_kind or "",
+        step_index=step_index if step_index is not None else -1,
+    )
 
 
 class ComputeConcurrencyTimeline:
@@ -93,41 +112,63 @@ class ComputeConcurrencyTimeline:
             self._entries.clear()
 
 
-@dataclass
+@dataclass(frozen=True)
 class OpenExecution:
-    """In-flight start timestamp used to derive wall duration on finish."""
+    """What a start event recorded, kept until the matching finish.
+
+    ``priority_band`` is the band the step started at (for a pool step, the
+    band it was picked at), so its finish reports that band.
+    """
 
     started_at: datetime
     backend: str | None
+    priority_band: ComputePriorityBand
+
+
+@dataclass(frozen=True)
+class ClosedExecution:
+    """A finished execution paired with its start event."""
+
+    duration_ms: float
+    backend: str | None
+    priority_band: ComputePriorityBand
 
 
 class OpenExecutionTracker:
     """Process-local map of open start events for duration pairing."""
 
     def __init__(self) -> None:
-        self._open: dict[str, OpenExecution] = {}
+        self._open: dict[StepExecutionKey, OpenExecution] = {}
         self._lock = threading.Lock()
 
     def open(
         self,
-        execution_key: str,
+        step: StepExecutionKey,
         *,
         backend: str | None,
+        priority_band: ComputePriorityBand,
         started_at: datetime | None = None,
     ) -> datetime:
         started = started_at if started_at is not None else datetime.now(UTC)
         with self._lock:
-            self._open[execution_key] = OpenExecution(started_at=started, backend=backend)
+            self._open[step] = OpenExecution(
+                started_at=started,
+                backend=backend,
+                priority_band=priority_band,
+            )
         return started
 
-    def close(self, execution_key: str) -> tuple[float | None, str | None]:
-        """Return ``(duration_ms, backend)`` when a matching start exists."""
+    def close(self, step: StepExecutionKey) -> ClosedExecution | None:
+        """Return the closed execution, or None when no matching start was recorded."""
         with self._lock:
-            opened = self._open.pop(execution_key, None)
+            opened = self._open.pop(step, None)
         if opened is None:
-            return None, None
-        duration_ms = (datetime.now(UTC) - opened.started_at).total_seconds() * 1000.0
-        return duration_ms, opened.backend
+            return None
+        return ClosedExecution(
+            duration_ms=(datetime.now(UTC) - opened.started_at).total_seconds() * 1000.0,
+            backend=opened.backend,
+            priority_band=opened.priority_band,
+        )
 
     def clear(self) -> None:
         with self._lock:

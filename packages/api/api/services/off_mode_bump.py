@@ -230,9 +230,8 @@ def live_turns_for_limited_recompute(
 ) -> dict[str, frozenset[int]]:
     """Live fleet and scores streams by analytic id, or empty when unused.
 
-    One registry walk. Callers that claim a root run it before that claim,
-    because the scan takes its own locks. Held admission and backfill on wake
-    every known turn and do not scan.
+    One registry walk over published snapshots; it takes no lock. Held
+    admission and backfill on wake every known turn and do not scan.
     """
     if not _limits_recompute(durable=durable, backfill_enabled=backfill_enabled):
         return {}

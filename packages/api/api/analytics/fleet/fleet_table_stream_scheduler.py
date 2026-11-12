@@ -263,7 +263,6 @@ class FleetTableStreamScheduler:
         binding.orchestrator.submit(
             ComputeRequest(
                 scope=scope,
-                priority_band="stream_attached",
                 force_fresh=True,
                 ctx=binding.query_context,
             )

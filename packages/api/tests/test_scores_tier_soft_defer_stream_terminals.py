@@ -73,7 +73,6 @@ def test_soft_row_defer_delivers_stream_terminal_without_completing_node(sample_
         orchestrator,
         scope,
         state="waiting_deps",
-        priority_band="stream_attached",
         result_wire={"runId": run.run_id, "rowComplete": soft_complete},
     )
 

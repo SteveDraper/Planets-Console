@@ -18,7 +18,6 @@ from api.compute.orchestrator_state import (
     ComputeRequest,
     ResolvedComputeRequest,
 )
-from api.compute.pools import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.root_plan import IgnoredRootPlan, RootPlan
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
@@ -216,62 +215,58 @@ class OrchestratorSubmissionMixin:
         """
         scope = request.scope
         existing = self._nodes.get(scope)
-        if existing is not None:
-            if not (request.force_fresh and existing.is_terminal):
-                if request.force_fresh:
-                    self._emit_force_fresh_lifecycle(
-                        kind="force_fresh_attach",
-                        node=existing,
-                        request=request,
-                    )
-                    self._maybe_wake_parked_node(existing)
-                    # Parked wake is handled above. ``waiting_deps`` / ``ready`` still
-                    # need a readiness refresh when deps are already terminal (e.g.
-                    # evidence-close force_fresh after scores completed but the
-                    # dependent missed the dependency-terminal callback).
-                    if existing.state in {"waiting_deps", "ready"}:
-                        self._refresh_node_readiness(existing)
-                        if existing.state == "waiting_deps":
-                            self._schedule_recreate_aborted_dependencies(existing)
-                handle = self._attach_to_existing(existing, request)
-                pending_inline, pending_pool = self._dispatch()
-                return AcceptedSubmission(handle, pending_inline, pending_pool, None)
-            self._emit_force_fresh_lifecycle(
-                kind="force_fresh_replace",
-                node=existing,
-                request=request,
+        planned: tuple[PlannedComputeNode, ...] | None = None
+        if existing is not None and not (request.force_fresh and existing.is_terminal):
+            if request.force_fresh:
+                self._emit_force_fresh_lifecycle(
+                    kind="force_fresh_attach",
+                    node=existing,
+                    request=request,
+                )
+                self._maybe_wake_parked_node(existing)
+                # Parked wake is handled above. ``waiting_deps`` / ``ready`` still
+                # need a readiness refresh when deps are already terminal (e.g.
+                # evidence-close force_fresh after scores completed but the
+                # dependent missed the dependency-terminal callback).
+                if existing.state in {"waiting_deps", "ready"}:
+                    self._refresh_node_readiness(existing)
+                    if existing.state == "waiting_deps":
+                        self._schedule_recreate_aborted_dependencies(existing)
+            handle = self._attach_to_existing(existing, request)
+        else:
+            if existing is not None:
+                self._emit_force_fresh_lifecycle(
+                    kind="force_fresh_replace",
+                    node=existing,
+                    request=request,
+                )
+                self._replace_terminal_node(existing)
+            planned = self._plan_submission_locked(request)
+            handle = ComputeHandle(
+                scope=scope,
+                _node=self._nodes[scope],
+                _condition=self._condition,
             )
-            self._replace_terminal_node(existing)
-        return self._plan_submission_locked(request)
+        # The request raises only its own scope's standing band. Its
+        # dependencies take their band from it through the pass derivation.
+        self._nodes[scope].raise_standing_band(request.priority_band)
+        pending_inline, pending_pool = self._dispatch()
+        return AcceptedSubmission(handle, pending_inline, pending_pool, planned)
 
     def _plan_submission_locked(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
-    ) -> AcceptedSubmission:
-        """Plan a fresh scope and select its first dispatchable work."""
-        submission_open = request.submission_open
-        scope = request.scope
-        bundle = self._require_bundle(request)
+    ) -> tuple[PlannedComputeNode, ...]:
+        """Plan and register a fresh scope, then refresh readiness across the DAG."""
         planned = self._plan_and_register(
-            scope,
-            bundle=bundle,
-            priority_band=request.priority_band,
+            request.scope,
+            bundle=self._require_bundle(request),
             entry_step_kind=request.step_kind,
-            submission_open=submission_open,
+            submission_open=request.submission_open,
         )
         for node in self._nodes.values():
             self._refresh_node_readiness(node)
-        pending_inline, pending_pool = self._dispatch()
-        return AcceptedSubmission(
-            handle=ComputeHandle(
-                scope=scope,
-                _node=self._nodes[scope],
-                _condition=self._condition,
-            ),
-            pending_inline=pending_inline,
-            pending_pool=pending_pool,
-            planned=planned,
-        )
+        return planned
 
     def _finish_submission(
         self: ComputeOrchestrator,
@@ -303,12 +298,10 @@ class OrchestratorSubmissionMixin:
         ``waiting_deps`` chain and recreates abort-failed dependencies so a
         later-turn fleet attach can restart aborted prior-turn scores.
         Do not recreate on abort itself -- that would fight an in-flight cancel.
+        A recreated dependency takes its band from the waiting dependents.
         Caller holds the orchestrator lock; submits run after release.
         """
-        to_recreate: dict[
-            ComputeScope,
-            tuple[OrchestrationBundle, ComputePriorityBand, SubmissionOpen],
-        ] = {}
+        to_recreate: dict[ComputeScope, tuple[OrchestrationBundle, SubmissionOpen]] = {}
         seen: set[ComputeScope] = set()
         stack = [node]
         while stack:
@@ -328,22 +321,17 @@ class OrchestratorSubmissionMixin:
                     bundle = dependency.bundle if dependency.bundle is not None else node.bundle
                     if bundle is None:
                         continue
-                    to_recreate[dependency_scope] = (
-                        bundle,
-                        node.priority_band,
-                        dependency.submission_open,
-                    )
+                    to_recreate[dependency_scope] = (bundle, dependency.submission_open)
                 elif dependency.state == "waiting_deps":
                     stack.append(dependency)
         if not to_recreate:
             return
 
         def _recreate() -> None:
-            for scope, (bundle, priority_band, submission_open) in to_recreate.items():
+            for scope, (bundle, submission_open) in to_recreate.items():
                 self.submit(
                     ComputeRequest(
                         scope=scope,
-                        priority_band=priority_band,
                         force_fresh=True,
                         bundle=bundle,
                         submission_open=submission_open,
@@ -371,7 +359,6 @@ class OrchestratorSubmissionMixin:
             _condition=self._condition,
         )
         node.waiters.append(handle)
-        self._maybe_adopt_priority(node, request.priority_band)
         return handle
 
     def _adopt_rooted_open_turn(
@@ -392,20 +379,6 @@ class OrchestratorSubmissionMixin:
             return
         node.submission_open = replace(node.submission_open, open_turn=open_turn)
 
-    def _maybe_adopt_priority(
-        self: ComputeOrchestrator,
-        node: ComputeNodeRun,
-        priority_band: ComputePriorityBand,
-    ) -> None:
-        """Upgrade a node's priority from a higher-priority attachment."""
-        if node.execution_sealed:
-            return
-        if not node.allows_priority_adopt:
-            return
-        if PRIORITY_BAND_RANK[priority_band] >= PRIORITY_BAND_RANK[node.priority_band]:
-            return
-        node.priority_band = priority_band
-
     def _replace_terminal_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         if not node.is_terminal:
             raise RuntimeError(f"cannot replace non-terminal node in state {node.state!r}")
@@ -418,7 +391,6 @@ class OrchestratorSubmissionMixin:
         root_scope: ComputeScope,
         *,
         bundle: OrchestrationBundle,
-        priority_band: ComputePriorityBand,
         entry_step_kind: str | None = None,
         submission_open: SubmissionOpen,
     ) -> tuple[PlannedComputeNode, ...]:
@@ -451,7 +423,6 @@ class OrchestratorSubmissionMixin:
             self._register_planned_node(
                 planned,
                 bundle=bundle,
-                priority_band=priority_band,
                 entry_step_kind=entry_step_kind if planned.scope == root_scope else None,
                 submission_open=submission_open,
             )
@@ -460,7 +431,6 @@ class OrchestratorSubmissionMixin:
                 scope=root_scope,
                 dependency_scopes=(),
                 state="complete",
-                priority_band=priority_band,
                 execution_generation=self._allocate_execution_generation(),
                 bundle=bundle,
                 submission_open=submission_open,
@@ -472,7 +442,6 @@ class OrchestratorSubmissionMixin:
         planned: PlannedComputeNode,
         *,
         bundle: OrchestrationBundle,
-        priority_band: ComputePriorityBand,
         entry_step_kind: str | None = None,
         submission_open: SubmissionOpen,
     ) -> None:
@@ -486,7 +455,6 @@ class OrchestratorSubmissionMixin:
         node = ComputeNodeRun(
             scope=planned.scope,
             dependency_scopes=planned.dependency_scopes,
-            priority_band=priority_band,
             profile_step_index=profile_step_index,
             execution_generation=self._allocate_execution_generation(),
             bundle=bundle,
