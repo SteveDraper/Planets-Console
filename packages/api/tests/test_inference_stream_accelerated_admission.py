@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from api.analytics.military_score_inference.accelerated_start import (
     ACCEL_WINDOW_SEGMENT_ID,
     REPORTED_HOST_TURN_SEGMENT_ID,
@@ -9,6 +10,7 @@ from api.analytics.military_score_inference.accelerated_start import (
 )
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_accelerated import (
     build_accelerated_backfill_stream_row_complete,
 )
@@ -416,6 +418,61 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
     run_inference_tier_job(run, callbacks)
 
     assert captured == [stream_row_search_effort_allowance()]
+
+
+def _hull_mask(*hull_ids: int) -> ResolvedHullCatalogMask:
+    enabled = frozenset(hull_ids)
+    return ResolvedHullCatalogMask(
+        race_id=0,
+        race_name="test",
+        master_hull_ids=enabled,
+        default_enabled_hull_ids=enabled,
+        effective_enabled_hull_ids=enabled,
+        has_user_override=True,
+    )
+
+
+@pytest.mark.parametrize("ladder_mask", [_hull_mask(1, 2), None])
+def test_segment_continuation_keeps_the_ladder_state_mask(
+    sample_turn, monkeypatch, ladder_mask
+) -> None:
+    orchestration = _accelerated_split_orchestration(sample_turn)
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+        resolved_mask=ladder_mask,
+    )
+    run = RowRun(session)
+    run.orchestration = orchestration
+    run.ladder_state = orchestration.new_ladder_state(session)
+
+    def fake_tier_step(state, *_args, **_kwargs) -> None:
+        session.resolved_mask = _hull_mask(3)
+        state.ladder_complete = True
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
+        fake_tier_step,
+    )
+
+    outcome = run_inference_tier_job(
+        run,
+        InferenceTierJobCallbacks(
+            emit_tier_started_progress=lambda: None,
+            emit_progress=lambda: None,
+            emit_held_solutions=lambda _observation: None,
+        ),
+    )
+
+    assert outcome.enqueue_continuation is True
+    assert outcome.next_ladder_state is not None
+    assert outcome.next_ladder_state.resolved_mask is ladder_mask
+    assert run.ladder_state is outcome.next_ladder_state
 
 
 def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_turn) -> None:

@@ -6,6 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
+from api.analytics.military_score_inference.inference_stream_orchestration import (
+    continue_ladder_state,
+)
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -106,11 +109,7 @@ def _outcome_after_ladder_complete(
         if advance.continue_next_segment:
             return TierJobOutcome(
                 enqueue_continuation=True,
-                next_ladder_state=orchestration.new_ladder_state(
-                    run.session,
-                    hopeless_context=state.hopeless_context,
-                    load_counterparty_fleet=state.load_counterparty_fleet,
-                ),
+                next_ladder_state=continue_ladder_state(state, run.session),
             )
         if advance.row_complete is not None:
             return TierJobOutcome(row_complete=advance.row_complete)
