@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
-from api.compute.backend_runtime import process_is_frozen
+from api.compute.backend_runtime import interpreter_remap_reason
 from api.compute.priority_band import PRIORITY_BAND_RANK, ComputePriorityBand
 from api.compute.profile import (
     REMOTE_COMPUTE_BACKENDS,
@@ -552,18 +552,20 @@ class ComputeWorkerPool:
         declared: ComputeBackend,
         effective: ComputeBackend,
     ) -> None:
+        """Log once per pool that ``declared`` steps run as ``effective``, and why.
+
+        The reason comes from ``interpreter_remap_reason``, the rule that made the
+        remap. If the remap setting has been cleared since the item was dispatched,
+        no reason is in force and nothing is logged.
+        """
+        reason = interpreter_remap_reason()
+        if reason is None:
+            return
         key = (declared, effective)
         with self._condition:
             if key in self._logged_backend_remaps:
                 return
             self._logged_backend_remaps.add(key)
-        if process_is_frozen():
-            reason = (
-                "frozen process; InterpreterPoolExecutor cannot import "
-                "application modules under PyInstaller"
-            )
-        else:
-            reason = "api.remap_interpreter_backend_to_thread"
         logger.info("Compute backend %r remapped to %r (%s)", declared, effective, reason)
 
     def _register_remote_future(

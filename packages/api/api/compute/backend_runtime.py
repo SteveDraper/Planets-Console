@@ -13,14 +13,24 @@ def process_is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
-def should_remap_interpreter_backend_to_thread() -> bool:
-    """Return whether declared ``interpreter`` steps must run as ``thread``.
+FROZEN_INTERPRETER_REMAP_REASON = (
+    "frozen process; InterpreterPoolExecutor cannot import application modules under PyInstaller"
+)
+CONFIGURED_INTERPRETER_REMAP_REASON = "api.remap_interpreter_backend_to_thread"
 
-    True when this process is frozen (PyInstaller) or when
-    ``api.remap_interpreter_backend_to_thread`` is set so unpackaged/dev can
+
+def interpreter_remap_reason() -> str | None:
+    """Return why declared ``interpreter`` steps run as ``thread``, or None if they run as declared.
+
+    A frozen (PyInstaller) process always remaps, and that reason wins. Otherwise
+    ``api.remap_interpreter_backend_to_thread`` remaps, so unpackaged/dev can
     match packaged GIL behaviour.
     """
-    return process_is_frozen() or get_config().remap_interpreter_backend_to_thread
+    if process_is_frozen():
+        return FROZEN_INTERPRETER_REMAP_REASON
+    if get_config().remap_interpreter_backend_to_thread:
+        return CONFIGURED_INTERPRETER_REMAP_REASON
+    return None
 
 
 def effective_compute_backend(backend: ComputeBackend) -> ComputeBackend:
@@ -33,6 +43,6 @@ def effective_compute_backend(backend: ComputeBackend) -> ComputeBackend:
     process with ``api.remap_interpreter_backend_to_thread`` -- runs it as
     ``thread``.
     """
-    if backend == "interpreter" and should_remap_interpreter_backend_to_thread():
+    if backend == "interpreter" and interpreter_remap_reason() is not None:
         return "thread"
     return backend

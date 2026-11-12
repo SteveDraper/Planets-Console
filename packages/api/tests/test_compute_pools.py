@@ -5,6 +5,7 @@ Pick-order and published-band tests live in ``test_compute_pool_published_bands`
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
@@ -27,6 +28,10 @@ from api.compute import (
     ThreadStepWork,
     build_compute_registry,
     normalize_export_scope_to_compute_scope,
+)
+from api.compute.backend_runtime import (
+    CONFIGURED_INTERPRETER_REMAP_REASON,
+    FROZEN_INTERPRETER_REMAP_REASON,
 )
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
@@ -315,7 +320,37 @@ def test_effective_compute_backend_remaps_interpreter_when_config_flag_set(monke
     assert effective_compute_backend("thread") == "thread"
 
 
-def test_pool_remaps_interpreter_backend_to_thread_when_frozen(sample_turn, monkeypatch):
+def test_interpreter_remap_reason_names_the_cause_in_force(monkeypatch):
+    from api.compute.backend_runtime import interpreter_remap_reason
+    from api.config import ApiConfig, set_config
+
+    cases = (
+        (False, False, None),
+        (False, True, CONFIGURED_INTERPRETER_REMAP_REASON),
+        (True, False, FROZEN_INTERPRETER_REMAP_REASON),
+        (True, True, FROZEN_INTERPRETER_REMAP_REASON),
+    )
+    for is_frozen, is_flag_set, expected_reason in cases:
+        monkeypatch.setattr(
+            "api.compute.backend_runtime.process_is_frozen", lambda frozen=is_frozen: frozen
+        )
+        set_config(
+            ApiConfig(storage_backend="ephemeral", remap_interpreter_backend_to_thread=is_flag_set)
+        )
+        assert interpreter_remap_reason() == expected_reason, (is_frozen, is_flag_set)
+
+
+def _logged_remap_reasons(caplog) -> list[str]:
+    return [
+        record.args[2]
+        for record in caplog.records
+        if record.name == "api.compute.pools"
+        and record.msg.startswith("Compute backend %r remapped")
+    ]
+
+
+def test_pool_remaps_interpreter_backend_to_thread_when_frozen(sample_turn, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="api.compute.pools")
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: True)
 
     def _forbidden_interpreter_pool(*_args, **_kwargs):
@@ -351,9 +386,13 @@ def test_pool_remaps_interpreter_backend_to_thread_when_frozen(sample_turn, monk
     assert handle.result_wire == {"result": _FLEET_ANALYTIC_ID}
     assert pool.metrics.thread_executions == 1
     assert pool.metrics.interpreter_executions == 0
+    assert _logged_remap_reasons(caplog) == [FROZEN_INTERPRETER_REMAP_REASON]
 
 
-def test_pool_remaps_interpreter_backend_to_thread_when_config_flag_set(sample_turn, monkeypatch):
+def test_pool_remaps_interpreter_backend_to_thread_when_config_flag_set(
+    sample_turn, monkeypatch, caplog
+):
+    caplog.set_level(logging.INFO, logger="api.compute.pools")
     from api.config import ApiConfig, set_config
 
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
@@ -394,6 +433,7 @@ def test_pool_remaps_interpreter_backend_to_thread_when_config_flag_set(sample_t
     assert handle.result_wire == {"result": _FLEET_ANALYTIC_ID}
     assert pool.metrics.thread_executions == 1
     assert pool.metrics.interpreter_executions == 0
+    assert _logged_remap_reasons(caplog) == [CONFIGURED_INTERPRETER_REMAP_REASON]
 
 
 def test_shutdown_releases_pool_condition_before_waiting_on_executors():
