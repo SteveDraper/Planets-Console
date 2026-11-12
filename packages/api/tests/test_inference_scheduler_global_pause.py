@@ -35,7 +35,7 @@ from tests.scores_exports_helpers import minimal_stream_query_context
 def noop_orchestrator_tier_submit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         InferenceRowScheduler,
-        "_submit_tier_solve_locked",
+        "_submit_tier_solve",
         lambda self, binding, root_scope: None,
     )
 
@@ -91,7 +91,7 @@ def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch) -> None:
         del self, binding
         submitted.append(root_scope)
 
-    monkeypatch.setattr(InferenceRowScheduler, "_submit_tier_solve_locked", record_submit)
+    monkeypatch.setattr(InferenceRowScheduler, "_submit_tier_solve", record_submit)
 
     cancelled = _session_for_turn(sample_turn)
     scheduler.enqueue_tier_ladder(cancelled, stream_token=stream_token)
@@ -220,7 +220,7 @@ def test_pause_holds_enqueued_jobs_and_resume_requeues(sample_turn, monkeypatch)
     ) -> None:
         submitted_scopes.append(root_scope)
 
-    monkeypatch.setattr(InferenceRowScheduler, "_submit_tier_solve_locked", record_submit)
+    monkeypatch.setattr(InferenceRowScheduler, "_submit_tier_solve", record_submit)
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,

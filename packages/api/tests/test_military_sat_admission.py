@@ -814,7 +814,7 @@ def test_stream_sat_refuse_does_not_continue_accelerated_segments(sample_turn, m
     )
     run = RowRun(session)
     run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state(session)
+    run.ladder_state = new_ladder_state(session)
     outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
     assert outcome.enqueue_continuation is False
     assert outcome.next_ladder_state is None

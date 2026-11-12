@@ -189,14 +189,6 @@ class InferenceStreamOrchestration:
         segment = self.current_segment()
         return segment is not None and segment.is_streaming_target
 
-    def new_ladder_state(
-        self,
-        session: InferenceRowStreamSession | None = None,
-        *,
-        load_counterparty_fleet: CounterpartyFleetLoader | None = None,
-    ) -> PolicyLadderState:
-        return new_ladder_state(session, load_counterparty_fleet=load_counterparty_fleet)
-
     def record_segment_ladder_complete(
         self,
         *,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.scope import WILDCARD, ComputeScope
+from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_stream_session import (
@@ -21,24 +21,32 @@ class InferenceStreamScope:
     turn_number: int
 
     @classmethod
-    def from_root(cls, scope: ComputeScope) -> InferenceStreamScope:
-        """Stream scope of a per-player scores root scope.
+    def try_from_root(cls, scope: ComputeScope) -> InferenceStreamScope | None:
+        """Stream scope of a per-player root scope, or ``None`` for a wider one.
 
         Reads game, perspective and turn only. A scope that does not name one
-        player on one turn (a wildcard player, or a wildcard or non-int turn or
-        perspective) has no stream scope and raises ``ValueError``.
+        player on one turn from one perspective (any of the three is a wildcard
+        or not an int) has no stream scope.
         """
-        if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
-            raise ValueError("inference stream scope requires a concrete player_id")
-        if scope.turn == WILDCARD or not isinstance(scope.turn, int):
-            raise ValueError("inference stream scope requires a concrete turn")
-        if scope.perspective == WILDCARD or not isinstance(scope.perspective, int):
-            raise ValueError("inference stream scope requires a concrete perspective")
+        if not all(
+            isinstance(axis, int) for axis in (scope.player_id, scope.turn, scope.perspective)
+        ):
+            return None
         return cls(
             game_id=scope.game_id,
             perspective=scope.perspective,
             turn_number=scope.turn,
         )
+
+    @classmethod
+    def from_root(cls, scope: ComputeScope) -> InferenceStreamScope:
+        """Stream scope of a per-player root scope; raises ``ValueError`` for a wider one."""
+        stream_scope = cls.try_from_root(scope)
+        if stream_scope is None:
+            raise ValueError(
+                "inference stream scope requires a concrete player_id, turn and perspective"
+            )
+        return stream_scope
 
     @classmethod
     def from_session(cls, session: InferenceRowStreamSession) -> InferenceStreamScope:

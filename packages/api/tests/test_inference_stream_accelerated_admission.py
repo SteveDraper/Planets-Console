@@ -30,6 +30,7 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
+    new_ladder_state,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
@@ -83,14 +84,11 @@ def _accelerated_split_orchestration(
     )
 
 
-def test_new_ladder_state_uses_full_k_per_segment(sample_turn) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
-
-    assert orchestration.new_ladder_state().resolved_max_solutions == 20
+def test_new_ladder_state_uses_full_k_per_segment() -> None:
+    assert new_ladder_state().resolved_max_solutions == 20
 
 
 def test_new_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
     score = sample_turn.scores[0]
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -100,7 +98,7 @@ def test_new_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> Non
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    state = orchestration.new_ladder_state(session)
+    state = new_ladder_state(session)
     assert state.hopeless_context is not None
     assert state.hopeless_context.planet_delta == score.planetchange
     assert state.hopeless_context.starbase_delta == score.starbasechange
@@ -192,7 +190,7 @@ def _admit_one_solution_during_a_tier(
     scheduler.enqueue_tier_ladder(session, orchestration=orchestration)
     run = get_row_run(session.run_id)
     assert run is not None
-    run.ladder_state = orchestration.new_ladder_state()
+    run.ladder_state = new_ladder_state()
 
     solution = InferenceSolution(
         objective_value=20,
@@ -306,7 +304,7 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
     )
     run = RowRun(session)
     run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state()
+    run.ladder_state = new_ladder_state()
 
     captured: list[float | None] = []
 
@@ -370,7 +368,7 @@ def test_segment_continuation_keeps_the_ladder_state_mask(
     )
     run = RowRun(session)
     run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state(session)
+    run.ladder_state = new_ladder_state(session)
 
     def fake_tier_step(state, *_args, **_kwargs) -> None:
         session.resolved_mask = _hull_mask(3)

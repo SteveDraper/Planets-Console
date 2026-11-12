@@ -119,7 +119,7 @@ def test_begin_scope_clears_pause_and_bindings_and_releases_held_submissions(
     released: list[tuple[object, object]] = []
     monkeypatch.setattr(
         scheduler,
-        "_submit_tier_solve_locked",
+        "_submit_tier_solve",
         lambda binding, root_scope: released.append((binding, root_scope)),
     )
     scope = _stream_scope(sample_turn)

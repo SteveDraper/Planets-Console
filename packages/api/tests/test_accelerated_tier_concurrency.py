@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.inference_row_runner import (
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
+    new_ladder_state,
 )
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
@@ -100,7 +101,7 @@ def test_concurrent_shared_rowrun_accelerated_completes_without_raise(
     )
     run = RowRun(session)
     run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state()
+    run.ladder_state = new_ladder_state()
 
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
@@ -154,7 +155,7 @@ def test_solve_context_raises_when_segments_exhausted(sample_turn) -> None:
     )
     run = RowRun(session)
     run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state()
+    run.ladder_state = new_ladder_state()
 
     try:
         solve_context(run)
@@ -182,7 +183,7 @@ def test_run_inference_tier_job_idempotent_when_segments_exhausted(
     )
     run = RowRun(session)
     run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state()
+    run.ladder_state = new_ladder_state()
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
         emit_progress=lambda: None,

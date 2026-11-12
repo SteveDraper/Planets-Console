@@ -56,12 +56,13 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
     InferenceStreamOrchestration,
     new_ladder_state,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.persist_decision import (
     PersistDecision,
     persist_decision_from_admission,
 )
-from api.compute.scope import WILDCARD, ComputeScope
+from api.compute.scope import ComputeScope
 from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 
 type ScoresScopeKey = tuple[int, int, int, int]
@@ -122,13 +123,13 @@ _ladder_stamp_by_scope_key: dict[ScoresScopeKey, TierLadderStamp] = {}
 
 
 def _scope_key(scope: ComputeScope) -> ScoresScopeKey:
-    if scope.perspective == WILDCARD or not isinstance(scope.perspective, int):
-        raise ValueError("scores tier scope requires concrete perspective")
-    if scope.turn == WILDCARD or not isinstance(scope.turn, int):
-        raise ValueError("scores tier scope requires concrete turn")
-    if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
-        raise ValueError("scores tier scope requires concrete player_id")
-    return (scope.game_id, scope.perspective, scope.turn, scope.player_id)
+    stream_scope = InferenceStreamScope.from_root(scope)
+    return (
+        stream_scope.game_id,
+        stream_scope.perspective,
+        stream_scope.turn_number,
+        scope.player_id,
+    )
 
 
 def _session_scope_key(session) -> ScoresScopeKey:

@@ -77,7 +77,7 @@ def _record_tier_submits(
     submitted: list[ComputeScope] = []
     monkeypatch.setattr(
         scheduler,
-        "_submit_tier_solve_locked",
+        "_submit_tier_solve",
         lambda _binding, root_scope: submitted.append(root_scope),
     )
     return submitted

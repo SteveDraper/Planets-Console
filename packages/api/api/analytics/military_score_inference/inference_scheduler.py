@@ -388,7 +388,7 @@ class InferenceRowScheduler(
             return
         orchestrator = self._orchestrator_attachment.ensure_registered()
         for held in release.held:
-            self._submit_tier_solve_locked(held.binding, held.root_scope)
+            self._submit_tier_solve(held.binding, held.root_scope)
         orchestrator.dispatch_ready_work()
 
     def unregister_session(self, run_id: str) -> None:
@@ -503,7 +503,7 @@ class InferenceRowScheduler(
                 if row_run is None or row_run.session.cancel_token.is_cancelled():
                     return
             self._orchestrator_attachment.ensure_registered()
-            self._submit_tier_solve_locked(binding, root_scope)
+            self._submit_tier_solve(binding, root_scope)
 
         return accept
 
@@ -666,7 +666,7 @@ class InferenceRowScheduler(
             if row_run is not None:
                 row_run.session.event_queue.put(event)
 
-    def _submit_tier_solve_locked(
+    def _submit_tier_solve(
         self,
         binding: InferenceStreamOrchestratorBinding,
         root_scope: ComputeScope,
