@@ -438,5 +438,5 @@ class InferenceInvalidationService:
             )
         scope = self._scope(game_id, perspective, host_turn)
         scheduler = self._scheduler_instance()
-        scheduler.clear_global_pause_for_scope(scope)
+        scheduler.clear_global_pause_for_replaced_rows(scope)
         reschedule_all_inference_rows(scope, force_schedule=True)

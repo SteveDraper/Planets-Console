@@ -41,13 +41,13 @@ class SchedulerOrchestratorAttachment:
         self._unregister_listener: Callable[[], None] | None = None
         self._unregister_gate: Callable[[], None] | None = None
 
-    def ensure_registered(self) -> None:
-        """Register callbacks on the current process orchestrator, once."""
+    def ensure_registered(self) -> ComputeOrchestrator:
+        """Register callbacks on the current process orchestrator, once, and return it."""
         from api.compute.runtime import get_compute_orchestrator
 
         orchestrator = get_compute_orchestrator()
         if self._callbacks_current(orchestrator):
-            return
+            return orchestrator
         with self._init_lock:
             orchestrator = get_compute_orchestrator()
             if self._orchestrator is not orchestrator:
@@ -57,7 +57,7 @@ class SchedulerOrchestratorAttachment:
                 self._unregister_gate = None
                 self._orchestrator = orchestrator
             if self._callbacks_current(orchestrator):
-                return
+                return orchestrator
             observers = orchestrator.observers
             if self._unregister_listener is None:
                 self._unregister_listener = observers.register_scope_outcome_listener(
@@ -65,6 +65,7 @@ class SchedulerOrchestratorAttachment:
                 )
             if self._dispatch_gate is not None and self._unregister_gate is None:
                 self._unregister_gate = observers.register_dispatch_gate(self._dispatch_gate)
+            return orchestrator
 
     def _callbacks_current(self, orchestrator: ComputeOrchestrator) -> bool:
         if self._orchestrator is not orchestrator or self._unregister_listener is None:

@@ -34,6 +34,7 @@ from api.analytics.military_score_inference.inference_stream_teardown import (
     HeldTierSubmission,
     InferenceStreamOrchestratorBinding,
     InferenceStreamTeardownMixin,
+    PauseRelease,
 )
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     wake_inference_table_stream_multiplex,
@@ -67,12 +68,12 @@ class TierLadderRegistration(Enum):
     # The scope's table stream owns the run: a stream binding exists and an
     # accept is pending. The caller submits it with ``accept_pending_run``.
     STREAM_BOUND = "stream_bound"
-    # No table stream owns the run: there was no stream token and no active
-    # stream, or the token no longer owns the scope. A deferred scores node for
-    # the scope is woken, and the run is never accepted by a stream.
+    # No table stream owns the run: there was no stream token, or the token no
+    # longer owns the scope. A deferred scores node for the scope is woken, and
+    # the run is never accepted by a stream.
     BACKGROUND = "background"
     # The owning stream is globally paused: a held submission is queued, and
-    # ``resume_globally`` submits it.
+    # clearing pause (``resume_globally`` or a stream switch) submits it.
     HELD = "held"
     # The scheduler was built with ``defer_orchestrator_submit`` (tests and
     # diagnostics): the run is registered and nothing is bound, accepted, held
@@ -348,40 +349,46 @@ class InferenceRowScheduler(
         return self._global_pause_status_from_inputs(scope, inputs)
 
     def resume_globally(self, scope: InferenceStreamScope) -> dict[str, object]:
+        """Clear global pause and release the work it held."""
         with self._lock:
             self._require_active_stream_for_scope_locked(scope)
-            was_paused = self._globally_paused
-            self._globally_paused = False
-            bindings = tuple(self._stream_bindings.values())
-            held = tuple(self._held_initial_submissions) if was_paused else ()
-            if was_paused:
-                self._held_initial_submissions.clear()
-                self._broadcast_global_pause_locked(paused=False)
+            release = self._clear_global_pause_locked()
             inputs = self._global_pause_status_inputs_locked(scope)
-        self._orchestrator_attachment.ensure_registered()
-        # Submit held work outside the scheduler lock (same ABBA risk as enqueue).
-        for held_item in held:
-            binding = self._stream_bindings.get(held_item.stream_token)
-            if binding is not None:
-                self._submit_tier_solve_locked(binding, held_item.root_scope)
-        if was_paused:
-            for binding in bindings:
-                binding.orchestrator.dispatch_ready_work()
+        self._apply_pause_release(release)
         return self._global_pause_status_from_inputs(scope, inputs)
+
+    def _clear_global_pause_locked(self) -> PauseRelease:
+        """Clear global pause and take every held submission. Caller holds ``self._lock``.
+
+        Clearing pause releases held work: the caller passes the result to
+        ``_apply_pause_release`` once the lock is released. A caller that drops
+        it instead documents why the held work must not run.
+        """
+        if not self._globally_paused:
+            return PauseRelease()
+        self._globally_paused = False
+        self._broadcast_global_pause_locked(paused=False)
+        held = tuple(self._held_initial_submissions)
+        self._held_initial_submissions.clear()
+        return PauseRelease(was_paused=True, held=held)
+
+    def _apply_pause_release(self, release: PauseRelease) -> None:
+        """Submit released held work, then dispatch what the pause gate held.
+
+        Caller must not hold ``self._lock``: submit and dispatch take the
+        orchestrator condition. The dispatch pass runs on the orchestrator the
+        pause gate is registered on.
+        """
+        if not release.was_paused:
+            return
+        orchestrator = self._orchestrator_attachment.ensure_registered()
+        for held in release.held:
+            self._submit_tier_solve_locked(held.binding, held.root_scope)
+        orchestrator.dispatch_ready_work()
 
     def unregister_session(self, run_id: str) -> None:
         with self._lock:
             self._remove_run_locked(run_id)
-
-    def _clear_global_pause_for_active_scope_locked(
-        self,
-        scope: InferenceStreamScope,
-    ) -> None:
-        """Clear the pause flag and held submissions when ``scope`` is active."""
-        if self._scope_guard.active_scope != scope:
-            return
-        self._globally_paused = False
-        self._held_initial_submissions.clear()
 
     def enqueue_tier_ladder(
         self,
@@ -393,13 +400,20 @@ class InferenceRowScheduler(
         """Register one tier ladder RowRun and decide, once, which stream owns it.
 
         The RowRun is always registered. Under ``self._lock`` the owning stream
-        is ``stream_token`` when it still owns the scope, or the active stream
-        when no token is given. With an owner the run is ``STREAM_BOUND`` (the
-        caller runs ``accept_pending_run``) or ``HELD`` while globally paused.
-        With no owner, including a token that lost the scope to another stream,
-        the run is ``BACKGROUND`` and the scope's deferred scores node is woken
-        after the lock. A submit-deferred scheduler returns ``SUBMIT_DEFERRED``
-        after registering.
+        is ``stream_token`` while that token still owns the scope. With an
+        owner the run is ``STREAM_BOUND`` (the caller runs
+        ``accept_pending_run``) or ``HELD`` while globally paused. With no
+        owner the run is ``BACKGROUND`` and the scope's deferred scores node is
+        woken after the lock: that covers no token at all, whatever stream is
+        active, and a token that lost the scope to another stream. A
+        submit-deferred scheduler returns ``SUBMIT_DEFERRED`` after registering.
+
+        An export admit passes the token of the stream attached at its own
+        scope. A stream that has claimed the scope in ``begin_scope`` but not
+        yet attached its controller has no token to pass, so an admit there
+        registers ``BACKGROUND``. The stream's own admission then registers its
+        own run, which wins the scope index, and the admit's run stays
+        registered beside it as a background duplicate.
         """
         with self._lock:
             row_run = RowRun(session)
@@ -411,14 +425,15 @@ class InferenceRowScheduler(
             self._runs[session.run_id] = root_scope
             if self._defer_orchestrator_submit:
                 return TierLadderRegistration.SUBMIT_DEFERRED
-            owning_token = self._owning_stream_token_locked(stream_token)
-            if owning_token is not None:
-                # Create the stream binding even when paused so resume can submit held
-                # work (``resume_globally`` looks up binding by stream_token).
-                binding = self._binding_for_stream_locked(owning_token, session=session)
+            if stream_token is not None and self._scope_guard.owns_table_stream_locked(
+                stream_token
+            ):
+                binding = self._binding_for_stream_locked(stream_token, session=session)
                 if self._globally_paused:
                     self._held_initial_submissions.append(
-                        HeldTierSubmission(stream_token=owning_token, root_scope=root_scope)
+                        HeldTierSubmission(
+                            stream_token=stream_token, binding=binding, root_scope=root_scope
+                        )
                     )
                     return TierLadderRegistration.HELD
                 # Accept is separate so connect can paint every player before submit.
@@ -434,18 +449,6 @@ class InferenceRowScheduler(
         self._orchestrator_attachment.ensure_registered()
         self._wake_deferred_scores_after_row_run_adopt(root_scope, session)
         return TierLadderRegistration.BACKGROUND
-
-    def _owning_stream_token_locked(self, stream_token: str | None) -> str | None:
-        """The stream that owns a new RowRun, or None. Caller holds ``self._lock``.
-
-        No token means the active stream, if any. A token owns only while it is
-        still the active stream token.
-        """
-        if stream_token is None:
-            return self._scope_guard.active_table_stream_token
-        if self._scope_guard.owns_table_stream_locked(stream_token):
-            return stream_token
-        return None
 
     def accept_pending_run(self, run_id: str) -> None:
         """Submit a run whose accept is still pending. A second call is a no-op."""
@@ -473,11 +476,20 @@ class InferenceRowScheduler(
             self._pending_accepts.discard(run_id)
         self.cancel_run(run_id)
 
-    def clear_global_pause_for_scope(self, scope: InferenceStreamScope) -> None:
+    def clear_global_pause_for_replaced_rows(self, scope: InferenceStreamScope) -> None:
+        """Clear global pause at the active ``scope`` before its rows are cancelled and replaced.
+
+        The caller then cancels and reschedules every row at ``scope``. Each
+        held submission belongs to one of those rows, so it is dropped, not
+        released: submitting it would only start work the cancel aborts, and
+        the replacement rows submit themselves once pause is clear. The
+        dispatch pass still runs for the nodes the pause gate held.
+        """
         with self._lock:
-            if self._scope_guard.active_scope == scope:
-                self._clear_global_pause_for_active_scope_locked(scope)
-                self._broadcast_global_pause_locked(paused=False)
+            if self._scope_guard.active_scope != scope:
+                return
+            release = self._clear_global_pause_locked()
+        self._apply_pause_release(replace(release, held=()))
 
     def shutdown(self) -> None:
         """Reset adapter state; safe for test teardown after dropping a service stack."""
