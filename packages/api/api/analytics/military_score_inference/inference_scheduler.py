@@ -45,7 +45,6 @@ from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.pending_accepts import PendingAccepts
-from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 from api.streaming.table_stream.scheduler_orchestrator_attachment import (
     SchedulerOrchestratorAttachment,
 )
@@ -374,28 +373,6 @@ class InferenceRowScheduler(
         with self._lock:
             self._remove_run_locked(run_id)
 
-    def detach_inference_stream(
-        self,
-        scope: InferenceStreamScope,
-        sessions: tuple[InferenceRowStreamSession, ...],
-        *,
-        stream_token: str,
-    ) -> None:
-        """Detach a table stream without cancelling its in-flight row runs.
-
-        Clears global pause when this stream owns the scope. The pause gate stays
-        registered and follows ``_globally_paused``, so this method does not take
-        the orchestrator condition.
-        """
-        with self._lock:
-            owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
-            for session in sessions:
-                self._remove_run_locked(session.run_id, op=RowLifecycleOp.DETACH)
-            self._drop_held_for_stream_locked(stream_token)
-            self._stream_bindings.pop(stream_token, None)
-            if owns_scope:
-                self._clear_global_pause_for_active_scope_locked(scope)
-
     def _clear_global_pause_for_active_scope_locked(
         self,
         scope: InferenceStreamScope,
@@ -680,11 +657,6 @@ class InferenceRowScheduler(
             for run_id, scope in self._runs.items():
                 if scope == root_scope:
                     self._execution_generation_by_run_id[run_id] = generation
-
-    def _drop_held_for_stream_locked(self, stream_token: str) -> None:
-        self._held_initial_submissions = [
-            held for held in self._held_initial_submissions if held.stream_token != stream_token
-        ]
 
     def _pause_dispatch_gate(self, node: object) -> bool:
         from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
