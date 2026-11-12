@@ -77,8 +77,6 @@ def test_snapshot_joins_remote_future_state_onto_in_flight():
     )
     in_flight = InFlightPoolExecution(
         step_key=step_key,
-        scope_key="fleet@g628580@p11@t5@pl3",
-        analytic_id="fleet",
         priority_band="stream_attached",
         backend="interpreter",
         started_at="2026-07-13T00:00:00+00:00",

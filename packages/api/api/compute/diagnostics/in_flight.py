@@ -24,8 +24,6 @@ class InFlightPoolExecution:
     """
 
     step_key: StepExecutionKey
-    scope_key: str
-    analytic_id: str
     priority_band: ComputePriorityBand
     backend: ComputeBackend
     started_at: str
@@ -36,8 +34,6 @@ def in_flight_from_pool_item(picked: BandedWorkItem) -> InFlightPoolExecution:
     item = picked.item
     return InFlightPoolExecution(
         step_key=item.step_key,
-        scope_key=format_compute_scope_key(item.scope),
-        analytic_id=item.scope.analytic_id,
         priority_band=picked.priority_band,
         backend=item.backend,
         started_at=datetime.now(UTC).isoformat(),
@@ -48,8 +44,8 @@ def in_flight_to_wire(record: InFlightPoolExecution) -> dict[str, object]:
     """Return the camelCase diagnostics snapshot row for one in-flight execution."""
     step_key = record.step_key
     return {
-        "scopeKey": record.scope_key,
-        "analyticId": record.analytic_id,
+        "scopeKey": format_compute_scope_key(step_key.scope),
+        "analyticId": step_key.scope.analytic_id,
         "stepKind": step_key.step_kind,
         "stepIndex": step_key.step_index,
         "executionGeneration": step_key.execution_generation,

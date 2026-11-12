@@ -26,6 +26,7 @@ from api.compute.diagnostics import (
     reset_compute_diagnostics_for_tests,
     snapshot_to_wire,
 )
+from api.compute.diagnostics.in_flight import in_flight_to_wire
 from api.compute.diagnostics.scope import (
     collect_diagnostic_ancestor_turns,
     scope_in_diagnostic_scope,
@@ -1460,7 +1461,9 @@ def test_in_flight_appears_on_dequeue_and_clears_on_pool_item_finished(sample_tu
     assert len(controller._in_flight_snapshot()) == 1
     record = controller._in_flight_snapshot()[0]
     assert record.step_key == item.step_key
-    assert record.analytic_id == item.scope.analytic_id
+    in_flight_row = in_flight_to_wire(record)
+    assert in_flight_row["scopeKey"] == format_compute_scope_key(item.scope)
+    assert in_flight_row["analyticId"] == item.scope.analytic_id
     assert record.priority_band == "background"
     assert record.backend == item.backend
     assert isinstance(record.started_at, str) and record.started_at
@@ -1684,7 +1687,6 @@ def test_in_flight_snapshot_filters_by_diagnostic_scope(sample_turn):
     ]
     assert len(in_scope) == 1
     assert in_scope[0].step_key == item.step_key
-    assert item.scope.analytic_id in in_scope[0].scope_key
 
 
 def test_release_orchestrator_unbinds_diagnostics_and_clears_snapshot_dag(sample_turn):
