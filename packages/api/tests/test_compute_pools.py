@@ -666,10 +666,8 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
     from api.analytics.fleet.compute_plane.finalization_leg import run_fleet_finalization_leg
     from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
 
-    def build_job_wire(scope, *, dependency_outputs, ctx=None, **_kwargs):
+    def build_job_wire(scope, *, dependency_outputs, ctx, **_kwargs):
         del dependency_outputs, _kwargs
-        if ctx is None:
-            raise RuntimeError("fleet leg test job wire requires AnalyticQueryContext")
         if ctx.load_turn(scope.turn) is None:
             raise RuntimeError(f"turn {scope.turn} required for fleet leg test job wire")
         return {
@@ -683,11 +681,10 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
         scope,
         *,
         dependency_outputs,
-        ctx=None,
-        node_result_wire=None,
+        node_result_wire,
         **_kwargs,
     ):
-        del scope, dependency_outputs, ctx, _kwargs
+        del scope, dependency_outputs, _kwargs
         if not isinstance(node_result_wire, dict):
             raise RuntimeError("fleet finalization test wire requires observation result")
         return dict(node_result_wire)

@@ -78,7 +78,7 @@ def build_fleet_observation_leg_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext | None = None,
+    ctx: AnalyticQueryContext,
     submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
@@ -95,7 +95,7 @@ def build_fleet_materialization_leg_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext | None = None,
+    ctx: AnalyticQueryContext,
     submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
@@ -107,8 +107,6 @@ def build_fleet_materialization_leg_job_wire(
     forces false.
     """
     del dependency_outputs
-    if ctx is None:
-        raise RuntimeError("fleet materialization leg job wire requires AnalyticQueryContext")
     if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
         raise ValueError("fleet materialization leg requires concrete player_id")
     if scope.turn == WILDCARD or not isinstance(scope.turn, int):
@@ -171,15 +169,13 @@ def build_fleet_finalization_leg_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext | None = None,
-    node_result_wire: object | None = None,
+    ctx: AnalyticQueryContext,
+    node_result_wire: object | None,
     submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Pass the observation continue wire into the inline finalization leg."""
     del dependency_outputs
-    if ctx is None:
-        raise RuntimeError("fleet finalization leg requires AnalyticQueryContext")
     if not isinstance(node_result_wire, dict):
         raise RuntimeError("fleet finalization leg requires observation result wire on node")
     if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):

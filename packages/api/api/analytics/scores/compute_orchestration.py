@@ -85,7 +85,7 @@ def build_scores_materialize_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext | None = None,
+    ctx: AnalyticQueryContext,
     submission_open: SubmissionOpen,
     **_kwargs: object,
 ) -> dict[str, Any]:
@@ -96,8 +96,6 @@ def build_scores_materialize_job_wire(
     )
 
     del dependency_outputs
-    if ctx is None:
-        raise RuntimeError("scores materialize job wire requires AnalyticQueryContext")
     export_scope = compute_scope_to_export_scope(scope)
     # Admit only -- never ensure_scope / wait. Fleet deps are already terminal on the DAG.
     admit_scores_export_work(
@@ -114,7 +112,7 @@ def build_scores_tier_solve_job_wire(
     scope: ComputeScope,
     *,
     dependency_outputs: DependencyOutputs,
-    ctx: AnalyticQueryContext | None = None,
+    ctx: AnalyticQueryContext,
     submission_open: SubmissionOpen,
     execution_generation: int,
     **_kwargs: object,
@@ -142,9 +140,6 @@ def build_scores_tier_solve_job_wire(
     run. The chosen run is then stamped with this node execution and the
     scores epoch.
     """
-    if ctx is None:
-        raise RuntimeError("scores tier_solve job wire requires AnalyticQueryContext")
-
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
         raise ValueError("scores tier_solve requires concrete scores scope")
