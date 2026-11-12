@@ -298,8 +298,9 @@ class OrchestratorStepExecutionMixin:
             try:
                 build_job_wire = submission.registration.build_step_job_wire[step.step_kind]
                 run_step = submission.registration.run_step[step.step_kind]
+                backend = effective_compute_backend(step.backend)
                 work: PoolStepWork
-                if effective_compute_backend(step.backend) == "thread":
+                if backend == "thread":
                     work = ThreadStepWork(
                         build_job_wire=build_job_wire,
                         job_wire_kwargs=submission.job_wire_kwargs,
@@ -307,6 +308,7 @@ class OrchestratorStepExecutionMixin:
                     )
                 else:
                     work = RemoteStepWork(
+                        backend=backend,
                         job_wire=build_job_wire(node.scope, **submission.job_wire_kwargs),
                         run_step=run_step,
                     )

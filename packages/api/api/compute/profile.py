@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
-ComputeBackend = Literal["inline", "thread", "interpreter", "process"]
+# Backends whose steps run on an executor outside the pool worker thread.
+RemoteComputeBackend = Literal["interpreter", "process"]
+ComputeBackend = Literal["inline", "thread", RemoteComputeBackend]
 
-VALID_COMPUTE_BACKENDS: frozenset[str] = frozenset({"inline", "thread", "interpreter", "process"})
+REMOTE_COMPUTE_BACKENDS: tuple[RemoteComputeBackend, ...] = get_args(RemoteComputeBackend)
+VALID_COMPUTE_BACKENDS: frozenset[ComputeBackend] = frozenset(get_args(ComputeBackend))
 
 
 @dataclass(frozen=True)

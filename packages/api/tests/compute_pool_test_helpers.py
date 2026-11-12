@@ -27,7 +27,7 @@ def _never_run(*_args: object, **_kwargs: object) -> NoReturn:
 
 
 # Pool work for a test item that is queued, inspected or picked, but never run.
-QUEUED_ONLY_STEP_WORK = RemoteStepWork(job_wire=None, run_step=_never_run)
+QUEUED_ONLY_STEP_WORK = RemoteStepWork(backend="process", job_wire=None, run_step=_never_run)
 
 
 def ok_thread_step_work(ctx: AnalyticQueryContext) -> ThreadStepWork:

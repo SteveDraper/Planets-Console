@@ -16,11 +16,16 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from api.compute.backend_runtime import process_is_frozen
 from api.compute.priority_band import PRIORITY_BAND_RANK, ComputePriorityBand
-from api.compute.profile import ComputeBackend, ComputeStepSpec
+from api.compute.profile import (
+    REMOTE_COMPUTE_BACKENDS,
+    ComputeBackend,
+    ComputeStepSpec,
+    RemoteComputeBackend,
+)
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
 from api.compute.scope import ComputeScope
 from api.compute.wire import BuildStepJobWireFn, BuildStepJobWireKwargs, RunStepFn
@@ -46,6 +51,8 @@ class ThreadStepWork:
     The pool worker builds the job wire from that snapshot and runs the step.
     """
 
+    backend: ClassVar[Literal["thread"]] = "thread"
+
     build_job_wire: BuildStepJobWireFn
     job_wire_kwargs: BuildStepJobWireKwargs
     run_step: RunStepFn
@@ -60,14 +67,23 @@ class RemoteStepWork:
     """An interpreter or process step: its serializable job wire, built before submit.
 
     The orchestrator builds ``job_wire`` from its dispatch-time snapshot of the
-    builder inputs. An executor runs ``run_step`` on it.
+    builder inputs. The executor for ``backend`` runs ``run_step`` on it.
     """
 
+    backend: RemoteComputeBackend
     job_wire: object
     run_step: RunStepFn
 
+    def __post_init__(self) -> None:
+        if self.backend not in REMOTE_COMPUTE_BACKENDS:
+            raise ValueError(
+                f"RemoteStepWork backend must be one of {REMOTE_COMPUTE_BACKENDS}, "
+                f"got {self.backend!r}"
+            )
 
-# The orchestrator chooses the kind from the effective backend; the pool runs by kind.
+
+# The orchestrator builds the work for the step's effective backend. The pool
+# runs each item on ``work.backend``.
 PoolStepWork = ThreadStepWork | RemoteStepWork
 
 
@@ -97,7 +113,7 @@ class PoolWorkItem:
     The item is bound to the execution of ``scope`` that dispatched it
     (``execution_generation``). Its orchestrator neither runs nor completes it
     for any other execution. ``backend`` is the step's declared backend;
-    ``work`` says how the step runs.
+    ``work`` says how the step runs, and ``work.backend`` is the backend it runs on.
     """
 
     orchestrator_id: int
@@ -475,15 +491,15 @@ class ComputeWorkerPool:
         item finishes here without running its step.
 
         ``ThreadStepWork`` runs synchronously on the pool worker. ``RemoteStepWork``
-        goes to the executor for its declared backend and completes via a done
+        goes to the executor for ``work.backend`` and completes via a done
         callback, so a stuck remote future cannot pin a pool worker thread (and
         stall the rest of the queue under freeze single-step). The done callback
         then owns the item's finish; every other path finishes it here.
 
         Frozen processes and ``api.remap_interpreter_backend_to_thread`` remap
-        ``interpreter`` to ``thread`` when the orchestrator chooses the work kind:
-        PyInstaller subinterpreters cannot import application modules. A thread
-        work item whose declared backend is not ``thread`` is such a remap.
+        ``interpreter`` to ``thread`` when the orchestrator builds the work:
+        PyInstaller subinterpreters cannot import application modules. An item
+        whose declared backend differs from ``work.backend`` is such a remap.
         """
         item = picked.item
         is_finish_owned_by_future = False
@@ -497,26 +513,17 @@ class ComputeWorkerPool:
             ):
                 return
             work = item.work
+            if item.backend != work.backend:
+                self._log_backend_remap(item.backend, work.backend)
+            with self._condition:
+                self._record_backend_execution_locked(work.backend)
             if isinstance(work, ThreadStepWork):
-                if item.backend != "thread":
-                    self._log_backend_remap(item.backend, "thread")
-                with self._condition:
-                    self._record_backend_execution_locked("thread")
                 self._complete_item(item, partial(work.run, item.scope))
                 return
-            if item.backend not in {"interpreter", "process"}:
-                raise RuntimeError(
-                    f"pool step {item.step_kind!r} with backend {item.backend!r} "
-                    "has no remote executor"
-                )
             with self._condition:
-                self._record_backend_execution_locked(item.backend)
-                if item.backend == "interpreter":
-                    executor = self._interpreter_executor_locked()
-                else:
-                    executor = self._process_executor_locked()
+                executor = self._remote_executor_locked(work.backend)
             future = executor.submit(work.run_step, work.job_wire)
-            self._register_remote_future(picked, future)
+            self._register_remote_future(picked, work.backend, future)
             future.add_done_callback(
                 lambda completed, pool_item=item: self._on_remote_future_done(
                     pool_item,
@@ -547,7 +554,12 @@ class ComputeWorkerPool:
             reason = "api.remap_interpreter_backend_to_thread"
         logger.info("Compute backend %r remapped to %r (%s)", declared, effective, reason)
 
-    def _register_remote_future(self, picked: BandedWorkItem, future: Future[object]) -> None:
+    def _register_remote_future(
+        self,
+        picked: BandedWorkItem,
+        backend: RemoteComputeBackend,
+        future: Future[object],
+    ) -> None:
         item = picked.item
         record = remote_future_record(
             orchestrator_id=item.orchestrator_id,
@@ -555,7 +567,7 @@ class ComputeWorkerPool:
             step_kind=item.step_kind,
             step_index=item.step_index,
             priority_band=picked.priority_band,
-            backend=item.backend,
+            backend=backend,
             future=future,
         )
         with self._remote_futures_lock:
@@ -588,15 +600,18 @@ class ComputeWorkerPool:
             finally:
                 self._unregister_remote_future(future)
 
-    def _interpreter_executor_locked(self) -> InterpreterPoolExecutor:
-        if self._interpreter_executor is None:
-            self._interpreter_executor = InterpreterPoolExecutor(
-                max_workers=self._worker_count,
-                initializer=init_worker_turn_cache,
-            )
-        return self._interpreter_executor
-
-    def _process_executor_locked(self) -> ProcessPoolExecutor:
+    def _remote_executor_locked(
+        self,
+        backend: RemoteComputeBackend,
+    ) -> InterpreterPoolExecutor | ProcessPoolExecutor:
+        """Return the executor that runs ``backend`` steps, starting it on first use."""
+        if backend == "interpreter":
+            if self._interpreter_executor is None:
+                self._interpreter_executor = InterpreterPoolExecutor(
+                    max_workers=self._worker_count,
+                    initializer=init_worker_turn_cache,
+                )
+            return self._interpreter_executor
         if self._process_executor is None:
             self._process_executor = ProcessPoolExecutor(
                 max_workers=self._worker_count,

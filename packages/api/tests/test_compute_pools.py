@@ -899,7 +899,14 @@ def test_flush_prebuilds_wire_when_effective_backend_stays_interpreter(sample_tu
     assert built == [{"built": True}]
     (work,) = submitted
     assert isinstance(work, RemoteStepWork)
+    assert work.backend == "interpreter"
     assert work.job_wire == {"built": True}
+
+
+@pytest.mark.parametrize("backend", ["inline", "thread"])
+def test_remote_step_work_rejects_a_backend_without_a_remote_executor(backend):
+    with pytest.raises(ValueError, match="RemoteStepWork backend"):
+        RemoteStepWork(backend=backend, job_wire=None, run_step=lambda _job: None)
 
 
 def test_flush_skips_wire_when_interpreter_remapped_to_thread(sample_turn, monkeypatch):
