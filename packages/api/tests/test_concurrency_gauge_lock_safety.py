@@ -80,6 +80,7 @@ def test_record_finish_uses_ready_cache_not_live_orchestrator_snapshot() -> None
     recorder.record_finish(
         shell,
         step=_step(scope, "tier_solve", node.step_index),
+        closed=None,
         node=node,
         surface="pool",
         terminal_state="success",
@@ -161,6 +162,7 @@ def test_listener_gauges_use_last_known_global_queue_depth() -> None:
     recorder.record_finish(
         shell,
         step=step,
+        closed=recorder.close_execution(step),
         node=node,
         surface="inline",
         terminal_state="success",

@@ -15,8 +15,13 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.compute.diagnostics.bindings import BoundOrchestrator
 from api.compute.diagnostics.history import CompletionSurface, CompletionTerminalState
 from api.compute.diagnostics.profile_steps import profile_step_at, profile_step_is_inline
+from api.compute.diagnostics.timeline import node_event_step_key
 from api.compute.orchestrator import ComputeOrchestrator
-from api.compute.orchestrator_observers import LifecycleEventKind, ScopeLifecycleSnapshot
+from api.compute.orchestrator_observers import (
+    POOL_ITEM_IGNORED_KINDS,
+    LifecycleEventKind,
+    ScopeLifecycleSnapshot,
+)
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.compute.step_execution_key import StepExecutionKey
@@ -297,6 +302,9 @@ class DiagnosticsOrchestratorBindMixin:
             step_kind=step_kind,
             step_index=step_index,
         )
+        # The finish ends the step's open start whatever shell is active now, so a
+        # start recorded before a shell switch or a continue is never left open.
+        closed = self._timeline.close_execution(step)
         # Clear in-flight on pool failure immediately, then reconcile other orphans.
         # On success, leave the row until pool item finished so persist-before-complete
         # stays visible (node remains ``running`` through durable write).
@@ -316,6 +324,7 @@ class DiagnosticsOrchestratorBindMixin:
         self._timeline.record_finish(
             shell,
             step=step,
+            closed=closed,
             node=node,
             surface=surface,
             terminal_state=terminal_state,
@@ -410,6 +419,18 @@ class DiagnosticsOrchestratorBindMixin:
         *,
         orchestrator_id: int | None = None,
     ) -> None:
+        if kind in POOL_ITEM_IGNORED_KINDS:
+            # An ignored pool item's execution is over: release its open start
+            # whatever shell is active now.
+            self._timeline.close_execution(
+                node_event_step_key(
+                    orchestrator_id=orchestrator_id,
+                    scope=scope,
+                    execution_generation=execution_generation,
+                    step_kind=step_kind,
+                    step_index=step_index,
+                )
+            )
         shell = self._scope_matches_active_shell(scope)
         if shell is None:
             return

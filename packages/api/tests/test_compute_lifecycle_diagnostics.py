@@ -1,9 +1,17 @@
-"""Causal lifecycle events on the compute concurrency timeline."""
+"""Causal lifecycle events on the compute concurrency timeline, and the open starts
+that a pool step's finish releases."""
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable, Iterator
+from dataclasses import replace
+
 import pytest
+from api.analytics.registration import TurnAnalyticRegistration
 from api.compute import (
+    COMPUTE_REGISTRY,
+    BandedWorkItem,
     ComputeOrchestrator,
     ComputeRequest,
     build_compute_registry,
@@ -14,8 +22,13 @@ from api.compute.diagnostics import (
     reset_compute_diagnostics_for_tests,
     snapshot_to_wire,
 )
+from api.compute.diagnostics.timeline import format_execution_key
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.pools import (
+    reset_compute_worker_pool_for_tests,
+    shutdown_compute_worker_pool_for_tests,
+)
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
@@ -32,6 +45,12 @@ from tests.test_compute_orchestrator import (
     _pool_compute_registration,
     _RecordingPersistencePolicy,
 )
+from tests.test_compute_pools import (
+    _POOL_EXPORT_REGISTRY,
+    _multi_step_thread_registration,
+    _scope_for_player,
+)
+from tests.test_compute_stale_pool_item import _generation_echo_registration, _ManualRemoteExecutor
 
 
 @pytest.fixture(autouse=True)
@@ -267,3 +286,178 @@ def test_step_parked_lifecycle_event_reports_canonical_step_index(sample_turn):
     parked = next(e for e in wire["concurrencyTimeline"] if e["kind"] == "step_parked")
     assert parked["detail"]["reason"] == "test_park"
     assert parked["stepIndex"] == 0
+
+
+class _PoolStepUnderShell:
+    """One scope on a worker-less diagnosed pool, submitted under its own operator shell.
+
+    Remote steps run on a manual interpreter executor, so the test decides when
+    each one finishes.
+    """
+
+    def __init__(self, sample_turn, registration: TurnAnalyticRegistration) -> None:
+        self.pool = reset_compute_worker_pool_for_tests(worker_count=0)
+        self.executor = _ManualRemoteExecutor()
+        self.pool._interpreter_executor = self.executor  # type: ignore[assignment]
+        self.orchestrator = ComputeOrchestrator(
+            compute_registry=build_compute_registry((registration,)),
+            worker_pool=self.pool,
+        )
+        self.scope = _scope_for_player(sample_turn, sample_turn.scores[0].ownerid)
+        self.controller = get_compute_diagnostics_controller()
+        self.controller.bind_orchestrator(self.orchestrator)
+        self.shell = ShellContextKey(
+            game_id=self.scope.game_id,
+            perspective=self.scope.perspective,
+            turn=self.scope.turn,
+        )
+        self.controller.on_shell_context(self.shell)
+        ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
+        self.orchestrator.submit(ComputeRequest(ctx=ctx, scope=self.scope))
+
+    def start(self) -> BandedWorkItem:
+        """Pick the queued item, which records its timeline start."""
+        picked = self.pool.take_next_item_for_tests()
+        assert picked is not None
+        return picked
+
+    def abort(self) -> None:
+        assert self.orchestrator.abort_scope(self.scope, ComputeScopeAbortedError("cancelled"))
+
+    def switch_shell(self) -> None:
+        """Move the operator to a shell whose diagnostic scope excludes the step."""
+        self.controller.on_shell_context(
+            replace(self.shell, perspective=self.shell.perspective + 1)
+        )
+
+    def timeline_kinds(self, picked: BandedWorkItem) -> list[str]:
+        """Kinds of the starting shell's timeline events naming ``picked``'s execution."""
+        execution_key = format_execution_key(picked.item.step_key)
+        return [
+            event.kind
+            for event in self.controller.timeline_recent(self.shell)
+            if event.execution_key == execution_key
+        ]
+
+    def holds_open_start(self, picked: BandedWorkItem) -> bool:
+        return self.controller._timeline._open_executions.close(picked.item.step_key) is not None
+
+
+@pytest.fixture
+def make_pool_step(
+    sample_turn,
+) -> Iterator[Callable[[TurnAnalyticRegistration], _PoolStepUnderShell]]:
+    yield lambda registration: _PoolStepUnderShell(sample_turn, registration)
+    shutdown_compute_worker_pool_for_tests()
+
+
+def _remote_step(make_pool_step) -> _PoolStepUnderShell:
+    return make_pool_step(_generation_echo_registration("interpreter", []))
+
+
+# Each finish runs ``after_start`` between the step's start and its finish.
+_PoolStepFinish = Callable[[_PoolStepUnderShell, Callable[[], None]], BandedWorkItem]
+
+
+def _complete(step: _PoolStepUnderShell, after_start: Callable[[], None]) -> BandedWorkItem:
+    picked = step.start()
+    step.pool._execute_item(picked)
+    after_start()
+    step.executor.finish(0)
+    return picked
+
+
+def _fail(step: _PoolStepUnderShell, after_start: Callable[[], None]) -> BandedWorkItem:
+    picked = step.start()
+    step.pool._execute_item(picked)
+    after_start()
+    step.executor.fail(0, RuntimeError("step failed"))
+    return picked
+
+
+def _finish_late(step: _PoolStepUnderShell, after_start: Callable[[], None]) -> BandedWorkItem:
+    picked = step.start()
+    step.pool._execute_item(picked)
+    after_start()
+    step.abort()
+    step.executor.finish(0)
+    return picked
+
+
+def _drop(step: _PoolStepUnderShell, after_start: Callable[[], None]) -> BandedWorkItem:
+    step.abort()
+    picked = step.start()
+    after_start()
+    step.pool._execute_item(picked)
+    return picked
+
+
+_POOL_STEP_FINISHES = pytest.mark.parametrize(
+    ("finish", "finish_kind"),
+    [
+        (_complete, "complete"),
+        (_fail, "complete"),
+        (_finish_late, "pool_finish_ignored"),
+        (_drop, "pool_item_dropped"),
+    ],
+    ids=["complete", "error", "late_finish", "drop"],
+)
+
+
+@_POOL_STEP_FINISHES
+def test_pool_step_finish_after_a_shell_switch_releases_its_open_start(
+    make_pool_step, finish: _PoolStepFinish, finish_kind: str
+):
+    step = _remote_step(make_pool_step)
+
+    picked = finish(step, step.switch_shell)
+
+    kinds = step.timeline_kinds(picked)
+    assert "start" in kinds
+    assert finish_kind not in kinds
+    assert not step.holds_open_start(picked)
+
+
+@_POOL_STEP_FINISHES
+def test_pool_step_finish_in_its_starting_shell_records_and_releases_its_open_start(
+    make_pool_step, finish: _PoolStepFinish, finish_kind: str
+):
+    step = _remote_step(make_pool_step)
+
+    picked = finish(step, lambda: None)
+
+    kinds = step.timeline_kinds(picked)
+    assert "start" in kinds
+    assert kinds[-1] == finish_kind
+    if finish_kind == "complete":
+        (completed,) = (
+            event
+            for event in step.controller.timeline_recent(step.shell)
+            if event.kind == "complete"
+        )
+        assert completed.duration_ms is not None
+        assert completed.priority_band == picked.priority_band
+    assert not step.holds_open_start(picked)
+
+
+def test_pool_step_continuing_into_another_step_kind_releases_its_open_start(
+    make_pool_step, monkeypatch
+):
+    gate = threading.Event()
+    gate.set()
+    registration = _multi_step_thread_registration([], gate)
+    # Diagnostics resolve profile steps from the process registry.
+    monkeypatch.setitem(
+        COMPUTE_REGISTRY,
+        registration.catalog_entry.id,
+        build_compute_registry((registration,))[registration.catalog_entry.id],
+    )
+    step = make_pool_step(registration)
+
+    picked = step.start()
+    step.pool._execute_item(picked)
+
+    node = step.orchestrator.nodes[step.scope]
+    assert node.step_index == picked.item.step_index + 1
+    assert node.profile_step_index == 1
+    assert not step.holds_open_start(picked)

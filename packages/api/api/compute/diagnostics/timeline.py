@@ -10,7 +10,7 @@ from typing import Literal
 
 from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.priority_band import ComputePriorityBand
-from api.compute.scope import format_compute_scope_key
+from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.compute.step_execution_key import StepExecutionKey
 
 DEFAULT_TIMELINE_CAPACITY = 5000
@@ -63,6 +63,28 @@ def format_execution_key(step: StepExecutionKey) -> str:
     orch = "none" if step.orchestrator_id is None else str(step.orchestrator_id)
     scope_key = format_compute_scope_key(step.scope)
     return f"{orch}|{scope_key}|g{step.execution_generation}|{step.step_kind}|{step.step_index}"
+
+
+def node_event_step_key(
+    *,
+    orchestrator_id: int | None,
+    scope: ComputeScope,
+    execution_generation: int,
+    step_kind: str | None,
+    step_index: int | None,
+) -> StepExecutionKey:
+    """Return the step a node event names.
+
+    A node event may not know its step kind or index; its key then names an
+    empty kind and index -1.
+    """
+    return StepExecutionKey(
+        orchestrator_id=orchestrator_id,
+        scope=scope,
+        execution_generation=execution_generation,
+        step_kind=step_kind or "",
+        step_index=step_index if step_index is not None else -1,
+    )
 
 
 class ComputeConcurrencyTimeline:

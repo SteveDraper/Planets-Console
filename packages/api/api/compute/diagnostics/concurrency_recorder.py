@@ -15,14 +15,15 @@ from api.compute.diagnostics.history import (
 from api.compute.diagnostics.in_flight import InFlightPoolExecution
 from api.compute.diagnostics.scope import scope_in_diagnostic_scope
 from api.compute.diagnostics.timeline import (
+    ClosedExecution,
     ComputeConcurrencyTimeline,
     OccupancyGauges,
     OpenExecutionTracker,
     TimelineEventKind,
     format_execution_key,
     make_concurrency_event,
+    node_event_step_key,
 )
-from api.compute.orchestrator_observers import POOL_ITEM_IGNORED_KINDS
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.priority_band import ComputePriorityBand
 from api.compute.scope import ComputeScope, format_compute_scope_key
@@ -42,6 +43,10 @@ class ConcurrencyTimelineRecorder:
     and is calling into the recorder. Callers must release the controller lock
     before ``record`` / ``record_finish`` / ``record_node_event`` (pool dequeue
     already does this).
+
+    Recording is shell-scoped, but an open start is not: the event that ends a
+    step releases it through :meth:`close_execution` whatever shell is active,
+    and a finish recorded in a shell pairs with what that call returned.
     """
 
     def __init__(
@@ -205,11 +210,16 @@ class ConcurrencyTimelineRecorder:
             backend=backend,
         )
 
+    def close_execution(self, step: StepExecutionKey) -> ClosedExecution | None:
+        """End ``step``'s open start and return it, or None when no start was recorded."""
+        return self._open_executions.close(step)
+
     def record_finish(
         self,
         shell: ShellContextKey,
         *,
         step: StepExecutionKey,
+        closed: ClosedExecution | None,
         node: ComputeNodeRun,
         surface: CompletionSurface,
         terminal_state: CompletionTerminalState,
@@ -219,12 +229,11 @@ class ConcurrencyTimelineRecorder:
         """One finish sink: timeline complete/inline_complete + completion history.
 
         ``step.step_index`` must be the index of the step that finished (captured
-        before any continue that advances ``node.step_index``). Both records carry
+        before any continue that advances ``node.step_index``). ``closed`` is
+        what :meth:`close_execution` returned for the step. Both records carry
         the band the step started at (its picked band for a pool step);
-        ``node.priority_band`` stands in only when this recorder saw no start for
-        the step.
+        ``node.priority_band`` stands in only when no start was recorded.
         """
-        closed = self._open_executions.close(step)
         if closed is None:
             duration_ms, started_backend, priority_band = None, None, node.priority_band
         else:
@@ -281,21 +290,14 @@ class ConcurrencyTimelineRecorder:
         backend: str | None = None,
         detail: dict[str, object] | None = None,
     ) -> None:
-        """Append a node event (ready, or a causal lifecycle event such as abort).
-
-        A node event may not know its step kind or index; its execution key
-        then names an empty kind and index -1. An ignored pool item's execution
-        is over, so its event also closes that item's open start.
-        """
-        step = StepExecutionKey(
+        """Append a node event (ready, or a causal lifecycle event such as abort)."""
+        step = node_event_step_key(
             orchestrator_id=orchestrator_id,
             scope=scope,
             execution_generation=execution_generation,
-            step_kind=step_kind or "",
-            step_index=step_index if step_index is not None else -1,
+            step_kind=step_kind,
+            step_index=step_index,
         )
-        if kind in POOL_ITEM_IGNORED_KINDS:
-            self._open_executions.close(step)
         gauges = self._occupancy_gauges(
             shell,
             sample_ready_from_orchestrators=False,

@@ -58,6 +58,11 @@ class _ManualRemoteExecutor:
         job_wire, future = self.submitted[index]
         future.set_result(job_wire)
 
+    def fail(self, index: int, error: Exception) -> None:
+        """Finish one submitted step by raising ``error``."""
+        _job_wire, future = self.submitted[index]
+        future.set_exception(error)
+
 
 def _generation_echo_registration(
     backend: ComputeBackend,
