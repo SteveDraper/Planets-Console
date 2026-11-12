@@ -660,6 +660,7 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -676,7 +677,7 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
         turn_number=sample_turn.settings.turn,
     )
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     persistence = InferenceRowPersistenceService(memory_backend)
     ctx = make_analytic_query_context(
         sample_turn,
@@ -731,6 +732,7 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
     )
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -747,7 +749,7 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
         turn_number=sample_turn.settings.turn,
     )
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     step_result = tier_job_outcome_to_step_result(
         run,
         TierJobOutcome(
@@ -805,6 +807,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         _detach_row_run,
         get_row_run_phase,
         register_row_run,
@@ -828,7 +831,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
         turn_number=sample_turn.settings.turn,
     )
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     run_id = run.run_id
     _detach_row_run(run_id)
     assert get_row_run_phase(run_id) is RowRunPhase.DETACHED

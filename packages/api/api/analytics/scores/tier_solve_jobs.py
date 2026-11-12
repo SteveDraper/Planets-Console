@@ -15,6 +15,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
+    ScopeIndexPolicy,
     clear_row_runs,
     register_row_run,
 )
@@ -154,7 +155,7 @@ def _time_player_tier_solves(
         load_scoreboard_turn=load_scoreboard_turn,
     )
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     try:
         with capture_cp_sat_solve_overlap() as captures:
             started = time.perf_counter()

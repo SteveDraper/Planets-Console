@@ -25,6 +25,7 @@ from api.analytics.military_score_inference.row_complete_factory import row_comp
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.soft_stream_policy import SoftTerminalReason
 from api.analytics.scores.tier_row_run_registry import (
+    ScopeIndexPolicy,
     register_row_run,
 )
 from api.streaming.table_stream import stream_drain
@@ -56,7 +57,7 @@ def test_soft_row_defer_delivers_stream_terminal_without_completing_node(sample_
     """Non-durable rowComplete defer soft-delivers without DAG complete (fleet blocked)."""
     session = _session(sample_turn)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
         game_id=session.game_id,
@@ -122,7 +123,7 @@ def test_empty_park_schedule_row_stays_silent_for_wake(sample_turn) -> None:
     """Empty park with schedule-only row stays silent; wake owns progress (no RowFailed)."""
     session = _session(sample_turn)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
         game_id=session.game_id,
@@ -170,7 +171,7 @@ def test_soft_defer_revert_preserves_hard_terminal_claimed_during_admission(
     """Revert miss must not pop HARD_TERMINAL that landed between claim and pop."""
     session = _session(sample_turn)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
         game_id=session.game_id,
@@ -223,7 +224,7 @@ def test_empty_tier_park_cheap_admits_when_admission_available(sample_turn, monk
 
     session = _session(sample_turn)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
         game_id=session.game_id,

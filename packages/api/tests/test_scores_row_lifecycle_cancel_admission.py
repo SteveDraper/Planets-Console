@@ -135,6 +135,7 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
     """
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         get_persist_admission,
         get_row_run_phase,
         register_row_run,
@@ -164,7 +165,7 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
             )
         )
         session = _session_for_player(sample_turn, player_id=player_id)
-        register_row_run(RowRun(session))
+        register_row_run(RowRun(session), scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(
                 analytic_id=SCORES_ANALYTIC_ID,
@@ -205,6 +206,7 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         get_persist_admission,
         get_row_run,
         get_row_run_phase,
@@ -232,7 +234,7 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
         )
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = RowRun(session)
-        register_row_run(row_run)
+        register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(
                 analytic_id=SCORES_ANALYTIC_ID,
@@ -314,12 +316,12 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
             other = _session_for_player(sample_turn, player_id=player_id)
             # Distinct run_ids via fresh sessions; mark cancelled then leave retained.
             other_run = RowRun(other)
-            reg.register_row_run(other_run)
+            reg.register_row_run(other_run, scope_index=reg.ScopeIndexPolicy.TAKE)
             reg._mark_row_run_cancelled(other_run.run_id)
 
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = RowRun(session)
-        reg.register_row_run(row_run)
+        reg.register_row_run(row_run, scope_index=reg.ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(
                 analytic_id=SCORES_ANALYTIC_ID,

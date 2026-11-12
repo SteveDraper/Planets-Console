@@ -81,8 +81,8 @@ class TierLadderRegistration(Enum):
     # clearing pause (``resume_globally`` or a stream switch) submits it.
     HELD = "held"
     # The scheduler was built with ``defer_orchestrator_submit`` (tests and
-    # diagnostics): the run is registered and nothing is bound, accepted, held
-    # or woken, so stream ownership is not decided.
+    # diagnostics): the run is registered, taking the scope index as stream
+    # ownership decides, and nothing is bound, accepted, held or woken.
     SUBMIT_DEFERRED = "submit_deferred"
 
 
@@ -418,40 +418,58 @@ class InferenceRowScheduler(
         """Register one tier ladder RowRun and decide, once, which stream owns it.
 
         The RowRun is always registered. Under ``self._lock`` the owning stream
-        is ``stream_token`` while that token still owns the scope. With an
-        owner the run is ``STREAM_BOUND`` (the caller runs
-        ``accept_pending_run``) or ``HELD`` while globally paused. With no
-        owner the run is ``BACKGROUND`` and the scope's deferred scores node is
-        woken after the lock: that covers no token at all, whatever stream is
-        active, and a token that lost the scope to another stream. A
-        submit-deferred scheduler returns ``SUBMIT_DEFERRED`` after registering.
+        is ``stream_token`` while that token still owns the scope, decided
+        before the run is registered. With an owner the run is
+        ``STREAM_BOUND`` (the caller runs ``accept_pending_run``) or ``HELD``
+        while globally paused. With no owner the run is ``BACKGROUND`` and the
+        scope's deferred scores node is woken after the lock: that covers no
+        token at all, whatever stream is active, and a token that lost the
+        scope to another stream. A submit-deferred scheduler returns
+        ``SUBMIT_DEFERRED`` after registering.
 
-        An export admit passes the token of the stream attached at its own
-        scope. A stream that has claimed the scope in ``begin_scope`` but not
-        yet attached its controller has no token to pass, so an admit there
-        registers ``BACKGROUND``. The stream's own admission then registers its
-        own run, which wins the scope index, and the admit's run stays
-        registered beside it as a background duplicate until the scope's next
-        ladder claim retires it (``claim_tier_ladder`` hand-over).
+        Ownership also decides the scope index, so the scope's next ladder
+        claim stamps the stream's run: an owned run takes the index, and a
+        background run takes it only when no ``REGISTERED`` run holds it. A
+        background run never displaces a stream's run. It stays registered
+        beside it as a duplicate until the scope's next ladder claim retires
+        it (``claim_tier_ladder`` hand-over). Duplicates come from an export
+        admit that checked for a run before its fleet I/O, a connect admission
+        that lost its scope on a T -> T' -> T toggle, and an admit at a scope a
+        stream has claimed in ``begin_scope`` but not yet attached its
+        controller to: an export admit passes the token of the stream attached
+        at its own scope, so that admit has none and registers ``BACKGROUND``,
+        and the stream's own admission then takes the index.
         """
-        with self._lock:
-            row_run = RowRun(session)
-            from api.analytics.scores.tier_row_run_registry import register_row_run
+        from api.analytics.scores.tier_row_run_registry import ScopeIndexPolicy, register_row_run
 
-            register_row_run(row_run, orchestration=orchestration)
+        with self._lock:
+            owning_token = (
+                stream_token
+                if stream_token is not None
+                and self._scope_guard.owns_table_stream_locked(stream_token)
+                else None
+            )
+            row_run = RowRun(session)
+            register_row_run(
+                row_run,
+                scope_index=(
+                    ScopeIndexPolicy.TAKE
+                    if owning_token is not None
+                    else ScopeIndexPolicy.TAKE_IF_VACANT
+                ),
+                orchestration=orchestration,
+            )
             self._register_tier_callbacks_for_run(row_run)
             root_scope = scores_root_scope_for_session(session)
             self._runs[session.run_id] = root_scope
             if self._defer_orchestrator_submit:
                 return TierLadderRegistration.SUBMIT_DEFERRED
-            if stream_token is not None and self._scope_guard.owns_table_stream_locked(
-                stream_token
-            ):
-                binding = self._binding_for_stream_locked(stream_token, session=session)
+            if owning_token is not None:
+                binding = self._binding_for_stream_locked(owning_token, session=session)
                 if self._globally_paused:
                     self._held_initial_submissions.append(
                         HeldTierSubmission(
-                            stream_token=stream_token, binding=binding, root_scope=root_scope
+                            stream_token=owning_token, binding=binding, root_scope=root_scope
                         )
                     )
                     return TierLadderRegistration.HELD

@@ -27,6 +27,12 @@ restarting the ladder. The stamp is guarded on read: a node replacement or a
 scores epoch change retires the ``DETACHED`` shell and the caller takes the
 admit path.
 
+The scope index names the run a claim stamps. Its registering caller decides
+whether a run takes it (:class:`ScopeIndexPolicy`): a stream's run always
+does, and a background run only when no ``REGISTERED`` run holds it, so a
+background run registered after a stream's run never displaces it and is
+retired at the next claim instead.
+
 When a different RowRun holds the scope index (a reopened stream's run, or a
 stream's run at a hop a walk's background run was solving), the claim hands
 the unfinished ladder over: the stamped run's ``ladder_state`` and
@@ -42,6 +48,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from enum import Enum
 
 from api.analytics.fleet.counterparty_ledger import counterparty_fleet_loader
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
@@ -73,6 +80,18 @@ class TierLadderStamp:
             execution_generation,
             scores_epoch,
         )
+
+
+class ScopeIndexPolicy(Enum):
+    """Whether a RowRun being registered becomes its scope's indexed run.
+
+    The registering caller decides; the registry applies it under its lock.
+    """
+
+    # The run takes the scope index, replacing any run indexed there.
+    TAKE = "take"
+    # The run takes the scope index only when no REGISTERED run holds it.
+    TAKE_IF_VACANT = "take_if_vacant"
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,10 +224,18 @@ def initialize_tier_ladder_state(
 def register_row_run(
     run: RowRun,
     *,
+    scope_index: ScopeIndexPolicy,
     orchestration: InferenceStreamOrchestration | None = None,
     initialize_ladder: bool = True,
 ) -> None:
-    """Register one RowRun for orchestrator tier_solve wire build and execution."""
+    """Register one RowRun for orchestrator tier_solve wire build and execution.
+
+    ``scope_index`` says whether the run becomes the scope's indexed run, the
+    one :func:`claim_tier_ladder` stamps: ``TAKE`` always, ``TAKE_IF_VACANT``
+    only when no ``REGISTERED`` run is indexed for the scope. The check and the
+    write share one lock hold. A run that does not take the index stays
+    registered and is retired at the scope's next claim.
+    """
     if initialize_ladder and run.ladder_state is None:
         initialize_tier_ladder_state(run, orchestration=orchestration)
     run.phase = RowRunPhase.REGISTERED
@@ -218,7 +245,11 @@ def register_row_run(
         _supersede_cancelled_for_scope_locked(scope_key)
         _forget_cancelled_locked(run.run_id)
         _runs_by_id[run.run_id] = run
-        _run_id_by_scope_key[scope_key] = run.run_id
+        if (
+            scope_index is ScopeIndexPolicy.TAKE
+            or _registered_run_for_scope_key_locked(scope_key) is None
+        ):
+            _run_id_by_scope_key[scope_key] = run.run_id
 
 
 def get_row_run(run_id: str) -> RowRun | None:
@@ -256,7 +287,8 @@ def claim_tier_ladder(
     winner, so a run registered concurrently is either seen here or survives
     to win the next claim.
 
-    The winner is the ``REGISTERED`` run indexed for the scope. With none, it
+    The winner is the ``REGISTERED`` run indexed for the scope (see
+    :class:`ScopeIndexPolicy` for which run that is). With none, it
     is the stamped run (normally ``DETACHED`` after its stream closed) while
     the stamp serves this execution and scores epoch. When the serving stamp
     names another run whose ladder is unfinished, that ladder

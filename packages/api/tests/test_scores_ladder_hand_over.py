@@ -16,6 +16,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
+from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -44,8 +45,11 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
     InferenceSolutionAction,
 )
+from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
+    PriorTurnFleetTorpResolution,
+)
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
-from api.analytics.scores import tier_row_run_registry
+from api.analytics.scores import exports, tier_row_run_registry
 from api.analytics.scores.compute_orchestration import (
     SCORES_PERSISTENCE_POLICY,
     build_scores_tier_solve_job_wire,
@@ -376,6 +380,89 @@ def test_a_stream_registered_while_the_wire_build_chooses_its_run_takes_the_ladd
     assert ladder.tier_steps[-1] == (stream_id, tiers_run)
     assert get_row_run(stream_id).ladder_state is chosen_ladder
     _assert_the_winner_alone_holds_the_scope(ladder, stream_id, (chosen_id,))
+
+
+# --- A background run registered after a stream's run never takes its scope ---
+
+
+def _admit_while_a_stream_registers_during_fleet_io(ladder: ShellLadder) -> None:
+    """An export admit finds no run, then a stream registers while it resolves prior fleet."""
+    resolve_prior_fleet = exports.resolve_prior_fleet_for_scores
+
+    def open_stream_then_resolve(*args: object, **kwargs: object) -> object:
+        ladder.open_stream()
+        return resolve_prior_fleet(*args, **kwargs)
+
+    export_scope = ExportScope(
+        game_id=ladder.scope.game_id,
+        perspective=ladder.scope.perspective,
+        turn=ladder.scope.turn,
+        player_id=ladder.player_id,
+    )
+    with patch.object(exports, "resolve_prior_fleet_for_scores", open_stream_then_resolve):
+        assert exports.admit_scores_export_work(
+            ladder.ctx,
+            export_scope,
+            backfill_earlier_turns=ladder.ctx.backfill_earlier_turns_enabled(),
+        )
+
+
+def _lose_a_connect_admission_to_a_successor_at_the_same_scope(ladder: ShellLadder) -> None:
+    """A stream's connect admission is in flight across a T -> T' -> T toggle.
+
+    The successor stream at T registers the player while the predecessor
+    resolves prior fleet, so the predecessor's admission registers after it
+    under a token that no longer owns the scope.
+    """
+    predecessor_token = ladder.scheduler.begin_scope(ladder.stream_scope)
+
+    def toggle_back_then_resolve(_player_id: int) -> PriorTurnFleetTorpResolution:
+        ladder.scheduler.begin_scope(
+            replace(ladder.stream_scope, turn_number=ladder.stream_scope.turn_number - 1)
+        )
+        ladder.open_stream()
+        return PriorTurnFleetTorpResolution(overlay=None, input_status="unavailable")
+
+    predecessor = InferenceTableStreamController(
+        scope=ladder.stream_scope,
+        stream_token=predecessor_token,
+        turn=ladder.sample_turn,
+        player_ids=(ladder.player_id,),
+        scheduler=ladder.scheduler,
+        game_id=GAME_ID,
+        perspective=ladder.stream_scope.perspective,
+        resolve_fleet_torp_resolution_for_player=toggle_back_then_resolve,
+        query_context=ladder.ctx,
+    )
+    predecessor.schedule_player_row(ladder.player_id)
+
+
+LATE_BACKGROUND_REGISTRATIONS = {
+    "admit-across-fleet-io": _admit_while_a_stream_registers_during_fleet_io,
+    "lost-connect-admission": _lose_a_connect_admission_to_a_successor_at_the_same_scope,
+}
+
+
+@pytest.mark.parametrize(
+    "register_late",
+    LATE_BACKGROUND_REGISTRATIONS.values(),
+    ids=LATE_BACKGROUND_REGISTRATIONS.keys(),
+)
+def test_a_background_run_registered_after_a_streams_run_loses_the_next_claim(
+    ladder, register_late
+):
+    closed_id = ladder.session.run_id
+    ladder.close_stream()
+    runs_before = set(ladder.scheduler._runs)
+
+    register_late(ladder)
+    stream_id = ladder.session.run_id
+    (background_id,) = set(ladder.scheduler._runs) - runs_before - {stream_id}
+    ladder.submit()
+    ladder.run_tier(CONTINUE)
+
+    assert ladder.tier_runs == [stream_id]
+    _assert_the_winner_alone_holds_the_scope(ladder, stream_id, (closed_id, background_id))
 
 
 # --- The held top-K reaches the winner's stream without announcing evidence ---

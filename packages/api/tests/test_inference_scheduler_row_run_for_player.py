@@ -49,7 +49,8 @@ def test_the_indexed_run_wins_over_an_earlier_registered_duplicate(sample_turn, 
     stale = _session_for_player(sample_turn, player_id=player_id)
     winner = _session_for_player(sample_turn, player_id=player_id)
     scheduler.enqueue_tier_ladder(stale)
-    scheduler.enqueue_tier_ladder(winner)
+    stream_token = scheduler.begin_scope(_stream_scope(sample_turn))
+    scheduler.enqueue_tier_ladder(winner, stream_token=stream_token)
     assert get_row_run(stale.run_id) is not None
     assert list(scheduler._runs) == [stale.run_id, winner.run_id]
 

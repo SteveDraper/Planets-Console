@@ -54,6 +54,7 @@ from api.analytics.scores.compute_orchestration import (
 )
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
+    ScopeIndexPolicy,
     _retire_row_run,
     get_row_run_for_scope,
     register_row_run,
@@ -125,7 +126,7 @@ def _scores_scope(sample_turn, player_id: int) -> ComputeScope:
 def _register_run(sample_turn, *, player_id: int | None = None) -> RowRun:
     session = _session_for_player(sample_turn, player_id=player_id)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     return run
 
 

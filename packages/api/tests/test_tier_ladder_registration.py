@@ -164,6 +164,29 @@ def test_a_paused_stream_holds_the_submission(sample_turn, monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("is_stream_first", [True, False], ids=["stream-first", "background-first"])
+def test_the_owning_streams_run_holds_the_scope_index_whatever_registers_first(
+    sample_turn, monkeypatch, is_stream_first
+):
+    scheduler = InferenceRowScheduler()
+    _record_background_wakes(monkeypatch, scheduler)
+    scope = _stream_scope(sample_turn)
+    token = scheduler.begin_scope(scope)
+    player_id = sample_turn.scores[1].ownerid
+    stream_session = _session_for_player(sample_turn, player_id=player_id)
+    background_session = _session_for_player(sample_turn, player_id=player_id)
+    registrations = [
+        lambda: scheduler.enqueue_tier_ladder(stream_session, stream_token=token),
+        lambda: scheduler.enqueue_tier_ladder(background_session),
+    ]
+
+    for register in registrations if is_stream_first else reversed(registrations):
+        register()
+
+    assert scheduler.row_run_for_player(scope, player_id).run_id == stream_session.run_id
+    assert set(scheduler._runs) == {stream_session.run_id, background_session.run_id}
+
+
 def test_a_submit_deferred_scheduler_only_registers_the_run(sample_turn, monkeypatch):
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
     woken = _record_background_wakes(monkeypatch, scheduler)
