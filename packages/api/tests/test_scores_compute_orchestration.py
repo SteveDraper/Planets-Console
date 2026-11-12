@@ -816,7 +816,7 @@ def test_horwasp_tier_solve_closes_evidence_before_solve_work(
 
     with (
         patch(
-            "api.analytics.scores.compute_orchestration.get_row_run_for_scope",
+            "api.analytics.scores.compute_orchestration.claim_tier_ladder",
             side_effect=_unexpected,
         ),
         patch(

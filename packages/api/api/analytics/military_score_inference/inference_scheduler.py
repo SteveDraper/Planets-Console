@@ -432,7 +432,7 @@ class InferenceRowScheduler(
         registers ``BACKGROUND``. The stream's own admission then registers its
         own run, which wins the scope index, and the admit's run stays
         registered beside it as a background duplicate until the scope's next
-        ladder stamp retires it (``stamp_tier_ladder`` hand-over).
+        ladder claim retires it (``claim_tier_ladder`` hand-over).
         """
         with self._lock:
             row_run = RowRun(session)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -28,12 +29,10 @@ from api.analytics.scores.exports import stored_closed_horwasp_skip
 from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
+    claim_tier_ladder,
     decide_scores_row_persist,
-    get_resumable_row_run_for_scope,
     get_row_run,
-    get_row_run_for_scope,
     get_tier_callbacks,
-    stamp_tier_ladder,
 )
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
@@ -121,9 +120,9 @@ def build_scores_tier_solve_job_wire(
     """Assemble a serializable job wire for one scores inference tier step.
 
     Horwasp production is not modeled. That classification writes the skip row
-    and returns the evidence-closed sentinel before RowRun lookup, scheduler
-    adopt, fleet resolution, or the satisfaction probe. The persisted row is
-    the mark fleet's materialization probe reads.
+    and returns the evidence-closed sentinel before the ladder claim, fleet
+    resolution, or the satisfaction probe. The persisted row is the mark
+    fleet's materialization probe reads.
 
     Other skip sentinels (``runId: None``, ``evidenceClosed: True``) are allowed
     only when turn evidence is already closed (persisted / durable terminal under
@@ -136,16 +135,16 @@ def build_scores_tier_solve_job_wire(
     with open evidence is forbidden -- that state has no armed wake publisher and
     hung dependents (Birds hang). Raise instead.
 
-    The RowRun comes from ``get_resumable_row_run_for_scope`` first, so a
-    continuation whose stream closed mid-ladder resumes its own ``DETACHED``
-    run. The chosen run is then stamped with this node execution and the
-    scores epoch. Stamping hands an unfinished ladder held by another run for
-    the scope over to the chosen run and retires every other run for the
-    scope. After the registry lock is released, the scheduler forgets the
-    retired runs and, on a hand-over, the chosen run's stream gets the moved
-    ladder's held solutions without an inference evidence announcement. The
-    fleet resolution is applied after the stamp, so it lands on the ladder
-    the step runs.
+    The RowRun comes from ``claim_tier_ladder``, one registry operation that
+    chooses the run, stamps it with this node execution and the scores epoch,
+    hands it an unfinished ladder another run for the scope held, and retires
+    every other run for the scope. A continuation whose stream closed
+    mid-ladder resumes its own ``DETACHED`` run. With no run to claim, the
+    admit runs outside the registry lock and the ladder is claimed again.
+    After the claim, the scheduler forgets the retired runs and, on a
+    hand-over, the claimed run's stream gets the moved ladder's held solutions
+    without an inference evidence announcement. The fleet resolution is
+    applied after the claim, so it lands on the ladder the step runs.
     """
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
@@ -157,13 +156,15 @@ def build_scores_tier_solve_job_wire(
 
     backfill_earlier_turns = submission_open.backfill_earlier_turns
     scores_epoch = SCORES_PERSISTENCE_POLICY.invalidation_generation(ctx, scope)
-    run = get_resumable_row_run_for_scope(
+    claim_ladder = partial(
+        claim_tier_ladder,
         scope,
         execution_generation=execution_generation,
         scores_epoch=scores_epoch,
     )
+    claim = claim_ladder()
     ensure_satisfied = True
-    if run is None:
+    if claim is None:
         # Materialize already admits; re-admit covers tier_solve entry submits and
         # races where the stream has not registered yet but admit can still schedule.
         from api.analytics.scores.exports import admit_scores_export_work
@@ -174,8 +175,8 @@ def build_scores_tier_solve_job_wire(
             overlay_ensure=False,
             backfill_earlier_turns=backfill_earlier_turns,
         )
-        run = get_row_run_for_scope(scope)
-    if run is None:
+        claim = claim_ladder()
+    if claim is None:
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
             return _evidence_closed_skip_wire(scope)
         raise RuntimeError(
@@ -185,14 +186,10 @@ def build_scores_tier_solve_job_wire(
             f"(game_id={scope.game_id}, perspective={scope.perspective}, "
             f"turn={scope.turn}, player_id={scope.player_id})"
         )
-    ladder_stamp = stamp_tier_ladder(
-        run,
-        execution_generation=execution_generation,
-        scores_epoch=scores_epoch,
-    )
+    run = claim.run
     scheduler = resolve_scores_services(ctx).scheduler
-    scheduler.forget_runs(ladder_stamp.retired_run_ids)
-    if ladder_stamp.ladder_handed_over:
+    scheduler.forget_runs(claim.retired_run_ids)
+    if claim.ladder_handed_over:
         scheduler.deliver_held_solutions_to_stream(run.session)
 
     turn = ctx.load_turn(export_scope.turn)

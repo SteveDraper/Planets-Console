@@ -22,13 +22,12 @@ from api.analytics.scores.compute_orchestration import build_scores_tier_solve_j
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     _detach_row_run,
+    claim_tier_ladder,
     clear_row_runs,
-    get_resumable_row_run_for_scope,
     get_row_run,
     register_row_run,
     release_tier_ladder_for_scope,
     reset_tier_row_run_registry_for_tests,
-    stamp_tier_ladder,
 )
 from api.compute import ComputeScope
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
@@ -60,7 +59,7 @@ def _clean_registries() -> Iterator[None]:
     reset_orchestrators_for_tests()
 
 
-# --- The resume guard on the registry ---
+# --- The resume guard on the registry's ladder claim ---
 
 
 @pytest.fixture
@@ -71,30 +70,31 @@ def registry_run(sample_turn) -> tuple[RowRun, ComputeScope]:
     return run, ladder_scope(sample_turn, player_id)
 
 
-def _resumable(scope: ComputeScope, *, generation: int = GENERATION, epoch: int = EPOCH):
-    return get_resumable_row_run_for_scope(
-        scope, execution_generation=generation, scores_epoch=epoch
-    )
+def _claimed(
+    scope: ComputeScope, *, generation: int = GENERATION, epoch: int = EPOCH
+) -> RowRun | None:
+    claim = claim_tier_ladder(scope, execution_generation=generation, scores_epoch=epoch)
+    return None if claim is None else claim.run
 
 
-def _stamp_and_detach(run: RowRun) -> None:
-    stamp_tier_ladder(run, execution_generation=GENERATION, scores_epoch=EPOCH)
+def _claim_and_detach(run: RowRun, scope: ComputeScope) -> None:
+    assert _claimed(scope) is run
     _detach_row_run(run.run_id)
 
 
 def test_a_detached_run_resumes_for_the_same_node_execution_and_epoch(registry_run):
     run, scope = registry_run
-    _stamp_and_detach(run)
+    _claim_and_detach(run, scope)
 
-    assert _resumable(scope) is run
-    assert _resumable(scope) is run
+    assert _claimed(scope) is run
+    assert _claimed(scope) is run
 
 
 def test_a_run_detached_before_its_ladder_started_does_not_resume(registry_run):
     run, scope = registry_run
     _detach_row_run(run.run_id)
 
-    assert _resumable(scope) is None
+    assert _claimed(scope) is None
     assert get_row_run(run.run_id) is run
 
 
@@ -105,60 +105,63 @@ def test_a_run_detached_before_its_ladder_started_does_not_resume(registry_run):
 )
 def test_a_mismatched_resume_retires_the_detached_shell(registry_run, generation, epoch):
     run, scope = registry_run
-    _stamp_and_detach(run)
+    _claim_and_detach(run, scope)
 
-    assert _resumable(scope, generation=generation, epoch=epoch) is None
+    assert _claimed(scope, generation=generation, epoch=epoch) is None
     assert get_row_run(run.run_id) is None
-    assert _resumable(scope) is None
+    assert _claimed(scope) is None
 
 
-def test_a_registered_run_wins_over_the_detached_one(sample_turn, registry_run):
+@pytest.mark.parametrize("generation", [GENERATION, GENERATION + 1], ids=["serving", "stale"])
+def test_a_registered_run_wins_over_the_detached_one(sample_turn, registry_run, generation):
     detached, scope = registry_run
-    _stamp_and_detach(detached)
+    _claim_and_detach(detached, scope)
     reopened = RowRun(ladder_session(sample_turn, scope.player_id))
     register_row_run(reopened, initialize_ladder=False)
 
-    assert _resumable(scope) is reopened
+    claim = claim_tier_ladder(scope, execution_generation=generation, scores_epoch=EPOCH)
 
-    stamp_tier_ladder(reopened, execution_generation=GENERATION, scores_epoch=EPOCH)
+    assert claim is not None
+    assert claim.run is reopened
+    assert claim.retired_run_ids == (detached.run_id,)
     assert get_row_run(detached.run_id) is None
     assert get_row_run(reopened.run_id) is reopened
 
 
 def test_retire_after_write_clears_the_resume_entry(registry_run):
     run, scope = registry_run
-    _stamp_and_detach(run)
+    _claim_and_detach(run, scope)
 
     apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run.run_id)
 
-    assert _resumable(scope) is None
+    assert _claimed(scope) is None
 
 
 def test_a_full_invalidate_clears_the_resume_entry(registry_run):
     run, scope = registry_run
-    _stamp_and_detach(run)
+    _claim_and_detach(run, scope)
 
     clear_row_runs()
 
-    assert _resumable(scope) is None
+    assert _claimed(scope) is None
 
 
 def test_the_node_reaching_terminal_retires_only_its_own_entry(registry_run):
     run, scope = registry_run
-    _stamp_and_detach(run)
+    _claim_and_detach(run, scope)
 
     release_tier_ladder_for_scope(scope, execution_generation=GENERATION - 1)
-    assert _resumable(scope) is run
+    assert _claimed(scope) is run
 
     release_tier_ladder_for_scope(scope, execution_generation=GENERATION)
-    assert _resumable(scope) is None
+    assert _claimed(scope) is None
     assert get_row_run(run.run_id) is None
 
 
 @pytest.mark.parametrize("state", ["complete", "failed"])
 def test_the_scope_outcome_listener_retires_the_entry_on_terminal(registry_run, state):
     run, scope = registry_run
-    _stamp_and_detach(run)
+    _claim_and_detach(run, scope)
 
     InferenceRowScheduler()._on_orchestrator_scope_outcome(
         ScopeLifecycleSnapshot(

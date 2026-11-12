@@ -60,7 +60,7 @@ Shell + admission + cancel seal + session token cancel go only through `apply_sc
 
 - No parallel `cancel_intent` module or second cancel entrypoint.
 - Scheduler `abort_scope` and stream-map pops stay on the scheduler plane (outside the lifecycle command), invoked from `cancel_run` after CANCEL -- not from DETACH.
-- The tier registry applies the same RETIRE side internally, without a new op, when a `tier_solve` ladder stamp names one run for a scope: every other `REGISTERED` or `DETACHED` run for that scope is retired (ladder hand-over), as a `DETACHED` shell whose ladder lost the scope already was.
+- The tier registry applies the same RETIRE side internally, without a new op, when a `tier_solve` ladder claim stamps one run for a scope: every other `REGISTERED` or `DETACHED` run for that scope is retired (ladder hand-over), as a `DETACHED` shell whose ladder lost the scope already was.
 
 ### 5. Soft defer wake (scores)
 

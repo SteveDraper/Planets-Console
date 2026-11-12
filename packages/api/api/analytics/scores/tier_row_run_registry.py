@@ -16,24 +16,26 @@ Lifecycle matrix sides (detach / cancel / retire) are applied by
 Production persist writers use :func:`decide_scores_row_persist` (admission +
 phase under one lock) -- not :func:`get_persist_admission` directly.
 
-Tier ladder resume and hand-over. Each ``tier_solve`` wire build stamps the
-scope's :class:`TierLadderStamp`: the RowRun whose ladder serves the scores
-node, the node's execution generation and the scores epoch. Detach clears the
-scope index but keeps the stamp, so the next continuation of the same node
-resumes its own ``DETACHED`` RowRun through
-:func:`get_resumable_row_run_for_scope` instead of restarting the ladder. The
-stamp is guarded on read: a node replacement or a scores epoch change retires
-the ``DETACHED`` shell and the caller takes the admit path.
+Tier ladder resume and hand-over. Each ``tier_solve`` wire build claims the
+scope's ladder through :func:`claim_tier_ladder`, one atomic registry
+operation that chooses the RowRun, hands the ladder over, retires the scope's
+other runs and writes the scope's :class:`TierLadderStamp`: the RowRun whose
+ladder serves the scores node, the node's execution generation and the scores
+epoch. Detach clears the scope index but keeps the stamp, so the next
+continuation of the same node resumes its own ``DETACHED`` RowRun instead of
+restarting the ladder. The stamp is guarded on read: a node replacement or a
+scores epoch change retires the ``DETACHED`` shell and the caller takes the
+admit path.
 
-When the wire build stamps a different RowRun for the scope (a reopened
-stream's run, or a stream's run at a hop a walk's background run was solving),
-:func:`stamp_tier_ladder` hands the unfinished ladder over: the stamped run's
-``ladder_state`` and ``orchestration`` move to the new run while the stamp
-still serves this node execution and scores epoch. Every other ``REGISTERED``
-or ``DETACHED`` run for the scope is then retired, and their ids are returned
-so the scheduler forgets them. A stamp is also released when its shell is
-dropped (retire-after-write, cancel, retire) and when the scores node reaches
-terminal (:func:`release_tier_ladder_for_scope`).
+When a different RowRun holds the scope index (a reopened stream's run, or a
+stream's run at a hop a walk's background run was solving), the claim hands
+the unfinished ladder over: the stamped run's ``ladder_state`` and
+``orchestration`` move to the new run while the stamp still serves this node
+execution and scores epoch. Every other ``REGISTERED`` or ``DETACHED`` run for
+the scope is retired, and their ids are returned so the scheduler forgets
+them. A stamp is also released when its shell is dropped (retire-after-write,
+cancel, retire) and when the scores node reaches terminal
+(:func:`release_tier_ladder_for_scope`).
 """
 
 from __future__ import annotations
@@ -74,17 +76,18 @@ class TierLadderStamp:
 
 
 @dataclass(frozen=True, slots=True)
-class LadderStampResult:
-    """What stamping a scope's ladder did to the scope's other RowRuns.
+class LadderClaim:
+    """The RowRun stamped to serve a scope's ladder, and what the claim did to the others.
 
     ``retired_run_ids`` names every other run for the scope, now retired; the
-    scheduler forgets them. ``ladder_handed_over`` is true when the stamped run
-    took over another run's unfinished ladder, so its stream has not yet seen
-    that ladder's held solutions.
+    scheduler forgets them. ``ladder_handed_over`` is true when ``run`` took
+    over another run's unfinished ladder, so its stream has not yet seen that
+    ladder's held solutions.
     """
 
-    retired_run_ids: tuple[str, ...] = ()
-    ladder_handed_over: bool = False
+    run: RowRun
+    retired_run_ids: tuple[str, ...]
+    ladder_handed_over: bool
 
 
 _lock = threading.Lock()
@@ -240,49 +243,31 @@ def _registered_run_for_scope_key_locked(scope_key: ScoresScopeKey) -> RowRun | 
     return run
 
 
-def get_resumable_row_run_for_scope(
+def claim_tier_ladder(
     scope: ComputeScope,
     *,
     execution_generation: int,
     scores_epoch: int,
-) -> RowRun | None:
-    """Return the RowRun a ``tier_solve`` step for ``scope`` continues, if any.
+) -> LadderClaim | None:
+    """Choose the RowRun whose ladder serves this scores node execution, and stamp it.
 
-    A ``REGISTERED`` run indexed for the scope wins. Otherwise the run stamped
-    for the scope (normally ``DETACHED`` after its stream closed) resumes only
-    when the stamp names this node execution and scores epoch. On a mismatch
-    the stamp is released, which retires a ``DETACHED`` shell, and None is
-    returned so the caller takes the admit path.
-    """
-    scope_key = _scope_key(scope)
-    with _lock:
-        registered = _registered_run_for_scope_key_locked(scope_key)
-        if registered is not None:
-            return registered
-        stamp = _ladder_stamp_by_scope_key.get(scope_key)
-        if stamp is None:
-            return None
-        if stamp.serves(execution_generation=execution_generation, scores_epoch=scores_epoch):
-            return _runs_by_id[stamp.run_id]
-        _release_ladder_stamp_locked(scope_key)
-        return None
+    One hold of the registry lock chooses the winner, hands an unfinished
+    ladder over to it, retires every other run for the scope and stamps the
+    winner, so a run registered concurrently is either seen here or survives
+    to win the next claim.
 
+    The winner is the ``REGISTERED`` run indexed for the scope. With none, it
+    is the stamped run (normally ``DETACHED`` after its stream closed) while
+    the stamp serves this execution and scores epoch. When the serving stamp
+    names another run whose ladder is unfinished, that ladder
+    (``ladder_state`` and ``orchestration``) moves to the winner; a stale
+    stamp or a finished ladder is not inherited, so the winner keeps its own
+    fresh ladder. Every other ``REGISTERED`` or ``DETACHED`` run for the scope
+    is retired (the RETIRE side) and named in the claim.
 
-def stamp_tier_ladder(
-    run: RowRun,
-    *,
-    execution_generation: int,
-    scores_epoch: int,
-) -> LadderStampResult:
-    """Record that ``run``'s ladder serves this scores node execution and epoch.
-
-    When the scope's stamp names another run, still serves this execution and
-    epoch, and that run's ladder is unfinished, the ladder is handed over:
-    its ``ladder_state`` and ``orchestration`` move to ``run``. A stale stamp
-    or a finished ladder is not inherited, so ``run`` keeps its own fresh
-    ladder. In every case every other run for the scope is retired (the
-    RETIRE side, ``REGISTERED`` and ``DETACHED`` alike) and named in the
-    result. No-op when ``run``'s shell is no longer retained.
+    With no winner, a stale stamp is released (retiring its ``DETACHED``
+    shell) and None is returned: the caller admits, which does I/O outside
+    this lock, and claims again.
 
     Hand-over holds only the registry lock and never takes a ``tier_lock``.
     It relies on this invariant: a stamp that serves the current execution
@@ -293,29 +278,40 @@ def stamp_tier_ladder(
     start while a step of the old one runs (the #633 game-change abort) must
     recheck it.
     """
-    scope_key = _session_scope_key(run.session)
+    scope_key = _scope_key(scope)
     with _lock:
-        if run.run_id not in _runs_by_id:
-            return LadderStampResult()
-        prior = _ladder_stamp_by_scope_key.get(scope_key)
-        handed_over = False
-        if (
-            prior is not None
-            and prior.run_id != run.run_id
-            and prior.serves(execution_generation=execution_generation, scores_epoch=scores_epoch)
-        ):
-            handed_over = _hand_over_unfinished_ladder_locked(_runs_by_id[prior.run_id], run)
+        stamp = _ladder_stamp_by_scope_key.get(scope_key)
+        serving_stamp = (
+            stamp
+            if stamp is not None
+            and stamp.serves(execution_generation=execution_generation, scores_epoch=scores_epoch)
+            else None
+        )
+        winner = _registered_run_for_scope_key_locked(scope_key)
+        if winner is None and serving_stamp is not None:
+            winner = _runs_by_id[serving_stamp.run_id]
+        if winner is None:
+            if stamp is not None:
+                _release_ladder_stamp_locked(scope_key)
+            return None
+        handed_over = (
+            serving_stamp is not None
+            and serving_stamp.run_id != winner.run_id
+            and _hand_over_unfinished_ladder_locked(_runs_by_id[serving_stamp.run_id], winner)
+        )
         _ladder_stamp_by_scope_key[scope_key] = TierLadderStamp(
-            run.run_id, execution_generation, scores_epoch
+            winner.run_id, execution_generation, scores_epoch
         )
         retired_run_ids = tuple(
             run_id
             for run_id, other in _runs_by_id.items()
-            if run_id != run.run_id and _session_scope_key(other.session) == scope_key
+            if run_id != winner.run_id and _session_scope_key(other.session) == scope_key
         )
         for run_id in retired_run_ids:
             _retire_row_run_locked(run_id)
-        return LadderStampResult(retired_run_ids=retired_run_ids, ladder_handed_over=handed_over)
+        return LadderClaim(
+            run=winner, retired_run_ids=retired_run_ids, ladder_handed_over=handed_over
+        )
 
 
 def _hand_over_unfinished_ladder_locked(holder: RowRun, winner: RowRun) -> bool:

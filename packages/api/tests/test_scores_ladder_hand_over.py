@@ -10,7 +10,8 @@ tier job scripted: a continuing tier finishes one tier of its run's ladder.
 from __future__ import annotations
 
 import queue
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -44,6 +45,7 @@ from api.analytics.military_score_inference.models import (
     InferenceSolutionAction,
 )
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
+from api.analytics.scores import tier_row_run_registry
 from api.analytics.scores.compute_orchestration import (
     SCORES_PERSISTENCE_POLICY,
     build_scores_tier_solve_job_wire,
@@ -282,6 +284,98 @@ def test_a_reopen_against_a_stale_stamp_starts_a_fresh_ladder(ladder, stale):
     assert get_row_run(winner_id).ladder_state is fresh_ladder
     assert fresh_ladder.next_step_index == 0
     _assert_the_winner_alone_holds_the_scope(ladder, winner_id, (stamped_id,))
+
+
+# --- Choosing the scope's run and stamping it are one registry operation ---
+
+
+class _RegistryLockWithReleaseHook:
+    """The registry lock, running a one-shot action right after its next release.
+
+    The action runs with the lock free, as another thread would between two
+    registry calls of a wire build.
+    """
+
+    def __init__(self, lock: threading.Lock) -> None:
+        self._lock = lock
+        self._after_next_release: Callable[[], object] | None = None
+
+    def run_after_next_release(self, action: Callable[[], object]) -> None:
+        self._after_next_release = action
+
+    def __enter__(self) -> None:
+        self._lock.acquire()
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self._lock.release()
+        action, self._after_next_release = self._after_next_release, None
+        if action is not None:
+            action()
+
+
+def _resume_the_closed_streams_run(
+    ladder: ShellLadder, open_stream_soon: Callable[[], None]
+) -> str:
+    """The wire build resumes the closed stream's stamped ``DETACHED`` run."""
+    ladder.submit()
+    ladder.run_tier(CONTINUE)
+    resumed_id = ladder.session.run_id
+    ladder.close_stream()
+    open_stream_soon()
+    ladder.run_tier(CONTINUE)
+    return resumed_id
+
+
+def _claim_an_admitted_background_run(
+    ladder: ShellLadder, open_stream_soon: Callable[[], None]
+) -> str:
+    """The wire build finds no run, admits a background run and takes it."""
+    ladder.close_stream()
+    admitted_ids: list[str] = []
+
+    def admit_a_background_run(*_args: object, **_kwargs: object) -> bool:
+        admitted_ids.append(ladder.register_background_run().run_id)
+        open_stream_soon()
+        return True
+
+    with patch(
+        "api.analytics.scores.exports.admit_scores_export_work",
+        side_effect=admit_a_background_run,
+    ):
+        ladder.submit()
+        ladder.run_tier(CONTINUE)
+    return admitted_ids[0]
+
+
+WIRE_BUILD_CHOICES = {
+    "resume": _resume_the_closed_streams_run,
+    "admit": _claim_an_admitted_background_run,
+}
+
+
+@pytest.mark.parametrize("choose_a_run", WIRE_BUILD_CHOICES.values(), ids=WIRE_BUILD_CHOICES.keys())
+def test_a_stream_registered_while_the_wire_build_chooses_its_run_takes_the_ladder_next(
+    ladder, monkeypatch, choose_a_run
+):
+    registry_lock = _RegistryLockWithReleaseHook(tier_row_run_registry._lock)
+    monkeypatch.setattr(tier_row_run_registry, "_lock", registry_lock)
+
+    def open_stream_at_the_next_registry_release() -> None:
+        registry_lock.run_after_next_release(ladder.open_stream)
+
+    chosen_id = choose_a_run(ladder, open_stream_at_the_next_registry_release)
+    stream_id = ladder.session.run_id
+
+    assert ladder.tier_runs[-1] == chosen_id
+    assert decide_scores_row_persist(stream_id) == PersistDecision.allow(retire_after_write=False)
+    chosen_ladder = get_row_run(chosen_id).ladder_state
+    tiers_run = len(ladder.tier_steps)
+
+    ladder.run_tier(CONTINUE)
+
+    assert ladder.tier_steps[-1] == (stream_id, tiers_run)
+    assert get_row_run(stream_id).ladder_state is chosen_ladder
+    _assert_the_winner_alone_holds_the_scope(ladder, stream_id, (chosen_id,))
 
 
 # --- The held top-K reaches the winner's stream without announcing evidence ---
