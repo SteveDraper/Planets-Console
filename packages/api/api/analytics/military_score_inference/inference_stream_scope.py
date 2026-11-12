@@ -24,29 +24,16 @@ class InferenceStreamScope:
     def try_from_root(cls, scope: ComputeScope) -> InferenceStreamScope | None:
         """Stream scope of a per-player root scope, or ``None`` for a wider one.
 
-        Reads game, perspective and turn only. A scope that does not name one
-        player on one turn from one perspective (any of the three is a wildcard
-        or not an int) has no stream scope.
+        Reads game, perspective and turn. The rule for which scopes qualify is
+        :meth:`InferenceRowScope.try_from_root`.
         """
-        if not all(
-            isinstance(axis, int) for axis in (scope.player_id, scope.turn, scope.perspective)
-        ):
-            return None
-        return cls(
-            game_id=scope.game_id,
-            perspective=scope.perspective,
-            turn_number=scope.turn,
-        )
+        row_scope = InferenceRowScope.try_from_root(scope)
+        return None if row_scope is None else row_scope.stream_scope
 
     @classmethod
     def from_root(cls, scope: ComputeScope) -> InferenceStreamScope:
         """Stream scope of a per-player root scope; raises ``ValueError`` for a wider one."""
-        stream_scope = cls.try_from_root(scope)
-        if stream_scope is None:
-            raise ValueError(
-                "inference stream scope requires a concrete player_id, turn and perspective"
-            )
-        return stream_scope
+        return InferenceRowScope.from_root(scope).stream_scope
 
     @classmethod
     def from_session(cls, session: InferenceRowStreamSession) -> InferenceStreamScope:
@@ -68,6 +55,57 @@ class InferenceStreamScope:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class InferenceRowScope:
+    """One player's scoreboard row on one stream scope: the identity of its scores node."""
+
+    stream_scope: InferenceStreamScope
+    player_id: int
+
+    @classmethod
+    def try_from_root(cls, scope: ComputeScope) -> InferenceRowScope | None:
+        """Row scope of a per-player root scope, or ``None`` for a wider one.
+
+        A scope names one row only when its player, turn and perspective are
+        all ints (none is a wildcard).
+        """
+        player_id, turn, perspective = scope.player_id, scope.turn, scope.perspective
+        if not (
+            isinstance(player_id, int) and isinstance(turn, int) and isinstance(perspective, int)
+        ):
+            return None
+        return cls(
+            stream_scope=InferenceStreamScope(
+                game_id=scope.game_id,
+                perspective=perspective,
+                turn_number=turn,
+            ),
+            player_id=player_id,
+        )
+
+    @classmethod
+    def from_root(cls, scope: ComputeScope) -> InferenceRowScope:
+        """Row scope of a per-player root scope; raises ``ValueError`` for a wider one."""
+        row_scope = cls.try_from_root(scope)
+        if row_scope is None:
+            raise ValueError(
+                "inference stream scope requires a concrete player_id, turn and perspective"
+            )
+        return row_scope
+
+    @classmethod
+    def from_session(cls, session: InferenceRowStreamSession) -> InferenceRowScope:
+        """Row scope a row session belongs to."""
+        return cls(
+            stream_scope=InferenceStreamScope.from_session(session),
+            player_id=session.player_id,
+        )
+
+    def root_scope(self) -> ComputeScope:
+        """The scores node this row's tier ladder serves; inverse of ``from_root``."""
+        return self.stream_scope.root_scope(self.player_id)
+
+
 def scores_root_scope_for_session(session: InferenceRowStreamSession) -> ComputeScope:
     """The scores node a row session's tier ladder serves."""
-    return InferenceStreamScope.from_session(session).root_scope(session.player_id)
+    return InferenceRowScope.from_session(session).root_scope()

@@ -56,7 +56,7 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
     InferenceStreamOrchestration,
     new_ladder_state,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_scope import InferenceRowScope
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.persist_decision import (
     PersistDecision,
@@ -64,8 +64,6 @@ from api.analytics.scores.persist_decision import (
 )
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
-
-type ScoresScopeKey = tuple[int, int, int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,36 +111,17 @@ class LadderClaim:
 _lock = threading.Lock()
 # REGISTERED and DETACHED shells only -- cancel never retains a shell.
 _runs_by_id: dict[str, RowRun] = {}
-_run_id_by_scope_key: dict[ScoresScopeKey, str] = {}
+_run_id_by_scope_key: dict[InferenceRowScope, str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
 # Compact cancelled admission: at most one run_id per scores scope.
-_cancelled_admissions: dict[str, ScoresScopeKey] = {}
-_cancelled_run_by_scope: dict[ScoresScopeKey, str] = {}
+_cancelled_admissions: dict[str, InferenceRowScope] = {}
+_cancelled_run_by_scope: dict[InferenceRowScope, str] = {}
 # One tier ladder per scores scope; its shell is always retained.
-_ladder_stamp_by_scope_key: dict[ScoresScopeKey, TierLadderStamp] = {}
-
-
-def _scope_key(scope: ComputeScope) -> ScoresScopeKey:
-    stream_scope = InferenceStreamScope.from_root(scope)
-    return (
-        stream_scope.game_id,
-        stream_scope.perspective,
-        stream_scope.turn_number,
-        scope.player_id,
-    )
-
-
-def _session_scope_key(session) -> ScoresScopeKey:
-    return (
-        session.game_id,
-        session.perspective,
-        session.turn_number,
-        session.player_id,
-    )
+_ladder_stamp_by_scope_key: dict[InferenceRowScope, TierLadderStamp] = {}
 
 
 def _clear_scope_index_locked(run: RowRun) -> None:
-    scope_key = _session_scope_key(run.session)
+    scope_key = InferenceRowScope.from_session(run.session)
     if _run_id_by_scope_key.get(scope_key) == run.run_id:
         _run_id_by_scope_key.pop(scope_key, None)
 
@@ -154,7 +133,7 @@ def _drop_shell_locked(run_id: str) -> RowRun | None:
         return None
     _clear_scope_index_locked(run)
     _tier_callbacks_by_run_id.pop(run_id, None)
-    scope_key = _session_scope_key(run.session)
+    scope_key = InferenceRowScope.from_session(run.session)
     stamp = _ladder_stamp_by_scope_key.get(scope_key)
     if stamp is not None and stamp.run_id == run_id:
         _ladder_stamp_by_scope_key.pop(scope_key, None)
@@ -167,7 +146,7 @@ def _retire_row_run_locked(run_id: str) -> None:
     _drop_shell_locked(run_id)
 
 
-def _release_ladder_stamp_locked(scope_key: ScoresScopeKey) -> None:
+def _release_ladder_stamp_locked(scope_key: InferenceRowScope) -> None:
     """Drop the scope's ladder stamp and retire its shell when no stream owns it.
 
     A ``REGISTERED`` shell stays: its stream retires it at finalize. Caller
@@ -188,14 +167,14 @@ def _forget_cancelled_locked(run_id: str) -> None:
         _cancelled_run_by_scope.pop(scope_key, None)
 
 
-def _supersede_cancelled_for_scope_locked(scope_key: ScoresScopeKey) -> None:
+def _supersede_cancelled_for_scope_locked(scope_key: InferenceRowScope) -> None:
     """Clear any cancelled admission for ``scope_key``. Caller holds ``_lock``."""
     prior = _cancelled_run_by_scope.pop(scope_key, None)
     if prior is not None:
         _cancelled_admissions.pop(prior, None)
 
 
-def _record_cancelled_locked(run_id: str, scope_key: ScoresScopeKey) -> None:
+def _record_cancelled_locked(run_id: str, scope_key: InferenceRowScope) -> None:
     """Remember cancelled admission for ``run_id`` under ``scope_key``. Caller holds ``_lock``."""
     _forget_cancelled_locked(run_id)
     _supersede_cancelled_for_scope_locked(scope_key)
@@ -240,7 +219,7 @@ def register_row_run(
     if initialize_ladder and run.ladder_state is None:
         initialize_tier_ladder_state(run, orchestration=orchestration)
     run.phase = RowRunPhase.REGISTERED
-    scope_key = _session_scope_key(run.session)
+    scope_key = InferenceRowScope.from_session(run.session)
     with _lock:
         # Same-scope re-register supersedes prior cancelled admission (preempt path).
         _supersede_cancelled_for_scope_locked(scope_key)
@@ -262,10 +241,10 @@ def get_row_run(run_id: str) -> RowRun | None:
 def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
     """Return the ``REGISTERED`` RowRun indexed for ``scope``, if any."""
     with _lock:
-        return _registered_run_for_scope_key_locked(_scope_key(scope))
+        return _registered_run_for_scope_key_locked(InferenceRowScope.from_root(scope))
 
 
-def _registered_run_for_scope_key_locked(scope_key: ScoresScopeKey) -> RowRun | None:
+def _registered_run_for_scope_key_locked(scope_key: InferenceRowScope) -> RowRun | None:
     run_id = _run_id_by_scope_key.get(scope_key)
     if run_id is None:
         return None
@@ -311,7 +290,7 @@ def claim_tier_ladder(
     start while a step of the old one runs (the #633 game-change abort) must
     recheck it.
     """
-    scope_key = _scope_key(scope)
+    scope_key = InferenceRowScope.from_root(scope)
     with _lock:
         stamp = _ladder_stamp_by_scope_key.get(scope_key)
         serving_stamp = (
@@ -338,7 +317,8 @@ def claim_tier_ladder(
         retired_run_ids = tuple(
             run_id
             for run_id, other in _runs_by_id.items()
-            if run_id != winner.run_id and _session_scope_key(other.session) == scope_key
+            if run_id != winner.run_id
+            and InferenceRowScope.from_session(other.session) == scope_key
         )
         for run_id in retired_run_ids:
             _retire_row_run_locked(run_id)
@@ -362,7 +342,7 @@ def release_tier_ladder_for_scope(scope: ComputeScope, *, execution_generation: 
 
     A stamp written for a later node execution is left alone.
     """
-    scope_key = _scope_key(scope)
+    scope_key = InferenceRowScope.from_root(scope)
     with _lock:
         stamp = _ladder_stamp_by_scope_key.get(scope_key)
         if stamp is not None and stamp.execution_generation == execution_generation:
@@ -457,7 +437,7 @@ def _mark_row_run_cancelled(run_id: str) -> RowRun | None:
     with _lock:
         dropped = _drop_shell_locked(run_id)
         if dropped is not None:
-            _record_cancelled_locked(run_id, _session_scope_key(dropped.session))
+            _record_cancelled_locked(run_id, InferenceRowScope.from_session(dropped.session))
             return dropped
         # Already compact-cancelled (or never registered): leave admission as-is.
         return None
