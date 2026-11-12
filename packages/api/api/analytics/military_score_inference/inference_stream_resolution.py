@@ -241,13 +241,7 @@ class InferenceStreamResolutionMixin:
             controller_for_scope,
         )
 
-        return controller_for_scope(
-            InferenceStreamScope(
-                game_id=session.game_id,
-                perspective=session.perspective,
-                turn_number=session.turn_number,
-            )
-        )
+        return controller_for_scope(InferenceStreamScope.from_session(session))
 
     def _controller_for_compute_scope(
         self: InferenceRowScheduler,
@@ -257,17 +251,7 @@ class InferenceStreamResolutionMixin:
             controller_for_scope,
         )
 
-        player_id = scope.player_id
-        turn_number = scope.turn
-        if not isinstance(player_id, int) or not isinstance(turn_number, int):
-            return None
-        return controller_for_scope(
-            InferenceStreamScope(
-                game_id=scope.game_id,
-                perspective=scope.perspective,
-                turn_number=turn_number,
-            )
-        )
+        return controller_for_scope(InferenceStreamScope.from_root(scope))
 
     def _open_stream_session_for_scope(
         self: InferenceRowScheduler,
@@ -276,10 +260,7 @@ class InferenceStreamResolutionMixin:
         controller = self._controller_for_compute_scope(scope)
         if controller is None:
             return None
-        player_id = scope.player_id
-        if not isinstance(player_id, int):
-            return None
-        scheduled = controller.scheduled_rows.get(player_id)
+        scheduled = controller.scheduled_rows.get(scope.player_id)
         return scheduled.session if scheduled is not None else None
 
     def _reopen_stream_row_for_force_fresh(

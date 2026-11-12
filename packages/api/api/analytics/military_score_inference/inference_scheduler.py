@@ -44,7 +44,7 @@ from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.pending_accepts import PendingAccepts
-from api.streaming.table_stream.row_run_admission import RowLifecycleOp, RowRunPhase
+from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 from api.streaming.table_stream.scheduler_orchestrator_attachment import (
     SchedulerOrchestratorAttachment,
 )
@@ -139,13 +139,7 @@ class InferenceRowScheduler(
 
         with self._lock:
             binding = self._stream_binding_for_scope_locked(scope)
-            scores_scope = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=scope.game_id,
-                perspective=scope.perspective,
-                turn=scope.turn_number,
-                player_id=event.player_id,
-            )
+            scores_scope = self._root_scope(scope, event.player_id)
             fleet_scope = self._fleet_scope_for_event(scope, event)
             orchestrator = binding.orchestrator if binding is not None else None
 
@@ -239,22 +233,13 @@ class InferenceRowScheduler(
     ) -> RowRun | None:
         """Return the live ``REGISTERED`` RowRun for this player, if any.
 
-        Uses the scheduler scope index plus the single registry owner. ``DETACHED``
-        shells (and cancelled admissions with no shell) are not re-attached here.
+        Reads the registry's scope index, so a stale duplicate run for the same
+        scope never shadows the indexed run. ``DETACHED`` shells (and cancelled
+        admissions with no shell) are not re-attached here.
         """
-        with self._lock:
-            for run_id, root_scope in self._runs.items():
-                if (
-                    root_scope.game_id == scope.game_id
-                    and root_scope.perspective == scope.perspective
-                    and root_scope.turn == scope.turn_number
-                    and root_scope.player_id == player_id
-                ):
-                    run = self._adapter_row_run(run_id)
-                    if run is not None and run.phase is RowRunPhase.REGISTERED:
-                        return run
-                    return None
-            return None
+        from api.analytics.scores.tier_row_run_registry import get_row_run_for_scope
+
+        return get_row_run_for_scope(self._root_scope(scope, player_id))
 
     def global_pause_status(self, scope: InferenceStreamScope) -> dict[str, object]:
         with self._lock:
@@ -687,13 +672,21 @@ class InferenceRowScheduler(
         return node.profile_step_index != SCORES_TIER_SOLVE_PROFILE_INDEX
 
     @staticmethod
-    def _root_scope_for_session(session: InferenceRowStreamSession) -> ComputeScope:
+    def _root_scope(scope: InferenceStreamScope, player_id: int) -> ComputeScope:
+        """Scores root scope for one player's row on ``scope``."""
         return ComputeScope(
             analytic_id=SCORES_ANALYTIC_ID,
-            game_id=session.game_id,
-            perspective=session.perspective,
-            turn=session.turn_number,
-            player_id=session.player_id,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=scope.turn_number,
+            player_id=player_id,
+        )
+
+    @staticmethod
+    def _root_scope_for_session(session: InferenceRowStreamSession) -> ComputeScope:
+        return InferenceRowScheduler._root_scope(
+            InferenceStreamScope.from_session(session),
+            session.player_id,
         )
 
     @staticmethod
@@ -721,13 +714,7 @@ class InferenceRowScheduler(
 
     @staticmethod
     def _wake_multiplex_for_session(session: InferenceRowStreamSession) -> None:
-        wake_inference_table_stream_multiplex(
-            InferenceStreamScope(
-                game_id=session.game_id,
-                perspective=session.perspective,
-                turn_number=session.turn_number,
-            )
-        )
+        wake_inference_table_stream_multiplex(InferenceStreamScope.from_session(session))
 
 
 def _query_context_for_session(

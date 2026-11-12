@@ -55,12 +55,7 @@ def deliver_inference_domain_event_to_open_stream(
     When no controller is attached, enqueue on the session queue only. Otherwise
     the controller routes bound vs unbound (pending wire) multiplex delivery.
     """
-    scope = InferenceStreamScope(
-        game_id=session.game_id,
-        perspective=session.perspective,
-        turn_number=session.turn_number,
-    )
-    controller = controller_for_scope(scope)
+    controller = controller_for_scope(InferenceStreamScope.from_session(session))
     if controller is None:
         session.event_queue.put(event)
         return

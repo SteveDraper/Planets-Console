@@ -321,6 +321,7 @@ def test_stopped_when_persisted_row_stopped(sample_turn, persistence):
 
 
 def test_materialize_omits_hull_catalog_mask_when_resolver_returns_none(sample_turn):
+    reset_inference_row_scheduler_for_tests()
     player_id = inference_target_player_id(sample_turn)
 
     def resolve_none_mask(_turn, _player_id):
