@@ -33,11 +33,25 @@ from tests.fixtures.military_score_inference import (  # noqa: F401
 from tests.fixtures.military_score_inference_prior_weights import (  # noqa: F401
     minimal_prior_catalog,
 )
+from tests.post_lock_callback_guard import failing_on_post_lock_callback_errors
 
 pytest_plugins = [
     "tests.scores_exports_helpers",
     "tests.scores_outlier_repro_harness",
 ]
+
+
+@pytest.fixture(autouse=True)
+def _fail_on_post_lock_callback_errors(request: pytest.FixtureRequest):
+    """Fail a test whose post-lock callbacks raised, unless it raises them on purpose.
+
+    Defined first so it wraps the other autouse fixtures' setup and teardown.
+    """
+    if request.node.get_closest_marker("allows_post_lock_callback_errors"):
+        yield
+        return
+    with failing_on_post_lock_callback_errors():
+        yield
 
 
 @pytest.fixture(autouse=True)
