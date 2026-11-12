@@ -10,7 +10,10 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     HeldSolutionsUpdated,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_scope import (
+    InferenceStreamScope,
+    scores_root_scope_for_session,
+)
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
@@ -100,7 +103,7 @@ def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch) -> None:
     live = _session_for_turn(sample_turn)
     scheduler.enqueue_tier_ladder(live, stream_token=stream_token)
     scheduler.accept_pending_run(live.run_id)
-    assert submitted == [scheduler._root_scope_for_session(live)]
+    assert submitted == [scores_root_scope_for_session(live)]
 
 
 def test_pause_without_active_stream_raises_validation_error(sample_turn):
@@ -404,7 +407,7 @@ def test_emit_held_solutions_snapshots_merged_list(sample_turn):
         )
     ]
 
-    scheduler._emit_held_solutions(session, observation=session.observation)
+    scheduler._emit_held_solutions(session)
 
     event = session.event_queue.get(timeout=1.0)
     assert isinstance(event, HeldSolutionsUpdated)

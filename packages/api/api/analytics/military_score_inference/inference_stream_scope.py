@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.scope import WILDCARD, ComputeScope
 
 if TYPE_CHECKING:
@@ -47,3 +48,18 @@ class InferenceStreamScope:
             perspective=session.perspective,
             turn_number=session.turn_number,
         )
+
+    def root_scope(self, player_id: int) -> ComputeScope:
+        """Scores root scope of one player's row on this stream scope; inverse of ``from_root``."""
+        return ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=self.game_id,
+            perspective=self.perspective,
+            turn=self.turn_number,
+            player_id=player_id,
+        )
+
+
+def scores_root_scope_for_session(session: InferenceRowStreamSession) -> ComputeScope:
+    """The scores node a row session's tier ladder serves."""
+    return InferenceStreamScope.from_session(session).root_scope(session.player_id)

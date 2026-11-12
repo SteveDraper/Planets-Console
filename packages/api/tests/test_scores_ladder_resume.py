@@ -254,19 +254,3 @@ def test_a_replaced_node_does_not_resume_the_old_run(ladder):
 
     assert get_row_run(stream_run_id) is None
     assert wire["runId"] != stream_run_id
-
-
-def test_reopening_the_stream_mid_ladder_starts_a_fresh_run_that_wins(ladder, sample_turn):
-    ladder.submit()
-    first_run_id = ladder.session.run_id
-    ladder.run_tier(TierJobOutcome(enqueue_continuation=True))
-    ladder.close_stream()
-
-    reopened_token = ladder.scheduler.begin_scope(ladder.stream_scope)
-    reopened = ladder_session(sample_turn, ladder.player_id)
-    ladder.scheduler.enqueue_tier_ladder(reopened, stream_token=reopened_token)
-    ladder.run_tier(durable_row_complete("fresh run after reopen"))
-
-    assert ladder.tier_runs == [first_run_id, reopened.run_id]
-    assert get_row_run(first_run_id) is None
-    assert ladder.persisted_summary() == "fresh run after reopen"

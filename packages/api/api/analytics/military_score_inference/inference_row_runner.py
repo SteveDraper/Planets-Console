@@ -44,9 +44,15 @@ class TierJobOutcome:
 
 @dataclass(frozen=True)
 class InferenceTierJobCallbacks:
+    """Stream callbacks for one tier job.
+
+    ``emit_held_solutions`` runs on every admitted solution; the scheduler
+    decides whether the row's stream shows held solutions.
+    """
+
     emit_tier_started_progress: Callable[[], None]
     emit_progress: Callable[[], None]
-    emit_held_solutions: Callable[[InferenceObservation], None]
+    emit_held_solutions: Callable[[], None]
 
 
 def solve_context(run: RowRun) -> tuple[InferenceObservation, TurnInfo]:
@@ -169,8 +175,7 @@ def _run_inference_tier_job_locked(
     observation, turn = solve_context(run)
 
     def on_admitted(_solution: InferenceSolution) -> None:
-        if orchestration is None or orchestration.should_emit_streaming_solutions():
-            callbacks.emit_held_solutions(observation)
+        callbacks.emit_held_solutions()
 
     callbacks.emit_tier_started_progress()
     run_policy_ladder_tier_step(

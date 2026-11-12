@@ -825,10 +825,6 @@ def test_horwasp_tier_solve_closes_evidence_before_solve_work(
         ),
         patch.object(ScoresPersistencePolicy, "is_satisfied", side_effect=_unexpected),
         patch(
-            "api.analytics.scores.compute_orchestration._adopt_scheduler_row_run_for_tier_wire",
-            side_effect=_unexpected,
-        ),
-        patch(
             "api.analytics.scores.compute_orchestration.resolve_prior_fleet_for_scores",
             side_effect=_unexpected,
         ),

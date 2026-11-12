@@ -9,7 +9,10 @@ from enum import Enum
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.ledger_persisted_event import FleetLedgerPersistedEvent
-from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
+from api.analytics.military_score_inference.inference_row_runner import (
+    InferenceTierJobCallbacks,
+    solve_context,
+)
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     GlobalPauseChanged,
     HeldSolutionsUpdated,
@@ -23,7 +26,10 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
 from api.analytics.military_score_inference.inference_stream_resolution import (
     InferenceStreamResolutionMixin,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_scope import (
+    InferenceStreamScope,
+    scores_root_scope_for_session,
+)
 from api.analytics.military_score_inference.inference_stream_scope_outcomes import (
     InferenceStreamScopeOutcomesMixin,
 )
@@ -39,7 +45,6 @@ from api.analytics.military_score_inference.inference_stream_teardown import (
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     wake_inference_table_stream_multiplex,
 )
-from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator
@@ -160,7 +165,7 @@ class InferenceRowScheduler(
 
         with self._lock:
             binding = self._stream_binding_for_scope_locked(scope)
-            scores_scope = self._root_scope(scope, event.player_id)
+            scores_scope = scope.root_scope(event.player_id)
             fleet_scope = self._fleet_scope_for_event(scope, event)
             orchestrator = binding.orchestrator if binding is not None else None
 
@@ -260,7 +265,7 @@ class InferenceRowScheduler(
         """
         from api.analytics.scores.tier_row_run_registry import get_row_run_for_scope
 
-        return get_row_run_for_scope(self._root_scope(scope, player_id))
+        return get_row_run_for_scope(scope.root_scope(player_id))
 
     def global_pause_status(self, scope: InferenceStreamScope) -> dict[str, object]:
         with self._lock:
@@ -390,6 +395,19 @@ class InferenceRowScheduler(
         with self._lock:
             self._remove_run_locked(run_id)
 
+    def forget_runs(self, run_ids: tuple[str, ...]) -> None:
+        """Drop runs the tier registry already retired from the scheduler's run maps.
+
+        Pops ``_runs``, the cached execution generations and pending accepts
+        only. Held submissions stay: they are keyed by root scope, which the
+        scope's surviving run shares.
+        """
+        with self._lock:
+            for run_id in run_ids:
+                self._runs.pop(run_id, None)
+                self._execution_generation_by_run_id.pop(run_id, None)
+            self._pending_accepts.discard_all(run_ids)
+
     def enqueue_tier_ladder(
         self,
         session: InferenceRowStreamSession,
@@ -413,7 +431,8 @@ class InferenceRowScheduler(
         yet attached its controller has no token to pass, so an admit there
         registers ``BACKGROUND``. The stream's own admission then registers its
         own run, which wins the scope index, and the admit's run stays
-        registered beside it as a background duplicate.
+        registered beside it as a background duplicate until the scope's next
+        ladder stamp retires it (``stamp_tier_ladder`` hand-over).
         """
         with self._lock:
             row_run = RowRun(session)
@@ -421,7 +440,7 @@ class InferenceRowScheduler(
 
             register_row_run(row_run, orchestration=orchestration)
             self._register_tier_callbacks_for_run(row_run)
-            root_scope = self._root_scope_for_session(session)
+            root_scope = scores_root_scope_for_session(session)
             self._runs[session.run_id] = root_scope
             if self._defer_orchestrator_submit:
                 return TierLadderRegistration.SUBMIT_DEFERRED
@@ -497,24 +516,27 @@ class InferenceRowScheduler(
         with self._lock:
             self._invalidate_retained_state_locked()
 
-    def _emit_held_solutions(
-        self,
-        session: InferenceRowStreamSession,
-        *,
-        observation: InferenceObservation,
-    ) -> None:
+    def deliver_held_solutions_to_stream(self, session: InferenceRowStreamSession) -> bool:
+        """Queue the run's held top-K on its stream and wake the multiplex.
+
+        Stream-only: no inference evidence is announced, so no fleet or scores
+        epoch moves. Returns False, delivering nothing, when the run holds no
+        solutions or its accelerated segment does not stream solutions. The
+        observation and segment come from the run's ladder orchestration.
+        """
         row_run = self._adapter_row_run(session.run_id)
         if row_run is None:
-            return
+            return False
         state = row_run.ladder_state
         if state is None or state.catalog is None or not state.merged_solutions:
-            return
-        segment_id: str | None = None
+            return False
         orchestration = row_run.orchestration
+        segment_id: str | None = None
         if orchestration is not None:
-            segment = orchestration.current_segment()
-            if segment is not None:
-                segment_id = segment.segment_id
+            if not orchestration.should_emit_streaming_solutions():
+                return False
+            segment_id = orchestration.current_segment().segment_id
+        observation, _turn = solve_context(row_run)
         session.event_queue.put(
             HeldSolutionsUpdated(
                 solutions=tuple(state.merged_solutions),
@@ -523,9 +545,15 @@ class InferenceRowScheduler(
                 segment_id=segment_id,
             )
         )
-        if self._on_held_solutions_updated is not None:
-            self._on_held_solutions_updated(session)
         self._wake_multiplex_for_session(session)
+        return True
+
+    def _emit_held_solutions(self, session: InferenceRowStreamSession) -> None:
+        """Deliver an admitted solution's held top-K, then announce the inference evidence."""
+        if self.deliver_held_solutions_to_stream(session) and (
+            self._on_held_solutions_updated is not None
+        ):
+            self._on_held_solutions_updated(session)
 
     def _emit_progress(self, session: InferenceRowStreamSession) -> None:
         row_run = self._adapter_row_run(session.run_id)
@@ -568,10 +596,7 @@ class InferenceRowScheduler(
             return InferenceTierJobCallbacks(
                 emit_tier_started_progress=lambda: self._emit_tier_started_progress(session),
                 emit_progress=lambda: self._emit_progress(session),
-                emit_held_solutions=lambda observation: self._emit_held_solutions(
-                    session,
-                    observation=observation,
-                ),
+                emit_held_solutions=lambda: self._emit_held_solutions(session),
             )
 
         register_tier_callbacks(row_run.run_id, callbacks())
@@ -678,24 +703,6 @@ class InferenceRowScheduler(
         if node.scope.analytic_id != SCORES_ANALYTIC_ID:
             return True
         return node.profile_step_index != SCORES_TIER_SOLVE_PROFILE_INDEX
-
-    @staticmethod
-    def _root_scope(scope: InferenceStreamScope, player_id: int) -> ComputeScope:
-        """Scores root scope for one player's row on ``scope``."""
-        return ComputeScope(
-            analytic_id=SCORES_ANALYTIC_ID,
-            game_id=scope.game_id,
-            perspective=scope.perspective,
-            turn=scope.turn_number,
-            player_id=player_id,
-        )
-
-    @staticmethod
-    def _root_scope_for_session(session: InferenceRowStreamSession) -> ComputeScope:
-        return InferenceRowScheduler._root_scope(
-            InferenceStreamScope.from_session(session),
-            session.player_id,
-        )
 
     @staticmethod
     def _row_complete_from_result_wire(result_wire: object | None) -> RowComplete | None:

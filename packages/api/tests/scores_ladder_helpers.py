@@ -2,11 +2,14 @@
 
 ``ShellLadder`` registers one player's RowRun through a live scores stream on a
 real ``InferenceRowScheduler``, then runs the real scores ``tier_solve`` wire
-builder and step with the tier job scripted.
+builder and step with the tier job scripted. A scripted tier that continues
+finishes one tier of the run's ladder; one that completes the row finishes the
+ladder.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import patch
 
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
@@ -66,18 +69,26 @@ def durable_row_complete(summary: str) -> TierJobOutcome:
 class ShellLadder:
     """The shell scoreboard ladder for one player, opened through a live scores stream."""
 
-    def __init__(self, sample_turn, persistence) -> None:
+    def __init__(
+        self,
+        sample_turn,
+        persistence,
+        *,
+        on_held_solutions_updated: Callable[[InferenceRowStreamSession], None] | None = None,
+    ) -> None:
+        self.sample_turn = sample_turn
         self.player_id = inference_target_player_id(sample_turn)
         self.persistence = persistence
-        self.scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+        self.scheduler = InferenceRowScheduler(
+            defer_orchestrator_submit=True,
+            on_held_solutions_updated=on_held_solutions_updated,
+        )
         self.stream_scope = InferenceStreamScope(
             game_id=GAME_ID,
             perspective=perspective(sample_turn),
             turn_number=sample_turn.settings.turn,
         )
-        self.stream_token = self.scheduler.begin_scope(self.stream_scope)
-        self.session = ladder_session(sample_turn, self.player_id)
-        self.scheduler.enqueue_tier_ladder(self.session, stream_token=self.stream_token)
+        self.open_stream()
         self.ctx = export_chain_query_context(
             sample_turn,
             persistence=persistence,
@@ -90,11 +101,38 @@ class ShellLadder:
             compute_registry=build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION)),
             pool_submitter=lambda _node, _step, *, work: self.submitted_work.append(work),
         )
-        self.tier_runs: list[str] = []
+        # (run_id, tier index the step started at) for every executed tier step.
+        self.tier_steps: list[tuple[str, int]] = []
 
-    def submit(self) -> None:
+    @property
+    def tier_runs(self) -> list[str]:
+        return [run_id for run_id, _tier_index in self.tier_steps]
+
+    def open_stream(self) -> InferenceRowStreamSession:
+        """Open a scores stream at the ladder's scope and register its row, as connect does.
+
+        The new stream's row becomes ``session``. Opened again, this is a reopen
+        (after ``close_stream``) or a same-scope preempt (before it).
+        """
+        self.stream_token = self.scheduler.begin_scope(self.stream_scope)
+        self.session = ladder_session(self.sample_turn, self.player_id)
+        self.scheduler.enqueue_tier_ladder(self.session, stream_token=self.stream_token)
+        return self.session
+
+    def register_background_run(self) -> InferenceRowStreamSession:
+        """Register a row no stream owns, as an export admit or a walk hop does."""
+        session = ladder_session(self.sample_turn, self.player_id)
+        self.scheduler.enqueue_tier_ladder(session)
+        return session
+
+    def submit(self, *, force_fresh: bool = False) -> None:
         self.orchestrator.submit(
-            ComputeRequest(ctx=self.ctx, scope=self.scope, step_kind=SCORES_TIER_SOLVE)
+            ComputeRequest(
+                ctx=self.ctx,
+                scope=self.scope,
+                step_kind=SCORES_TIER_SOLVE,
+                force_fresh=force_fresh,
+            )
         )
         assert self.orchestrator.nodes[self.scope].state == "running"
 
@@ -112,9 +150,14 @@ class ShellLadder:
         """
 
         def tier_job(run: RowRun, _callbacks) -> TierJobOutcome:
-            self.tier_runs.append(run.run_id)
+            ladder_state = run.ladder_state
+            self.tier_steps.append((run.run_id, ladder_state.next_step_index))
             if isinstance(outcome, BaseException):
                 raise outcome
+            if outcome.enqueue_continuation:
+                ladder_state.next_step_index += 1
+            else:
+                ladder_state.ladder_complete = True
             return outcome
 
         with patch(

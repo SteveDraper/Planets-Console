@@ -384,7 +384,7 @@ def _quiet_tier_job_callbacks():
     return InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
         emit_progress=lambda: None,
-        emit_held_solutions=lambda _observation: None,
+        emit_held_solutions=lambda: None,
     )
 
 

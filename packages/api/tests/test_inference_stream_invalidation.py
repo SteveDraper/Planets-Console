@@ -20,7 +20,10 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     iter_scores_table_inference_events,
     schedule_inference_row,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_scope import (
+    InferenceStreamScope,
+    scores_root_scope_for_session,
+)
 from api.analytics.military_score_inference.inference_table_stream_controller import (
     InferenceTableStreamController,
 )
@@ -368,7 +371,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     scheduled_rows = controller.scheduled_rows
     binding = next(iter(scheduler._stream_bindings.values()))
     before_run_id = scheduled_rows[target_player_id].session.run_id
-    scope = scheduler._root_scope_for_session(scheduled_rows[target_player_id].session)
+    scope = scores_root_scope_for_session(scheduled_rows[target_player_id].session)
 
     complete_running_pool_step(
         binding.orchestrator,
@@ -1040,7 +1043,7 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
     controller.register_scheduled_row(target_player_id, scheduled)
     before_run_id = scheduled.session.run_id
     binding = next(iter(scheduler._stream_bindings.values()))
-    scope = scheduler._root_scope_for_session(scheduled.session)
+    scope = scores_root_scope_for_session(scheduled.session)
     assert binding.orchestrator.nodes[scope].state == "running"
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
@@ -1122,7 +1125,7 @@ def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
         stream_token=stream_token,
     )
     controller.register_scheduled_row(player_id, survivor)
-    scope = scheduler._root_scope_for_session(survivor.session)
+    scope = scores_root_scope_for_session(survivor.session)
     orchestrator = get_compute_orchestrator()
     assert orchestrator.nodes[scope].state == "running"
     before_generation = orchestrator.execution_generation_for_scope(scope)
@@ -1260,9 +1263,9 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
     controller.register_scheduled_row(player_id, scheduled)
     before_run_id = scheduled.session.run_id
     before_generation = get_compute_orchestrator().execution_generation_for_scope(
-        scheduler._root_scope_for_session(scheduled.session)
+        scores_root_scope_for_session(scheduled.session)
     )
-    scope = scheduler._root_scope_for_session(scheduled.session)
+    scope = scores_root_scope_for_session(scheduled.session)
     orchestrator = get_compute_orchestrator()
     assert orchestrator.nodes[scope].state == "running"
 

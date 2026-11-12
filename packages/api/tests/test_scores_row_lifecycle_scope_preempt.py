@@ -18,7 +18,10 @@ from api.analytics.military_score_inference.inference_scheduler import (
     TierLadderRegistration,
     reset_inference_row_scheduler_for_tests,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_scope import (
+    InferenceStreamScope,
+    scores_root_scope_for_session,
+)
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
@@ -140,7 +143,7 @@ def test_begin_scope_clears_pause_and_bindings_and_releases_held_submissions(
     assert scheduler._globally_paused is False
     assert scheduler._held_initial_submissions == []
     assert scheduler._stream_bindings == {}
-    assert released == [(binding, scheduler._root_scope_for_session(held))]
+    assert released == [(binding, scores_root_scope_for_session(held))]
     for session in (bound, held):
         assert get_row_run_phase(session.run_id) is RowRunPhase.REGISTERED
 
@@ -187,7 +190,7 @@ def test_a_walk_node_held_behind_pause_dispatches_when_a_switch_clears_pause(
     scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
     walk_session = _walk_session(sample_turn, scheduler, scores_rows)
-    walk_node_scope = scheduler._root_scope_for_session(walk_session)
+    walk_node_scope = scores_root_scope_for_session(walk_session)
     walk_orchestrator.submit(
         ComputeRequest(
             scope=walk_node_scope, step_kind=SCORES_TIER_SOLVE, ctx=walk_session.query_context
@@ -208,7 +211,7 @@ def test_rows_held_behind_pause_are_submitted_when_a_switch_clears_pause(
     scope = _stream_scope(sample_turn)
     token = scheduler.begin_scope(scope)
     rescheduled = _walk_session(sample_turn, scheduler, scores_rows, 0)
-    rescheduled_node = scheduler._root_scope_for_session(rescheduled)
+    rescheduled_node = scores_root_scope_for_session(rescheduled)
     assert (
         scheduler.enqueue_tier_ladder(rescheduled, stream_token=token)
         is TierLadderRegistration.STREAM_BOUND
@@ -221,7 +224,7 @@ def test_rows_held_behind_pause_are_submitted_when_a_switch_clears_pause(
     assert walk_orchestrator.nodes[rescheduled_node].is_terminal
     replacement = _walk_session(sample_turn, scheduler, scores_rows, 0)
     admitted = _walk_session(sample_turn, scheduler, scores_rows, 1)
-    admitted_node = scheduler._root_scope_for_session(admitted)
+    admitted_node = scores_root_scope_for_session(admitted)
     for held in (replacement, admitted):
         assert (
             scheduler.enqueue_tier_ladder(held, stream_token=token) is TierLadderRegistration.HELD

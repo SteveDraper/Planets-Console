@@ -69,7 +69,9 @@ class InferenceStreamTeardownMixin:
         ``begin_scope`` never detaches or cancels a run. A stream detaches its
         own rows when it ends (``detach_inference_stream``, from the connect
         ``finally``), so the replaced stream's rows stay ``REGISTERED`` until
-        then and background runs are never touched.
+        then and background runs are never touched. On a same-scope preempt
+        the new stream registers its own row beside the old one; the scope's
+        next ladder stamp hands the ladder to the new row and retires the old.
 
         Under the scheduler lock it resets only stream-owned state. Every
         claim clears global pause, taking the held submissions. A scope change,

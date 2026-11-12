@@ -16,6 +16,9 @@ from api.analytics.military_score_inference.inference_row_runner import (
     run_inference_tier_job,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
+from api.analytics.military_score_inference.inference_stream_scope import (
+    scores_root_scope_for_session,
+)
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
 )
@@ -30,10 +33,8 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_row_run_for_scope,
     get_tier_callbacks,
-    register_row_run,
     stamp_tier_ladder,
 )
-from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
@@ -131,14 +132,20 @@ def build_scores_tier_solve_job_wire(
     rewrites the skip row when it is missing; they do not need a ``RowRun``.
 
     Invariant: when ensure is satisfied and evidence is still open, this dispatch
-    must attach a ``runId`` (tier registry or successful scheduler adopt). Parking
-    on ``{runId: None}`` with open evidence is forbidden -- that state has no armed
-    wake publisher and hung dependents (Birds hang). Raise instead.
+    must attach a ``runId`` from the tier registry. Parking on ``{runId: None}``
+    with open evidence is forbidden -- that state has no armed wake publisher and
+    hung dependents (Birds hang). Raise instead.
 
     The RowRun comes from ``get_resumable_row_run_for_scope`` first, so a
     continuation whose stream closed mid-ladder resumes its own ``DETACHED``
     run. The chosen run is then stamped with this node execution and the
-    scores epoch.
+    scores epoch. Stamping hands an unfinished ladder held by another run for
+    the scope over to the chosen run and retires every other run for the
+    scope. After the registry lock is released, the scheduler forgets the
+    retired runs and, on a hand-over, the chosen run's stream gets the moved
+    ladder's held solutions without an inference evidence announcement. The
+    fleet resolution is applied after the stamp, so it lands on the ladder
+    the step runs.
     """
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
@@ -169,8 +176,6 @@ def build_scores_tier_solve_job_wire(
         )
         run = get_row_run_for_scope(scope)
     if run is None:
-        run = _adopt_scheduler_row_run_for_tier_wire(ctx, export_scope)
-    if run is None:
         if ScoresPersistencePolicy().is_satisfied(ctx, scope):
             return _evidence_closed_skip_wire(scope)
         raise RuntimeError(
@@ -180,11 +185,15 @@ def build_scores_tier_solve_job_wire(
             f"(game_id={scope.game_id}, perspective={scope.perspective}, "
             f"turn={scope.turn}, player_id={scope.player_id})"
         )
-    stamp_tier_ladder(
+    ladder_stamp = stamp_tier_ladder(
         run,
         execution_generation=execution_generation,
         scores_epoch=scores_epoch,
     )
+    scheduler = resolve_scores_services(ctx).scheduler
+    scheduler.forget_runs(ladder_stamp.retired_run_ids)
+    if ladder_stamp.ladder_handed_over:
+        scheduler.deliver_held_solutions_to_stream(run.session)
 
     turn = ctx.load_turn(export_scope.turn)
     if turn is None or export_scope.player_id is None:
@@ -242,35 +251,6 @@ def _horwasp_evidence_closed_skip_wire(
     return _evidence_closed_skip_wire(scope)
 
 
-def _adopt_scheduler_row_run_for_tier_wire(
-    ctx: AnalyticQueryContext,
-    export_scope: ExportScope,
-) -> RowRun | None:
-    """Re-index a live ``REGISTERED`` RowRun when scope lookup raced ensure.
-
-    ``row_run_for_player`` reads the single registry owner (REGISTERED only).
-    ``DETACHED`` shells and cancelled admissions are not adoptable.
-    ``register_row_run`` refreshes the scope index if ensure scheduled the row
-    before the first ``get_row_run_for_scope`` check.
-    """
-    if export_scope.player_id is None:
-        return None
-    from api.analytics.scores.export_snapshot import scores_inference_stream_scope
-
-    services = resolve_scores_services(ctx)
-    scheduler_run = services.scheduler.row_run_for_player(
-        scores_inference_stream_scope(export_scope),
-        export_scope.player_id,
-    )
-    if scheduler_run is None:
-        return None
-    register_row_run(
-        scheduler_run,
-        initialize_ladder=scheduler_run.ladder_state is None,
-    )
-    return scheduler_run
-
-
 def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
     """Inline scores materialize then continue into ``tier_solve`` on the same node.
 
@@ -318,17 +298,6 @@ def wake_scores_scope(
     return True
 
 
-def _scores_compute_scope_for_run(run: RowRun) -> ComputeScope:
-    session = run.session
-    return ComputeScope(
-        analytic_id=SCORES_ANALYTIC_ID,
-        game_id=session.game_id,
-        perspective=session.perspective,
-        turn=session.turn_number,
-        player_id=session.player_id,
-    )
-
-
 def _waiting_deps_without_submit() -> StepResult:
     """Soft-defer demotion: ``waiting_deps`` with no dependency graft or force_fresh.
 
@@ -349,7 +318,7 @@ def _emit_soft_defer_and_wait(
         inference_row_scheduler_if_initialized,
     )
 
-    scope = _scores_compute_scope_for_run(run)
+    scope = scores_root_scope_for_session(run.session)
     scheduler = inference_row_scheduler_if_initialized()
     if scheduler is not None:
         scheduler.deliver_scores_row_defer_terminal(
@@ -418,7 +387,7 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         callbacks = InferenceTierJobCallbacks(
             emit_tier_started_progress=lambda: None,
             emit_progress=lambda: None,
-            emit_held_solutions=lambda _observation: None,
+            emit_held_solutions=lambda: None,
         )
     outcome = run_inference_tier_job(run, callbacks)
     return tier_job_outcome_to_step_result(run, outcome)

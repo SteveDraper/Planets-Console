@@ -105,7 +105,7 @@ def test_concurrent_shared_rowrun_accelerated_completes_without_raise(
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
         emit_progress=lambda: None,
-        emit_held_solutions=lambda _o: None,
+        emit_held_solutions=lambda: None,
     )
     errors: list[str] = []
     terminals = 0
@@ -186,7 +186,7 @@ def test_run_inference_tier_job_idempotent_when_segments_exhausted(
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
         emit_progress=lambda: None,
-        emit_held_solutions=lambda _o: None,
+        emit_held_solutions=lambda: None,
     )
 
     outcome = run_inference_tier_job(run, callbacks)
