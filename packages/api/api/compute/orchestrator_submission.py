@@ -25,7 +25,11 @@ from api.compute.orchestrator_state import (
 )
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.root_plan import IgnoredRootPlan, RootPlan
-from api.compute.scope import ComputeScope, compute_scope_to_export_scope
+from api.compute.scope import (
+    ComputeScope,
+    compute_scope_to_export_scope,
+    format_compute_scope_key,
+)
 from api.compute.submission_open import SubmissionOpen
 
 if TYPE_CHECKING:
@@ -275,13 +279,29 @@ class OrchestratorSubmissionMixin:
         """Raise when ``request`` belongs to a node execution that is no longer live.
 
         Caller holds the orchestrator lock. A request with no requester passes.
+        A refusal records a ``dependency_submit_refused`` lifecycle event on the
+        requester's execution, naming the refused dependency scope.
         """
         requester = request.requester
         if requester is None:
             return
+        generation = requester.execution_generation
         node = self._nodes.get(requester.scope)
-        if node is None or not node.is_live_execution(requester.execution_generation):
-            raise ComputeRequesterEndedError(requester)
+        if node is not None and node.is_live_execution(generation):
+            return
+        self._observers.notify_lifecycle(
+            "dependency_submit_refused",
+            requester.scope,
+            execution_generation=generation,
+            node=node if node is not None and node.execution_generation == generation else None,
+            detail={
+                "reason": "requester_ended",
+                "relatedScopeKey": format_compute_scope_key(request.scope),
+                "dependencyStepKind": request.step_kind,
+                "forceFresh": request.force_fresh,
+            },
+        )
+        raise ComputeRequesterEndedError(requester)
 
     def _submit_dependencies(
         self: ComputeOrchestrator,

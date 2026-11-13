@@ -71,6 +71,7 @@ LifecycleEventKind = (
         "epoch_retry",
         "persist_deferred",
         "step_parked",
+        "dependency_submit_refused",
     ]
     | PoolItemIgnoredKind
 )
@@ -347,7 +348,7 @@ class OrchestratorObservers:
         step_index: int | None = None,
         detail: Mapping[str, Any] | None = None,
     ) -> None:
-        """Schedule causal lifecycle listeners (force_fresh / abort / stale pool item).
+        """Schedule causal lifecycle listeners (force_fresh / abort / stale pool item / refusal).
 
         ``execution_generation`` / ``step_kind`` / ``step_index`` are the
         canonical step identity for this event; every call site passes them

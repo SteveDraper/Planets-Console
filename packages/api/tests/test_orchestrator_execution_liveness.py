@@ -3,8 +3,10 @@
 A dependency submit that a node queues post-lock carries the node's
 execution as its requester. The orchestrator refuses it, planning nothing,
 once that execution has ended, including when it ends while the submit
-fetches its dependency chain. A thread pool step whose execution ends while
-its wire builds is dropped before it runs.
+fetches its dependency chain. Each refusal records one
+``dependency_submit_refused`` lifecycle event on the requester's execution.
+A thread pool step whose execution ends while its wire builds is dropped
+before it runs.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator_observers import POOL_ITEM_IGNORED_KINDS
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.scope import format_compute_scope_key
 from api.compute.wire import StepResult
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
@@ -102,6 +105,29 @@ class _PersistDeferredHarness:
             ),
             pool_submitter=lambda node, _step, **_kwargs: self.pool_submissions.append(node.scope),
         )
+        self.refusals: list[tuple[ComputeScope, int, ComputeNodeRun | None, dict[str, object]]] = []
+        self.orchestrator.observers.register_lifecycle_listener(self._record_refusal)
+
+    def _record_refusal(self, kind, scope, node, generation, _step_kind, _step_index, detail):
+        if kind == "dependency_submit_refused":
+            self.refusals.append((scope, generation, node, dict(detail)))
+
+    def assert_one_refused_shared_submit(self, *, dependency_step_kind: str | None) -> None:
+        """One refusal names the aborted ``branch_b`` execution and the refused ``shared``."""
+        requester = self.node(self.branch_b_scope)
+        assert self.refusals == [
+            (
+                self.branch_b_scope,
+                requester.execution_generation,
+                requester,
+                {
+                    "reason": "requester_ended",
+                    "relatedScopeKey": format_compute_scope_key(self.shared_scope),
+                    "dependencyStepKind": dependency_step_kind,
+                    "forceFresh": True,
+                },
+            )
+        ]
 
     def run_branch_b_to_its_persist(self) -> ComputeNodeRun:
         """Run ``shared`` to complete and ``branch_b`` to running; return the ``shared`` node."""
@@ -145,6 +171,7 @@ def test_t11a_persist_deferred_recovery_submits_its_dependency_while_the_request
     assert replanned_shared.execution_generation > completed_shared.execution_generation
     assert replanned_shared.state == "running"
     assert harness.pool_submissions == [harness.shared_scope]
+    assert harness.refusals == []
 
 
 def test_t11b_an_abort_before_the_queued_dependency_submit_plans_nothing(sample_turn, monkeypatch):
@@ -165,6 +192,29 @@ def test_t11b_an_abort_before_the_queued_dependency_submit_plans_nothing(sample_
     assert harness.node(harness.shared_scope) is completed_shared
     assert completed_shared.state == "complete"
     assert harness.pool_submissions == []
+    harness.assert_one_refused_shared_submit(dependency_step_kind="materialize")
+
+
+def test_a_refusal_after_the_requester_was_replaced_names_no_node(sample_turn, monkeypatch):
+    harness = _PersistDeferredHarness(sample_turn)
+    harness.run_branch_b_to_its_persist()
+    ended_generation = harness.node(harness.branch_b_scope).execution_generation
+    submit = harness.orchestrator.submit
+
+    def replace_requester_then_submit(request: ComputeRequest):
+        if request.scope == harness.shared_scope:
+            harness.abort_branch_b()
+            submit(ComputeRequest(ctx=harness.ctx, scope=harness.branch_b_scope, force_fresh=True))
+        return submit(request)
+
+    monkeypatch.setattr(harness.orchestrator, "submit", replace_requester_then_submit)
+
+    harness.finish_branch_b_with_persist()
+
+    assert harness.node(harness.branch_b_scope).execution_generation > ended_generation
+    assert [(scope, generation, node) for scope, generation, node, _ in harness.refusals] == [
+        (harness.branch_b_scope, ended_generation, None)
+    ]
 
 
 def test_t11c_an_abort_during_the_dependency_chain_fetch_plans_nothing(sample_turn, monkeypatch):
@@ -195,6 +245,7 @@ def test_t11c_an_abort_during_the_dependency_chain_fetch_plans_nothing(sample_tu
     assert harness.node(harness.shared_scope) is completed_shared
     assert completed_shared.state == "complete"
     assert harness.pool_submissions == []
+    harness.assert_one_refused_shared_submit(dependency_step_kind="materialize")
 
 
 def test_recreating_an_abort_failed_dependency_plans_nothing_once_its_requester_ended(
@@ -221,6 +272,7 @@ def test_recreating_an_abort_failed_dependency_plans_nothing_once_its_requester_
     assert harness.node(harness.branch_b_scope).error is _ABORT
     assert harness.node(harness.shared_scope) is aborted_shared
     assert harness.pool_submissions == []
+    harness.assert_one_refused_shared_submit(dependency_step_kind=None)
 
 
 def _thread_registration(
