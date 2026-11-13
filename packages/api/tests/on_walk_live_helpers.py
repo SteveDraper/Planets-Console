@@ -52,8 +52,16 @@ class LiveStream:
     for ``deliver_domain_event``.
     """
 
-    def __init__(self, scope: TableStreamScopeBinding, turn, ctx, player_ids: list[int]) -> None:
-        self.stream_token = uuid.uuid4().hex
+    def __init__(
+        self,
+        scope: TableStreamScopeBinding,
+        turn,
+        ctx,
+        player_ids: list[int],
+        *,
+        stream_token: str | None = None,
+    ) -> None:
+        self.stream_token = uuid.uuid4().hex if stream_token is None else stream_token
         self.turn = turn
         self.query_context = ctx
         self.player_ids = tuple(player_ids)
@@ -101,9 +109,16 @@ def roster_player_ids(turn) -> list[int]:
 
 
 def attach_stream(
-    registry, scope: TableStreamScopeBinding, turn, ctx, player_ids: list[int]
+    registry,
+    scope: TableStreamScopeBinding,
+    turn,
+    ctx,
+    player_ids: list[int],
+    *,
+    stream_token: str | None = None,
 ) -> LiveStream:
-    controller = LiveStream(scope, turn, ctx, player_ids)
+    """Attach a stand-in stream; ``stream_token`` is the scheduler claim's token when it has one."""
+    controller = LiveStream(scope, turn, ctx, player_ids, stream_token=stream_token)
     registry.attach(scope, controller)
     return controller
 

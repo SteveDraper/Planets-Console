@@ -290,7 +290,7 @@ def schedule_row_with_ladder(
     game_id: int = GAME_ID,
 ) -> InferenceStreamScope:
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    scheduled = schedule_inference_row(
+    schedule_inference_row(
         scheduler,
         score=score,
         turn=sample_turn,
@@ -299,7 +299,6 @@ def schedule_row_with_ladder(
         perspective=perspective(sample_turn),
         query_context=scores_query_context(sample_turn, scheduler=scheduler),
     )
-    assert scheduled is not None
     stream_scope = stream_scope_for_turn(sample_turn, game_id=game_id)
     run = scheduler.row_run_for_player(stream_scope, player_id)
     assert run is not None

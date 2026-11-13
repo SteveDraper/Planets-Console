@@ -15,6 +15,7 @@ from api.analytics.military_score_inference.inference_admission import (
     is_build_inference_available,
     resolve_inference_admission_skip,
 )
+from api.analytics.military_score_inference.inference_scheduler import TierLadderRegistration
 from api.analytics.military_score_inference.inference_stream_rows import (
     ImmediateRowAdmission,
     immediate_row_inference_events,
@@ -376,7 +377,7 @@ def _ensure_admit_inference_row(
         overlay_ensure=overlay_ensure,
         backfill_earlier_turns=backfill_earlier_turns,
     )
-    scheduled = schedule_inference_row(
+    registered = schedule_inference_row(
         services.scheduler,
         score=score,
         turn=turn,
@@ -394,8 +395,8 @@ def _ensure_admit_inference_row(
         query_context=ctx,
         persistence=services.persistence,
     )
-    if scheduled is not None:
-        services.scheduler.accept_pending_run(scheduled.session.run_id)
+    if registered.registration is TierLadderRegistration.STREAM_BOUND:
+        services.scheduler.accept_pending_run(registered.row.session.run_id)
     return True
 
 

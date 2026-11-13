@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from api.analytics.military_score_inference.accelerated_start import (
     ACCEL_WINDOW_SEGMENT_ID,
     REPORTED_HOST_TURN_SEGMENT_ID,
     AcceleratedInferenceSegment,
 )
-from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_accelerated import (
     build_accelerated_backfill_stream_row_complete,
 )
@@ -29,6 +30,7 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
+    new_ladder_state,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
@@ -82,14 +84,11 @@ def _accelerated_split_orchestration(
     )
 
 
-def test_new_ladder_state_uses_full_k_per_segment(sample_turn) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
-
-    assert orchestration.new_ladder_state().resolved_max_solutions == 20
+def test_new_ladder_state_uses_full_k_per_segment() -> None:
+    assert new_ladder_state().resolved_max_solutions == 20
 
 
 def test_new_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
     score = sample_turn.scores[0]
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -99,7 +98,7 @@ def test_new_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> Non
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    state = orchestration.new_ladder_state(session)
+    state = new_ladder_state(session)
     assert state.hopeless_context is not None
     assert state.hopeless_context.planet_delta == score.planetchange
     assert state.hopeless_context.starbase_delta == score.starbasechange
@@ -155,180 +154,30 @@ def test_should_emit_streaming_solutions_false_for_backfill_non_target_segment(s
     assert orchestration.should_emit_streaming_solutions() is False
 
 
-def test_run_inference_tier_job_does_not_emit_on_admission_for_accel_window_segment(
+def _admit_one_solution_during_a_tier(
     sample_turn,
     monkeypatch,
-) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
-    score = sample_turn.scores[0]
-    session = InferenceRowStreamSession(
-        player_id=score.ownerid,
-        observation=build_inference_observation(score, sample_turn),
-        turn=sample_turn,
-        game_id=628580,
-        perspective=1,
-        turn_number=sample_turn.settings.turn,
-    )
-    run = RowRun(session)
-    run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state()
-
-    solution = InferenceSolution(
-        objective_value=20,
-        actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),
-    )
-
-    def fake_solve_catalog(
-        _observation,
-        _catalog,
-        *,
-        race_id=None,
-        max_solutions,
-        solve_clip,
-        military_score_window=None,
-        pins=None,
-        cancel_token=None,
-        on_solution=None,
-        seed_no_good_solutions=(),
-        **_budget,
-    ):
-        del race_id, max_solutions, solve_clip, military_score_window
-        del pins, cancel_token, seed_no_good_solutions
-        if on_solution is not None:
-            on_solution(solution)
-        from api.analytics.military_score_inference.actions import build_inference_problem
-
-        problem = build_inference_problem(_observation, _catalog, max_solutions=1)
-        from api.analytics.military_score_inference.models import InferenceResult
-
-        return (
-            InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(solution,),
-                diagnostics={},
-            ),
-            problem,
-        )
-
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_seed_progression",
-        lambda *args, **kwargs: (None, None),
-    )
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
-        fake_solve_catalog,
-    )
-
-    emitted_observations: list[object] = []
-    callbacks = InferenceTierJobCallbacks(
-        emit_tier_started_progress=lambda: None,
-        emit_progress=lambda: None,
-        emit_held_solutions=emitted_observations.append,
-    )
-
-    run_inference_tier_job(run, callbacks)
-
-    assert emitted_observations == []
-
-
-def test_run_inference_tier_job_emits_on_admission_for_reported_host_turn_segment(
-    sample_turn,
-    monkeypatch,
-) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
-    orchestration.current_segment_index = 1
-    score = sample_turn.scores[0]
-    session = InferenceRowStreamSession(
-        player_id=score.ownerid,
-        observation=build_inference_observation(score, sample_turn),
-        turn=sample_turn,
-        game_id=628580,
-        perspective=1,
-        turn_number=sample_turn.settings.turn,
-    )
-    run = RowRun(session)
-    run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state()
-    observation = orchestration.current_observation()
-
-    solution = InferenceSolution(
-        objective_value=20,
-        actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),
-    )
-
-    def fake_solve_catalog(
-        _observation,
-        _catalog,
-        *,
-        race_id=None,
-        max_solutions,
-        solve_clip,
-        military_score_window=None,
-        pins=None,
-        cancel_token=None,
-        on_solution=None,
-        seed_no_good_solutions=(),
-        **_budget,
-    ):
-        del race_id, max_solutions, solve_clip, military_score_window
-        del pins, cancel_token, seed_no_good_solutions
-        if on_solution is not None:
-            on_solution(solution)
-        from api.analytics.military_score_inference.actions import build_inference_problem
-
-        problem = build_inference_problem(_observation, _catalog, max_solutions=1)
-        from api.analytics.military_score_inference.models import InferenceResult
-
-        return (
-            InferenceResult(
-                status=STATUS_EXACT,
-                solutions=(solution,),
-                diagnostics={},
-            ),
-            problem,
-        )
-
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_seed_progression",
-        lambda *args, **kwargs: (None, None),
-    )
-    monkeypatch.setattr(
-        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
-        fake_solve_catalog,
-    )
-
-    emitted_observations: list[object] = []
-    callbacks = InferenceTierJobCallbacks(
-        emit_tier_started_progress=lambda: None,
-        emit_progress=lambda: None,
-        emit_held_solutions=emitted_observations.append,
-    )
-
-    run_inference_tier_job(run, callbacks)
-
-    assert len(emitted_observations) == 1
-    emitted = emitted_observations[0]
-    assert emitted.player_id == observation.player_id
-    assert emitted.military_delta_2x == observation.military_delta_2x
-    assert emitted.scoreboard_delta_source == "accelerated_segment"
-
-
-def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn) -> None:
+    *,
+    segment_index: int,
+) -> tuple[InferenceRowStreamSession, InferenceStreamOrchestration]:
+    """Run one accelerated tier through the scheduler's callbacks; the solve admits one solution."""
     from api.analytics.military_score_inference.inference_scheduler import (
         InferenceRowScheduler,
         reset_inference_row_scheduler_for_tests,
     )
+    from api.analytics.scores.tier_row_run_registry import get_row_run, get_tier_callbacks
 
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
-    scope = InferenceStreamScope(
-        game_id=628580,
-        perspective=1,
-        turn_number=sample_turn.settings.turn,
+    scheduler.begin_scope(
+        InferenceStreamScope(
+            game_id=628580,
+            perspective=1,
+            turn_number=sample_turn.settings.turn,
+        )
     )
-    scheduler.begin_scope(scope)
     orchestration = _accelerated_split_orchestration(sample_turn)
-    orchestration.current_segment_index = 1
+    orchestration.current_segment_index = segment_index
     score = sample_turn.scores[0]
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -339,25 +188,97 @@ def test_emit_held_solutions_includes_reported_host_turn_segment_id(sample_turn)
         turn_number=sample_turn.settings.turn,
     )
     scheduler.enqueue_tier_ladder(session, orchestration=orchestration)
-    from api.analytics.scores.tier_row_run_registry import get_row_run
+    run = get_row_run(session.run_id)
+    assert run is not None
+    run.ladder_state = new_ladder_state()
 
-    row_run = get_row_run(session.run_id)
-    assert row_run is not None
-    row_run.ladder_state.catalog = ActionCatalog((), (), {})
-    row_run.ladder_state.merged_solutions = [
-        InferenceSolution(
-            objective_value=20,
-            actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),
-        )
-    ]
-
-    scheduler._emit_held_solutions(
-        session,
-        observation=orchestration.current_observation(),
+    solution = InferenceSolution(
+        objective_value=20,
+        actions=(InferenceSolutionAction(action_id="action_a", label="Action A", count=1),),
     )
 
-    event = session.event_queue.get(timeout=1.0)
-    assert isinstance(event, HeldSolutionsUpdated)
+    def fake_solve_catalog(
+        _observation,
+        _catalog,
+        *,
+        race_id=None,
+        max_solutions,
+        solve_clip,
+        military_score_window=None,
+        pins=None,
+        cancel_token=None,
+        on_solution=None,
+        seed_no_good_solutions=(),
+        **_budget,
+    ):
+        del race_id, max_solutions, solve_clip, military_score_window
+        del pins, cancel_token, seed_no_good_solutions
+        if on_solution is not None:
+            on_solution(solution)
+        from api.analytics.military_score_inference.actions import build_inference_problem
+
+        problem = build_inference_problem(_observation, _catalog, max_solutions=1)
+        from api.analytics.military_score_inference.models import InferenceResult
+
+        return (
+            InferenceResult(
+                status=STATUS_EXACT,
+                solutions=(solution,),
+                diagnostics={},
+            ),
+            problem,
+        )
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_seed_progression",
+        lambda *args, **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.policy_ladder_tier_step._solve_catalog",
+        fake_solve_catalog,
+    )
+
+    callbacks = get_tier_callbacks(session.run_id)
+    assert callbacks is not None
+    run_inference_tier_job(run, callbacks)
+    return session, orchestration
+
+
+def _queued_held_solutions(session: InferenceRowStreamSession) -> list[HeldSolutionsUpdated]:
+    held: list[HeldSolutionsUpdated] = []
+    while not session.event_queue.empty():
+        event = session.event_queue.get_nowait()
+        if isinstance(event, HeldSolutionsUpdated):
+            held.append(event)
+    return held
+
+
+def test_an_admission_in_the_accel_window_segment_streams_no_held_solutions(
+    sample_turn,
+    monkeypatch,
+) -> None:
+    session, _orchestration = _admit_one_solution_during_a_tier(
+        sample_turn, monkeypatch, segment_index=0
+    )
+
+    assert _queued_held_solutions(session) == []
+
+
+def test_an_admission_in_the_reported_host_turn_segment_streams_its_held_solutions(
+    sample_turn,
+    monkeypatch,
+) -> None:
+    session, orchestration = _admit_one_solution_during_a_tier(
+        sample_turn, monkeypatch, segment_index=1
+    )
+
+    held = _queued_held_solutions(session)
+    assert len(held) == 1
+    event = held[0]
+    observation = orchestration.current_observation()
+    assert event.observation.player_id == observation.player_id
+    assert event.observation.military_delta_2x == observation.military_delta_2x
+    assert event.observation.scoreboard_delta_source == "accelerated_segment"
     assert event.segment_id == REPORTED_HOST_TURN_SEGMENT_ID
 
     wire_events = domain_event_to_wire_events(
@@ -383,7 +304,7 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
     )
     run = RowRun(session)
     run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state()
+    run.ladder_state = new_ladder_state()
 
     captured: list[float | None] = []
 
@@ -411,11 +332,66 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
         emit_progress=lambda: None,
-        emit_held_solutions=lambda _observation: None,
+        emit_held_solutions=lambda: None,
     )
     run_inference_tier_job(run, callbacks)
 
     assert captured == [stream_row_search_effort_allowance()]
+
+
+def _hull_mask(*hull_ids: int) -> ResolvedHullCatalogMask:
+    enabled = frozenset(hull_ids)
+    return ResolvedHullCatalogMask(
+        race_id=0,
+        race_name="test",
+        master_hull_ids=enabled,
+        default_enabled_hull_ids=enabled,
+        effective_enabled_hull_ids=enabled,
+        has_user_override=True,
+    )
+
+
+@pytest.mark.parametrize("ladder_mask", [_hull_mask(1, 2), None])
+def test_segment_continuation_keeps_the_ladder_state_mask(
+    sample_turn, monkeypatch, ladder_mask
+) -> None:
+    orchestration = _accelerated_split_orchestration(sample_turn)
+    score = sample_turn.scores[0]
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+        resolved_mask=ladder_mask,
+    )
+    run = RowRun(session)
+    run.orchestration = orchestration
+    run.ladder_state = new_ladder_state(session)
+
+    def fake_tier_step(state, *_args, **_kwargs) -> None:
+        session.resolved_mask = _hull_mask(3)
+        state.ladder_complete = True
+
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
+        fake_tier_step,
+    )
+
+    outcome = run_inference_tier_job(
+        run,
+        InferenceTierJobCallbacks(
+            emit_tier_started_progress=lambda: None,
+            emit_progress=lambda: None,
+            emit_held_solutions=lambda: None,
+        ),
+    )
+
+    assert outcome.enqueue_continuation is True
+    assert outcome.next_ladder_state is not None
+    assert outcome.next_ladder_state.resolved_mask is ladder_mask
+    assert run.ladder_state is outcome.next_ladder_state
 
 
 def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_turn) -> None:

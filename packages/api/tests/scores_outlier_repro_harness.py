@@ -63,6 +63,7 @@ from api.analytics.scores.compute_orchestration import (
     run_scores_tier_solve,
 )
 from api.analytics.scores.tier_row_run_registry import (
+    ScopeIndexPolicy,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
@@ -287,7 +288,7 @@ def reproduce_admit_ship_outlier(
     )
     run = RowRun(session)
     _apply_fleet_resolution_to_row_run(run, resolution)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     probe = PhaseProbe(report)
     probe.install()
     try:

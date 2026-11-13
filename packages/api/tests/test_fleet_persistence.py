@@ -830,8 +830,7 @@ def test_held_solutions_scheduler_callback_invalidates_cached_fleet_snapshot(
         player_id=player_id,
         game_id=628580,
         perspective=1,
-    )
-    assert scheduled is not None
+    ).row
     assert scheduler._on_held_solutions_updated is not None
     scheduler._on_held_solutions_updated(scheduled.session)
 

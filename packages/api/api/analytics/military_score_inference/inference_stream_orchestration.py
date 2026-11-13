@@ -52,30 +52,62 @@ from api.models.player import Score
 def new_ladder_state(
     session: InferenceRowStreamSession | None = None,
     *,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
-    fleet_torp_overlay: FleetTorpOverlay | None = None,
-    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
-    hopeless_context: HopelessRowFacts | None = None,
     load_counterparty_fleet: CounterpartyFleetLoader | None = None,
 ) -> PolicyLadderState:
-    """Build a fresh ladder snapshot. Session, when given, owns fact assembly.
+    """Build a fresh ladder snapshot. Session, when given, seeds every input.
 
     ``load_counterparty_fleet`` is the donor-ledger loader for the incoming
     warship floor. The scores tier registry supplies it when the session has a
-    query context; continuations pass the loader already on the previous state.
+    query context.
     """
-    if session is not None:
-        if resolved_mask is None:
-            resolved_mask = session.resolved_mask
-        if fleet_torp_overlay is None:
-            fleet_torp_overlay = session.fleet_torp_overlay
-        if prior_fleet_max_tech_by_axis is None:
-            prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
-        if hopeless_context is None:
-            hopeless_context = hopeless_row_facts_from_session(session)
-        prior_fleet_records: tuple[FleetShipRecord, ...] = session.prior_fleet_records
-    else:
-        prior_fleet_records = ()
+    if session is None:
+        return _assemble_ladder_state(None, load_counterparty_fleet=load_counterparty_fleet)
+    return _assemble_ladder_state(
+        session,
+        resolved_mask=session.resolved_mask,
+        fleet_torp_overlay=session.fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=session.prior_fleet_max_tech_by_axis,
+        prior_fleet_records=session.prior_fleet_records,
+        hopeless_context=hopeless_row_facts_from_session(session),
+        load_counterparty_fleet=load_counterparty_fleet,
+    )
+
+
+def continue_ladder_state(
+    previous: PolicyLadderState,
+    session: InferenceRowStreamSession,
+) -> PolicyLadderState:
+    """Build the next accelerated segment's ladder from the previous segment's.
+
+    Every carried input comes from ``previous``, where ``None`` is a real value,
+    so the ladder does not depend on the session it started with. The fleet
+    torp overlay and prior fleet facts are refreshed on both the session and the
+    ladder state at every wire build, so carrying them equals reading the
+    session. The session's observation and turn feed only the overshoot plan;
+    every RowRun for one scores scope shares the same stored scoreboard turns,
+    so they cannot differ between runs.
+    """
+    return _assemble_ladder_state(
+        session,
+        resolved_mask=previous.resolved_mask,
+        fleet_torp_overlay=previous.fleet_torp_overlay,
+        prior_fleet_max_tech_by_axis=previous.prior_fleet_max_tech_by_axis,
+        prior_fleet_records=previous.prior_fleet_records,
+        hopeless_context=previous.hopeless_context,
+        load_counterparty_fleet=previous.load_counterparty_fleet,
+    )
+
+
+def _assemble_ladder_state(
+    session: InferenceRowStreamSession | None,
+    *,
+    resolved_mask: ResolvedHullCatalogMask | None = None,
+    fleet_torp_overlay: FleetTorpOverlay | None = None,
+    prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
+    prior_fleet_records: tuple[FleetShipRecord, ...] = (),
+    hopeless_context: HopelessRowFacts | None = None,
+    load_counterparty_fleet: CounterpartyFleetLoader | None = None,
+) -> PolicyLadderState:
     state = PolicyLadderState(
         policy_steps=tuple(resolve_tier_policies(None)),
         resolved_mask=resolved_mask,
@@ -156,25 +188,6 @@ class InferenceStreamOrchestration:
     def should_emit_streaming_solutions(self) -> bool:
         segment = self.current_segment()
         return segment is not None and segment.is_streaming_target
-
-    def new_ladder_state(
-        self,
-        session: InferenceRowStreamSession | None = None,
-        *,
-        resolved_mask: ResolvedHullCatalogMask | None = None,
-        fleet_torp_overlay: FleetTorpOverlay | None = None,
-        prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
-        hopeless_context: HopelessRowFacts | None = None,
-        load_counterparty_fleet: CounterpartyFleetLoader | None = None,
-    ) -> PolicyLadderState:
-        return new_ladder_state(
-            session,
-            resolved_mask=resolved_mask,
-            fleet_torp_overlay=fleet_torp_overlay,
-            prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
-            hopeless_context=hopeless_context,
-            load_counterparty_fleet=load_counterparty_fleet,
-        )
 
     def record_segment_ladder_complete(
         self,

@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
+    ScopeIndexPolicy,
     _retire_row_run,
     get_row_run,
     register_row_run,
@@ -37,7 +38,7 @@ def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> Non
     """Missing RowRun must park (rebuild wire on wake), not empty-complete and unlock fleet."""
     session = _session(sample_turn)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     _retire_row_run(run.run_id)
 
     scope = _scope_for(session)
@@ -65,7 +66,7 @@ def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -
 def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, monkeypatch) -> None:
     session = _session(sample_turn)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
 
     orchestrator = _singleton_orchestrator()
@@ -118,7 +119,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
 def test_peer_failure_does_not_retire_while_sibling_running(sample_turn, monkeypatch) -> None:
     session = _session(sample_turn)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
 
     orchestrator = _singleton_orchestrator()

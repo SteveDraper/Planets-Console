@@ -384,7 +384,7 @@ def _quiet_tier_job_callbacks():
     return InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
         emit_progress=lambda: None,
-        emit_held_solutions=lambda _observation: None,
+        emit_held_solutions=lambda: None,
     )
 
 
@@ -814,7 +814,7 @@ def test_stream_sat_refuse_does_not_continue_accelerated_segments(sample_turn, m
     )
     run = RowRun(session)
     run.orchestration = orchestration
-    run.ladder_state = orchestration.new_ladder_state(session)
+    run.ladder_state = new_ladder_state(session)
     outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
     assert outcome.enqueue_continuation is False
     assert outcome.next_ladder_state is None

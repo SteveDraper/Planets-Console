@@ -276,6 +276,7 @@ def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, per
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.scores.compute_orchestration import build_scores_tier_solve_job_wire
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -337,7 +338,7 @@ def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, per
         fleet_torp_input_status="pending",
     )
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
 
     prior_fleet_scope = ComputeScope(
         analytic_id="fleet",

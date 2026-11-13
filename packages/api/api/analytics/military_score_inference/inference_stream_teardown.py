@@ -1,7 +1,9 @@
-"""Stream detach / abort helpers for the scores inference row scheduler.
+"""Stream claim, detach and cancel for the scores inference row scheduler.
 
-Owns begin_scope preempt detach, cancel_run abort, and turn-scoped stream
-teardown without cancelling in-flight solve work on detach.
+A stream detaches its own rows when it ends (``detach_inference_stream``).
+``begin_scope`` never detaches a run; it resets only stream-owned state and
+releases the work global pause held.
+``cancel_run`` is the explicit cancel path (lifecycle CANCEL, then abort).
 """
 
 from __future__ import annotations
@@ -11,6 +13,9 @@ from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
+)
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
@@ -35,58 +40,94 @@ class InferenceStreamOrchestratorBinding:
 
 @dataclass(frozen=True)
 class HeldTierSubmission:
+    """A row's tier submission held while globally paused, with the binding it submits on."""
+
     stream_token: str
+    binding: InferenceStreamOrchestratorBinding
     root_scope: ComputeScope
 
 
+@dataclass(frozen=True)
+class PauseRelease:
+    """The work clearing global pause lets go, taken under the scheduler lock.
+
+    ``_apply_pause_release`` applies it after the lock: it submits each held
+    submission on its own binding, then runs a dispatch pass for the nodes the
+    pause gate held. An empty release (pause was not set) does nothing.
+    """
+
+    was_paused: bool = False
+    held: tuple[HeldTierSubmission, ...] = ()
+
+
 class InferenceStreamTeardownMixin:
-    """Detach stream ownership vs cancel+abort orchestrator scopes."""
+    """Claim and end table streams; cancel row runs and abort their orchestrator scopes."""
 
     def begin_scope(self: InferenceRowScheduler, scope: InferenceStreamScope) -> str:
-        """Claim the active table-stream scope, detaching the prior stream's row runs.
+        """Claim the active table-stream scope and reset stream-owned scheduler state.
 
-        Background ensure RowRuns for *other* turns must survive. Detaching them on
-        ``begin_scope`` (e.g. opening the turn-8 stream while turn-3 background
-        warm is in flight) left fleet waiting forever on aborted/missing scores
-        deps. Only the prior active stream turn is detached; a first claim
-        (no prior scope) leaves retained runs alone.
+        ``begin_scope`` never detaches or cancels a run. A stream detaches its
+        own rows when it ends (``detach_inference_stream``, from the connect
+        ``finally``), so the replaced stream's rows stay ``REGISTERED`` until
+        then and background runs are never touched. On a same-scope preempt
+        the new stream registers its own row beside the old one; the scope's
+        next ladder stamp hands the ladder to the new row and retires the old.
 
-        Detach transitions RowRuns to ``DETACHED`` (shell retained for late
-        persist) and drops stream bindings but does **not** cancel solve tokens,
-        set resolution ``CANCELED``, or abort orchestrator nodes -- in-flight
-        tier workers may still finish, persist from the RowComplete payload, and
-        complete the DAG node. ``cancel_run`` is the explicit cancel path
-        (lifecycle CANCEL then abort).
+        Under the scheduler lock it resets only stream-owned state. Every
+        claim clears global pause, taking the held submissions. A scope change,
+        including the first claim, then drops every stream binding, and a
+        same-scope preempt drops the previous stream's binding.
 
-        Detach runs under the scheduler lock and does not take the orchestrator
-        condition. The pause gate and scope-outcome listener are registered
-        after that lock is released, once per process orchestrator. The gate
-        follows ``_globally_paused``, which detach clears.
+        Clearing pause releases held work. After the lock, the scope-outcome
+        listener and the pause gate are registered once per process
+        orchestrator, each held submission is submitted on the binding it was
+        held with, and a dispatch pass runs for the nodes the gate held.
+        Released work has no stream watching it, so it runs at its standing
+        band.
         """
         with self._lock:
-            prior = self._scope_guard.active_scope
-
-            def on_same_scope_preempt() -> None:
-                self._detach_stream_runs_locked(turn=scope.turn_number)
-
-            def on_scope_change() -> None:
-                if prior is None:
-                    return
-                self._detach_stream_runs_locked(turn=prior.turn_number)
-
+            release = self._clear_global_pause_locked()
             token = self._scope_guard.begin_scope_locked(
                 scope,
-                on_same_scope_preempt=on_same_scope_preempt,
-                on_scope_change=on_scope_change,
+                on_same_scope_preempt=self._drop_preempted_stream_binding_locked,
+                on_scope_change=self._stream_bindings.clear,
             )
         self._orchestrator_attachment.ensure_registered()
+        self._apply_pause_release(release)
         return token
+
+    def detach_inference_stream(
+        self: InferenceRowScheduler,
+        scope: InferenceStreamScope,
+        sessions: tuple[InferenceRowStreamSession, ...],
+        *,
+        stream_token: str,
+    ) -> None:
+        """Detach a table stream's own rows when it ends, without cancelling them.
+
+        This is the only place a stream's rows are detached: each session's
+        RowRun goes ``DETACHED`` (shell retained for a late persist), and the
+        stream's held submissions and binding are dropped. Clears global pause
+        when this stream still owns the scope.
+
+        Detach runs from the connect ``finally``, which may already hold the
+        orchestrator condition, so it never calls into the orchestrator. The
+        held submissions it drops are not released, and a node the pause gate
+        held dispatches on the next dispatch pass.
+        """
+        with self._lock:
+            owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
+            for session in sessions:
+                self._remove_run_locked(session.run_id, op=RowLifecycleOp.DETACH)
+            self._release_stream_locked(stream_token)
+            if owns_scope:
+                self._clear_global_pause_locked()
 
     def cancel_run(self: InferenceRowScheduler, run_id: str) -> None:
         """Cancel one row run and abort its orchestrator scope when no sibling remains.
 
-        Unlike ``_detach_stream_runs_locked`` (stream switch / begin_scope), which
-        only drops stream ownership without cancelling solve work, cancel applies
+        Unlike a stream's end (``detach_inference_stream``), which only detaches
+        its rows without cancelling solve work, cancel applies
         :func:`~api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
         for ``RowLifecycleOp.CANCEL`` (token + compact cancel admission + stream
         CANCELED) then aborts in-flight orchestrator nodes so a later
@@ -122,50 +163,38 @@ class InferenceStreamTeardownMixin:
         if abort_scope is not None and abort_generation is not None:
             self._abort_orchestrator_scope(abort_scope, abort_generation)
 
-    def _detach_stream_runs_locked(
-        self: InferenceRowScheduler,
-        *,
-        turn: int | None = None,
-    ) -> None:
-        """Detach stream ownership for one turn without cancelling solve work.
+    def _drop_preempted_stream_binding_locked(self: InferenceRowScheduler) -> None:
+        """Drop the preempted stream's binding. Caller holds ``self._lock``."""
+        preempted_token = self._scope_guard.active_table_stream_token
+        # The guard preempts only an active stream, and an active stream always has a token.
+        assert preempted_token is not None
+        self._stream_bindings.pop(preempted_token, None)
 
-        Used by ``begin_scope`` when switching table streams. Detaches RowRuns
-        (``DETACHED`` phase, shell retained) and drops stream bindings for
-        ``turn`` only; other turns are untouched. Does **not** cancel RowRun
-        tokens, record cancel admission, or call ``abort_scope`` -- in-flight tier
-        workers may still finish, persist from the RowComplete payload, and
-        complete the DAG node. ``cancel_run`` is the explicit cancel path
-        (lifecycle CANCEL then abort).
+    def _release_stream_locked(self: InferenceRowScheduler, stream_token: str) -> None:
+        """Drop one stream's held submissions and its binding."""
+        self._held_initial_submissions = [
+            held for held in self._held_initial_submissions if held.stream_token != stream_token
+        ]
+        self._stream_bindings.pop(stream_token, None)
 
-        Stream resolutions are left untouched for a turn-scoped detach.
-        A full invalidate (``turn is None``, e.g. shutdown) clears every
-        resolution and retires all retained RowRun shells.
+    def _invalidate_retained_state_locked(self: InferenceRowScheduler) -> None:
+        """Drop all stream state and every run, for shutdown or a hard invalidate.
+
+        Clears global pause and drops its held submissions with every stream
+        binding, detaches every run without cancelling it, then clears every
+        stream resolution and every retained RowRun shell.
         """
         from api.analytics.scores.tier_row_run_registry import clear_row_runs
         from api.streaming.table_stream.row_stream_resolution_registry import (
             clear_stream_resolutions,
         )
 
-        self._globally_paused = False
-        if turn is None:
-            self._held_initial_submissions.clear()
-        else:
-            self._held_initial_submissions = [
-                held for held in self._held_initial_submissions if held.root_scope.turn != turn
-            ]
-        for run_id in list(self._runs):
-            root_scope = self._runs.get(run_id)
-            if turn is not None and root_scope is not None and root_scope.turn != turn:
-                continue
-            self._remove_run_locked(run_id, op=RowLifecycleOp.DETACH)
-        if turn is None:
-            clear_stream_resolutions()
-            clear_row_runs()
+        self._clear_global_pause_locked()
         self._stream_bindings.clear()
-
-    def _invalidate_retained_state_locked(self: InferenceRowScheduler) -> None:
-        # Full detach for shutdown / hard invalidate -- not used by begin_scope.
-        self._detach_stream_runs_locked(turn=None)
+        for run_id in list(self._runs):
+            self._remove_run_locked(run_id, op=RowLifecycleOp.DETACH)
+        clear_stream_resolutions()
+        clear_row_runs()
 
     def _abort_orchestrator_scope(
         self: InferenceRowScheduler,

@@ -14,7 +14,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     drain_available_multiplex_events,
     iter_multiplexed_inference_events,
     iter_scores_table_inference_events,
-    schedule_inference_row,
     tag_inference_stream_event,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -24,10 +23,12 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.scores.tier_row_run_registry import get_row_run_phase
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
+from api.streaming.table_stream.row_run_admission import RowRunPhase
 from api.transport.inference_stream import (
     stream_inference_ndjson,
 )
@@ -114,45 +115,7 @@ def test_table_stream_reconnect_via_ndjson_transport(sample_turn):
     assert json.loads(lines[0]) == {"type": "globalPause", "paused": False}
 
 
-def test_schedule_inference_row_ignores_stale_stream_token_after_scope_end(sample_turn):
-    reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
-    scope = InferenceStreamScope(
-        game_id=628580,
-        perspective=1,
-        turn_number=sample_turn.settings.turn,
-    )
-    score = sample_turn.scores[0]
-    first_token = scheduler.begin_scope(scope)
-
-    active_row = schedule_inference_row(
-        scheduler,
-        score=score,
-        turn=sample_turn,
-        player_id=score.ownerid,
-        game_id=628580,
-        perspective=1,
-        stream_token=first_token,
-    )
-    assert active_row is not None
-
-    scheduler.detach_inference_stream(scope, (active_row.session,), stream_token=first_token)
-    scheduler.begin_scope(scope)
-
-    stale_row = schedule_inference_row(
-        scheduler,
-        score=score,
-        turn=sample_turn,
-        player_id=score.ownerid,
-        game_id=628580,
-        perspective=1,
-        stream_token=first_token,
-    )
-    assert stale_row is None
-    assert not active_row.session.cancel_token.is_cancelled()
-
-
-def test_table_stream_reconnect_preempts_in_flight_rows_for_same_scope(sample_turn):
+def test_a_same_scope_reconnect_leaves_in_flight_rows_to_the_old_streams_end(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     scope = InferenceStreamScope(
@@ -179,9 +142,14 @@ def test_table_stream_reconnect_preempts_in_flight_rows_for_same_scope(sample_tu
 
     assert not scheduler.owns_table_stream(stream_token)
     for session in sessions:
-        # Reconnect detach must not cancel solve tokens (persist may still write).
+        assert get_row_run_phase(session.run_id) is RowRunPhase.REGISTERED
+
+    scheduler.detach_inference_stream(scope, tuple(sessions), stream_token=stream_token)
+    for session in sessions:
+        # Detach must not cancel solve tokens (persist may still write).
         assert not session.cancel_token.is_cancelled()
         assert session.run_id not in scheduler._runs
+        assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
 
 
 def test_tag_inference_stream_event_adds_player_id_except_global_pause():

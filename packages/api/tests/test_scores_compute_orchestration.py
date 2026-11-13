@@ -54,6 +54,7 @@ from api.analytics.scores.compute_orchestration import (
 )
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
+    ScopeIndexPolicy,
     _retire_row_run,
     get_row_run_for_scope,
     register_row_run,
@@ -125,7 +126,7 @@ def _scores_scope(sample_turn, player_id: int) -> ComputeScope:
 def _register_run(sample_turn, *, player_id: int | None = None) -> RowRun:
     session = _session_for_player(sample_turn, player_id=player_id)
     run = RowRun(session)
-    register_row_run(run)
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     return run
 
 
@@ -369,7 +370,7 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
     )
     export_scope = compute_scope_to_export_scope(scope)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    scheduled = schedule_inference_row(
+    schedule_inference_row(
         scheduler,
         score=score,
         turn=sample_turn,
@@ -377,7 +378,6 @@ def test_build_scores_tier_solve_job_wire_attaches_registered_row_from_registry(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
     )
-    assert scheduled is not None
     run = scheduler.row_run_for_player(
         scores_inference_stream_scope(export_scope),
         player_id,
@@ -448,7 +448,7 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
     )
     export_scope = compute_scope_to_export_scope(scope)
     score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    scheduled = schedule_inference_row(
+    schedule_inference_row(
         scheduler,
         score=score,
         turn=sample_turn,
@@ -456,7 +456,6 @@ def test_build_scores_tier_solve_job_wire_does_not_adopt_retired_row(
         game_id=GAME_ID,
         perspective=perspective(sample_turn),
     )
-    assert scheduled is not None
     run = scheduler.row_run_for_player(
         scores_inference_stream_scope(export_scope),
         player_id,
@@ -818,7 +817,7 @@ def test_horwasp_tier_solve_closes_evidence_before_solve_work(
 
     with (
         patch(
-            "api.analytics.scores.compute_orchestration.get_row_run_for_scope",
+            "api.analytics.scores.compute_orchestration.claim_tier_ladder",
             side_effect=_unexpected,
         ),
         patch(
@@ -826,10 +825,6 @@ def test_horwasp_tier_solve_closes_evidence_before_solve_work(
             side_effect=_unexpected,
         ),
         patch.object(ScoresPersistencePolicy, "is_satisfied", side_effect=_unexpected),
-        patch(
-            "api.analytics.scores.compute_orchestration._adopt_scheduler_row_run_for_tier_wire",
-            side_effect=_unexpected,
-        ),
         patch(
             "api.analytics.scores.compute_orchestration.resolve_prior_fleet_for_scores",
             side_effect=_unexpected,

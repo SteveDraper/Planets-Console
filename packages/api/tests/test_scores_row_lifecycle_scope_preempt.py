@@ -1,228 +1,239 @@
-"""Scope preempt / other-turn regressions for scores row-run lifecycle."""
+"""``begin_scope`` claims a scope without detaching any run.
+
+A scores stream detaches its own rows when it ends. Claiming a scope, whether
+the first claim, a scope change or a same-scope preempt, only resets
+stream-owned scheduler state: global pause, held submissions and bindings.
+Clearing pause releases held work: each held submission is submitted and the
+nodes the pause gate held are dispatched.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from dataclasses import replace
+
+import pytest
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    TierLadderRegistration,
     reset_inference_row_scheduler_for_tests,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.analytics.military_score_inference.inference_stream_scope import (
+    InferenceStreamScope,
+    scores_root_scope_for_session,
+)
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.scores.tier_row_run_registry import get_row_run
+from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
+from api.analytics.scores.export_services import ScoresExportContext
+from api.analytics.scores.persist_decision import PersistDecision
+from api.analytics.scores.tier_row_run_registry import (
+    decide_scores_row_persist,
+    get_row_run_phase,
+    reset_tier_row_run_registry_for_tests,
+)
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.orchestrator import ComputeRequest
+from api.compute.pools import reset_compute_worker_pool_for_tests
+from api.compute.runtime import get_compute_orchestrator
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.storage.memory_asset import MemoryAssetBackend
+from api.streaming.table_stream.row_run_admission import RowRunPhase
 
 from tests.scores_row_lifecycle_test_helpers import (
+    _patch_scores_dag_without_fleet_deps,
     _session_for_player,
 )
 
+GAME_ID = 628580
+PERSPECTIVE = 1
 
-def test_begin_scope_other_turn_leaves_background_row_runs_running(sample_turn):
-    """Opening a later turn's stream must not tear down earlier-turn background warm.
 
-    Fingerprint: begin_scope(t8) while scores@t3 background was in flight aborted all
-    t3 nodes; fleet stayed waiting_deps forever (no fleet rows).
-    """
-    from api.analytics.military_score_inference.row_run import RowRun
-    from api.analytics.scores.tier_row_run_registry import (
-        register_row_run,
-        reset_tier_row_run_registry_for_tests,
-    )
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.compute.scope import ComputeScope
-
+@pytest.fixture
+def scheduler() -> Iterator[InferenceRowScheduler]:
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
-    scheduler = InferenceRowScheduler()
-    try:
-        turn_number = sample_turn.settings.turn
-        player_id = sample_turn.scores[0].ownerid
-        session = _session_for_player(sample_turn, player_id=player_id)
-        row_run = RowRun(session)
-        register_row_run(row_run)
-        with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
-            )
-
-        # First stream claim for a *later* turn (no prior active scope).
-        scheduler.begin_scope(
-            InferenceStreamScope(
-                game_id=628580,
-                perspective=1,
-                turn_number=turn_number + 1,
-            )
-        )
-
-        assert get_row_run(session.run_id) is not None
-        assert session.run_id in scheduler._runs
-        assert not session.cancel_token.is_cancelled()
-    finally:
-        reset_inference_row_scheduler_for_tests()
-        reset_tier_row_run_registry_for_tests()
-
-
-def test_begin_scope_prior_turn_preempts_only_that_turn(sample_turn):
-    """Switching stream turns preempts the prior turn's runs, not other turns.
-
-    Also covers stream resolution state: a turn-scoped detach must not wipe
-    stream resolutions for other-turn rows (background warm) or undo the
-    keep-resolution-after-unregister invariant for the detached turn's own row.
-    """
-    from api.analytics.military_score_inference.row_run import RowRun
-    from api.analytics.scores.tier_row_run_registry import (
-        get_row_run,
-        get_row_run_phase,
-        register_row_run,
-        reset_tier_row_run_registry_for_tests,
-    )
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.compute.scope import ComputeScope
-    from api.streaming.table_stream.row_run_admission import RowRunPhase
-    from api.streaming.table_stream.row_stream_resolution import (
-        RowStreamResolutionState,
-        RowStreamResolutionTrigger,
-    )
-    from api.streaming.table_stream.row_stream_resolution_registry import (
-        get_stream_resolution,
-        transition_stream_resolution,
-    )
-
+    yield InferenceRowScheduler()
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
-    scheduler = InferenceRowScheduler()
-    try:
-        turn_number = sample_turn.settings.turn
-        player_id = sample_turn.scores[0].ownerid
-
-        def _register_for_turn(turn: int) -> InferenceRowStreamSession:
-            session = _session_for_player(sample_turn, player_id=player_id)
-            # Override turn_number on a fresh session for the synthetic prior turn.
-            session = InferenceRowStreamSession(
-                player_id=player_id,
-                observation=session.observation,
-                turn=sample_turn,
-                game_id=628580,
-                perspective=1,
-                turn_number=turn,
-            )
-            register_row_run(RowRun(session))
-            with scheduler._lock:
-                scheduler._runs[session.run_id] = ComputeScope(
-                    analytic_id=SCORES_ANALYTIC_ID,
-                    game_id=628580,
-                    perspective=1,
-                    turn=turn,
-                    player_id=player_id,
-                )
-            return session
-
-        prior_session = _register_for_turn(turn_number)
-        other_session = _register_for_turn(turn_number + 5)
-
-        transition_stream_resolution(
-            prior_session.run_id,
-            RowStreamResolutionTrigger.SOFT_PROVISIONAL,
-        )
-        transition_stream_resolution(
-            other_session.run_id,
-            RowStreamResolutionTrigger.SOFT_PROVISIONAL,
-        )
-
-        scheduler.begin_scope(
-            InferenceStreamScope(
-                game_id=628580,
-                perspective=1,
-                turn_number=turn_number,
-            )
-        )
-        # Switch away from prior turn -- only that turn is detached (not cancelled).
-        scheduler.begin_scope(
-            InferenceStreamScope(
-                game_id=628580,
-                perspective=1,
-                turn_number=turn_number + 1,
-            )
-        )
-
-        assert not prior_session.cancel_token.is_cancelled()
-        assert prior_session.run_id not in scheduler._runs
-        assert get_row_run_phase(prior_session.run_id) is RowRunPhase.DETACHED
-
-        assert not other_session.cancel_token.is_cancelled()
-        assert other_session.run_id in scheduler._runs
-        assert get_row_run(other_session.run_id) is not None
-        assert get_row_run_phase(other_session.run_id) is RowRunPhase.REGISTERED
-
-        # Other-turn resolution must survive untouched (background warm row).
-        other_resolution = get_stream_resolution(other_session.run_id)
-        assert other_resolution is not None
-        assert other_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
-        # Detached-turn resolution is kept too, matching _remove_run_locked's
-        # keep-resolution-after-unregister invariant (late peer events silenced).
-        prior_resolution = get_stream_resolution(prior_session.run_id)
-        assert prior_resolution is not None
-        assert prior_resolution.state is RowStreamResolutionState.SOFT_PROVISIONAL
-    finally:
-        reset_inference_row_scheduler_for_tests()
-        reset_tier_row_run_registry_for_tests()
 
 
-def test_begin_scope_prior_turn_preempt_keeps_other_turn_held_submissions(sample_turn):
-    """A turn-scoped detach must only drop held submissions for the detached turn."""
-    from api.analytics.military_score_inference.inference_stream_teardown import (
-        HeldTierSubmission,
+def _stream_scope(sample_turn, *, turn_offset: int = 0) -> InferenceStreamScope:
+    return InferenceStreamScope(
+        game_id=GAME_ID,
+        perspective=PERSPECTIVE,
+        turn_number=sample_turn.settings.turn + turn_offset,
     )
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.compute.scope import ComputeScope
 
-    reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler()
-    try:
-        turn_number = sample_turn.settings.turn
-        player_id = sample_turn.scores[0].ownerid
 
-        def _held_for_turn(turn: int) -> HeldTierSubmission:
-            return HeldTierSubmission(
-                stream_token="held-token",
-                root_scope=ComputeScope(
-                    analytic_id=SCORES_ANALYTIC_ID,
-                    game_id=628580,
-                    perspective=1,
-                    turn=turn,
-                    player_id=player_id,
-                ),
-            )
+def _player_session(sample_turn, index: int = 0) -> InferenceRowStreamSession:
+    return _session_for_player(sample_turn, player_id=sample_turn.scores[index].ownerid)
 
-        scheduler.begin_scope(
-            InferenceStreamScope(
-                game_id=628580,
-                perspective=1,
-                turn_number=turn_number,
-            )
+
+def _first_claim(
+    scheduler: InferenceRowScheduler, sample_turn, session: InferenceRowStreamSession
+) -> None:
+    """A background run is registered before any stream claims a scope."""
+    assert scheduler.enqueue_tier_ladder(session) is TierLadderRegistration.BACKGROUND
+    scheduler.begin_scope(_stream_scope(sample_turn, turn_offset=1))
+
+
+def _claim_after_a_stream_row(turn_offset: int) -> Callable[..., None]:
+    def claim(
+        scheduler: InferenceRowScheduler, sample_turn, session: InferenceRowStreamSession
+    ) -> None:
+        token = scheduler.begin_scope(_stream_scope(sample_turn))
+        registration = scheduler.enqueue_tier_ladder(session, stream_token=token)
+        assert registration is TierLadderRegistration.STREAM_BOUND
+        scheduler.begin_scope(_stream_scope(sample_turn, turn_offset=turn_offset))
+
+    return claim
+
+
+CLAIMS = {
+    "first-claim": _first_claim,
+    "scope-change": _claim_after_a_stream_row(turn_offset=1),
+    "same-scope-preempt": _claim_after_a_stream_row(turn_offset=0),
+}
+
+
+@pytest.mark.parametrize("claim", CLAIMS.values(), ids=CLAIMS.keys())
+def test_begin_scope_detaches_no_run(scheduler, sample_turn, claim):
+    session = _player_session(sample_turn)
+
+    claim(scheduler, sample_turn, session)
+
+    assert get_row_run_phase(session.run_id) is RowRunPhase.REGISTERED
+    assert session.run_id in scheduler._runs
+    assert not session.cancel_token.is_cancelled()
+    assert decide_scores_row_persist(session.run_id) == PersistDecision.allow(
+        retire_after_write=False
+    )
+
+
+@pytest.mark.parametrize("turn_offset", [1, 0], ids=["scope-change", "same-scope-preempt"])
+def test_begin_scope_clears_pause_and_bindings_and_releases_held_submissions(
+    scheduler, sample_turn, turn_offset, monkeypatch
+):
+    released: list[tuple[object, object]] = []
+    monkeypatch.setattr(
+        scheduler,
+        "_submit_tier_solve",
+        lambda binding, root_scope: released.append((binding, root_scope)),
+    )
+    scope = _stream_scope(sample_turn)
+    token = scheduler.begin_scope(scope)
+    bound = _player_session(sample_turn, 0)
+    assert (
+        scheduler.enqueue_tier_ladder(bound, stream_token=token)
+        is TierLadderRegistration.STREAM_BOUND
+    )
+    scheduler.pause_globally(scope)
+    held = _player_session(sample_turn, 1)
+    assert scheduler.enqueue_tier_ladder(held, stream_token=token) is TierLadderRegistration.HELD
+    assert [submission.stream_token for submission in scheduler._held_initial_submissions] == [
+        token
+    ]
+    assert list(scheduler._stream_bindings) == [token]
+    binding = scheduler._stream_bindings[token]
+
+    scheduler.begin_scope(_stream_scope(sample_turn, turn_offset=turn_offset))
+
+    assert scheduler._globally_paused is False
+    assert scheduler._held_initial_submissions == []
+    assert scheduler._stream_bindings == {}
+    assert released == [(binding, scores_root_scope_for_session(held))]
+    for session in (bound, held):
+        assert get_row_run_phase(session.run_id) is RowRunPhase.REGISTERED
+
+
+SWITCHES: dict[str, Callable[[InferenceStreamScope], InferenceStreamScope]] = {
+    "turn-switch": lambda scope: replace(scope, turn_number=scope.turn_number - 1),
+    "perspective-switch": lambda scope: replace(scope, perspective=scope.perspective + 1),
+}
+switches = pytest.mark.parametrize("switch_to", SWITCHES.values(), ids=SWITCHES.keys())
+
+
+def _walk_session(
+    sample_turn, scheduler: InferenceRowScheduler, scores_rows, index: int = 0
+) -> InferenceRowStreamSession:
+    """A row session whose context lets the process orchestrator build its tier step."""
+    session = _player_session(sample_turn, index)
+    session.query_context = replace(
+        session.query_context,
+        export_services={
+            SCORES_ANALYTIC_ID: ScoresExportContext(scheduler=scheduler, persistence=scores_rows)
+        },
+    )
+    return session
+
+
+@pytest.fixture
+def walk_orchestrator(monkeypatch):
+    """The process orchestrator on a pool with no workers, so a dispatched step stays running."""
+    reset_compute_worker_pool_for_tests(worker_count=0)
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
+    return get_compute_orchestrator()
+
+
+@pytest.fixture
+def scores_rows() -> InferenceRowPersistenceService:
+    return InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
+
+
+@switches
+def test_a_walk_node_held_behind_pause_dispatches_when_a_switch_clears_pause(
+    scheduler, sample_turn, walk_orchestrator, scores_rows, switch_to
+):
+    scope = _stream_scope(sample_turn)
+    scheduler.begin_scope(scope)
+    scheduler.pause_globally(scope)
+    walk_session = _walk_session(sample_turn, scheduler, scores_rows)
+    walk_node_scope = scores_root_scope_for_session(walk_session)
+    walk_orchestrator.submit(
+        ComputeRequest(
+            scope=walk_node_scope, step_kind=SCORES_TIER_SOLVE, ctx=walk_session.query_context
         )
-        prior_held = _held_for_turn(turn_number)
-        other_held = _held_for_turn(turn_number + 5)
-        with scheduler._lock:
-            scheduler._held_initial_submissions = [prior_held, other_held]
+    )
+    walk_orchestrator.dispatch_ready_work()
+    assert walk_orchestrator.nodes[walk_node_scope].state == "ready"
 
-        # Switch away from prior turn -- only that turn's held submissions drop.
-        scheduler.begin_scope(
-            InferenceStreamScope(
-                game_id=628580,
-                perspective=1,
-                turn_number=turn_number + 1,
-            )
+    scheduler.begin_scope(switch_to(scope))
+
+    assert walk_orchestrator.nodes[walk_node_scope].state == "running"
+
+
+@switches
+def test_rows_held_behind_pause_are_submitted_when_a_switch_clears_pause(
+    scheduler, sample_turn, walk_orchestrator, scores_rows, switch_to
+):
+    scope = _stream_scope(sample_turn)
+    token = scheduler.begin_scope(scope)
+    rescheduled = _walk_session(sample_turn, scheduler, scores_rows, 0)
+    rescheduled_node = scores_root_scope_for_session(rescheduled)
+    assert (
+        scheduler.enqueue_tier_ladder(rescheduled, stream_token=token)
+        is TierLadderRegistration.STREAM_BOUND
+    )
+    scheduler.accept_pending_run(rescheduled.run_id)
+    assert walk_orchestrator.nodes[rescheduled_node].state == "running"
+    scheduler.pause_globally(scope)
+    # A reschedule cancels the row, aborting its node, and registers a replacement.
+    scheduler.cancel_row_run(rescheduled.run_id)
+    assert walk_orchestrator.nodes[rescheduled_node].is_terminal
+    replacement = _walk_session(sample_turn, scheduler, scores_rows, 0)
+    admitted = _walk_session(sample_turn, scheduler, scores_rows, 1)
+    admitted_node = scores_root_scope_for_session(admitted)
+    for held in (replacement, admitted):
+        assert (
+            scheduler.enqueue_tier_ladder(held, stream_token=token) is TierLadderRegistration.HELD
         )
 
-        assert other_held in scheduler._held_initial_submissions
-        assert prior_held not in scheduler._held_initial_submissions
-    finally:
-        reset_inference_row_scheduler_for_tests()
+    scheduler.begin_scope(switch_to(scope))
+
+    assert walk_orchestrator.nodes[rescheduled_node].state == "running"
+    assert walk_orchestrator.nodes[admitted_node].state == "running"
 
 
 def test_stream_resolutions_are_fifo_bounded_across_states(monkeypatch):

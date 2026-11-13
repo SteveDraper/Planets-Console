@@ -232,7 +232,11 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     monkeypatch,
     memory_backend,
 ):
-    """Reconnect preempts the prior stream so a duplicate connect can proceed."""
+    """Reconnect preempts the prior stream so a duplicate connect can proceed.
+
+    The first connection's rows stay registered until that stream's own end
+    detaches them.
+    """
     persistence = InferenceRowPersistenceService(memory_backend)
     scheduler = _install_workerless_scheduler(
         monkeypatch,
@@ -276,10 +280,13 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     replacement.close()
 
     assert persistence.get_row(628580, 1, turn_number, completed_player_id) is not None
-    # Reconnect detach drops stream ownership without cancelling solve tokens.
+    assert not scheduler.owns_table_stream(first_token)
+    assert in_flight_session.run_id in scheduler._runs
+
+    scheduler.detach_inference_stream(scope, (in_flight_session,), stream_token=first_token)
+    # Detach drops the row without cancelling its solve token.
     assert not in_flight_session.cancel_token.is_cancelled()
     assert in_flight_session.run_id not in scheduler._runs
-    assert not scheduler.owns_table_stream(first_token)
 
 
 def test_progress_without_terminal_complete_when_scope_deactivates_mid_row(sample_turn):
@@ -443,8 +450,7 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
         game_id=628580,
         perspective=1,
         stream_token=stream_token,
-    )
-    assert scheduled is not None
+    ).row
     _complete_row_via_scheduler(
         scheduler,
         scheduled.session,

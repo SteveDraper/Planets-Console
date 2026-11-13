@@ -21,14 +21,14 @@ from tests.scores_row_lifecycle_test_helpers import (
 )
 
 
-def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
+def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
     sample_turn,
 ):
-    """Detach must not cancel; DETACHED shell must still admit persist.
+    """A preempt must not cancel or detach the preempted stream's row; it still persists.
 
     Fingerprint: cancel-on-detach raced with ScoresPersistencePolicy, which skips
     cancelled runs -- durable evidence dropped even though the worker finished a
-    RowComplete. Detach must leave DETACHED shell (allow late persist), not cancel.
+    RowComplete. The row stays ``REGISTERED`` until its own stream ends.
     """
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.row_run import RowRun
@@ -37,6 +37,7 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         decide_scores_row_persist,
         get_row_run_phase,
         register_row_run,
@@ -61,7 +62,7 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         first_token = scheduler.begin_scope(scope)
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = RowRun(session)
-        register_row_run(row_run)
+        register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(
                 analytic_id=SCORES_ANALYTIC_ID,
@@ -71,16 +72,14 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
                 player_id=player_id,
             )
 
-        # Same-scope preempt detaches stream ownership without cancelling solve.
         second_token = scheduler.begin_scope(scope)
         assert second_token != first_token
         assert not scheduler.owns_table_stream(first_token)
         assert not session.cancel_token.is_cancelled()
-        assert session.run_id not in scheduler._runs
         assert get_row_run(session.run_id) is row_run
-        assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
+        assert get_row_run_phase(session.run_id) is RowRunPhase.REGISTERED
         assert decide_scores_row_persist(session.run_id) == PersistDecision.allow(
-            retire_after_write=True
+            retire_after_write=False
         )
 
         ctx = make_analytic_query_context(
@@ -94,7 +93,7 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         )
         row_complete = row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
-            summary="detach must not block persist",
+            summary="a preempt must not block persist",
         )
         ScoresPersistencePolicy().persist(
             ctx,
@@ -110,13 +109,13 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
 
         stored = persistence.get_row(628580, 1, turn_number, player_id)
         assert stored is not None
-        assert stored.summary == "detach must not block persist"
-        assert get_row_run_phase(session.run_id) is None
+        assert stored.summary == "a preempt must not block persist"
+        assert get_row_run_phase(session.run_id) is RowRunPhase.REGISTERED
 
-        # After ALLOW retire, compact cancel admission still refuses late persist.
+        # Compact cancel admission still refuses a late persist.
         persistence.delete_row(628580, 1, turn_number, player_id)
-        cancelled = RowRun(session)
-        register_row_run(cancelled)
+        cancelled = RowRun(_session_for_player(sample_turn, player_id=player_id))
+        register_row_run(cancelled, scope_index=ScopeIndexPolicy.TAKE)
         from api.analytics.scores.tier_row_run_registry import _mark_row_run_cancelled
 
         _mark_row_run_cancelled(cancelled.run_id)
@@ -140,57 +139,6 @@ def test_begin_scope_detach_allows_durable_persist_while_run_still_visible(
         reset_tier_row_run_registry_for_tests()
 
 
-def test_detach_does_not_apply_lifecycle_cancel(sample_turn):
-    """begin_scope detach drops ownership without token or cancel refuse."""
-    from api.analytics.military_score_inference.row_run import RowRun
-    from api.analytics.scores.persist_decision import PersistDecision
-    from api.analytics.scores.tier_row_run_registry import (
-        decide_scores_row_persist,
-        get_row_run_phase,
-        register_row_run,
-        reset_tier_row_run_registry_for_tests,
-    )
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-    from api.compute.scope import ComputeScope
-    from api.streaming.table_stream.row_run_admission import RowRunPhase
-
-    reset_inference_row_scheduler_for_tests()
-    reset_tier_row_run_registry_for_tests()
-    scheduler = InferenceRowScheduler()
-    try:
-        turn_number = sample_turn.settings.turn
-        player_id = sample_turn.scores[0].ownerid
-        scope = InferenceStreamScope(
-            game_id=628580,
-            perspective=1,
-            turn_number=turn_number,
-        )
-        scheduler.begin_scope(scope)
-        session = _session_for_player(sample_turn, player_id=player_id)
-        register_row_run(RowRun(session))
-        with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
-            )
-
-        # Same-scope preempt detaches prior stream runs without cancel.
-        scheduler.begin_scope(scope)
-
-        assert not session.cancel_token.is_cancelled()
-        assert decide_scores_row_persist(session.run_id) == PersistDecision.allow(
-            retire_after_write=True
-        )
-        assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
-        assert session.run_id not in scheduler._runs
-    finally:
-        reset_inference_row_scheduler_for_tests()
-        reset_tier_row_run_registry_for_tests()
-
-
 def test_row_run_phase_survives_scheduler_remove(sample_turn):
     """Cancel refuse and DETACHED shells stay on the registry owner after scheduler drop.
 
@@ -199,6 +147,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
     from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         _detach_row_run,
         _mark_row_run_cancelled,
         decide_scores_row_persist,
@@ -213,7 +162,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
     reset_tier_row_run_registry_for_tests()
     try:
         cancelled = RowRun(_session_for_player(sample_turn, player_id=players[0]))
-        register_row_run(cancelled)
+        register_row_run(cancelled, scope_index=ScopeIndexPolicy.TAKE)
         _mark_row_run_cancelled(cancelled.run_id)
         assert get_row_run_phase(cancelled.run_id) is None
         assert decide_scores_row_persist(cancelled.run_id) == PersistDecision.refuse(
@@ -221,7 +170,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
         )
 
         detached = RowRun(_session_for_player(sample_turn, player_id=players[1]))
-        register_row_run(detached)
+        register_row_run(detached, scope_index=ScopeIndexPolicy.TAKE)
         _detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
         # Cross-scope detach must not clear another scope's cancelled refuse.
@@ -241,6 +190,7 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
     from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
+        ScopeIndexPolicy,
         decide_scores_row_persist,
         get_row_run_phase,
         register_row_run,
@@ -265,7 +215,7 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         stream_token = scheduler.begin_scope(scope)
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = RowRun(session)
-        register_row_run(row_run)
+        register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(
                 analytic_id=SCORES_ANALYTIC_ID,

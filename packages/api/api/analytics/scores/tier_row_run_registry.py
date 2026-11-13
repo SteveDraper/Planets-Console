@@ -16,25 +16,39 @@ Lifecycle matrix sides (detach / cancel / retire) are applied by
 Production persist writers use :func:`decide_scores_row_persist` (admission +
 phase under one lock) -- not :func:`get_persist_admission` directly.
 
-Tier ladder resume. Each ``tier_solve`` wire build stamps the scope's
-:class:`TierLadderStamp`: the RowRun whose ladder serves the scores node, the
-node's execution generation and the scores epoch. Detach clears the scope
-index but keeps the stamp, so the next continuation of the same node resumes
-its own ``DETACHED`` RowRun through :func:`get_resumable_row_run_for_scope`
-instead of restarting the ladder. A ``REGISTERED`` run for the scope always
-wins. The stamp is guarded on read: a node replacement or a scores epoch
-change retires the ``DETACHED`` shell and the caller takes the admit path.
-A stamp is also released when its shell is dropped (retire-after-write,
-cancel, retire), when another RowRun takes over the scope's ladder, and when
-the scores node reaches terminal (:func:`release_tier_ladder_for_scope`).
-Reattaching a ``DETACHED`` run to a reopened stream is not supported: a
-reopen registers a fresh run, which wins.
+Tier ladder resume and hand-over. Each ``tier_solve`` wire build claims the
+scope's ladder through :func:`claim_tier_ladder`, one atomic registry
+operation that chooses the RowRun, hands the ladder over, retires the scope's
+other runs and writes the scope's :class:`TierLadderStamp`: the RowRun whose
+ladder serves the scores node, the node's execution generation and the scores
+epoch. Detach clears the scope index but keeps the stamp, so the next
+continuation of the same node resumes its own ``DETACHED`` RowRun instead of
+restarting the ladder. The stamp is guarded on read: a node replacement or a
+scores epoch change retires the ``DETACHED`` shell and the caller takes the
+admit path.
+
+The scope index names the run a claim stamps. Its registering caller decides
+whether a run takes it (:class:`ScopeIndexPolicy`): a stream's run always
+does, and a background run only when no ``REGISTERED`` run holds it, so a
+background run registered after a stream's run never displaces it and is
+retired at the next claim instead.
+
+When a different RowRun holds the scope index (a reopened stream's run, or a
+stream's run at a hop a walk's background run was solving), the claim hands
+the unfinished ladder over: the stamped run's ``ladder_state`` and
+``orchestration`` move to the new run while the stamp still serves this node
+execution and scores epoch. Every other ``REGISTERED`` or ``DETACHED`` run for
+the scope is retired, and their ids are returned so the scheduler forgets
+them. A stamp is also released when its shell is dropped (retire-after-write,
+cancel, retire) and when the scores node reaches terminal
+(:func:`release_tier_ladder_for_scope`).
 """
 
 from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from enum import Enum
 
 from api.analytics.fleet.counterparty_ledger import counterparty_fleet_loader
 from api.analytics.military_score_inference.inference_row_runner import InferenceTierJobCallbacks
@@ -42,15 +56,14 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
     InferenceStreamOrchestration,
     new_ladder_state,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceRowScope
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.persist_decision import (
     PersistDecision,
     persist_decision_from_admission,
 )
-from api.compute.scope import WILDCARD, ComputeScope
+from api.compute.scope import ComputeScope
 from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
-
-type ScoresScopeKey = tuple[int, int, int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,39 +81,47 @@ class TierLadderStamp:
         )
 
 
+class ScopeIndexPolicy(Enum):
+    """Whether a RowRun being registered becomes its scope's indexed run.
+
+    The registering caller decides; the registry applies it under its lock.
+    """
+
+    # The run takes the scope index, replacing any run indexed there.
+    TAKE = "take"
+    # The run takes the scope index only when no REGISTERED run holds it.
+    TAKE_IF_VACANT = "take_if_vacant"
+
+
+@dataclass(frozen=True, slots=True)
+class LadderClaim:
+    """The RowRun stamped to serve a scope's ladder, and what the claim did to the others.
+
+    ``retired_run_ids`` names every other run for the scope, now retired; the
+    scheduler forgets them. ``ladder_handed_over`` is true when ``run`` took
+    over another run's unfinished ladder, so its stream has not yet seen that
+    ladder's held solutions.
+    """
+
+    run: RowRun
+    retired_run_ids: tuple[str, ...]
+    ladder_handed_over: bool
+
+
 _lock = threading.Lock()
 # REGISTERED and DETACHED shells only -- cancel never retains a shell.
 _runs_by_id: dict[str, RowRun] = {}
-_run_id_by_scope_key: dict[ScoresScopeKey, str] = {}
+_run_id_by_scope_key: dict[InferenceRowScope, str] = {}
 _tier_callbacks_by_run_id: dict[str, InferenceTierJobCallbacks] = {}
 # Compact cancelled admission: at most one run_id per scores scope.
-_cancelled_admissions: dict[str, ScoresScopeKey] = {}
-_cancelled_run_by_scope: dict[ScoresScopeKey, str] = {}
+_cancelled_admissions: dict[str, InferenceRowScope] = {}
+_cancelled_run_by_scope: dict[InferenceRowScope, str] = {}
 # One tier ladder per scores scope; its shell is always retained.
-_ladder_stamp_by_scope_key: dict[ScoresScopeKey, TierLadderStamp] = {}
-
-
-def _scope_key(scope: ComputeScope) -> ScoresScopeKey:
-    if scope.perspective == WILDCARD or not isinstance(scope.perspective, int):
-        raise ValueError("scores tier scope requires concrete perspective")
-    if scope.turn == WILDCARD or not isinstance(scope.turn, int):
-        raise ValueError("scores tier scope requires concrete turn")
-    if scope.player_id == WILDCARD or not isinstance(scope.player_id, int):
-        raise ValueError("scores tier scope requires concrete player_id")
-    return (scope.game_id, scope.perspective, scope.turn, scope.player_id)
-
-
-def _session_scope_key(session) -> ScoresScopeKey:
-    return (
-        session.game_id,
-        session.perspective,
-        session.turn_number,
-        session.player_id,
-    )
+_ladder_stamp_by_scope_key: dict[InferenceRowScope, TierLadderStamp] = {}
 
 
 def _clear_scope_index_locked(run: RowRun) -> None:
-    scope_key = _session_scope_key(run.session)
+    scope_key = InferenceRowScope.from_session(run.session)
     if _run_id_by_scope_key.get(scope_key) == run.run_id:
         _run_id_by_scope_key.pop(scope_key, None)
 
@@ -112,7 +133,7 @@ def _drop_shell_locked(run_id: str) -> RowRun | None:
         return None
     _clear_scope_index_locked(run)
     _tier_callbacks_by_run_id.pop(run_id, None)
-    scope_key = _session_scope_key(run.session)
+    scope_key = InferenceRowScope.from_session(run.session)
     stamp = _ladder_stamp_by_scope_key.get(scope_key)
     if stamp is not None and stamp.run_id == run_id:
         _ladder_stamp_by_scope_key.pop(scope_key, None)
@@ -125,7 +146,7 @@ def _retire_row_run_locked(run_id: str) -> None:
     _drop_shell_locked(run_id)
 
 
-def _release_ladder_stamp_locked(scope_key: ScoresScopeKey) -> None:
+def _release_ladder_stamp_locked(scope_key: InferenceRowScope) -> None:
     """Drop the scope's ladder stamp and retire its shell when no stream owns it.
 
     A ``REGISTERED`` shell stays: its stream retires it at finalize. Caller
@@ -146,14 +167,14 @@ def _forget_cancelled_locked(run_id: str) -> None:
         _cancelled_run_by_scope.pop(scope_key, None)
 
 
-def _supersede_cancelled_for_scope_locked(scope_key: ScoresScopeKey) -> None:
+def _supersede_cancelled_for_scope_locked(scope_key: InferenceRowScope) -> None:
     """Clear any cancelled admission for ``scope_key``. Caller holds ``_lock``."""
     prior = _cancelled_run_by_scope.pop(scope_key, None)
     if prior is not None:
         _cancelled_admissions.pop(prior, None)
 
 
-def _record_cancelled_locked(run_id: str, scope_key: ScoresScopeKey) -> None:
+def _record_cancelled_locked(run_id: str, scope_key: InferenceRowScope) -> None:
     """Remember cancelled admission for ``run_id`` under ``scope_key``. Caller holds ``_lock``."""
     _forget_cancelled_locked(run_id)
     _supersede_cancelled_for_scope_locked(scope_key)
@@ -183,20 +204,32 @@ def initialize_tier_ladder_state(
 def register_row_run(
     run: RowRun,
     *,
+    scope_index: ScopeIndexPolicy,
     orchestration: InferenceStreamOrchestration | None = None,
     initialize_ladder: bool = True,
 ) -> None:
-    """Register one RowRun for orchestrator tier_solve wire build and execution."""
+    """Register one RowRun for orchestrator tier_solve wire build and execution.
+
+    ``scope_index`` says whether the run becomes the scope's indexed run, the
+    one :func:`claim_tier_ladder` stamps: ``TAKE`` always, ``TAKE_IF_VACANT``
+    only when no ``REGISTERED`` run is indexed for the scope. The check and the
+    write share one lock hold. A run that does not take the index stays
+    registered and is retired at the scope's next claim.
+    """
     if initialize_ladder and run.ladder_state is None:
         initialize_tier_ladder_state(run, orchestration=orchestration)
     run.phase = RowRunPhase.REGISTERED
-    scope_key = _session_scope_key(run.session)
+    scope_key = InferenceRowScope.from_session(run.session)
     with _lock:
         # Same-scope re-register supersedes prior cancelled admission (preempt path).
         _supersede_cancelled_for_scope_locked(scope_key)
         _forget_cancelled_locked(run.run_id)
         _runs_by_id[run.run_id] = run
-        _run_id_by_scope_key[scope_key] = run.run_id
+        if (
+            scope_index is ScopeIndexPolicy.TAKE
+            or _registered_run_for_scope_key_locked(scope_key) is None
+        ):
+            _run_id_by_scope_key[scope_key] = run.run_id
 
 
 def get_row_run(run_id: str) -> RowRun | None:
@@ -208,10 +241,10 @@ def get_row_run(run_id: str) -> RowRun | None:
 def get_row_run_for_scope(scope: ComputeScope) -> RowRun | None:
     """Return the ``REGISTERED`` RowRun indexed for ``scope``, if any."""
     with _lock:
-        return _registered_run_for_scope_key_locked(_scope_key(scope))
+        return _registered_run_for_scope_key_locked(InferenceRowScope.from_root(scope))
 
 
-def _registered_run_for_scope_key_locked(scope_key: ScoresScopeKey) -> RowRun | None:
+def _registered_run_for_scope_key_locked(scope_key: InferenceRowScope) -> RowRun | None:
     run_id = _run_id_by_scope_key.get(scope_key)
     if run_id is None:
         return None
@@ -221,55 +254,87 @@ def _registered_run_for_scope_key_locked(scope_key: ScoresScopeKey) -> RowRun | 
     return run
 
 
-def get_resumable_row_run_for_scope(
+def claim_tier_ladder(
     scope: ComputeScope,
     *,
     execution_generation: int,
     scores_epoch: int,
-) -> RowRun | None:
-    """Return the RowRun a ``tier_solve`` step for ``scope`` continues, if any.
+) -> LadderClaim | None:
+    """Choose the RowRun whose ladder serves this scores node execution, and stamp it.
 
-    A ``REGISTERED`` run indexed for the scope wins. Otherwise the run stamped
-    for the scope (normally ``DETACHED`` after its stream closed) resumes only
-    when the stamp names this node execution and scores epoch. On a mismatch
-    the stamp is released, which retires a ``DETACHED`` shell, and None is
-    returned so the caller takes the admit path.
+    One hold of the registry lock chooses the winner, hands an unfinished
+    ladder over to it, retires every other run for the scope and stamps the
+    winner, so a run registered concurrently is either seen here or survives
+    to win the next claim.
+
+    The winner is the ``REGISTERED`` run indexed for the scope (see
+    :class:`ScopeIndexPolicy` for which run that is). With none, it
+    is the stamped run (normally ``DETACHED`` after its stream closed) while
+    the stamp serves this execution and scores epoch. When the serving stamp
+    names another run whose ladder is unfinished, that ladder
+    (``ladder_state`` and ``orchestration``) moves to the winner; a stale
+    stamp or a finished ladder is not inherited, so the winner keeps its own
+    fresh ladder. Every other ``REGISTERED`` or ``DETACHED`` run for the scope
+    is retired (the RETIRE side) and named in the claim.
+
+    With no winner, a stale stamp is released (retiring its ``DETACHED``
+    shell) and None is returned: the caller admits, which does I/O outside
+    this lock, and claims again.
+
+    Hand-over holds only the registry lock and never takes a ``tier_lock``.
+    It relies on this invariant: a stamp that serves the current execution
+    names a run with no tier step in flight. Within one execution the node
+    runs one step at a time and the wire is built between steps; a new
+    execution starts only once the node is terminal, and the only mid-step
+    abort (``cancel_run``) drops the run. A change that lets a new execution
+    start while a step of the old one runs (the #633 game-change abort) must
+    recheck it.
     """
-    scope_key = _scope_key(scope)
+    scope_key = InferenceRowScope.from_root(scope)
     with _lock:
-        registered = _registered_run_for_scope_key_locked(scope_key)
-        if registered is not None:
-            return registered
         stamp = _ladder_stamp_by_scope_key.get(scope_key)
-        if stamp is None:
+        serving_stamp = (
+            stamp
+            if stamp is not None
+            and stamp.serves(execution_generation=execution_generation, scores_epoch=scores_epoch)
+            else None
+        )
+        winner = _registered_run_for_scope_key_locked(scope_key)
+        if winner is None and serving_stamp is not None:
+            winner = _runs_by_id[serving_stamp.run_id]
+        if winner is None:
+            if stamp is not None:
+                _release_ladder_stamp_locked(scope_key)
             return None
-        if stamp.serves(execution_generation=execution_generation, scores_epoch=scores_epoch):
-            return _runs_by_id[stamp.run_id]
-        _release_ladder_stamp_locked(scope_key)
-        return None
+        handed_over = (
+            serving_stamp is not None
+            and serving_stamp.run_id != winner.run_id
+            and _hand_over_unfinished_ladder_locked(_runs_by_id[serving_stamp.run_id], winner)
+        )
+        _ladder_stamp_by_scope_key[scope_key] = TierLadderStamp(
+            winner.run_id, execution_generation, scores_epoch
+        )
+        retired_run_ids = tuple(
+            run_id
+            for run_id, other in _runs_by_id.items()
+            if run_id != winner.run_id
+            and InferenceRowScope.from_session(other.session) == scope_key
+        )
+        for run_id in retired_run_ids:
+            _retire_row_run_locked(run_id)
+        return LadderClaim(
+            run=winner, retired_run_ids=retired_run_ids, ladder_handed_over=handed_over
+        )
 
 
-def stamp_tier_ladder(
-    run: RowRun,
-    *,
-    execution_generation: int,
-    scores_epoch: int,
-) -> None:
-    """Record that ``run``'s ladder serves this scores node execution and epoch.
-
-    A different RowRun stamped for the same scope is released first, so a
-    ``DETACHED`` shell whose ladder lost the scope is retired. No-op when
-    ``run``'s shell is no longer retained.
-    """
-    scope_key = _session_scope_key(run.session)
-    stamp = TierLadderStamp(run.run_id, execution_generation, scores_epoch)
-    with _lock:
-        if run.run_id not in _runs_by_id:
-            return
-        prior = _ladder_stamp_by_scope_key.get(scope_key)
-        if prior is not None and prior.run_id != run.run_id:
-            _release_ladder_stamp_locked(scope_key)
-        _ladder_stamp_by_scope_key[scope_key] = stamp
+def _hand_over_unfinished_ladder_locked(holder: RowRun, winner: RowRun) -> bool:
+    """Move ``holder``'s ladder to ``winner`` unless it is finished. Caller holds ``_lock``."""
+    ladder_state = holder.ladder_state
+    if ladder_state is None or ladder_state.ladder_complete:
+        return False
+    winner.ladder_state = ladder_state
+    winner.orchestration = holder.orchestration
+    return True
 
 
 def release_tier_ladder_for_scope(scope: ComputeScope, *, execution_generation: int) -> None:
@@ -277,7 +342,7 @@ def release_tier_ladder_for_scope(scope: ComputeScope, *, execution_generation: 
 
     A stamp written for a later node execution is left alone.
     """
-    scope_key = _scope_key(scope)
+    scope_key = InferenceRowScope.from_root(scope)
     with _lock:
         stamp = _ladder_stamp_by_scope_key.get(scope_key)
         if stamp is not None and stamp.execution_generation == execution_generation:
@@ -372,7 +437,7 @@ def _mark_row_run_cancelled(run_id: str) -> RowRun | None:
     with _lock:
         dropped = _drop_shell_locked(run_id)
         if dropped is not None:
-            _record_cancelled_locked(run_id, _session_scope_key(dropped.session))
+            _record_cancelled_locked(run_id, InferenceRowScope.from_session(dropped.session))
             return dropped
         # Already compact-cancelled (or never registered): leave admission as-is.
         return None

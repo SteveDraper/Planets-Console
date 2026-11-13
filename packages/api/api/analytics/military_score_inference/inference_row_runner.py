@@ -6,6 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
+from api.analytics.military_score_inference.inference_stream_orchestration import (
+    continue_ladder_state,
+)
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
 from api.analytics.military_score_inference.policy_ladder import finalize_policy_ladder_result
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
@@ -41,9 +44,15 @@ class TierJobOutcome:
 
 @dataclass(frozen=True)
 class InferenceTierJobCallbacks:
+    """Stream callbacks for one tier job.
+
+    ``emit_held_solutions`` runs on every admitted solution; the scheduler
+    decides whether the row's stream shows held solutions.
+    """
+
     emit_tier_started_progress: Callable[[], None]
     emit_progress: Callable[[], None]
-    emit_held_solutions: Callable[[InferenceObservation], None]
+    emit_held_solutions: Callable[[], None]
 
 
 def solve_context(run: RowRun) -> tuple[InferenceObservation, TurnInfo]:
@@ -106,11 +115,7 @@ def _outcome_after_ladder_complete(
         if advance.continue_next_segment:
             return TierJobOutcome(
                 enqueue_continuation=True,
-                next_ladder_state=orchestration.new_ladder_state(
-                    run.session,
-                    hopeless_context=state.hopeless_context,
-                    load_counterparty_fleet=state.load_counterparty_fleet,
-                ),
+                next_ladder_state=continue_ladder_state(state, run.session),
             )
         if advance.row_complete is not None:
             return TierJobOutcome(row_complete=advance.row_complete)
@@ -170,8 +175,7 @@ def _run_inference_tier_job_locked(
     observation, turn = solve_context(run)
 
     def on_admitted(_solution: InferenceSolution) -> None:
-        if orchestration is None or orchestration.should_emit_streaming_solutions():
-            callbacks.emit_held_solutions(observation)
+        callbacks.emit_held_solutions()
 
     callbacks.emit_tier_started_progress()
     run_policy_ladder_tier_step(

@@ -16,7 +16,6 @@ from api.analytics.military_score_inference.inference_cancel import InferenceCan
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     InferenceStreamDomainEvent,
 )
-from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.models import InferenceObservation
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     FleetTorpInputStatus,
@@ -49,11 +48,3 @@ class InferenceRowStreamSession:
     cancel_token: InferenceCancelToken = field(default_factory=InferenceCancelToken)
     event_queue: queue.Queue[InferenceStreamDomainEvent] = field(default_factory=queue.Queue)
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-
-    @property
-    def stream_scope(self) -> InferenceStreamScope:
-        return InferenceStreamScope(
-            game_id=self.game_id,
-            perspective=self.perspective,
-            turn_number=self.turn_number,
-        )

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     RowFailed,
 )
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
@@ -68,12 +69,7 @@ class InferenceStreamScopeOutcomesMixin:
 
         with self._lock:
             matching_run_ids = [
-                run_id
-                for run_id, root_scope in self._runs.items()
-                if root_scope.player_id == scope.player_id
-                and root_scope.game_id == scope.game_id
-                and root_scope.perspective == scope.perspective
-                and scope.turn == root_scope.turn
+                run_id for run_id, root_scope in self._runs.items() if root_scope == scope
             ]
             if wire_run_id is not None:
                 matching_run_ids = [run_id for run_id in matching_run_ids if run_id == wire_run_id]
@@ -192,10 +188,7 @@ class InferenceStreamScopeOutcomesMixin:
 
 
 def _is_scores_player_turn_scope(scope: ComputeScope) -> bool:
-    if scope.analytic_id != SCORES_ANALYTIC_ID:
-        return False
-    if scope.turn == "*" or not isinstance(scope.turn, int):
-        return False
-    if scope.player_id == "*" or not isinstance(scope.player_id, int):
-        return False
-    return True
+    return (
+        scope.analytic_id == SCORES_ANALYTIC_ID
+        and InferenceStreamScope.try_from_root(scope) is not None
+    )
