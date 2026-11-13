@@ -139,6 +139,11 @@ class InferenceStreamTeardownMixin:
         duplicate. Aborting that generation fails the shared DAG node the survivor
         still needs. Skip abort while another live run still maps to the scope.
         The last remaining cancel still aborts.
+
+        The abort reaches the scope-outcome listener, which cancels the run the
+        scope's ladder stamp names for that execution. When that was this run,
+        its CANCEL already released the stamp and the listener changes nothing;
+        a resumable ``DETACHED`` shell the stamp names is cancelled too.
         """
         abort_scope: ComputeScope | None = None
         abort_generation: int | None = None

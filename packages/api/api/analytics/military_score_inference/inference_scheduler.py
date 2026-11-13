@@ -403,10 +403,14 @@ class InferenceRowScheduler(
         scope's surviving run shares.
         """
         with self._lock:
-            for run_id in run_ids:
-                self._runs.pop(run_id, None)
-                self._execution_generation_by_run_id.pop(run_id, None)
-            self._pending_accepts.discard_all(run_ids)
+            self._forget_runs_locked(run_ids)
+
+    def _forget_runs_locked(self, run_ids: tuple[str, ...]) -> None:
+        """The map side of :meth:`forget_runs`. Caller holds ``self._lock``."""
+        for run_id in run_ids:
+            self._runs.pop(run_id, None)
+            self._execution_generation_by_run_id.pop(run_id, None)
+        self._pending_accepts.discard_all(run_ids)
 
     def enqueue_tier_ladder(
         self,

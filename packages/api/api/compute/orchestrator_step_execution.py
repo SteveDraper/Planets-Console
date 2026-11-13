@@ -9,6 +9,7 @@ focused on readiness, singleflight, and terminal lifecycle.
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 from api.compute.backend_runtime import effective_compute_backend
@@ -140,6 +141,7 @@ class OrchestratorStepExecutionMixin:
             node_result_wire=node.result_wire,
             submission_open=node.submission_open,
             execution_generation=node.execution_generation,
+            is_execution_live=partial(node.is_live_execution, node.execution_generation),
         )
 
     def _execute_pending_inlines(

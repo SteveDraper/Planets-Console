@@ -107,6 +107,10 @@ class BuildStepJobWireKwargs(TypedDict):
     # Identity of the node execution the wire is built for. A replaced node
     # gets a new one; requeues of the same node keep it.
     execution_generation: int
+    # Whether that execution is still live. It reads the node without the
+    # orchestrator lock, so a builder may ask under its own locks. False is
+    # final: a node's generation never changes and a terminal node stays terminal.
+    is_execution_live: Callable[[], bool]
 
 
 # Orchestration plane: scope + dependency outputs -> serializable job payload.

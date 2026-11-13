@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -115,6 +116,7 @@ def build_scores_tier_solve_job_wire(
     ctx: AnalyticQueryContext,
     submission_open: SubmissionOpen,
     execution_generation: int,
+    is_execution_live: Callable[[], bool],
     **_kwargs: object,
 ) -> dict[str, Any]:
     """Assemble a serializable job wire for one scores inference tier step.
@@ -145,6 +147,10 @@ def build_scores_tier_solve_job_wire(
     hand-over, the claimed run's stream gets the moved ladder's held solutions
     without an inference evidence announcement. The fleet resolution is
     applied after the claim, so it lands on the ladder the step runs.
+
+    A claim for an execution that ended while its wire was being built raises
+    ``ComputeExecutionEndedError`` and changes nothing; the orchestrator
+    ignores the failed build of an ended execution.
     """
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
@@ -161,6 +167,7 @@ def build_scores_tier_solve_job_wire(
         scope,
         execution_generation=execution_generation,
         scores_epoch=scores_epoch,
+        is_execution_live=is_execution_live,
     )
     claim = claim_ladder()
     ensure_satisfied = True

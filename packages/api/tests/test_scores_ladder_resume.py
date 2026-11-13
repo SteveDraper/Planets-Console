@@ -22,6 +22,7 @@ from api.analytics.scores.compute_orchestration import build_scores_tier_solve_j
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
+    StampedLadderRun,
     _detach_row_run,
     claim_tier_ladder,
     clear_row_runs,
@@ -43,7 +44,7 @@ from tests.scores_ladder_helpers import (
     ladder_scope,
     ladder_session,
 )
-from tests.submission_open_helpers import explicit_submission_open
+from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 GENERATION = 7
 EPOCH = 0
@@ -74,7 +75,12 @@ def registry_run(sample_turn) -> tuple[RowRun, ComputeScope]:
 def _claimed(
     scope: ComputeScope, *, generation: int = GENERATION, epoch: int = EPOCH
 ) -> RowRun | None:
-    claim = claim_tier_ladder(scope, execution_generation=generation, scores_epoch=epoch)
+    claim = claim_tier_ladder(
+        scope,
+        execution_generation=generation,
+        scores_epoch=epoch,
+        is_execution_live=live_execution,
+    )
     return None if claim is None else claim.run
 
 
@@ -120,7 +126,12 @@ def test_a_registered_run_wins_over_the_detached_one(sample_turn, registry_run, 
     reopened = RowRun(ladder_session(sample_turn, scope.player_id))
     register_row_run(reopened, initialize_ladder=False, scope_index=ScopeIndexPolicy.TAKE)
 
-    claim = claim_tier_ladder(scope, execution_generation=generation, scores_epoch=EPOCH)
+    claim = claim_tier_ladder(
+        scope,
+        execution_generation=generation,
+        scores_epoch=EPOCH,
+        is_execution_live=live_execution,
+    )
 
     assert claim is not None
     assert claim.run is reopened
@@ -151,10 +162,12 @@ def test_the_node_reaching_terminal_retires_only_its_own_entry(registry_run):
     run, scope = registry_run
     _claim_and_detach(run, scope)
 
-    release_tier_ladder_for_scope(scope, execution_generation=GENERATION - 1)
+    release_tier_ladder_for_scope(
+        StampedLadderRun(scope=scope, execution_generation=GENERATION - 1)
+    )
     assert _claimed(scope) is run
 
-    release_tier_ladder_for_scope(scope, execution_generation=GENERATION)
+    release_tier_ladder_for_scope(StampedLadderRun(scope=scope, execution_generation=GENERATION))
     assert _claimed(scope) is None
     assert get_row_run(run.run_id) is None
 
@@ -235,6 +248,7 @@ def test_a_fleet_epoch_change_while_detached_takes_the_admit_path(ladder):
         ctx=ladder.ctx,
         submission_open=explicit_submission_open(),
         execution_generation=ladder.orchestrator.nodes[ladder.scope].execution_generation,
+        is_execution_live=live_execution,
     )
 
     assert get_row_run(stream_run_id) is None
@@ -254,6 +268,7 @@ def test_a_replaced_node_does_not_resume_the_old_run(ladder):
         ctx=ladder.ctx,
         submission_open=explicit_submission_open(),
         execution_generation=old_generation + 1,
+        is_execution_live=live_execution,
     )
 
     assert get_row_run(stream_run_id) is None

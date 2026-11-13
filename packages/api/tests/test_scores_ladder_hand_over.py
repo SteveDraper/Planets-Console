@@ -68,7 +68,7 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_exports_helpers import GAME_ID
 from tests.scores_ladder_helpers import ShellLadder, durable_row_complete
-from tests.submission_open_helpers import explicit_submission_open
+from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 CONTINUE = TierJobOutcome(enqueue_continuation=True)
 ABSENT = PersistDecision.refuse(should_retire=False)
@@ -282,6 +282,7 @@ def test_a_reopen_against_a_stale_stamp_starts_a_fresh_ladder(ladder, stale):
         ctx=ladder.ctx,
         submission_open=explicit_submission_open(),
         execution_generation=generation,
+        is_execution_live=live_execution,
     )
 
     assert wire["runId"] == winner_id

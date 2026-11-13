@@ -1,7 +1,8 @@
 """Map orchestrator scope outcomes onto scores inference row-run / stream terminals.
 
-Owns the scores ``register_scope_outcome_listener`` decision tree: cancel-abort
-ignore, peer-binding races, durable complete/fail, orphan fallback, and
+Owns the scores ``register_scope_outcome_listener`` decision tree: the
+cancel-abort stamped cancel (and no stream terminal), peer-binding races,
+durable complete/fail with a ladder stamp release, orphan fallback, and
 row-run finalize. Soft defer delivery is row-path owned (``ROW_DEFER``), not
 scope-outcome park notify. Stream terminal *delivery* stays in
 ``inference_stream_resolution``.
@@ -22,11 +23,13 @@ from api.analytics.military_score_inference.soft_stream_policy import TerminalSo
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
+from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
     from api.analytics.military_score_inference.inference_scheduler import (
         InferenceRowScheduler,
     )
+    from api.analytics.scores.tier_row_run_registry import StampedLadderRun
 
 
 class InferenceStreamScopeOutcomesMixin:
@@ -39,25 +42,45 @@ class InferenceStreamScopeOutcomesMixin:
         scope = snapshot.scope
         if not _is_scores_player_turn_scope(scope):
             return
-        if snapshot.state in {"complete", "failed"}:
-            # The node's tier ladder ends here: a DETACHED run it was resuming
-            # must not outlive it. Imported here because the registry imports
-            # this scheduler package at module load.
-            from api.analytics.scores.tier_row_run_registry import (
-                release_tier_ladder_for_scope,
-            )
+        # Imported here because the registry imports this scheduler package at
+        # module load.
+        from api.analytics.scores.tier_row_run_registry import (
+            StampedLadderRun,
+            release_tier_ladder_for_scope,
+        )
 
-            release_tier_ladder_for_scope(
-                scope,
-                execution_generation=snapshot.execution_generation,
-            )
-        # Intentional row-run cancel aborts in-flight DAG nodes. Do not fail (or
-        # orphan-complete) the open multiplex -- reschedule will admit a replacement.
+        # The node's tier ladder ends here, so the run its stamp names must not
+        # outlive this execution.
+        stamped = StampedLadderRun(scope=scope, execution_generation=snapshot.execution_generation)
+        # An intentional abort (an explicit cancel, or a game change) stops the
+        # stamped run's solve and refuses its persist. Do not fail (or
+        # orphan-complete) the open multiplex -- a reopen or reschedule admits
+        # a replacement.
         if self._is_cancel_abort_failure(snapshot):
+            self._cancel_stamped_ladder_run(stamped)
             return
+        if snapshot.state in {"complete", "failed"}:
+            release_tier_ladder_for_scope(stamped)
 
         self._apply_scope_outcome_to_matching_runs(snapshot)
         self._deliver_orphan_terminal_if_needed(snapshot)
+
+    def _cancel_stamped_ladder_run(
+        self: InferenceRowScheduler,
+        stamped: StampedLadderRun,
+    ) -> None:
+        """Apply ``CANCEL`` to the run ``stamped`` names, then forget that run.
+
+        A stamp written for a newer execution is left alone. The scheduler
+        lock is held across both, scheduler then registry, as ``cancel_run``
+        holds it.
+        """
+        from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
+
+        with self._lock:
+            cancelled_run_id = apply_scores_row_lifecycle(RowLifecycleOp.CANCEL, stamped)
+            if cancelled_run_id is not None:
+                self._forget_runs_locked((cancelled_run_id,))
 
     def _apply_scope_outcome_to_matching_runs(
         self: InferenceRowScheduler,

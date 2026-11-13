@@ -28,6 +28,16 @@ class ComputeRequesterEndedError(ConflictError):
         self.requester = requester
 
 
+class ComputeExecutionEndedError(RuntimeError):
+    """A job-wire build found that the node execution it builds for has ended.
+
+    A builder raises it, through its ``is_execution_live`` probe, rather than
+    change shared state on behalf of an execution that can no longer run the
+    step. The orchestrator applies a step failure only to an execution that is
+    still running, so this one changes no node, and the step never runs.
+    """
+
+
 class ComputeScopeAbortedError(RuntimeError):
     """In-flight compute scope intentionally aborted (e.g. scores row-run cancel).
 
