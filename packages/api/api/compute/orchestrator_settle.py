@@ -2,7 +2,8 @@
 
 A settle applies a caller's policy to the non-terminal nodes its work
 selection names, all in one orchestrator lock hold. It never drains post-lock
-callbacks; the caller owns that drain.
+callbacks. They share one queue, so the caller's drain, or another thread's
+drain that runs first, applies them.
 """
 
 from __future__ import annotations
@@ -40,11 +41,12 @@ class OrchestratorSettleMixin:
         takes ``policy.unstarted``. ``FINISH_WITHOUT_STAMP`` raises the node's
         ``running_step``, so its worker finishes and the execution then ends
         without persisting or stamping. ``DISCARD`` fails the node with
-        ``DiscardedWorkRefused``, unless non-terminal work this settle leaves
-        alive still needs it: such a node is kept.
+        ``DiscardedWorkRefused``, unless work this settle leaves alive still
+        needs it (``needed_scopes``): such a node is kept.
 
         Runs under the orchestrator lock and does not drain the post-lock
-        callbacks it queues.
+        callbacks it queues; another thread's drain may run them before the
+        caller's.
         """
         with self._condition:
             discards: list[ComputeNodeRun] = []

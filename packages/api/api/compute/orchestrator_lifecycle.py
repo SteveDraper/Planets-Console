@@ -207,19 +207,26 @@ class OrchestratorLifecycleMixin:
     ) -> bool:
         """Fail ``node`` when its running-step disposition does not permit ``step_exit``.
 
-        Returns whether it was refused. The refused execution persists
-        nothing, stamps nothing and is not retried. Caller holds the lock.
+        Returns whether it was refused. "Needed" is derived only when the
+        disposition's answer depends on it. Caller holds the lock.
         """
-        if node.running_step.permits(step_exit, is_needed=self._is_needed(node)):
+        if node.running_step.permits(step_exit, is_needed=lambda: self._is_needed(node)):
             return False
+        self._fail_refused_execution(node)
+        return True
+
+    def _fail_refused_execution(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """End an execution its running-step disposition refused. Caller holds the lock.
+
+        It persists nothing, stamps nothing and is not retried.
+        """
         self._fail_node(
             node,
             DiscardedWorkRefused("discarded step does not persist or stamp the new evidence mark"),
         )
-        return True
 
     def _is_needed(self: ComputeOrchestrator, node: ComputeNodeRun) -> bool:
-        """Whether other non-terminal work still depends on ``node``. Caller holds the lock."""
+        """Whether other non-terminal work still needs ``node``. Caller holds the lock."""
         others = (scope for scope in self._nodes if scope != node.scope)
         return node.scope in needed_scopes(self._nodes, others)
 
@@ -228,11 +235,21 @@ class OrchestratorLifecycleMixin:
         node: ComputeNodeRun,
         result_wire: object | None,
     ) -> None:
-        step_result = coerce_step_result(result_wire)
-        if self._refuse_step_exit(node, _STEP_EXIT_BY_OUTCOME[step_result.outcome]):
+        """Apply a finished step's result. Caller holds the lock.
+
+        The result is read only when it can change the outcome: an execution
+        that may take no exit is refused first, and an epoch-stale step is
+        retried next, whatever it returned. Otherwise the outcome names the
+        exit the step takes.
+        """
+        if node.running_step.permits_no_exit:
+            self._fail_refused_execution(node)
             return
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
+            return
+        step_result = coerce_step_result(result_wire)
+        if self._refuse_step_exit(node, _STEP_EXIT_BY_OUTCOME[step_result.outcome]):
             return
 
         registration = self._compute_registry[node.scope.analytic_id]

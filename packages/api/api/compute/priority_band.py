@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from api.compute.dag_reach import DagReachNode, needed_scopes
+from api.compute.dag_reach import DagReachNode, dependency_closure
 
 if TYPE_CHECKING:
     from api.compute.registry import AnalyticComputeRegistration
@@ -145,6 +145,6 @@ def derive_priority_bands(
     bands: dict[ComputeScope, ComputePriorityBand] = {}
     for band in _BANDS_BY_PRECEDENCE:
         holders = [scope for scope, own in own_bands.items() if own == band and scope not in bands]
-        for scope in needed_scopes(live_nodes, holders):
+        for scope in dependency_closure(live_nodes, holders):
             bands.setdefault(scope, band)
     return MappingProxyType(bands)

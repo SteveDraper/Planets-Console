@@ -8,7 +8,7 @@ each disposition lets the execution take.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from enum import Enum, IntEnum
 from types import MappingProxyType
 
@@ -41,14 +41,25 @@ class RunningStepDisposition(IntEnum):
     CONTINUE = 0
     FINISH_WITHOUT_STAMP = 2
 
-    def permits(self, step_exit: StepExit, *, is_needed: bool) -> bool:
+    def permits(self, step_exit: StepExit, *, is_needed: Callable[[], bool]) -> bool:
         """Whether this execution may take ``step_exit``.
 
-        ``is_needed`` is whether non-terminal work the orchestrator keeps
-        alive still depends on this node; a ``WHILE_NEEDED`` cell reads it.
+        ``is_needed`` derives whether non-terminal work the orchestrator keeps
+        alive still depends on this node. Only a ``WHILE_NEEDED`` cell calls
+        it, so a caller pays for that derivation only when the answer
+        depends on it.
         """
         permit = _PERMITS[self][step_exit]
-        return permit is _Permit.YES or (permit is _Permit.WHILE_NEEDED and is_needed)
+        return permit is _Permit.YES or (permit is _Permit.WHILE_NEEDED and is_needed())
+
+    @property
+    def permits_no_exit(self) -> bool:
+        """Whether this execution may take no exit at all once its picked step finishes.
+
+        Such an execution ends whatever its step returned, so its result
+        need not be read to refuse it.
+        """
+        return all(permit is _Permit.NO for permit in _PERMITS[self].values())
 
 
 _PERMITS: Mapping[RunningStepDisposition, Mapping[StepExit, _Permit]] = MappingProxyType(

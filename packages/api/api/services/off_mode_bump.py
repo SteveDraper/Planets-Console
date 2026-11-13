@@ -121,8 +121,9 @@ def discard_bumped_player_work(
     """Settle one player's in-flight fleet and scoreboard work for a bump.
 
     Shell and live turns are the recompute turns of :class:`BumpDiscardPolicy`.
-    The settle drains none of the post-lock work it queues; the bump's
-    enclosing drain does.
+    The settle drains none of the post-lock work it queues. The bump's
+    enclosing drain applies it, unless another thread's drain of the shared
+    queue runs it first, possibly before the bump publishes its epoch.
     """
     orchestrator.settle_in_flight_work(
         PlayerWork(
