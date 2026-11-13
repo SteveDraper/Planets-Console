@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
-from api.compute.scope import ComputeScope
-from api.errors import ValidationError
+from api.compute.scope import ComputeScope, format_compute_scope_key
+from api.compute.step_execution_key import ExecutionRef
+from api.errors import ConflictError, ValidationError
 
 
 class UnresolvedSubmissionOpenError(ValidationError):
     """A submission has no carried open and no bundle to read the backfill choice."""
+
+
+class ComputeRequesterEndedError(ConflictError):
+    """A dependency submit was refused because the execution that queued it has ended.
+
+    Raised by ``ComputeOrchestrator.submit`` before anything is planned, only
+    for a request whose ``requester`` is set. The orchestrator sets it on the
+    dependency submits a node queues post-lock.
+    """
+
+    def __init__(self, requester: ExecutionRef) -> None:
+        super().__init__(
+            "dependency submit refused: requester "
+            f"{format_compute_scope_key(requester.scope)} execution "
+            f"{requester.execution_generation} is no longer live"
+        )
+        self.requester = requester
 
 
 class ComputeScopeAbortedError(RuntimeError):

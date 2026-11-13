@@ -301,8 +301,10 @@ class ComputeOrchestrator(
         A pool item is bound to the execution that dispatched it. When that
         execution of ``scope`` is no longer running (aborted, or replaced by a
         newer execution), the item is dropped: this records
-        ``pool_item_dropped`` and returns False. :meth:`complete_pool_step`
-        checks the binding again, since the execution can end while the step runs.
+        ``pool_item_dropped`` and returns False. A worker asks at the pick and,
+        for a thread step, again after building the wire, since the execution
+        can end during the build. :meth:`complete_pool_step` checks the binding
+        once more, since the execution can end while the step runs.
         """
         with self._condition:
             node = self._nodes.get(scope)

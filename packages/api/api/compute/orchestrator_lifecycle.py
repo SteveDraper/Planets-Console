@@ -123,9 +123,11 @@ class OrchestratorLifecycleMixin:
         in ``waiting_deps`` (0% CPU hang). Never graft the node's own scope -- that
         self-edge can never become ``complete`` while this node is ``waiting_deps``.
         The force_fresh dependency submit asks for no band of its own: the
-        grafted edge gives it this node's band at the next dispatch pass.
+        grafted edge gives it this node's band at the next dispatch pass. It
+        runs after the lock is released and names this node's execution as its
+        requester, so it plans nothing once that execution has ended (aborted
+        or replaced) before the plan would be registered.
         """
-        bundle = node.bundle
         with self._condition:
             if node.state != "running":
                 return
@@ -156,24 +158,19 @@ class OrchestratorLifecycleMixin:
                 },
             )
 
-        if not recovery.force_fresh:
-            return
-
-        step_kind = recovery.step_kind
-        submission_open = node.submission_open
-
-        def _force_fresh_dependency() -> None:
-            self.submit(
-                ComputeRequest(
-                    scope=dependency_scope,
-                    force_fresh=True,
-                    step_kind=step_kind,
-                    bundle=bundle,
-                    submission_open=submission_open,
-                )
+            if not recovery.force_fresh:
+                return
+            dependency_request = ComputeRequest(
+                scope=dependency_scope,
+                force_fresh=True,
+                step_kind=recovery.step_kind,
+                bundle=node.bundle,
+                submission_open=node.submission_open,
+                requester=node.execution_ref,
             )
-
-        self._observers.schedule_post_lock(_force_fresh_dependency)
+            self._observers.schedule_post_lock(
+                lambda: self._submit_dependencies((dependency_request,))
+            )
 
     def _abandon_persist_if_not_running_or_stale(
         self: ComputeOrchestrator,

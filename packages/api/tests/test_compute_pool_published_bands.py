@@ -243,10 +243,11 @@ def test_picked_band_stays_fixed_when_the_published_band_changes(sample_turn):
 
     (in_flight,) = controller._in_flight_snapshot()
     assert in_flight.priority_band == "background"
+    work = picked.item.work
     complete_running_pool_step(
         orchestrator,
         scope,
-        result_wire=picked.item.work.run(scope),
+        result_wire=work.run_step(work.job_wire_for(scope)),
         step_kind=picked.item.step_kind,
         step_index=picked.item.step_index,
     )

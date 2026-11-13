@@ -49,7 +49,9 @@ class ThreadStepWork:
     """A thread step as dispatched: its builder inputs and the functions that use them.
 
     The orchestrator snapshots ``job_wire_kwargs`` under its lock at dispatch.
-    The pool worker builds the job wire from that snapshot and runs the step.
+    The pool worker builds the job wire from that snapshot, checks again that
+    the execution which dispatched the step is still running, and only then
+    runs the step, as the inline path re-checks after its own wire build.
     """
 
     backend: ClassVar[Literal["thread"]] = "thread"
@@ -58,9 +60,9 @@ class ThreadStepWork:
     job_wire_kwargs: BuildStepJobWireKwargs
     run_step: RunStepFn
 
-    def run(self, scope: ComputeScope) -> object:
-        """Build the job wire from the dispatch snapshot and run the step on this thread."""
-        return self.run_step(self.build_job_wire(scope, **self.job_wire_kwargs))
+    def job_wire_for(self, scope: ComputeScope) -> object:
+        """Build the job wire for ``scope`` from the dispatch snapshot."""
+        return self.build_job_wire(scope, **self.job_wire_kwargs)
 
 
 @dataclass(frozen=True)
@@ -175,6 +177,16 @@ def pick_next_work_item(candidates: Iterable[BandedWorkItem]) -> BandedWorkItem 
         candidates,
         key=lambda candidate: work_pick_key(candidate.priority_band, candidate.item.step_index),
         default=None,
+    )
+
+
+def _begin_pool_step(orchestrator: ComputeOrchestrator, item: PoolWorkItem) -> bool:
+    """Ask ``orchestrator`` whether ``item``'s execution may run its step now."""
+    return orchestrator.begin_pool_step(
+        item.scope,
+        item.execution_generation,
+        step_kind=item.step_kind,
+        step_index=item.step_index,
     )
 
 
@@ -502,7 +514,9 @@ class ComputeWorkerPool:
         dispatched the item is still running (``begin_pool_step``). A stale
         item finishes here without running its step.
 
-        ``ThreadStepWork`` runs synchronously on the pool worker. ``RemoteStepWork``
+        ``ThreadStepWork`` builds its wire and runs synchronously on the pool
+        worker, and confirms the execution again between the two
+        (``_run_thread_step``). ``RemoteStepWork``
         goes to the executor for ``work.backend`` and completes via a done
         callback, so a stuck remote future cannot pin a pool worker thread (and
         stall the rest of the queue under freeze single-step). The done callback
@@ -517,12 +531,7 @@ class ComputeWorkerPool:
         is_finish_owned_by_future = False
         try:
             orchestrator = self._lookup_orchestrator(item.orchestrator_id)
-            if orchestrator is None or not orchestrator.begin_pool_step(
-                item.scope,
-                item.execution_generation,
-                step_kind=item.step_kind,
-                step_index=item.step_index,
-            ):
+            if orchestrator is None or not _begin_pool_step(orchestrator, item):
                 return
             work = item.work
             if item.backend != work.backend:
@@ -530,7 +539,7 @@ class ComputeWorkerPool:
             with self._condition:
                 self._record_backend_execution_locked(work.backend)
             if isinstance(work, ThreadStepWork):
-                self._complete_item(item, partial(work.run, item.scope))
+                self._run_thread_step(orchestrator, item, work)
                 return
             with self._condition:
                 executor = self._remote_executor_locked(work.backend)
@@ -546,6 +555,28 @@ class ComputeWorkerPool:
         finally:
             if not is_finish_owned_by_future:
                 self._notify_item_finished(item)
+
+    def _run_thread_step(
+        self,
+        orchestrator: ComputeOrchestrator,
+        item: PoolWorkItem,
+        work: ThreadStepWork,
+    ) -> None:
+        """Build the step's wire on this worker, then run it if its execution still runs.
+
+        The execution can end while the wire builds (an abort or a replace).
+        ``begin_pool_step`` is asked again after the build, so a stale item is
+        dropped there exactly as at the pick, and never runs its step. A wire
+        build that raises fails the step through ``complete_pool_step``.
+        """
+        try:
+            job_wire = work.job_wire_for(item.scope)
+        except BaseException as exc:
+            self._report_item_outcome(item, result_wire=None, error=exc)
+            return
+        if not _begin_pool_step(orchestrator, item):
+            return
+        self._complete_item(item, partial(work.run_step, job_wire))
 
     def _log_backend_remap(
         self,
@@ -655,6 +686,16 @@ class ComputeWorkerPool:
             result_wire = get_result_wire()
         except BaseException as exc:
             error = exc
+        self._report_item_outcome(item, result_wire=result_wire, error=error)
+
+    def _report_item_outcome(
+        self,
+        item: PoolWorkItem,
+        *,
+        result_wire: object | None,
+        error: BaseException | None,
+    ) -> None:
+        """Hand one step's result wire, or its error, to the item's orchestrator, if registered."""
         orchestrator = self._lookup_orchestrator(item.orchestrator_id)
         if orchestrator is None:
             return

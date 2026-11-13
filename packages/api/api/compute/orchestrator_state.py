@@ -13,6 +13,7 @@ from api.compute.errors import ComputeWaitTimeoutError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.priority_band import ComputePriorityBand, ComputeRequestBand, highest_band
 from api.compute.scope import ComputeScope, format_compute_scope_key
+from api.compute.step_execution_key import ExecutionRef
 from api.compute.submission_open import SubmissionOpen
 
 NodeState = Literal[
@@ -49,6 +50,10 @@ class ComputeRequest:
     # A resubmitted hop passes the pair it was planned under. An explicit open
     # turn on that pair wins over the scope turn.
     submission_open: SubmissionOpen | None = None
+    # The node execution whose post-lock dependency submit this is. Set only by
+    # the orchestrator's own dependency submits; the submit is refused unless
+    # that execution is still live when the plan would be registered.
+    requester: ExecutionRef | None = None
 
     def __post_init__(self) -> None:
         if self.priority_band not in _REQUEST_BANDS:
@@ -170,6 +175,18 @@ class NodeExecutionBinding:
         """
         return self.state == "running" and self.execution_generation == execution_generation
 
+    def is_live_execution(self, execution_generation: int) -> bool:
+        """Whether this node is the execution ``execution_generation`` and not yet terminal.
+
+        Unlike :meth:`is_running_execution`, any non-terminal state counts: a
+        node demoted to ``waiting_deps`` while it waits on a dependency it
+        asked for is still the same live execution.
+        """
+        return (
+            self.state not in TERMINAL_NODE_STATES
+            and self.execution_generation == execution_generation
+        )
+
 
 @dataclass
 class ComputeNodeRun(NodeExecutionBinding):
@@ -214,6 +231,11 @@ class ComputeNodeRun(NodeExecutionBinding):
     def raise_standing_band(self, band: ComputeRequestBand) -> None:
         """Keep the higher of the current standing band and ``band``."""
         self.standing_band = highest_band(self.standing_band, band)
+
+    @property
+    def execution_ref(self) -> ExecutionRef:
+        """This node's execution, as a dependency submit it queues names its requester."""
+        return ExecutionRef(scope=self.scope, execution_generation=self.execution_generation)
 
     @property
     def is_terminal(self) -> bool:

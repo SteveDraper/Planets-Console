@@ -164,7 +164,8 @@ class ShellLadder:
             "api.analytics.scores.compute_orchestration.run_inference_tier_job",
             side_effect=tier_job,
         ):
-            return self.submitted_work[-1].run(self.scope)
+            work = self.submitted_work[-1]
+            return work.run_step(work.job_wire_for(self.scope))
 
     def complete_tier(self, result_wire: object) -> None:
         """Hand an executed step's result back to the orchestrator, which persists it."""

@@ -1,10 +1,23 @@
-"""Identity of one compute step run by one execution of a scope."""
+"""Identity of one execution of a scope, and of one compute step it runs."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from api.compute.scope import ComputeScope
+
+
+@dataclass(frozen=True)
+class ExecutionRef:
+    """One execution of ``scope``, named by its ``execution_generation``.
+
+    Abort and a ``force_fresh`` replace end an execution: the scope's node is
+    then failed, or a newer generation, so the reference no longer names a
+    live execution.
+    """
+
+    scope: ComputeScope
+    execution_generation: int
 
 
 @dataclass(frozen=True)
