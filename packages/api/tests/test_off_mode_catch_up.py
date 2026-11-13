@@ -21,6 +21,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
+from api.compute.running_step import RunningStepDisposition, StepExit
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
@@ -270,7 +271,7 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
     assert persistence.get_ledger(ctx.game_id, ctx.perspective, 40, player_id) is not None
     assert root.open_turn_consumed is True
     assert orchestrator.nodes[offscreen].state == "running"
-    assert orchestrator.nodes[offscreen].discard_without_stamp is False
+    assert orchestrator.nodes[offscreen].running_step is RunningStepDisposition.CONTINUE
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 0
 
     invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
@@ -548,12 +549,12 @@ def test_bump_drops_offscreen_hops_and_refuses_an_executing_step():
     assert orchestrator.nodes[ready].state == "failed"
     assert ready not in orchestrator._ready_queue
     assert orchestrator.nodes[running].state == "running"
-    assert orchestrator.nodes[running].discard_without_stamp is True
+    assert orchestrator.nodes[running].running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
     assert orchestrator.nodes[shell].state == "failed"
 
     with orchestrator._condition:
         abandoned = orchestrator._abandon_persist_if_not_running_or_stale(
-            orchestrator.nodes[running]
+            orchestrator.nodes[running], StepExit.PERSIST
         )
     assert abandoned is True
     assert orchestrator.nodes[running].state == "failed"
@@ -670,10 +671,10 @@ def test_executing_offscreen_work_is_flagged_before_the_epoch_bump(sample_turn, 
         woken.clear()
 
         def spy_invalidate(*args, **kwargs):
-            seen["flagged"] = orchestrator.nodes[running].discard_without_stamp
+            seen["flagged"] = orchestrator.nodes[running].running_step
             seen["ready_state"] = orchestrator.nodes[ready].state
             seen["ready_queued"] = ready in orchestrator._ready_queue
-            seen["shell_flagged"] = orchestrator.nodes[shell].discard_without_stamp
+            seen["shell_flagged"] = orchestrator.nodes[shell].running_step
             seen["shell_state"] = orchestrator.nodes[shell].state
             seen["epoch"] = persistence.player_invalidation_generation(
                 ctx.game_id, ctx.perspective, player_id
@@ -691,10 +692,10 @@ def test_executing_offscreen_work_is_flagged_before_the_epoch_bump(sample_turn, 
         finally:
             persistence.invalidate_player_ledgers_from_turn = original_invalidate
 
-        assert seen["flagged"] is True
+        assert seen["flagged"] is RunningStepDisposition.FINISH_WITHOUT_STAMP
         assert seen["ready_state"] == "failed"
         assert seen["ready_queued"] is False
-        assert seen["shell_flagged"] is False
+        assert seen["shell_flagged"] is RunningStepDisposition.CONTINUE
         assert seen["shell_state"] == "running"
         assert seen["epoch"] == epoch_before
         assert seen["mark"] == mark_before
@@ -780,7 +781,7 @@ def test_held_admission_leaves_executing_work_for_epoch_retry(sample_turn, monke
     )
 
     assert orchestrator.nodes[running].state == "running"
-    assert orchestrator.nodes[running].discard_without_stamp is False
+    assert orchestrator.nodes[running].running_step is RunningStepDisposition.CONTINUE
     assert (
         persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id)
         == epoch_before + 1

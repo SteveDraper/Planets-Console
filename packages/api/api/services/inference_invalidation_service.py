@@ -21,14 +21,16 @@ from api.analytics.off_mode import MarkPersist, off_mode_mark_persist
 from api.analytics.on_walk import scoreboard_persist_belongs_to_on_walk
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
+from api.services.in_flight_orchestrator import (
+    InFlightOrchestrator,
+    OrchestratorResolver,
+    in_flight_orchestrator,
+)
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.off_mode_bump import (
     DeferRecompute,
-    InFlightOrchestrator,
-    OrchestratorResolver,
     ResolvedRecompute,
     claim_player_open_roots,
-    in_flight_orchestrator,
     live_turns_for_limited_recompute,
     recompute_decision_at_wake,
     resolve_durable_scores_evidence,
@@ -58,7 +60,7 @@ class InferenceInvalidationService:
         """Process orchestrator for this persist, or a stand-in when none exists.
 
         The stand-in does not start a worker pool. It has no in-flight roots
-        and nothing to discard.
+        and nothing to settle.
         """
         return in_flight_orchestrator(self._resolve_orchestrator())
 

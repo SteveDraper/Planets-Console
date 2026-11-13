@@ -12,6 +12,7 @@ from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.errors import ComputeWaitTimeoutError
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.priority_band import ComputePriorityBand, ComputeRequestBand, highest_band
+from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.compute.step_execution_key import ExecutionRef
 from api.compute.submission_open import SubmissionOpen
@@ -213,10 +214,10 @@ class ComputeNodeRun(NodeExecutionBinding):
     waiters: list[ComputeHandle] = field(default_factory=list)
     # Leader-retained query context / export services.
     bundle: OrchestrationBundle | None = None
-    # Set when in-flight work must finish without persisting or stamping.
-    # The worker may finish; persist and stamp are refused, and the step is
-    # not retried.
-    discard_without_stamp: bool = False
+    # How far this execution may go past the step a worker picked
+    # (``RunningStepDisposition.permits``). Written under the orchestrator
+    # lock; a settle only raises it.
+    running_step: RunningStepDisposition = RunningStepDisposition.CONTINUE
     _: KW_ONLY
     # Root turn and backfill choice of the submission that planned this node.
     # A later submission that roots at this scope replaces the open turn and

@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.errors import ComputeScopeAbortedError
+from api.compute.in_flight_settle import InFlightWork, PlayerWork
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_ensure import OrchestratorEnsureMixin
 from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
 from api.compute.orchestrator_observers import OrchestratorObservers, PoolItemIgnoredKind
+from api.compute.orchestrator_settle import OrchestratorSettleMixin
 from api.compute.orchestrator_state import (
     TERMINAL_NODE_STATES,
     ComputeHandle,
@@ -30,7 +32,6 @@ from api.compute.registry import AnalyticComputeRegistration
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.turn_cache import TurnInfoCache, get_process_turn_info_cache
-from api.exceptions import DiscardedWorkRefused
 from api.models.game import TurnInfo
 
 # Re-exports for external callers; in-package compute code imports state types
@@ -113,6 +114,7 @@ class ComputeOrchestrator(
     OrchestratorStepExecutionMixin,
     OrchestratorLifecycleMixin,
     OrchestratorSubmissionMixin,
+    OrchestratorSettleMixin,
 ):
     """Process-wide DAG scheduler with singleflight per normalized compute scope.
 
@@ -433,28 +435,20 @@ class ComputeOrchestrator(
             detail={**detail, "hadError": had_error},
         )
 
-    def _nodes_for_player(
+    def _nodes_in(
         self,
+        work: InFlightWork,
         *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
         turn: int | None = None,
     ) -> Iterator[tuple[ComputeScope, ComputeNodeRun]]:
-        """Yield one player's nodes. Caller holds the orchestrator lock.
+        """Yield the nodes ``work`` selects. Caller holds the orchestrator lock.
 
-        ``analytic_ids`` selects which analytics to scan. ``turn`` restricts
-        the scan to that scope turn. When ``turn`` is omitted, scopes whose
-        turn is not an int are skipped. Do not add or remove nodes while
-        iterating.
+        ``turn`` restricts the scan to that scope turn. When ``turn`` is
+        omitted, scopes whose turn is not an int are skipped. Do not add or
+        remove nodes while iterating.
         """
         for scope, node in self._nodes.items():
-            if scope.analytic_id not in analytic_ids:
-                continue
-            if scope.game_id != game_id or scope.perspective != perspective:
-                continue
-            if scope.player_id != player_id:
+            if not work.selects(scope):
                 continue
             if turn is None:
                 if not isinstance(scope.turn, int):
@@ -486,11 +480,13 @@ class ComputeOrchestrator(
         with self._condition:
             return tuple(
                 node.submission_open
-                for _, node in self._nodes_for_player(
-                    game_id=game_id,
-                    perspective=perspective,
-                    player_id=player_id,
-                    analytic_ids=analytic_ids,
+                for _, node in self._nodes_in(
+                    PlayerWork(
+                        game_id=game_id,
+                        perspective=perspective,
+                        player_id=player_id,
+                        analytic_ids=analytic_ids,
+                    )
                 )
                 if not node.is_terminal
             )
@@ -513,14 +509,14 @@ class ComputeOrchestrator(
         records whether the one-shot for that root has already been applied.
         Callers decide which analytic's root wins when several match.
         """
+        player_work = PlayerWork(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            analytic_ids=analytic_ids,
+        )
         with self._condition:
-            return self._collect_open_turn_roots(
-                game_id=game_id,
-                perspective=perspective,
-                player_id=player_id,
-                analytic_ids=analytic_ids,
-                turn=turn,
-            )
+            return self._collect_open_turn_roots(player_work, turn=turn)
 
     def claim_open_turn_roots(
         self,
@@ -540,44 +536,30 @@ class ComputeOrchestrator(
         count a shell it is about to close. A later claim sees ``consumed``
         on that root.
         """
-        with self._condition:
-            roots = self._collect_open_turn_roots(
-                game_id=game_id,
-                perspective=perspective,
-                player_id=player_id,
-                analytic_ids=analytic_ids,
-            )
-            has_unconsumed_root = any(
-                not root.consumed and root.open_turn == open_turn for root in roots
-            )
-            if has_unconsumed_root:
-                self._mark_open_turn_consumed(
-                    game_id=game_id,
-                    perspective=perspective,
-                    player_id=player_id,
-                    open_turn=open_turn,
-                    analytic_ids=analytic_ids,
-                )
-            return roots
-
-    def _collect_open_turn_roots(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
-        turn: int | None = None,
-    ) -> tuple[OpenTurnRoot, ...]:
-        """In-flight roots. Caller holds the orchestrator lock."""
-        roots: list[OpenTurnRoot] = []
-        for scope, node in self._nodes_for_player(
+        player_work = PlayerWork(
             game_id=game_id,
             perspective=perspective,
             player_id=player_id,
             analytic_ids=analytic_ids,
-            turn=turn,
-        ):
+        )
+        with self._condition:
+            roots = self._collect_open_turn_roots(player_work)
+            has_unconsumed_root = any(
+                not root.consumed and root.open_turn == open_turn for root in roots
+            )
+            if has_unconsumed_root:
+                self._mark_open_turn_consumed(player_work, open_turn=open_turn)
+            return roots
+
+    def _collect_open_turn_roots(
+        self,
+        player_work: PlayerWork,
+        *,
+        turn: int | None = None,
+    ) -> tuple[OpenTurnRoot, ...]:
+        """In-flight roots. Caller holds the orchestrator lock."""
+        roots: list[OpenTurnRoot] = []
+        for scope, node in self._nodes_in(player_work, turn=turn):
             open_turn = node.submission_open.open_turn
             if node.is_terminal or open_turn is None:
                 continue
@@ -593,130 +575,11 @@ class ComputeOrchestrator(
             )
         return tuple(roots)
 
-    def _mark_open_turn_consumed(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        open_turn: int,
-        analytic_ids: frozenset[str],
-    ) -> None:
+    def _mark_open_turn_consumed(self, player_work: PlayerWork, *, open_turn: int) -> None:
         """Mark the one-shot at ``open_turn``. Caller holds the orchestrator lock."""
-        for _scope, node in self._nodes_for_player(
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-            analytic_ids=analytic_ids,
-            turn=open_turn,
-        ):
+        for _scope, node in self._nodes_in(player_work, turn=open_turn):
             if node.submission_open.open_turn == open_turn:
                 node.open_turn_consumed = True
-
-    def discard_matching_work(
-        self,
-        should_discard: Callable[[ComputeScope, ComputeNodeRun], bool],
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
-    ) -> None:
-        """Discard queued matches and refuse persist on matches already running.
-
-        The player and analytic filter selects candidates. ``should_discard``
-        runs under the orchestrator lock for each non-terminal candidate and
-        must not re-enter the orchestrator. A match that is not running is
-        failed and leaves the ready queue. A match that is running finishes
-        its worker; persist and stamp are refused and the step is not retried.
-        """
-        with self._condition:
-            candidates = [
-                (scope, node)
-                for scope, node in self._nodes_for_player(
-                    game_id=game_id,
-                    perspective=perspective,
-                    player_id=player_id,
-                    analytic_ids=analytic_ids,
-                )
-                if not node.is_terminal
-            ]
-            for scope, node in candidates:
-                if not should_discard(scope, node):
-                    continue
-                if node.state == "running":
-                    node.discard_without_stamp = True
-                    continue
-                self._fail_node(
-                    node,
-                    DiscardedWorkRefused(
-                        "in-flight work was discarded before it started executing"
-                    ),
-                )
-
-    def abort_scope(
-        self,
-        scope: ComputeScope,
-        error: BaseException,
-        *,
-        expected_execution_generation: int | None = None,
-    ) -> bool:
-        """Abort a non-terminal node so a later ``force_fresh`` submit can replace it.
-
-        Returns whether a node was aborted. No-op when the scope is absent or already
-        terminal, or when it is no longer the expected execution generation. Used when
-        a stream row run is cancelled while orchestrator work for that scope is still
-        in flight.
-
-        Prefer :class:`ComputeScopeAbortedError` for intentional cancels: the node
-        becomes ``failed`` for force_fresh replacement, but dependents do **not**
-        cascade-fail (they stay ``waiting_deps`` on the singleton DAG). Abort
-        itself does not recreate those dependencies. A later ``force_fresh``
-        attach of a ``waiting_deps`` waiter recreates abort-failed dependencies
-        along the ``waiting_deps`` chain.
-        """
-        with self._condition:
-            node = self._nodes.get(scope)
-            if node is None or node.is_terminal:
-                return False
-            if (
-                expected_execution_generation is not None
-                and node.execution_generation != expected_execution_generation
-            ):
-                return False
-            prior_state = node.state
-            was_running = prior_state == "running"
-            finished_step_kind: str | None = None
-            finished_step_index = node.step_index
-            if was_running:
-                registration = self._compute_registry.get(node.scope.analytic_id)
-                if registration is not None:
-                    finished_step_kind = self._current_step_spec(node, registration).step_kind
-                    self._observers.notify_step_complete(
-                        node,
-                        finished_step_kind,
-                        step_index=finished_step_index,
-                        surface="pool",
-                        terminal_state="failed",
-                    )
-            self._observers.notify_lifecycle(
-                "abort",
-                scope,
-                execution_generation=node.execution_generation,
-                node=node,
-                step_kind=finished_step_kind,
-                step_index=finished_step_index,
-                detail={
-                    "reason": "abort_scope",
-                    "priorState": prior_state,
-                    "priorProfileStepIndex": node.profile_step_index,
-                    "wasRunning": was_running,
-                    "errorType": type(error).__name__,
-                },
-            )
-            self._fail_node(node, error)
-        self._observers.drain_post_lock_callbacks()
-        return True
 
     def _ctx_for_bundle(self, bundle: OrchestrationBundle) -> AnalyticQueryContext:
         """Return a ctx view of ``bundle`` with the process-wide turn cache spliced in."""

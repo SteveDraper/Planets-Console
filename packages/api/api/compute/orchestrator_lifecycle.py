@@ -8,18 +8,33 @@ wire-ready scope keys on lifecycle details so listeners need not reconstruct
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
+from api.compute.dag_reach import needed_scopes
 from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.running_step import StepExit
 from api.compute.scope import format_compute_scope_key
-from api.compute.wire import coerce_step_result
+from api.compute.wire import StepOutcome, coerce_step_result
 from api.exceptions import DiscardedWorkRefused
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.registry import AnalyticComputeRegistration
+
+# The exit each step outcome takes first once the step has finished.
+_STEP_EXIT_BY_OUTCOME: Mapping[StepOutcome, StepExit] = MappingProxyType(
+    {
+        "persist": StepExit.PERSIST,
+        "complete": StepExit.COMPLETE,
+        "continue": StepExit.START,
+        "park": StepExit.REQUEUE,
+        "waiting_deps": StepExit.REQUEUE,
+    }
+)
 
 
 class OrchestratorLifecycleMixin:
@@ -175,38 +190,51 @@ class OrchestratorLifecycleMixin:
     def _abandon_persist_if_not_running_or_stale(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
+        step_exit: StepExit,
     ) -> bool:
-        """Return True when persist/complete must not proceed. Caller holds the lock."""
+        """Return True when the persist leg must not take ``step_exit``. Caller holds the lock."""
         if node.state != "running":
             return True
-        if node.discard_without_stamp:
-            self._fail_discarded_stamp(node)
+        if self._refuse_step_exit(node, step_exit):
             return True
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return True
         return False
 
-    def _fail_discarded_stamp(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Finish a discarded step without persisting or retrying."""
+    def _refuse_step_exit(
+        self: ComputeOrchestrator, node: ComputeNodeRun, step_exit: StepExit
+    ) -> bool:
+        """Fail ``node`` when its running-step disposition does not permit ``step_exit``.
+
+        Returns whether it was refused. The refused execution persists
+        nothing, stamps nothing and is not retried. Caller holds the lock.
+        """
+        if node.running_step.permits(step_exit, is_needed=self._is_needed(node)):
+            return False
         self._fail_node(
             node,
             DiscardedWorkRefused("discarded step does not persist or stamp the new evidence mark"),
         )
+        return True
+
+    def _is_needed(self: ComputeOrchestrator, node: ComputeNodeRun) -> bool:
+        """Whether other non-terminal work still depends on ``node``. Caller holds the lock."""
+        others = (scope for scope in self._nodes if scope != node.scope)
+        return node.scope in needed_scopes(self._nodes, others)
 
     def _after_step_success(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
         result_wire: object | None,
     ) -> None:
-        if node.discard_without_stamp:
-            self._fail_discarded_stamp(node)
+        step_result = coerce_step_result(result_wire)
+        if self._refuse_step_exit(node, _STEP_EXIT_BY_OUTCOME[step_result.outcome]):
             return
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return
 
-        step_result = coerce_step_result(result_wire)
         registration = self._compute_registry[node.scope.analytic_id]
         # Persist runs after this lock is released. Keep generation_at_submit so
         # persist-then-complete can still discard if invalidation lands in that window.
@@ -278,7 +306,9 @@ class OrchestratorLifecycleMixin:
                 # Epoch can also advance in this window (durable wipe while persist
                 # is queued); do not stamp ``complete`` over a deleted ledger.
                 with self._condition:
-                    if self._abandon_persist_if_not_running_or_stale(completed_node):
+                    if self._abandon_persist_if_not_running_or_stale(
+                        completed_node, StepExit.PERSIST
+                    ):
                         return
                 ctx = self._ctx_for_node(completed_node)
                 try:
@@ -302,16 +332,22 @@ class OrchestratorLifecycleMixin:
                         return
                     with self._condition:
                         # Epoch refusal from persist. Same split as an epoch that
-                        # moved before the hook: discard-flagged work fails, and
-                        # a running shell or live turn is re-queued.
+                        # moved before the hook: an execution a settle left
+                        # finishing without a stamp fails, and a running shell or
+                        # live turn is re-queued.
                         if isinstance(exc, DiscardedWorkRefused):
-                            if self._abandon_persist_if_not_running_or_stale(completed_node):
+                            if self._abandon_persist_if_not_running_or_stale(
+                                completed_node, StepExit.PERSIST
+                            ):
                                 return
                         if completed_node.state == "running":
                             self._fail_node(completed_node, exc)
                     return
                 with self._condition:
-                    if self._abandon_persist_if_not_running_or_stale(completed_node):
+                    if self._abandon_persist_if_not_running_or_stale(
+                        completed_node,
+                        StepExit.START if should_continue else StepExit.COMPLETE,
+                    ):
                         return
                     if should_continue:
                         self._continue_node_step(completed_node, completed_registration)

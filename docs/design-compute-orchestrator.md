@@ -255,7 +255,7 @@ A node's band is derived, not stored. `ComputeRequest.priority_band` is a **stan
 Every dispatch pass starts by deriving each non-terminal node's band (`priority_band.derive_priority_bands`):
 
 - A node's own band is `stream_attached` when its registration's `shell_stream_watch` reports the node's `(game, perspective, turn, player)` as watched, and its standing band otherwise. Fleet and scores register the walk watch (`walk_shell_watch.WALK_SHELL_STREAM_WATCH`), which reports every player on a live fleet or scoreboard table stream. Other registrations default to `UNWATCHED`.
-- Its derived band is the highest own band over the node and every non-terminal node that transitively depends on it. Parked dependents count; terminal nodes carry no band.
+- Its derived band is the highest own band over the node and every non-terminal node that transitively depends on it. Parked dependents count; terminal nodes carry no band. The walk is `dag_reach.needed_scopes`, run once per band from the nodes that hold it.
 
 Each watch is read once per pass, from lock-free registry snapshots. The pass writes the derived band to every non-terminal node, picks ready nodes by band (FIFO within a band), and publishes the derivation for the worker pool. A hop, a persist-deferred dependency and a recreated abort-failed dependency ask for no band: their dependents' bands reach them through the derivation. No mid-run preempt: a step keeps the band a worker picked it at.
 
@@ -280,6 +280,34 @@ Each watch is read once per pass, from lock-free registry snapshots. The pass wr
 Default behavior treats terminal nodes as a **cache hit**: repeat callers for the same normalized `ComputeScope` get the prior outcome without re-execution. Opt-in `force_fresh=True` is the generic lifecycle primitive for callers that need a new run after terminal completion or failure (for example scores inference stream reschedule paths that must re-enter `tier_solve` on an already-failed or completed scope), and for a later-turn attach of a `waiting_deps` waiter (fleet after scores row-run cancel) that must restart abort-failed dependencies.
 
 Supersession clears orchestrator node state only; analytic persistence invalidation and reader gates remain the analytic's responsibility.
+
+### Settling in-flight work
+
+`settle_in_flight_work(work, policy)` (`orchestrator_settle.py`) is the one operation that changes in-flight work on a caller's behalf. Under the orchestrator lock it selects the non-terminal nodes `work` names, asks `policy` for each one's disposition, and applies them. It does no I/O and drains no post-lock callbacks: the caller owns that drain. The types live in `in_flight_settle.py`, and `compute/` holds no knowledge of which analytics or callers settle.
+
+- **Selection.** `PlayerWork(game_id, perspective, player_id, analytic_ids)` selects one player's nodes; `GameWork(game_id, analytic_ids)` selects every perspective and player in a game. Scopes whose turn is not a concrete int are skipped.
+- **Policy.** An `InFlightSettlePolicy` subclass decides from an `InFlightCandidate` (scope and submission open). A `running` node takes `policy.running`; any other non-terminal node (`waiting_deps`, `ready`, `parked`) takes `policy.unstarted`.
+
+| Disposition | Applied as |
+|---|---|
+| `UnstartedDisposition.KEEP`, `RunningDisposition.KEEP` | Nothing changes. |
+| `UnstartedDisposition.DISCARD` | The node fails with `DiscardedWorkRefused`, which its dependents inherit, and leaves the ready queue. |
+| `RunningDisposition.FINISH_WITHOUT_STAMP` | The node's `running_step` is raised to `FINISH_WITHOUT_STAMP`. |
+
+**Needed exemption.** A `DISCARD` becomes `KEEP` when non-terminal work the settle leaves alive still depends on the node, directly or through other non-terminal nodes. "Needed" has one home, `dag_reach.needed_scopes(nodes, alive)`: the non-terminal scopes in `alive` and every non-terminal scope they transitively depend on. The band derivation's walk is the same function. For the bump, the only live work that can depend on one of its discards is that player's own running fleet or scores node, because only fleet and scores ensure fleet or scores, and only for the same player (pinned by `test_fleet_walk_dependency_edges.py`).
+
+**Running-step lattice.** `ComputeNodeRun.running_step: RunningStepDisposition` (`running_step.py`) is how far a running execution may go past the step a worker picked. It is ordered `CONTINUE < FINISH_WITHOUT_STAMP`, and a settle only raises it. `RunningStepDisposition.permits(step_exit, *, is_needed)` is the one table of what each value lets the execution do at a `StepExit`:
+
+| Exit | `CONTINUE` | `FINISH_WITHOUT_STAMP` |
+|---|---|---|
+| `PERSIST` | yes | no |
+| `COMPLETE` | yes | no |
+| `START` (continue into the next step) | yes | no |
+| `REQUEUE` (park, soft or persist-deferred `waiting_deps`) | yes | no |
+
+After a step succeeds, its outcome names the exit it takes first (`persist`, `complete`, `continue` → `START`, `park` and `waiting_deps` → `REQUEUE`), and the persist leg checks `PERSIST` before its hook and `COMPLETE` (or `START` for persist-then-continue) after it. A refused exit fails the node with `DiscardedWorkRefused`; it persists nothing and is not retried. Each check runs before the epoch retry, so a refused execution is never re-queued.
+
+**Abort.** `abort_scope` (explicit cancel) lives in the same mixin. Its lock-held body is `_abort_node_locked`, and it drains after releasing the lock.
 
 ---
 
@@ -399,8 +427,8 @@ Which mechanism catches which stale-work race:
 | Mechanism | Race |
 |-----------|------|
 | **Orchestrator epoch retry** | Before persist, and again before the node is marked complete, `generation_at_submit` is compared with the scope's current invalidation generation. A mismatch discards the result and re-queues the node. The persist hook runs only after that check releases the orchestrator lock. |
-| **`discard_without_stamp`** | A bump discard predicate already selected this running node. The worker finishes, persist and stamp are refused, and the step is not retried. The predicate selects from the scope and the node under the orchestrator lock, and that selection is applied before the player epoch increments. |
-| **Fleet wire epoch refusal** | `refuse_stale_fleet_epoch` is a fast fail before the ledger is built. It compares `playerInvalidationGeneration` on the fleet job wire with the player's current epoch. A missing value raises `ValidationError`. The ledger write repeats that compare under the generation lock in the same decision as the generation it stamps, and writes before releasing that lock. A concrete player whose epoch differs raises `DiscardedWorkRefused` and does not write. A durable bump publishes the new evidence mark and the player epoch before it releases the generation lock. A node flagged `discard_without_stamp` is not re-queued. A shell or live turn left running is re-queued through the orchestrator epoch retry. The compare is inside fleet persist, which runs after the orchestrator releases its lock, and on persist callers outside the orchestrator. |
+| **`FINISH_WITHOUT_STAMP`** | A bump settle (`BumpDiscardPolicy`) already raised this running node's `running_step` to `FINISH_WITHOUT_STAMP`. The worker finishes; persist, stamp, complete and any retry are refused, and the node fails with `DiscardedWorkRefused`. The settle runs under the orchestrator lock before the player epoch increments (see [Settling in-flight work](#settling-in-flight-work)). |
+| **Fleet wire epoch refusal** | `refuse_stale_fleet_epoch` is a fast fail before the ledger is built. It compares `playerInvalidationGeneration` on the fleet job wire with the player's current epoch. A missing value raises `ValidationError`. The ledger write repeats that compare under the generation lock in the same decision as the generation it stamps, and writes before releasing that lock. A concrete player whose epoch differs raises `DiscardedWorkRefused` and does not write. A durable bump publishes the new evidence mark and the player epoch before it releases the generation lock. A node whose `running_step` is `FINISH_WITHOUT_STAMP` is not re-queued. A shell or live turn left running is re-queued through the orchestrator epoch retry. The compare is inside fleet persist, which runs after the orchestrator releases its lock, and on persist callers outside the orchestrator. |
 
 Same semantics as former gap-fill coordinator epoch abort ([#233](https://github.com/SteveDraper/Planets-Console/issues/233); coordinator deleted in [#204](https://github.com/SteveDraper/Planets-Console/issues/204)): mid-chain generation bumps exit the leg (`FleetGapFillEpochInvalidated`) instead of spinning sync rematerializations; orchestrator / stream reschedule / later ensure re-queues when the epoch advances or scores turn-evidence closes. Scores `invalidation_generation` reads the **turn-scoped** fleet epoch for `fleet@(host_turn - 1)` so in-flight `tier_solve` work is discarded when that prior fleet changes -- not when same-player scores/fleet activity on unrelated turns advances the player-scoped counter used by fleet compute / gap-fill. Fleet final `on_ledger_persisted` may wipe/reschedule ambient scores; **own-DAG elision** (#204) skips wipe and reschedule when `scores@(fleet_turn+1)` is already a non-terminal dependent of that fleet scope on the same DAG.
 
@@ -537,6 +565,10 @@ packages/api/api/compute/
   orchestrator_observers.py  # Immutable outcome snapshots and lifecycle observers
   profile.py         # AnalyticComputeProfile, ComputeStepSpec
   orchestrator.py    # DAG, singleflight, submit, complete (process-wide singleton)
+  orchestrator_settle.py  # settle_in_flight_work, abort_scope
+  in_flight_settle.py     # Settle selection, policy protocol and dispositions
+  running_step.py    # RunningStepDisposition lattice and its permits table
+  dag_reach.py       # needed_scopes: the dependency closure live work reaches
   turn_cache.py      # Process-wide TurnInfo LRU keyed by (game_id, perspective, turn)
   pools.py           # Global pool, priority dequeue, backend dispatch
   wire.py            # DependencyOutputs, base JobWire/ResultWire types

@@ -9,21 +9,37 @@ from typing import get_protocol_members
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.on_walk import scoreboard_persist_belongs_to_on_walk
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.in_flight_settle import (
+    InFlightCandidate,
+    InFlightSettlePolicy,
+    PlayerWork,
+    RunningDisposition,
+    UnstartedDisposition,
+)
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OpenTurnRoot
 from api.compute.orchestrator_state import NodeState
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
+from api.services.in_flight_orchestrator import InFlightOrchestrator, in_flight_orchestrator
 from api.services.off_mode_bump import (
     DeferRecompute,
-    InFlightOrchestrator,
     LimitedRecompute,
     WakeAllRecompute,
-    in_flight_orchestrator,
     preferred_unconsumed_root_backfill,
     resolve_durable_scores_evidence,
 )
 
 _ANALYTICS = frozenset({"alpha", "beta"})
+
+
+class _UnreachablePolicy(InFlightSettlePolicy):
+    """A settle with no in-flight work never asks for a disposition."""
+
+    def unstarted(self, candidate: InFlightCandidate) -> UnstartedDisposition:
+        raise AssertionError(candidate)
+
+    def running(self, candidate: InFlightCandidate) -> RunningDisposition:
+        raise AssertionError(candidate)
 
 
 def _put(
@@ -160,39 +176,6 @@ def test_claim_open_turn_roots_marks_only_matching_roots():
             consumed=True,
         ),
     )
-
-
-def test_discard_matching_work_uses_the_player_scan():
-    orchestrator = ComputeOrchestrator(compute_registry={})
-    ready = _put(orchestrator, "alpha", 39)
-    running = _put(orchestrator, "alpha", 38, state="running")
-    other = _put(orchestrator, "gamma", 39)
-    wild = ComputeScope(
-        analytic_id="alpha",
-        game_id=1,
-        perspective=1,
-        turn="*",
-        player_id=7,
-    )
-    orchestrator.nodes[wild] = ComputeNodeRun(
-        scope=wild, dependency_scopes=(), state="ready", submission_open=SubmissionOpen()
-    )
-    orchestrator._ready_queue.append(ready)
-
-    orchestrator.discard_matching_work(
-        lambda _scope, _node: True,
-        game_id=1,
-        perspective=1,
-        player_id=7,
-        analytic_ids=frozenset({"alpha"}),
-    )
-
-    assert orchestrator.nodes[ready].state == "failed"
-    assert ready not in orchestrator._ready_queue
-    assert orchestrator.nodes[running].state == "running"
-    assert orchestrator.nodes[running].discard_without_stamp is True
-    assert orchestrator.nodes[other].state == "ready"
-    assert orchestrator.nodes[wild].state == "ready"
 
 
 def test_preferred_unconsumed_root_backfill_lets_the_caller_choose():
@@ -382,7 +365,6 @@ def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
     scope = ComputeScope(
         analytic_id=SCORES_ANALYTIC_ID, game_id=1, perspective=1, turn=40, player_id=7
     )
-    discarded: list[ComputeScope] = []
     keys = {
         "game_id": 1,
         "perspective": 1,
@@ -392,9 +374,8 @@ def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
 
     assert absent.open_turn_roots(**keys) == ()
     assert absent.claim_open_turn_roots(open_turn=40, **keys) == ()
-    absent.discard_matching_work(lambda scope, _node: discarded.append(scope) or True, **keys)
+    assert absent.settle_in_flight_work(PlayerWork(**keys), _UnreachablePolicy()) is None
     assert absent.non_terminal_submission_open_for(scope) is None
-    assert discarded == []
 
 
 def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():
@@ -404,7 +385,7 @@ def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():
     assert members == {
         "open_turn_roots",
         "claim_open_turn_roots",
-        "discard_matching_work",
+        "settle_in_flight_work",
         "non_terminal_submission_open_for",
     }
     for name in members:
@@ -475,20 +456,11 @@ def test_claim_open_turn_roots_blocks_a_second_claim_until_the_one_shot_is_consu
 
         def _collect_open_turn_roots(
             self,
+            player_work: PlayerWork,
             *,
-            game_id: int,
-            perspective: int,
-            player_id: int,
-            analytic_ids: frozenset[str],
             turn: int | None = None,
         ) -> tuple[OpenTurnRoot, ...]:
-            roots = super()._collect_open_turn_roots(
-                game_id=game_id,
-                perspective=perspective,
-                player_id=player_id,
-                analytic_ids=analytic_ids,
-                turn=turn,
-            )
+            roots = super()._collect_open_turn_roots(player_work, turn=turn)
             self.collect_calls += 1
             if self.collect_calls == 1:
                 self.entered.set()
