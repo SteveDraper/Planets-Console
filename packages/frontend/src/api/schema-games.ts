@@ -127,7 +127,8 @@ export interface paths {
          * Post Backfill Walks Stop
          * @description Stop every accepted walk in a game the shell left. 204 for any game id.
          *
-         *     The stop's queued compute work runs after the response.
+         *     The stop settles before the response. Only the drain of the compute work
+         *     it queued runs after the response, as a background task.
          */
         post: operations["post_backfill_walks_stop_games__game_id__backfill_walks_stop_post"];
         delete?: never;
