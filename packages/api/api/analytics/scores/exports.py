@@ -561,17 +561,16 @@ def _persist_immediate_row_admission(
         perspective=scope.perspective,
         player_id=scope.player_id,
     )
-    services.persistence.put_row(
+    # Establishing cheap terminal disk evidence must not fire fleet
+    # invalidation: on_row_persisted would bump generation mid gap-fill
+    # (FleetGapFillEpochInvalidated → 409 on sync table/map). Fleet sees
+    # closed evidence on the next provenance resolve via get_row.
+    services.persistence.put_row_without_notify(
         scope.game_id,
         scope.perspective,
         scope.turn,
         scope.player_id,
         row,
-        # Establishing cheap terminal disk evidence must not fire fleet
-        # invalidation: on_row_persisted would bump generation mid gap-fill
-        # (FleetGapFillEpochInvalidated → 409 on sync table/map). Fleet sees
-        # closed evidence on the next provenance resolve via get_row.
-        notify=False,
     )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import Protocol
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.durable_turn_evidence import (
@@ -28,7 +28,22 @@ from api.transport.inference_stream_wire import row_complete_to_complete_wire_ev
 
 _INFERENCE_ROWS_KEY = "inference_rows"
 
-OnRowPersistedCallback = Callable[[int, int, int, int], None]
+
+class OnRowPersistedCallback(Protocol):
+    """Told about each scores row a producing execution persisted.
+
+    ``on_walk`` is that execution's walk membership, carried from its job wire.
+    """
+
+    def __call__(
+        self,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
+        *,
+        on_walk: bool,
+    ) -> None: ...
 
 
 class InferenceRowPersistenceService:
@@ -72,7 +87,7 @@ class InferenceRowPersistenceService:
         row = persisted_inference_row_from_json(data)
         upgraded, changed = upgrade_persisted_inference_row(row)
         if changed:
-            self.put_row(game_id, perspective, host_turn, player_id, upgraded)
+            self.put_row_without_notify(game_id, perspective, host_turn, player_id, upgraded)
         return upgraded
 
     def wire_complete_for_row(
@@ -95,23 +110,39 @@ class InferenceRowPersistenceService:
         player_id: int,
         row: PersistedInferenceRow,
         *,
-        notify: bool = True,
+        on_walk: bool,
     ) -> None:
-        """Store one inference row.
+        """Store one inference row a producing execution solved, then notify.
 
-        When ``notify`` is true (default), invoke ``on_row_persisted`` so fleet
-        invalidation can clear ledgers from this host turn. Pass ``notify=False``
-        for first-write cheap terminals (``no_prior_turn`` / ``player_not_found``)
-        established during ensure: those close materialization evidence without
-        being a scores refine that should abort an in-flight fleet gap-fill.
+        ``on_row_persisted`` receives ``on_walk``, the producing execution's
+        walk membership, so fleet invalidation classifies stamp versus bump
+        from it and clears ledgers from this host turn on a bump.
+        """
+        self.put_row_without_notify(game_id, perspective, host_turn, player_id, row)
+        if self._on_row_persisted is not None:
+            self._on_row_persisted(game_id, perspective, host_turn, player_id, on_walk=on_walk)
+
+    def put_row_without_notify(
+        self,
+        game_id: int,
+        perspective: int,
+        host_turn: int,
+        player_id: int,
+        row: PersistedInferenceRow,
+    ) -> None:
+        """Store one inference row without invoking ``on_row_persisted``.
+
+        For writes that carry no new scores evidence: first-write cheap
+        terminals (``no_prior_turn`` / ``player_not_found``) established during
+        ensure, which close materialization evidence without being a scores
+        refine that should abort an in-flight fleet gap-fill, and the upgrade
+        of a stored row on read.
         """
         prepared, _ = upgrade_persisted_inference_row(row)
         self._storage.put(
             self.row_store_key(game_id, perspective, host_turn, player_id),
             persisted_inference_row_to_json(prepared),
         )
-        if notify and self._on_row_persisted is not None:
-            self._on_row_persisted(game_id, perspective, host_turn, player_id)
 
     @property
     def on_row_persisted(self) -> OnRowPersistedCallback | None:
@@ -211,8 +242,12 @@ class InferenceRowPersistenceService:
         player_id: int,
         fleet_torp_input_status: str | None = None,
         query_context: AnalyticQueryContext | None = None,
+        on_walk: bool,
     ) -> None:
-        """Write durable turn evidence from a RowComplete payload alone."""
+        """Write durable turn evidence from a RowComplete payload alone.
+
+        ``on_walk`` is the producing execution's walk membership.
+        """
         status = event.wire_payload.status
         if not is_durable_turn_evidence_row_status(status):
             return
@@ -228,12 +263,14 @@ class InferenceRowPersistenceService:
             perspective=perspective,
             player_id=player_id,
         )
-        self.put_row(game_id, perspective, host_turn, player_id, row)
+        self.put_row(game_id, perspective, host_turn, player_id, row, on_walk=on_walk)
 
     def persist_row_complete(
         self,
         session: InferenceRowStreamSession,
         event: RowComplete,
+        *,
+        on_walk: bool,
     ) -> None:
         if session.cancel_token.is_cancelled():
             return
@@ -244,4 +281,5 @@ class InferenceRowPersistenceService:
             host_turn=session.turn_number,
             player_id=session.player_id,
             query_context=session.query_context,
+            on_walk=on_walk,
         )

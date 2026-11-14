@@ -454,8 +454,10 @@ def test_ensure_cheap_terminal_persist_does_not_notify_row_persisted(
     )
     player_id = inference_target_player_id(turn_2)
     notified: list[tuple[int, int, int, int]] = []
-    persistence.on_row_persisted = lambda game_id, perspective_id, host_turn, row_player_id: (
-        notified.append((game_id, perspective_id, host_turn, row_player_id))
+    persistence.on_row_persisted = (
+        lambda game_id, perspective_id, host_turn, row_player_id, *, on_walk: notified.append(
+            (game_id, perspective_id, host_turn, row_player_id)
+        )
     )
     ctx = scores_query_context(
         turn_2,

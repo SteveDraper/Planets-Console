@@ -71,6 +71,7 @@ def _stored_skip(persistence: InferenceRowPersistenceService, *, turn: int, play
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
 
 
@@ -258,6 +259,7 @@ def test_both_write_paths_call_the_persist_stamp(
         host_turn=turn,
         player_id=durable_player,
         query_context=context,
+        on_walk=False,
     )
     _persist_immediate_row_admission(
         ScoresExportContext(persistence=persistence),
@@ -303,6 +305,7 @@ def test_live_durable_complete_reads_the_generation_persist_just_wrote(
         host_turn=turn,
         player_id=player_id,
         query_context=context,
+        on_walk=False,
     )
     session = InferenceRowStreamSession(
         player_id=player_id,

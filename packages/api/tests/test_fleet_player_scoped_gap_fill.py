@@ -336,6 +336,7 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     inference_persistence.put_row(
         628580,
@@ -349,6 +350,7 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
             is_complete=False,
             solutions=[],
         ),
+        on_walk=False,
     )
 
     assert persistence.get_snapshot(628580, 1, 111) is None

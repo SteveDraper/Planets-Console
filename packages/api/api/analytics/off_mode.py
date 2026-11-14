@@ -95,8 +95,8 @@ def off_mode_mark_persist(
 
     The first rule that matches decides, in this order.
 
-    1. ``on_walk`` (the persist belongs to an in-flight on-walk): STAMP, even
-       with an absent mark. The on-walk plan establishes the mark before any
+    1. ``on_walk`` (the persist's producing execution was an on-walk): STAMP,
+       even with an absent mark. The on-walk plan establishes the mark before any
        of its scoreboards persist, so it never takes the first persist.
     2. Absent mark: FIRST_PERSIST, which becomes generation 1.
     3. ``is_backfill_off_open_turn``: STAMP.

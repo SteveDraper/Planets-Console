@@ -300,6 +300,7 @@ def test_cancelling_the_stamped_run_leaves_the_listener_only_its_stamp(ladder, m
         {
             "runId": stamped.run_id,
             "rowComplete": durable_row_complete("late persist after cancel").row_complete,
+            "onWalk": False,
         },
     )
 

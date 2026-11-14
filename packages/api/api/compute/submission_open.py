@@ -7,9 +7,6 @@ import analytic code.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
-
-from api.compute.scope import ComputeScope
 
 
 @dataclass(frozen=True)
@@ -27,14 +24,3 @@ class SubmissionOpen:
     open_turn: int | None = None
     backfill_earlier_turns: bool = False
     on_walk: bool = False
-
-
-class SubmissionOpenReader(Protocol):
-    """Reads the submission open of one in-flight compute node."""
-
-    def non_terminal_submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
-        """Submission open of one in-memory node that has not reached a final state.
-
-        None when that scope is not in memory or its node is terminal.
-        """
-        ...

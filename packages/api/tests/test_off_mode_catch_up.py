@@ -264,7 +264,7 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
         orchestrator=lambda: orchestrator,
     )
 
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id, on_walk=False)
 
     stamped = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
     assert stamped == FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
@@ -274,7 +274,7 @@ def test_catch_up_scoreboard_stamps_and_new_information_bumps(sample_turn):
     assert orchestrator.nodes[offscreen].running_step is RunningStepDisposition.CONTINUE
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 0
 
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id, on_walk=False)
 
     bumped = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
     assert bumped.evidence_generation == 4
@@ -320,7 +320,7 @@ def test_scores_root_backfill_wins_and_a_later_turn_does_not_consume(sample_turn
         orchestrator=lambda: orchestrator,
     )
 
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id, on_walk=False)
 
     bumped = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
     assert bumped.evidence_generation == 4
@@ -328,7 +328,7 @@ def test_scores_root_backfill_wins_and_a_later_turn_does_not_consume(sample_turn
     assert orchestrator.nodes[scores_scope].open_turn_consumed is True
 
     fresh = install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 42)
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 41, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 41, player_id, on_walk=False)
     assert fresh.open_turn_consumed is False
 
 
@@ -390,7 +390,9 @@ def test_root_bump_wakes_the_shell_chosen_before_consume(
         orchestrator=lambda: orchestrator,
     )
     try:
-        invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 4, player_id)
+        invalidation.on_scores_row_persisted(
+            ctx.game_id, ctx.perspective, 4, player_id, on_walk=False
+        )
     finally:
         reset_fleet_table_stream_registry_for_tests()
 
@@ -414,7 +416,7 @@ def test_first_scoreboard_persist_sets_generation_one(sample_turn):
         fleet_persistence=persistence,
     )
 
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id, on_walk=False)
 
     mark = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
     assert mark == FleetEvidenceMark(evidence_generation=1, applies_from_turn=10)
@@ -713,7 +715,9 @@ def test_executing_offscreen_work_is_flagged_before_the_epoch_bump(sample_turn, 
         assert orchestrator.nodes[shell].state == "running"
 
     def persist_scores(invalidation: InferenceInvalidationService) -> None:
-        invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 39, player_id)
+        invalidation.on_scores_row_persisted(
+            ctx.game_id, ctx.perspective, 39, player_id, on_walk=False
+        )
 
     def update_evidence(invalidation: InferenceInvalidationService) -> None:
         invalidation.on_inference_evidence_updated(

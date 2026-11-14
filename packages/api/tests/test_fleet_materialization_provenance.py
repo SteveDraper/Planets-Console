@@ -240,6 +240,7 @@ def test_complete_scores_closure_persists_final_provenance_when_prior_final(
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
 
     get_or_materialize_fleet_ledger_for_player(

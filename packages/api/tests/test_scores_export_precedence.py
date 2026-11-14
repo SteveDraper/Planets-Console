@@ -526,7 +526,7 @@ def _held_scores_for_turn_two_from_turn_three_row(
         scores=[replace(score, turn=2) for score in turn_two.scores],
     )
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(628580, 1, 3, player_id, persisted_row)
+    persistence.put_row(628580, 1, 3, player_id, persisted_row, on_walk=False)
 
     def load_turn(turn_number: int):
         if turn_number == 2:

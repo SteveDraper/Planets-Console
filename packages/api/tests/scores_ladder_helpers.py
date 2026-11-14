@@ -29,6 +29,7 @@ from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
 from api.compute.pools import ThreadStepWork
+from api.compute.submission_open import SubmissionOpen
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -125,13 +126,19 @@ class ShellLadder:
         self.scheduler.enqueue_tier_ladder(session)
         return session
 
-    def submit(self, *, force_fresh: bool = False) -> None:
+    def submit(
+        self,
+        *,
+        force_fresh: bool = False,
+        submission_open: SubmissionOpen | None = None,
+    ) -> None:
         self.orchestrator.submit(
             ComputeRequest(
                 ctx=self.ctx,
                 scope=self.scope,
                 step_kind=SCORES_TIER_SOLVE,
                 force_fresh=force_fresh,
+                submission_open=submission_open,
             )
         )
         assert self.orchestrator.nodes[self.scope].state == "running"

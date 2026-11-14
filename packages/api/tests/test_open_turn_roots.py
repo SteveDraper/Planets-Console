@@ -7,7 +7,6 @@ import threading
 from typing import get_protocol_members
 
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
-from api.analytics.on_walk import scoreboard_persist_belongs_to_on_walk
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.in_flight_settle import (
     InFlightCandidate,
@@ -353,18 +352,8 @@ def test_resolved_recompute_names_the_turns_it_wakes():
     limited.discard_bumped_work(absent, game_id=1, perspective=1, player_id=7)
 
 
-def test_scoreboard_persist_with_no_process_orchestrator_belongs_to_no_on_walk():
-    absent = in_flight_orchestrator(None)
-    assert not scoreboard_persist_belongs_to_on_walk(
-        absent, game_id=1, perspective=1, player_id=7, host_turn=40
-    )
-
-
 def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
     absent = in_flight_orchestrator(None)
-    scope = ComputeScope(
-        analytic_id=SCORES_ANALYTIC_ID, game_id=1, perspective=1, turn=40, player_id=7
-    )
     keys = {
         "game_id": 1,
         "perspective": 1,
@@ -375,7 +364,6 @@ def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
     assert absent.open_turn_roots(**keys) == ()
     assert absent.claim_open_turn_roots(open_turn=40, **keys) == ()
     assert absent.settle_in_flight_work(PlayerWork(**keys), _UnreachablePolicy()) is None
-    assert absent.non_terminal_submission_open_for(scope) is None
 
 
 def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():
@@ -386,7 +374,6 @@ def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():
         "open_turn_roots",
         "claim_open_turn_roots",
         "settle_in_flight_work",
-        "non_terminal_submission_open_for",
     }
     for name in members:
         stand_in = inspect.signature(getattr(absent, name))

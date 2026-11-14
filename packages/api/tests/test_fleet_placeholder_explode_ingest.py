@@ -103,6 +103,7 @@ def _ingest_with_persist_placeholders(
             placeholders=placeholders,
             unexplained_military_delta_2x=22,
         ),
+        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),

@@ -13,11 +13,9 @@ from typing import Protocol, TypeAlias
 
 from api.compute.in_flight_settle import InFlightSettlePolicy, InFlightWork
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
-from api.compute.scope import ComputeScope
-from api.compute.submission_open import SubmissionOpen, SubmissionOpenReader
 
 
-class InFlightOrchestrator(SubmissionOpenReader, Protocol):
+class InFlightOrchestrator(Protocol):
     """The orchestrator queries and settle that services use for in-flight work.
 
     The absent-process stand-in subclasses it, so its signatures are checked
@@ -86,10 +84,6 @@ class _AbsentProcessOrchestrator(InFlightOrchestrator):
         policy: InFlightSettlePolicy,
     ) -> None:
         return
-
-    def non_terminal_submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
-        """No in-memory node, so no submission open."""
-        return None
 
 
 _ABSENT_PROCESS_ORCHESTRATOR = _AbsentProcessOrchestrator()

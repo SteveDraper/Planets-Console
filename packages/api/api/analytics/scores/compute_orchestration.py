@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +25,11 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     PriorTurnFleetTorpResolution,
 )
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.off_mode_wire import (
+    ON_WALK_WIRE_FIELD,
+    copy_submission_open_fields,
+    parse_off_mode_wire,
+)
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.exports import stored_closed_horwasp_skip
 from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
@@ -40,6 +45,7 @@ from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs, StepResult
+from api.exceptions import ValidationError
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
@@ -151,6 +157,10 @@ def build_scores_tier_solve_job_wire(
     A claim for an execution that ended while its wire was being built raises
     ``ComputeExecutionEndedError`` and changes nothing; the orchestrator
     ignores the failed build of an ended execution.
+
+    The wire carries ``onWalk`` from the node's submission open, so the persist
+    it produces classifies stamp versus bump by this execution's walk
+    membership.
     """
     export_scope = _export_scope_for_compute(scope)
     if export_scope is None:
@@ -225,6 +235,7 @@ def build_scores_tier_solve_job_wire(
         "perspective": scope.perspective,
         "turn": scope.turn,
         "playerId": scope.player_id,
+        ON_WALK_WIRE_FIELD: submission_open.on_walk,
     }
 
 
@@ -336,12 +347,17 @@ def _emit_soft_defer_and_wait(
     return result
 
 
-def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> StepResult:
+def tier_job_outcome_to_step_result(
+    run: RowRun,
+    outcome: TierJobOutcome,
+    job_wire: Mapping[str, Any],
+) -> StepResult:
     """Map one inference tier job outcome to an orchestrator step result.
 
     Non-durable or empty outcomes demote the node to ``waiting_deps`` and emit
     soft stream rows from the row path (not orchestrator park). Durable terminals
-    persist and complete the scores node.
+    persist and complete the scores node. A row payload copies the submission
+    open fields ``job_wire`` carries.
     """
     if outcome.enqueue_continuation:
         if outcome.next_ladder_state is not None:
@@ -349,7 +365,7 @@ def tier_job_outcome_to_step_result(run: RowRun, outcome: TierJobOutcome) -> Ste
         return StepResult(outcome="continue")
 
     if outcome.row_complete is not None:
-        payload = _tier_persist_payload(run, outcome.row_complete)
+        payload = _tier_persist_payload(run, outcome.row_complete, job_wire)
         status = outcome.row_complete.wire_payload.status
         if is_durable_turn_evidence_row_status(status):
             return StepResult(outcome="persist", payload=payload)
@@ -394,11 +410,17 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
             emit_held_solutions=lambda: None,
         )
     outcome = run_inference_tier_job(run, callbacks)
-    return tier_job_outcome_to_step_result(run, outcome)
+    return tier_job_outcome_to_step_result(run, outcome, job_wire)
 
 
-def _tier_persist_payload(run: RowRun, row_complete: RowComplete) -> dict[str, object]:
-    return {"runId": run.run_id, "rowComplete": row_complete}
+def _tier_persist_payload(
+    run: RowRun,
+    row_complete: RowComplete,
+    job_wire: Mapping[str, Any],
+) -> dict[str, object]:
+    payload: dict[str, object] = {"runId": run.run_id, "rowComplete": row_complete}
+    copy_submission_open_fields(job_wire, payload)
+    return payload
 
 
 class ScoresPersistencePolicy:
@@ -438,6 +460,12 @@ class ScoresPersistencePolicy:
         row_complete = result_wire.get("rowComplete")
         if not isinstance(row_complete, RowComplete):
             raise TypeError("scores persist result wire missing RowComplete payload")
+        # Walk membership of the producing execution, carried from its job wire.
+        on_walk = parse_off_mode_wire(result_wire).on_walk
+        if on_walk is None:
+            raise ValidationError(
+                f"scores persist result wire requires boolean {ON_WALK_WIRE_FIELD}"
+            )
 
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None or export_scope.player_id is None:
@@ -469,6 +497,7 @@ class ScoresPersistencePolicy:
             player_id=export_scope.player_id,
             fleet_torp_input_status=_fleet_torp_input_status_for_persist(run_id),
             query_context=ctx,
+            on_walk=on_walk,
         )
         if decision.retire_after_write:
             apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run_id)

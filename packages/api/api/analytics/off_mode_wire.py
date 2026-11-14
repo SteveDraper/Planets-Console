@@ -2,8 +2,10 @@
 
 ``stamp_submission_open`` writes ``openTurn``, ``catchUp``, and
 ``backfillEarlierTurns`` from a submission open the caller already resolved.
-``parse_off_mode_wire`` reads those fields and ``playerInvalidationGeneration``.
-``copy_submission_open_fields`` copies the parsed fields onto a persist payload.
+The scores ``tier_solve`` job wire carries ``onWalk``, the producing
+execution's walk membership. ``parse_off_mode_wire`` reads those fields and
+``playerInvalidationGeneration``. ``copy_submission_open_fields`` copies the
+parsed fields onto a persist payload.
 
 Writing the submission-open fields needs ``SubmissionOpen`` and ``ComputeScope``.
 It does not read the stored backfill record.
@@ -22,6 +24,7 @@ from api.exceptions import ValidationError
 BACKFILL_EARLIER_TURNS_WIRE_FIELD = "backfillEarlierTurns"
 OPEN_TURN_WIRE_FIELD = "openTurn"
 CATCH_UP_WIRE_FIELD = "catchUp"
+ON_WALK_WIRE_FIELD = "onWalk"
 _PLAYER_INVALIDATION_GENERATION_FIELD = "playerInvalidationGeneration"
 
 
@@ -39,22 +42,24 @@ def _require_json_bool(value: object, *, field: str) -> bool:
 
 @dataclass(frozen=True)
 class OffModeWireFields:
-    """Off-mode fields on a fleet job wire or persist payload.
+    """Off-mode fields on a fleet or scores job wire or persist payload.
 
     ``open_turn`` is None when the wire is not an off-mode open. ``catch_up``
     is true only for an earlier hop of that open. ``backfill_earlier_turns``
     is None when the wire does not carry the choice. ``player_invalidation_generation``
-    is None when the wire does not carry an epoch.
+    is None when the wire does not carry an epoch. ``on_walk`` is None when
+    the wire does not carry walk membership.
     """
 
     open_turn: int | None
     catch_up: bool
     backfill_earlier_turns: bool | None
     player_invalidation_generation: int | None
+    on_walk: bool | None
 
 
 def parse_off_mode_wire(wire: Mapping[str, object]) -> OffModeWireFields:
-    """Read openTurn, catchUp, backfillEarlierTurns, and playerInvalidationGeneration.
+    """Read openTurn, catchUp, backfillEarlierTurns, playerInvalidationGeneration, and onWalk.
 
     A missing field keeps the meaning above. A present field of the wrong JSON
     type is a ``ValidationError``. ``catchUp: true`` without ``openTurn`` is a
@@ -88,11 +93,17 @@ def parse_off_mode_wire(wire: Mapping[str, object]) -> OffModeWireFields:
     else:
         player_invalidation_generation = None
 
+    if ON_WALK_WIRE_FIELD in wire:
+        on_walk = _require_json_bool(wire[ON_WALK_WIRE_FIELD], field=ON_WALK_WIRE_FIELD)
+    else:
+        on_walk = None
+
     return OffModeWireFields(
         open_turn=open_turn,
         catch_up=catch_up,
         backfill_earlier_turns=backfill_earlier_turns,
         player_invalidation_generation=player_invalidation_generation,
+        on_walk=on_walk,
     )
 
 
@@ -106,14 +117,17 @@ def copy_submission_open_fields(
     unset. ``catchUp`` is copied only together with that open turn. A carried
     ``backfillEarlierTurns`` boolean is copied on its own, including when
     backfill is on and the open turn is left off the wire. A carried integer
-    ``playerInvalidationGeneration`` is copied. A missing epoch stays off the
-    payload so persist can reject it.
+    ``playerInvalidationGeneration`` is copied, and so is a carried ``onWalk``
+    boolean. A missing epoch or membership stays off the payload so persist
+    can reject it.
     """
     fields = parse_off_mode_wire(job_wire)
     if fields.backfill_earlier_turns is not None:
         payload[BACKFILL_EARLIER_TURNS_WIRE_FIELD] = fields.backfill_earlier_turns
     if fields.player_invalidation_generation is not None:
         payload[_PLAYER_INVALIDATION_GENERATION_FIELD] = fields.player_invalidation_generation
+    if fields.on_walk is not None:
+        payload[ON_WALK_WIRE_FIELD] = fields.on_walk
     if fields.open_turn is None:
         return
     payload[OPEN_TURN_WIRE_FIELD] = fields.open_turn

@@ -74,7 +74,7 @@ def test_soft_row_defer_delivers_stream_terminal_without_completing_node(sample_
         orchestrator,
         scope,
         state="waiting_deps",
-        result_wire={"runId": run.run_id, "rowComplete": soft_complete},
+        result_wire={"runId": run.run_id, "rowComplete": soft_complete, "onWalk": False},
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)

@@ -204,6 +204,7 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     persistence.put_row(
         GAME_ID,
@@ -217,6 +218,7 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
             is_complete=True,
             solutions=[{"objectiveValue": 1, "actions": []}],
         ),
+        on_walk=False,
     )
 
     scope = InferenceStreamScope(

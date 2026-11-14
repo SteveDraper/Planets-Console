@@ -150,9 +150,10 @@ def test_retire_stale_run_preserves_replacement_scope_mapping(sample_turn) -> No
 
 def test_tier_job_outcome_mapping(sample_turn) -> None:
     run = _register_run(sample_turn)
+    job_wire = {"runId": run.run_id, "onWalk": True}
 
     continue_result = tier_job_outcome_to_step_result(
-        run, TierJobOutcome(enqueue_continuation=True)
+        run, TierJobOutcome(enqueue_continuation=True), job_wire
     )
     assert continue_result.outcome == "continue"
 
@@ -164,9 +165,11 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
                 summary="exact",
             ),
         ),
+        job_wire,
     )
     assert persist_result.outcome == "persist"
     assert persist_result.payload["runId"] == run.run_id
+    assert persist_result.payload["onWalk"] is True
 
     stopped_result = tier_job_outcome_to_step_result(
         run,
@@ -176,11 +179,12 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
                 summary="stopped",
             ),
         ),
+        job_wire,
     )
     # Stopped closes turn evidence when durable -- persist, do not soft-complete.
     assert stopped_result.outcome == "persist"
 
-    empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome())
+    empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome(), job_wire)
     # Empty terminals must not DAG-complete (unlocks fleet with open evidence).
     assert empty_result.outcome == "waiting_deps"
     assert empty_result.wait_recovery is None
@@ -1269,7 +1273,7 @@ def test_scores_persistence_policy_persist_delegates_to_inference_service(
     policy.persist(
         ctx,
         _scores_scope(sample_turn, run.session.player_id),
-        {"runId": run.run_id, "rowComplete": row_complete},
+        {"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
     )
 
     stored = row_persistence.get_row(
@@ -1373,7 +1377,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
             ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE),
         )
         assert submitted_scopes == [scope]
-        result_wire = run_scores_tier_solve({"runId": run.run_id})
+        result_wire = run_scores_tier_solve({"runId": run.run_id, "onWalk": False})
         complete_running_pool_step(orchestrator, scope, result_wire=result_wire)
 
     assert handle.state == "complete", handle.error

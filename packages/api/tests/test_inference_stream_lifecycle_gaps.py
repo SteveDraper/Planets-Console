@@ -129,7 +129,7 @@ def _complete_row_via_scheduler(
     persistence: InferenceRowPersistenceService | None = None,
 ) -> None:
     if persistence is not None:
-        persistence.persist_row_complete(session, row_complete)
+        persistence.persist_row_complete(session, row_complete, on_walk=False)
     session.event_queue.put(row_complete)
     scheduler._finalize_row_run(session)
 
@@ -561,7 +561,7 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
         summary="persisted while multiplex unbound",
         diagnostics=_diagnostics(turn=turn_number, player_id=player_id),
     )
-    persistence.persist_row_complete(session, row_complete)
+    persistence.persist_row_complete(session, row_complete, on_walk=False)
     assert persistence.get_row(628580, 1, turn_number, player_id) is not None
 
     compute_scope = ComputeScope(
@@ -576,7 +576,7 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
             scope=compute_scope,
             state="complete",
             execution_generation=0,
-            result_wire={"runId": run_id, "rowComplete": row_complete},
+            result_wire={"runId": run_id, "rowComplete": row_complete, "onWalk": False},
             error=None,
         ),
     )

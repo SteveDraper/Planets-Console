@@ -145,14 +145,14 @@ def test_on_fleet_snapshot_persisted_clears_scores_host_turn_document(
         solutions=[],
     )
     for host_turn in (110, 111):
-        persistence.put_row(game_id, persp, host_turn, player_id, row)
+        persistence.put_row(game_id, persp, host_turn, player_id, row, on_walk=False)
 
     invalidation.on_fleet_snapshot_persisted(game_id, persp, fleet_turn=110)
 
     assert persistence.get_row(game_id, persp, 111, player_id) is None
     assert persistence.get_row(game_id, persp, 110, player_id) is not None
 
-    persistence.put_row(game_id, persp, 111, player_id, row)
+    persistence.put_row(game_id, persp, 111, player_id, row, on_walk=False)
 
     try:
         scope = InferenceStreamScope(game_id=game_id, perspective=persp, turn_number=111)
@@ -399,6 +399,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
                 is_complete=True,
                 solutions=[],
             ),
+            on_walk=False,
         )
 
     def resolve_fleet_torp_resolution_for_player(

@@ -148,6 +148,7 @@ def seed_fleet_unwind_through(
                     is_complete=True,
                     solutions=[],
                 ),
+                on_walk=False,
             )
         _materialize_fleet_snapshot_chain(
             fleet_services.persistence,

@@ -8,9 +8,10 @@ on-walk, so every node the walk plans, and every hop resubmitted from those
 nodes, carries that membership. Nothing is written for a join or an empty
 plan. A plan that schedules turns establishes that mark and widens
 ``appliesFromTurn`` backward only, before the first persist. A scoreboard
-persist whose producing node is on the walk stamps and does not bump. A
-scoreboard persist that belongs to no in-flight on-walk keeps the ordinary
-bump.
+persist whose producing execution was on the walk stamps and does not bump.
+The scores ``tier_solve`` job wire carries that membership as ``onWalk`` onto
+the persist payload, so it is the membership at admission, not the live
+node's. A scoreboard persist produced off any walk keeps the ordinary bump.
 """
 
 from __future__ import annotations
@@ -26,11 +27,10 @@ from api.analytics.fleet.injected_services import (
     lookup_fleet_compute_services,
 )
 from api.analytics.fleet.types import FleetEvidenceMark
-from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.dag import PlannedComputeNode, earliest_planned_turn
 from api.compute.root_plan import IgnoredRootPlan, RootPlan
 from api.compute.scope import ComputeScope
-from api.compute.submission_open import SubmissionOpen, SubmissionOpenReader
+from api.compute.submission_open import SubmissionOpen
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 
 
@@ -125,30 +125,3 @@ def _on_walk_shell(
             accelerated_ensure_floor(shell.settings, open_turn)
         ),
     )
-
-
-def scoreboard_persist_belongs_to_on_walk(
-    orchestrator: SubmissionOpenReader,
-    *,
-    game_id: int,
-    perspective: int,
-    player_id: int,
-    host_turn: int,
-) -> bool:
-    """Whether this scoreboard persist belongs to an in-flight on-walk.
-
-    The producing scores node carries whether its submission was an on-walk.
-    A node accepted while the setting was off, or by a submission that opened
-    no walk, does not belong to one. A node that has reached a final state is
-    no longer in flight, so a later persist at its scope does not belong to it.
-    """
-    opened = orchestrator.non_terminal_submission_open_for(
-        ComputeScope(
-            analytic_id=SCORES_ANALYTIC_ID,
-            game_id=game_id,
-            perspective=perspective,
-            turn=host_turn,
-            player_id=player_id,
-        )
-    )
-    return opened is not None and opened.on_walk

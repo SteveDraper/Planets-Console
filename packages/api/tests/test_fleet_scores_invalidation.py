@@ -406,7 +406,7 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
     )
 
     # Seed a durable scores row so on_fleet_ledger_persisted would wipe it if not elided.
-    inference_persistence.put_row(
+    inference_persistence.put_row_without_notify(
         628580,
         1,
         112,
@@ -418,7 +418,6 @@ def test_fleet_ledger_persist_skips_reschedule_when_stream_dep_delivers_matching
             is_complete=True,
             solutions=[],
         ),
-        notify=False,
     )
     assert inference_persistence.get_row(628580, 1, 112, 8) is not None
 

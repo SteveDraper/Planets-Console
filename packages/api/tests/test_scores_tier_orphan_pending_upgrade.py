@@ -242,7 +242,7 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(sample_tur
         _outcome_snapshot(
             scope,
             state="complete",
-            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+            result_wire={"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
         ),
     )
     assert get_row_run(run.run_id) is None
@@ -606,13 +606,13 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
         orchestrator,
         scope,
         state="complete",
-        result_wire={"runId": run.run_id, "rowComplete": row_complete},
+        result_wire={"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
     )
     scheduler._on_orchestrator_scope_outcome(
         _outcome_snapshot(
             scope,
             state="complete",
-            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+            result_wire={"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
         ),
     )
 
@@ -683,13 +683,13 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
         orchestrator,
         scope,
         state="complete",
-        result_wire={"runId": solved_run.run_id, "rowComplete": row_complete},
+        result_wire={"runId": solved_run.run_id, "rowComplete": row_complete, "onWalk": False},
     )
     scheduler._on_orchestrator_scope_outcome(
         _outcome_snapshot(
             scope,
             state="complete",
-            result_wire={"runId": solved_run.run_id, "rowComplete": row_complete},
+            result_wire={"runId": solved_run.run_id, "rowComplete": row_complete, "onWalk": False},
         ),
     )
 
@@ -710,7 +710,7 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
         _outcome_snapshot(
             scope,
             state="complete",
-            result_wire={"runId": solved_run.run_id, "rowComplete": row_complete},
+            result_wire={"runId": solved_run.run_id, "rowComplete": row_complete, "onWalk": False},
         ),
     )
     assert not [

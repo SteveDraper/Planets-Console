@@ -809,6 +809,7 @@ def test_persisted_inference_refines_placeholders():
                 }
             ],
         ),
+        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -855,6 +856,7 @@ def test_persisted_inference_refines_freighter_placeholders():
                 }
             ],
         ),
+        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -913,6 +915,7 @@ def test_duplicate_combo_id_keeps_highest_solution_rank_weight():
                 },
             ],
         ),
+        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -969,6 +972,7 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
                 },
             ],
         ),
+        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -1063,6 +1067,7 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
                 }
             ],
         ),
+        on_walk=False,
     )
     services = build_ephemeral_fleet_compute_services(
         turn,
@@ -1121,6 +1126,7 @@ def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
                 }
             ],
         ),
+        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -1235,6 +1241,7 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
             solutions=inference_payload["solutions"],
             diagnostics=inference_payload["diagnostics"],
         ),
+        on_walk=False,
     )
     stored = persistence.get_row(628580, 1, 3, player_id)
     assert stored is not None
@@ -1288,6 +1295,7 @@ def test_accelerated_first_reliable_refines_without_scores_diagnostics():
             diagnostics=None,
             host_turn_targets=host_turn_targets,
         ),
+        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -1337,6 +1345,7 @@ def test_accelerated_window_refine_when_intermediate_scoreboard_turn_missing():
             diagnostics=None,
             host_turn_targets=host_turn_targets,
         ),
+        on_walk=False,
     )
 
     def load_turn(turn_number: int):
