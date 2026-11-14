@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 import sys
 
-from server.process_host.packaged_runtime_probe import run_packaged_runtime_probe
+import pytest
+from api.storage_factory import production_storage_format
+from server.process_host.packaged_runtime_probe import (
+    _scores_solve_json,
+    run_packaged_runtime_probe,
+)
 from server.process_host.runtime import main
 
 
@@ -211,3 +216,45 @@ def test_main_console_package_probe_forwards_scores_solve_tree(tmp_path, monkeyp
 
     assert main() == 0
     assert seen == [tree]
+
+
+class _StubScoresSolveTiming:
+    def to_probe_json(self) -> dict[str, object]:
+        return {"solveInvoked": True}
+
+
+def test_scores_solve_reads_a_data_directory_at_the_production_storage_version(
+    tmp_path, monkeypatch
+):
+    tree = tmp_path / "data"
+    info = tree / "games" / "683364" / "info.json"
+    info.parent.mkdir(parents=True)
+    info.write_text(json.dumps({"name": "probe game"}), encoding="utf-8")
+    version_file = tree / "meta" / "storage-version.json"
+    version_file.parent.mkdir(parents=True)
+    version_file.write_text(
+        json.dumps({"version": production_storage_format().current_version}),
+        encoding="utf-8",
+    )
+    read_infos: list[object] = []
+
+    def time_solve(storage):
+        read_infos.append(storage.get("games/683364/info"))
+        return _StubScoresSolveTiming()
+
+    monkeypatch.setattr(
+        "server.process_host.packaged_runtime_probe.time_scores_tier_solve_jobs",
+        time_solve,
+    )
+
+    assert _scores_solve_json(tree) == {"solveInvoked": True}
+    assert read_infos == [{"name": "probe game"}]
+
+
+def test_scores_solve_refuses_a_missing_tree_without_creating_it(tmp_path):
+    tree = tmp_path / "missing"
+
+    with pytest.raises(FileNotFoundError, match="scores solve tree is not a directory"):
+        _scores_solve_json(tree)
+
+    assert not tree.exists()

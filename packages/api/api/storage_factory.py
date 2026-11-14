@@ -78,22 +78,35 @@ def document_cache_caps_from_config(cfg: ApiConfig) -> DocumentCacheCaps:
     )
 
 
+def open_file_storage(storage_root: Path, *, cache_caps: DocumentCacheCaps) -> StorageBackend:
+    """Open a data directory on disk at ``production_storage_format()``.
+
+    An older supported directory runs its due migrations on open, as it does
+    when the process starts.
+    """
+    return FileStorageBackend(
+        storage_root,
+        cache_caps=cache_caps,
+        storage_format=production_storage_format(),
+    )
+
+
 def get_storage() -> StorageBackend:
     """Return the configured storage backend (cached per process)."""
     global _backend_cache
     if _backend_cache is not None:
         return _backend_cache
     cfg = get_config()
-    storage_format = production_storage_format()
     if cfg.storage_backend == "ephemeral":
         asset_path = Path(cfg.storage_asset_path) if cfg.storage_asset_path else None
         initial = _load_asset(asset_path)
-        _backend_cache = MemoryAssetBackend(initial=initial, storage_format=storage_format)
+        _backend_cache = MemoryAssetBackend(
+            initial=initial, storage_format=production_storage_format()
+        )
     elif cfg.storage_backend == "file":
-        _backend_cache = FileStorageBackend(
+        _backend_cache = open_file_storage(
             Path(cfg.storage_root),
             cache_caps=document_cache_caps_from_config(cfg),
-            storage_format=storage_format,
         )
     else:
         raise ValueError(f"Unknown storage_backend: {cfg.storage_backend!r}")

@@ -22,7 +22,7 @@ from api.storage.file_json_jobs import (
     time_file_json_jobs,
     time_large_document_jobs,
 )
-from api.storage_factory import document_cache_caps_from_config
+from api.storage_factory import document_cache_caps_from_config, open_file_storage
 
 PROBE_FLAG = "--console-package-probe"
 OUTPUT_FLAG = "--output"
@@ -137,10 +137,16 @@ def _probe_document_cache_caps() -> DocumentCacheCaps:
 
 
 def _scores_solve_json(scores_solve_tree: Path | None) -> dict[str, object] | None:
+    """Time one scores ``tier_solve`` on an existing data directory.
+
+    The directory is opened the way the process opens its own data directory.
+    """
     if scores_solve_tree is None:
         return None
+    if not scores_solve_tree.is_dir():
+        raise FileNotFoundError(f"scores solve tree is not a directory: {scores_solve_tree!s}")
     timing = time_scores_tier_solve_jobs(
-        open_probe_file_backend(scores_solve_tree, _probe_document_cache_caps())
+        open_file_storage(scores_solve_tree, cache_caps=_probe_document_cache_caps())
     )
     return timing.to_probe_json()
 

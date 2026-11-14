@@ -44,10 +44,9 @@ from api.services.inference_row_persistence_service import (  # noqa: E402
     InferenceRowPersistenceService,
 )
 from api.storage.base import StorageBackend  # noqa: E402
-from api.storage.file import FileStorageBackend  # noqa: E402
 from api.storage_factory import (  # noqa: E402
     document_cache_caps_from_config,
-    production_storage_format,
+    open_file_storage,
 )
 
 WILDCARD = "*"
@@ -606,10 +605,9 @@ def main(
         typer.echo(f"game storage not found: {game_prefix}", err=True)
         raise typer.Exit(code=2)
 
-    storage = FileStorageBackend(
+    storage = open_file_storage(
         storage_root.resolve(),
         cache_caps=document_cache_caps_from_config(get_config()),
-        storage_format=production_storage_format(),
     )
     result = clear_analytic_persistence(
         storage,
