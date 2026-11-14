@@ -9,8 +9,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, TypeAlias, overload
 
-import yaml
-
 from api.analytics.military_score_inference.aggregate_action_registry import (
     AggregateActionSpec,
     is_pooled_torp_load_prior_key,
@@ -24,6 +22,7 @@ from api.analytics.military_score_inference.hull_category import (
 from api.analytics.military_score_inference.prior_weights_laplace import WILDCARD_COUNT_KEY
 from api.analytics.scores_assets import Scores
 from api.concepts.game_category import GAME_CATEGORY_RULES_VERSION, GameCategory
+from api.serialization.yaml_documents import load_yaml_mapping
 
 ShipLimitBand = Literal["before_ship_limit", "after_ship_limit"]
 
@@ -472,10 +471,7 @@ def load_prior_weights_asset(
     *,
     require_complete_aggregates: bool = True,
 ) -> PriorWeightsAsset:
-    with path.open(encoding="utf-8") as handle:
-        document = yaml.safe_load(handle)
-    if not isinstance(document, dict):
-        raise ValueError(f"prior weights root must be a mapping: {path}")
+    document = load_yaml_mapping(path, document_name="prior weights")
     asset = parse_prior_weights_document(
         document,
         require_complete_aggregates=require_complete_aggregates,

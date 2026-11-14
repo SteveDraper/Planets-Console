@@ -201,6 +201,7 @@ _SLOW_TEST_NAMES = frozenset(
         "test_get_row_upgrades_legacy_v1_split_row_with_write_back",
         "test_get_scores_row_inference_emits_applied_fleet_torp_input_status",
         "test_host2_manifest_runs_tier1_without_coverage_gate",
+        "test_host51_manifest_case_coverage_passes_tier1",
         "test_host_turn_functional_target_persistence_round_trip",
         "test_host_turn_functional_target_wire_round_trip",
         "test_inference_diagnostics_include_policy_ladder_fields",

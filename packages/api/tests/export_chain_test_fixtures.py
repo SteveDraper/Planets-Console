@@ -26,6 +26,7 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.turn_roster import iter_turn_players
+from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.errors import NotFoundError
 from api.serialization.backfill_earlier_turns import (
     backfill_earlier_turns_document,
@@ -121,7 +122,15 @@ def seed_fleet_unwind_through(
     through_turn: int,
     player_id: int | Iterable[int],
 ) -> None:
-    """Persist terminal scores rows and fleet snapshots for turns 1..through_turn-1."""
+    """Persist terminal scores rows and fleet snapshots for turns 1..through_turn-1.
+
+    Every scores row is written first, so one roster gap-fill pass to the last
+    seeded turn writes each player's ledgers once. A player without seeded
+    scores rows never reaches an ensure-final ledger, so a pass per turn would
+    rewrite that player's chain from the floor every time. Turns below the
+    accelerated ensure floor get their own pass, since a pass that starts at the
+    floor does not write them.
+    """
     player_ids = (player_id,) if isinstance(player_id, int) else tuple(player_id)
     fleet_services = ctx.export_services["fleet"]
     if not isinstance(fleet_services, FleetComputeServices):
@@ -131,10 +140,15 @@ def seed_fleet_unwind_through(
     if scores_services.persistence is None:
         raise RuntimeError("seed_fleet_unwind_through requires scores persistence")
 
+    last_seeded_turn = through_turn - 1
+    if last_seeded_turn < 1:
+        return
+    seeded_turns = {}
     for turn_number in range(1, through_turn):
         turn = ctx.load_turn(turn_number)
         if turn is None:
             raise RuntimeError(f"seed_fleet_unwind_through missing stored turn {turn_number}")
+        seeded_turns[turn_number] = turn
         for row_player_id in player_ids:
             scores_services.persistence.put_row(
                 ctx.game_id,
@@ -150,11 +164,15 @@ def seed_fleet_unwind_through(
                 ),
                 on_walk=False,
             )
+
+    floor = accelerated_ensure_floor(seeded_turns[last_seeded_turn].settings, last_seeded_turn)
+    below_floor_turn = floor - 1
+    for gap_fill_turn in sorted({below_floor_turn, last_seeded_turn} - {0}):
         _materialize_fleet_snapshot_chain(
             fleet_services.persistence,
             ctx.game_id,
             ctx.perspective,
-            turn,
+            seeded_turns[gap_fill_turn],
             load_turn=ctx.load_turn,
             inference_materialization=fleet_services.inference_materialization,
         )

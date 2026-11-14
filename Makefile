@@ -43,11 +43,11 @@ test_bff:
 
 test_api:
 	uv sync --extra dev
-	PYTHONPATH=packages/api uv run python -m pytest packages/api/tests -m "not slow"
+	PYTHONPATH=packages/api uv run python -m pytest packages/api/tests -m "not slow" --durations=15
 
 test_api_full:
 	uv sync --extra dev
-	PYTHONPATH=packages/api uv run python -m pytest packages/api/tests
+	PYTHONPATH=packages/api uv run python -m pytest packages/api/tests --durations=15
 
 test_server:
 	uv sync --extra dev
