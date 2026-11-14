@@ -37,10 +37,11 @@ from api.storage.path_utils import deep_copy_value
 from api.storage_factory import (
     clear_backend_cache,
     get_storage,
+    open_file_storage,
     production_migrations,
     production_storage_format,
 )
-from tests.file_storage_helpers import open_file_storage_backend
+from tests.file_storage_helpers import DEFAULT_DOCUMENT_CACHE_CAPS, open_file_storage_backend
 from tests.fleet_fixtures import legacy_fleet_players_document
 
 _BACKEND_METHODS = frozenset({"get", "put", "delete", "list"})
@@ -653,6 +654,25 @@ def test_get_storage_file_open_runs_fleet_migration(tmp_path):
     finally:
         clear_backend_cache()
         set_config(previous)
+
+
+def test_open_file_storage_opens_a_directory_at_the_production_version(tmp_path):
+    """The default format refuses this directory; the production opener reads it in place."""
+    root = tmp_path / "data"
+    info = root / "games" / "1" / "info.json"
+    info.parent.mkdir(parents=True)
+    info.write_text(json.dumps({"name": "keep"}), encoding="utf-8")
+    version_file = root / "meta" / "storage-version.json"
+    version_file.parent.mkdir(parents=True)
+    current = {"version": production_storage_format().current_version}
+    version_file.write_text(json.dumps(current), encoding="utf-8")
+    with pytest.raises(UnhandledFormatError):
+        open_file_storage_backend(root)
+
+    backend = open_file_storage(root, cache_caps=DEFAULT_DOCUMENT_CACHE_CAPS)
+
+    assert backend.get("games/1/info") == {"name": "keep"}
+    assert json.loads(version_file.read_text(encoding="utf-8")) == current
 
 
 def test_production_open_splits_shared_scores_document(tmp_path):
