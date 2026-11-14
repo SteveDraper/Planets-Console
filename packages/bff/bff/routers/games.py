@@ -190,9 +190,11 @@ def post_backfill_walks_stop(
 ) -> Response:
     """Stop every accepted walk in a game the shell left. 204 for any game id.
 
-    The stop's queued compute work runs after the response.
+    The stop settles before the response. Only the drain of the compute work
+    it queued runs after the response, as a background task.
     """
-    background_tasks.add_task(core.stop_backfill_walks(game_id))
+    drain = core.stop_backfill_walks(game_id)
+    background_tasks.add_task(drain)
     return Response(status_code=204)
 
 
