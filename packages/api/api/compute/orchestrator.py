@@ -14,7 +14,11 @@ from api.compute.in_flight_settle import InFlightWork, PlayerWork
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_ensure import OrchestratorEnsureMixin
 from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
-from api.compute.orchestrator_observers import OrchestratorObservers, PoolItemIgnoredKind
+from api.compute.orchestrator_observers import (
+    OrchestratorObservers,
+    PoolItemIgnoredKind,
+    PoolItemIgnoredReason,
+)
 from api.compute.orchestrator_settle import OrchestratorSettleMixin
 from api.compute.orchestrator_state import (
     TERMINAL_NODE_STATES,
@@ -304,25 +308,26 @@ class ComputeOrchestrator(
         A pool item is bound to the execution that dispatched it. When that
         execution of ``scope`` is no longer running (aborted, or replaced by a
         newer execution), or the start-or-requeue gate ends it here, the item
-        is dropped: this records ``pool_item_dropped`` and returns False. A
-        worker asks at the pick and, for a thread step, again after building
-        the wire, since the execution can end during the build.
-        :meth:`complete_pool_step` checks the binding once more, since the
-        execution can end while the step runs.
+        is dropped: this records ``pool_item_dropped``, whose reason tells the
+        two apart, and returns False. A worker asks at the pick and, for a
+        thread step, again after building the wire, since the execution can
+        end during the build. :meth:`complete_pool_step` checks the binding
+        once more, since the execution can end while the step runs.
         """
         with self._condition:
             node = self._nodes.get(scope)
-            if (
-                node is not None
-                and node.is_running_execution(execution_generation)
-                and not self._refuse_step_exit(node, StepExit.START)
-            ):
+            if node is None or not node.is_running_execution(execution_generation):
+                reason = _unbound_pool_item_reason(node, execution_generation)
+            elif self._refuse_step_exit(node, StepExit.START):
+                reason = PoolItemIgnoredReason.START_REFUSED
+            else:
                 return True
             self._notify_pool_item_ignored(
                 "pool_item_dropped",
                 scope,
                 node,
                 execution_generation,
+                reason,
                 step_kind=step_kind,
                 step_index=step_index,
                 had_error=False,
@@ -371,6 +376,7 @@ class ComputeOrchestrator(
                     scope,
                     node,
                     execution_generation,
+                    _unbound_pool_item_reason(node, execution_generation),
                     step_kind=step_kind,
                     step_index=step_index,
                     had_error=error is not None,
@@ -407,29 +413,27 @@ class ComputeOrchestrator(
         scope: ComputeScope,
         node: ComputeNodeRun | None,
         execution_generation: int,
+        reason: PoolItemIgnoredReason,
         *,
         step_kind: str | None,
         step_index: int | None,
         had_error: bool,
     ) -> None:
-        """Record a pool item left unapplied because its execution is not running.
+        """Record a pool item left unapplied, for ``reason``.
 
         Caller holds the orchestrator lock. ``execution_generation`` /
         ``step_kind`` / ``step_index`` name the pool item, which may differ from
-        the node's current execution and step.
+        the node's current execution and step. ``runningStep`` is the node's
+        running-step disposition, which names what a settle asked of a
+        ``START_REFUSED`` execution.
         """
-        if node is None:
-            detail: dict[str, object] = {"reason": "missing_node"}
-        else:
-            detail = {
-                "reason": (
-                    "node_not_running"
-                    if node.execution_generation == execution_generation
-                    else "stale_execution"
-                ),
+        detail: dict[str, object] = {"reason": reason}
+        if node is not None:
+            detail |= {
                 "priorState": node.state,
                 "priorStepIndex": node.step_index,
                 "priorProfileStepIndex": node.profile_step_index,
+                "runningStep": node.running_step.name.lower(),
             }
         self._observers.notify_lifecycle(
             kind,
@@ -697,3 +701,17 @@ class ComputeOrchestrator(
         return any(
             node.state in {"waiting_deps", "ready", "running"} for node in self._nodes.values()
         )
+
+
+def _unbound_pool_item_reason(
+    node: ComputeNodeRun | None, execution_generation: int
+) -> PoolItemIgnoredReason:
+    """Why a pool item's execution ``execution_generation`` is no longer running on ``node``.
+
+    The caller has found that it is not running.
+    """
+    if node is None:
+        return PoolItemIgnoredReason.MISSING_NODE
+    if node.execution_generation == execution_generation:
+        return PoolItemIgnoredReason.NODE_NOT_RUNNING
+    return PoolItemIgnoredReason.STALE_EXECUTION

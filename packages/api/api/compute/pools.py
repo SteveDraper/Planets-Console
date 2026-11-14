@@ -50,8 +50,9 @@ class ThreadStepWork:
 
     The orchestrator snapshots ``job_wire_kwargs`` under its lock at dispatch.
     The pool worker builds the job wire from that snapshot, checks again that
-    the execution which dispatched the step is still running, and only then
-    runs the step, as the inline path re-checks after its own wire build.
+    the execution which dispatched the step is still running and that the
+    start-or-requeue gate permits the step, and only then runs the step, as
+    the inline path re-checks after its own wire build.
     """
 
     backend: ClassVar[Literal["thread"]] = "thread"
@@ -181,7 +182,10 @@ def pick_next_work_item(candidates: Iterable[BandedWorkItem]) -> BandedWorkItem 
 
 
 def _begin_pool_step(orchestrator: ComputeOrchestrator, item: PoolWorkItem) -> bool:
-    """Ask ``orchestrator`` whether ``item``'s execution may run its step now."""
+    """Ask ``orchestrator`` whether ``item``'s execution may run its step now.
+
+    False means the orchestrator dropped the item and recorded why.
+    """
     return orchestrator.begin_pool_step(
         item.scope,
         item.execution_generation,
@@ -508,11 +512,13 @@ class ComputeWorkerPool:
             return self._orchestrators.get(orchestrator_id)
 
     def _execute_item(self, picked: BandedWorkItem) -> None:
-        """Run one dequeued item, or drop it when its execution is no longer running.
+        """Run one dequeued item, or drop it when its step may not start.
 
         The item's orchestrator first confirms that the execution which
-        dispatched the item is still running (``begin_pool_step``). A stale
-        item finishes here without running its step.
+        dispatched the item is still running and that the start-or-requeue
+        gate permits the step (``begin_pool_step``). Otherwise the
+        orchestrator records ``pool_item_dropped`` with its typed reason, and
+        the item finishes here without running its step.
 
         ``ThreadStepWork`` builds its wire and runs synchronously on the pool
         worker, and confirms the execution again between the two
@@ -562,12 +568,14 @@ class ComputeWorkerPool:
         item: PoolWorkItem,
         work: ThreadStepWork,
     ) -> None:
-        """Build the step's wire on this worker, then run it if its execution still runs.
+        """Build the step's wire on this worker, then run it if its step may still start.
 
-        The execution can end while the wire builds (an abort or a replace).
-        ``begin_pool_step`` is asked again after the build, so a stale item is
-        dropped there exactly as at the pick, and never runs its step. A wire
-        build that raises fails the step through ``complete_pool_step``.
+        While the wire builds, the execution can end (an abort or a replace),
+        or a settle can raise its running-step disposition so that the
+        start-or-requeue gate refuses the step. ``begin_pool_step`` is asked
+        again after the build, so such an item is dropped there exactly as at
+        the pick, with its typed reason, and never runs its step. A wire build
+        that raises fails the step through ``complete_pool_step``.
         """
         try:
             job_wire = work.job_wire_for(item.scope)

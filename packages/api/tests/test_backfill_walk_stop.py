@@ -16,7 +16,7 @@ write.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 
 import pytest
@@ -31,6 +31,7 @@ from api.analytics.scores.tier_row_run_registry import get_persist_admission, ge
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeHandle, ComputeOrchestrator, ComputeRequest
+from api.compute.orchestrator_observers import PoolItemIgnoredReason
 from api.compute.orchestrator_state import ComputeNodeRun, NodeState
 from api.compute.pools import PoolWorkItem
 from api.compute.running_step import RunningStepDisposition
@@ -164,6 +165,26 @@ def _lifecycle_kinds(orchestrator: ComputeOrchestrator) -> list[str]:
     return kinds
 
 
+def _dropped_item_details(orchestrator: ComputeOrchestrator) -> list[Mapping[str, object]]:
+    """The detail of each ``pool_item_dropped`` record from now on."""
+    details: list[Mapping[str, object]] = []
+
+    def record(kind, _scope, _node, _generation, _step_kind, _step_index, detail) -> None:
+        if kind == "pool_item_dropped":
+            details.append(detail)
+
+    orchestrator.observers.register_lifecycle_listener(record)
+    return details
+
+
+def _assert_dropped_by_the_start_gate(
+    details: list[Mapping[str, object]], running_step: RunningStepDisposition
+) -> None:
+    (detail,) = details
+    assert detail["reason"] == PoolItemIgnoredReason.START_REFUSED
+    assert detail["runningStep"] == running_step.name.lower()
+
+
 def _non_terminal_walk_scopes(orchestrator: ComputeOrchestrator, game_id: int) -> set:
     return {
         scope
@@ -184,7 +205,7 @@ def test_a_stop_aborts_unstarted_hops_in_every_perspective_and_drops_queued_ones
     walk.submit_shell()
     other_perspective = _plant(walk, perspective_offset=1, on_walk=True)
     other_game = _plant(walk, game_offset=1, on_walk=True)
-    kinds = _lifecycle_kinds(walk.orchestrator)
+    dropped = _dropped_item_details(walk.orchestrator)
 
     _stop(walk.orchestrator, walk.ctx.game_id)
 
@@ -199,7 +220,7 @@ def test_a_stop_aborts_unstarted_hops_in_every_perspective_and_drops_queued_ones
     assert not _begin(walk, _take_queued_item(walk))
 
     _assert_aborted(queued)
-    assert "pool_item_dropped" in kinds
+    _assert_dropped_by_the_start_gate(dropped, RunningStepDisposition.END_AFTER_STEP)
     assert _non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id) == set()
 
 
@@ -218,11 +239,13 @@ def test_a_bump_discarded_step_not_yet_picked_fails_at_the_pick_as_before(walk):
     walk.orchestrator.drain_post_lock_callbacks()
     queued = _node(walk, 3)
     assert queued.running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
+    dropped = _dropped_item_details(walk.orchestrator)
 
     assert not _begin(walk, _take_queued_item(walk))
 
     assert queued.state == "failed"
     assert isinstance(queued.error, DiscardedWorkRefused)
+    _assert_dropped_by_the_start_gate(dropped, RunningStepDisposition.FINISH_WITHOUT_STAMP)
 
 
 # --- T2: a picked fleet step ends at its next start or requeue, and submits nothing ---

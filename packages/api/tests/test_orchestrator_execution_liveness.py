@@ -5,8 +5,8 @@ execution as its requester. The orchestrator refuses it, planning nothing,
 once that execution has ended, including when it ends while the submit
 fetches its dependency chain. Each refusal records one
 ``dependency_submit_refused`` lifecycle event on the requester's execution.
-A thread pool step whose execution ends while its wire builds is dropped
-before it runs.
+A thread pool step whose execution ends while its wire builds, or whose
+start-or-requeue gate refuses it then, is dropped before it runs.
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ from api.compute import (
     build_compute_registry,
 )
 from api.compute.errors import ComputeScopeAbortedError
-from api.compute.orchestrator_observers import POOL_ITEM_IGNORED_KINDS
+from api.compute.in_flight_settle import GameWork, RunningDisposition
+from api.compute.orchestrator_observers import POOL_ITEM_IGNORED_KINDS, PoolItemIgnoredReason
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.scope import format_compute_scope_key
@@ -53,6 +54,7 @@ from tests.test_compute_pools import (
     _catalog_entry,
     _scope_for_player,
 )
+from tests.test_orchestrator_settle import _StopEverything
 
 _ABORT = ComputeScopeAbortedError("requester cancelled")
 
@@ -362,6 +364,25 @@ def test_t12_a_thread_step_whose_execution_ends_while_its_wire_builds_never_runs
     assert harness.run_step_calls == 0
     assert harness.node().error is _ABORT
     assert harness.ignored == [("pool_item_dropped", "node_not_running")]
+    assert len(harness.finished_items) == 1
+
+
+def test_a_thread_step_its_start_gate_refuses_while_its_wire_builds_never_runs(
+    make_thread_harness,
+):
+    def stop_during_build() -> None:
+        harness.orchestrator.settle_in_flight_work(
+            GameWork(game_id=harness.scope.game_id, analytic_ids=frozenset({_ANALYTIC_ID})),
+            _StopEverything(RunningDisposition.END_AFTER_STEP),
+        )
+
+    harness = make_thread_harness(stop_during_build)
+
+    harness.submit_and_run_picked_step()
+
+    assert harness.run_step_calls == 0
+    assert isinstance(harness.node().error, ComputeScopeAbortedError)
+    assert harness.ignored == [("pool_item_dropped", PoolItemIgnoredReason.START_REFUSED)]
     assert len(harness.finished_items) == 1
 
 
