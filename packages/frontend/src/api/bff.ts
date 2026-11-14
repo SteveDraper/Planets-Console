@@ -1,5 +1,6 @@
 import { turnUsernamesByPlayerIdFromPayload } from '../lib/turnPlayerUsernames'
 import { turnRelationsFromPayload, type TurnRelationEdge } from '../lib/turnRelations'
+import { pendingBackfillWalkStop } from '../lib/backfillWalkStop'
 
 import type { AnalyticFreshness } from '../analytics/analyticFreshness'
 import {
@@ -49,8 +50,7 @@ import {
   throwBffHttpErrorFromResponse,
   withEndpointIfGeneric,
 } from './bffHttpError'
-
-const BFF_BASE = '' // proxy in dev: /bff -> backend
+import { sendBffRequest, type BffRequestTarget } from './bffSend'
 
 export {
   BffHttpError,
@@ -99,79 +99,19 @@ export type {
 export { isStellarCartographySampleLayerId } from './bffCartographyTypes'
 export { normalizeMapDataResponse } from './normalizeMapDataResponse'
 
-/** When set in `sessionStorage`, all `/bff/...` requests get `?includeDiagnostics=true` (or `&...`). */
-export const INCLUDE_DIAGNOSTICS_SESSION_KEY = 'planetsConsole.includeDiagnostics' as const
-
-export function isIncludeDiagnosticsSessionEnabled(): boolean {
-  if (typeof sessionStorage === 'undefined') {
-    return false
-  }
-  return sessionStorage.getItem(INCLUDE_DIAGNOSTICS_SESSION_KEY) === '1'
-}
-
-export function setIncludeDiagnosticsSessionEnabled(enabled: boolean): void {
-  if (typeof sessionStorage === 'undefined') {
-    return
-  }
-  if (enabled) {
-    sessionStorage.setItem(INCLUDE_DIAGNOSTICS_SESSION_KEY, '1')
-  } else {
-    sessionStorage.removeItem(INCLUDE_DIAGNOSTICS_SESSION_KEY)
-  }
-}
-
-function appendIncludeDiagnosticsQuery(path: string): string {
-  if (!path.startsWith('/bff/')) {
-    return path
-  }
-  if (!isIncludeDiagnosticsSessionEnabled()) {
-    return path
-  }
-  if (/[?&]includeDiagnostics=/.test(path)) {
-    return path
-  }
-  const sep = path.includes('?') ? '&' : '?'
-  return `${path}${sep}includeDiagnostics=true`
-}
-
 /**
- * When `fetch` rejects (no HTTP response), browsers often set only a generic
- * "Failed to fetch" / "Load failed" message. This keeps the original text but
- * adds method+path, the request URL path, and `cause` when present.
+ * Send a BFF request. A request naming game G first waits for G's pending Backfill walk stop, so
+ * the stop reaches the server before any later request for G can submit compute.
  */
-export function toFetchRejectionError(
-  err: unknown,
-  endpointLabel: string,
-  attemptedPath: string
-): Error {
-  const name = err instanceof Error ? err.name : 'Error'
-  const message = err instanceof Error ? err.message : String(err)
-  let cause = ''
-  if (err instanceof Error && 'cause' in err) {
-    const c = (err as Error & { cause?: unknown }).cause
-    if (c != null) {
-      cause = `; cause: ${String(c)}`
-    }
-  }
-  return new Error(
-    `${name}: ${message} — ${endpointLabel} (request: ${attemptedPath}). ` +
-      `No HTTP response${cause}. ` +
-      `Check BFF is running, the dev proxy targets it, and there is no CORS or connection problem.`
-  )
-}
-
 export async function bffRequest(
-  path: string,
+  target: BffRequestTarget,
   init: RequestInit | undefined,
   endpointLabel: string
 ): Promise<Response> {
-  const requestPath = appendIncludeDiagnosticsQuery(path)
-  const url = `${BFF_BASE}${requestPath}`
-  try {
-    return await fetch(url, init)
-  } catch (e) {
-    throw toFetchRejectionError(e, endpointLabel, requestPath)
+  if (target.gameId != null) {
+    await pendingBackfillWalkStop(target.gameId)
   }
+  return sendBffRequest(target.path, init, endpointLabel)
 }
 
 /** True when a BFF fetch failed because the requested store path does not exist (HTTP 404). */
@@ -298,7 +238,7 @@ export type GamesListResponse = {
 export async function fetchGames(): Promise<GamesListResponse> {
   const path = '/bff/games'
   const endpointLabel = 'GET /bff/games'
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId: null }, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -333,7 +273,7 @@ export type ShellBootstrapResponse = {
 export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {
   const path = '/bff/shell/bootstrap'
   const endpointLabel = 'GET /bff/shell/bootstrap'
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId: null }, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -344,7 +284,7 @@ export async function fetchShellBootstrap(): Promise<ShellBootstrapResponse> {
 export async function fetchStoredGameInfo(gameId: string): Promise<GameInfoResponse> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/info`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId }, undefined, endpointLabel)
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -368,7 +308,7 @@ export async function fetchBackfillEarlierTurns(
 ): Promise<BackfillEarlierTurnsBody> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/backfill-earlier-turns`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId }, undefined, endpointLabel)
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
@@ -383,7 +323,7 @@ export async function putBackfillEarlierTurns(
   const path = `/bff/games/${encodeURIComponent(gameId)}/backfill-earlier-turns`
   const endpointLabel = `PUT ${path}`
   const r = await bffRequest(
-    path,
+    { path, gameId },
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -408,7 +348,7 @@ export async function fetchStoredTurnPerspectives(
 ): Promise<StoredTurnPerspectivesResponse> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/turns/${encodeURIComponent(String(turn))}/stored-perspectives`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId }, undefined, endpointLabel)
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -436,7 +376,7 @@ export async function fetchViewpointEligibility(
   const params = new URLSearchParams({ username })
   const path = `/bff/games/${encodeURIComponent(gameId)}/viewpoint-eligibility?${params}`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId }, undefined, endpointLabel)
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
@@ -449,7 +389,7 @@ export type LeagueTeamsResponse = components['schemas']['LeagueTeamsResponse']
 export async function fetchLeagueTeams(gameId: string): Promise<LeagueTeamsResponse> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/league-teams`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId }, undefined, endpointLabel)
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
@@ -465,7 +405,7 @@ export async function fetchTerritoryMovie(
 ): Promise<TerritoryMovieResponse> {
   const path = `/bff/games/${encodeURIComponent(gameId)}/${encodeURIComponent(String(perspective))}/territory-movie`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId }, undefined, endpointLabel)
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
@@ -480,7 +420,7 @@ export async function publishTerritoryMoviePage(html: string): Promise<Territory
   const path = '/bff/territory-movie-pages'
   const endpointLabel = `POST ${path}`
   const r = await bffRequest(
-    path,
+    { path, gameId: null },
     {
       method: 'POST',
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -499,7 +439,7 @@ export async function discardTerritoryMoviePage(pageId: string): Promise<void> {
   const path = `/bff/territory-movie-pages/${encodeURIComponent(pageId)}`
   const endpointLabel = `DELETE ${path}`
   try {
-    const r = await bffRequest(path, { method: 'DELETE' }, endpointLabel)
+    const r = await bffRequest({ path, gameId: null }, { method: 'DELETE' }, endpointLabel)
     if (!r.ok && r.status !== 404) {
       await throwBffHttpErrorFromResponse(r, endpointLabel)
     }
@@ -531,7 +471,7 @@ export async function loadAllTurnsWithProgress(
   const path = `/bff/games/${encodeURIComponent(gameId)}/turns/load-all/stream`
   const endpointLabel = `POST ${path}`
   const r = await bffRequest(
-    path,
+    { path, gameId },
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -584,7 +524,7 @@ export async function fetchLoadAllTurnsStatus(
   const qs = params.toString()
   const path = `/bff/games/${encodeURIComponent(gameId)}/turns/load-all-status${qs ? `?${qs}` : ''}`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId }, undefined, endpointLabel)
   if (!r.ok) {
     let detail = r.statusText
     try {
@@ -629,7 +569,7 @@ export async function ensureTurnData(
   const path = `/bff/games/${encodeURIComponent(gameId)}/turns/ensure`
   const endpointLabel = `POST ${path}`
   const r = await bffRequest(
-    path,
+    { path, gameId },
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -669,7 +609,7 @@ export async function refreshGameInfo(
   const path = `/bff/games/${encodeURIComponent(gameId)}/info`
   const endpointLabel = `POST ${path}`
   const r = await bffRequest(
-    path,
+    { path, gameId },
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -686,7 +626,7 @@ export async function refreshGameInfo(
 export async function fetchAnalytics(): Promise<AnalyticsListResponse> {
   const path = '/bff/analytics'
   const endpointLabel = 'GET /bff/analytics'
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId: null }, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -735,7 +675,11 @@ export async function fetchAnalyticTable(
   }
   const qs = `?${params.toString()}`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    undefined,
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -751,7 +695,11 @@ export async function fetchScoresRowInference(
   params.set('playerId', String(playerId))
   const qs = `?${params.toString()}`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    undefined,
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -792,7 +740,11 @@ export async function fetchInferenceHullCatalogMask(
   params.set('playerId', String(playerId))
   const qs = `?${params.toString()}`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    undefined,
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -810,7 +762,7 @@ export async function putInferenceHullCatalogMask(
   const qs = `?${params.toString()}`
   const endpointLabel = `PUT ${path}`
   const r = await bffRequest(
-    `${path}${qs}`,
+    { path: `${path}${qs}`, gameId: scope.gameId },
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -833,7 +785,11 @@ export async function resetInferenceHullCatalogMask(
   params.set('playerId', String(playerId))
   const qs = `?${params.toString()}`
   const endpointLabel = `DELETE ${path}`
-  const r = await bffRequest(`${path}${qs}`, { method: 'DELETE' }, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    { method: 'DELETE' },
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -861,7 +817,11 @@ export async function fetchInferenceGlobalPauseStatus(
   const path = '/bff/analytics/scores/inference/global-pause'
   const qs = `?${analyticScopeParams(scope).toString()}`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    undefined,
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -874,7 +834,11 @@ export async function pauseInferenceGlobally(
   const path = '/bff/analytics/scores/inference/global-pause'
   const qs = `?${analyticScopeParams(scope).toString()}`
   const endpointLabel = `POST ${path}`
-  const r = await bffRequest(`${path}${qs}`, { method: 'POST' }, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    { method: 'POST' },
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -887,7 +851,11 @@ export async function resumeInferenceGlobally(
   const path = '/bff/analytics/scores/inference/global-pause'
   const qs = `?${analyticScopeParams(scope).toString()}`
   const endpointLabel = `DELETE ${path}`
-  const r = await bffRequest(`${path}${qs}`, { method: 'DELETE' }, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    { method: 'DELETE' },
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -900,7 +868,11 @@ export async function fetchScoresInferenceRecompute(
   const path = '/bff/analytics/scores/inference/recompute'
   const qs = `?${analyticScopeParams(scope).toString()}`
   const endpointLabel = `POST ${path}`
-  const r = await bffRequest(`${path}${qs}`, { method: 'POST' }, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    { method: 'POST' },
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -921,7 +893,7 @@ export async function fetchScoresTableInferenceStream(
   await fetchAnalyticTableNdjsonStream(
     bffRequest,
     withEndpointIfGeneric,
-    path,
+    { path, gameId: scope.gameId },
     params,
     parseInferenceStreamEvent,
     handlers
@@ -942,7 +914,7 @@ export async function fetchFleetTableStream(
   await fetchAnalyticTableNdjsonStream(
     bffRequest,
     withEndpointIfGeneric,
-    path,
+    { path, gameId: scope.gameId },
     params,
     parseFleetTableStreamEvent,
     handlers
@@ -955,7 +927,11 @@ export async function fetchFleetComponentCatalog(
   const path = '/bff/analytics/fleet/component-catalog'
   const qs = `?${analyticScopeParams(scope).toString()}`
   const endpointLabel = `GET ${path}`
-  const response = await bffRequest(`${path}${qs}`, undefined, endpointLabel)
+  const response = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    undefined,
+    endpointLabel
+  )
   if (!response.ok) {
     throw new Error(withEndpointIfGeneric(String(response.status), endpointLabel))
   }
@@ -974,7 +950,11 @@ export async function fetchAnalyticMap(
   const path = `/bff/analytics/${encodeURIComponent(analyticId)}/map`
   const qs = analyticMapQueryString(scope, analyticId)
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(`${path}${qs}`, { cache: 'no-store' }, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    { cache: 'no-store' },
+    endpointLabel
+  )
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
@@ -990,7 +970,11 @@ export async function fetchStellarCartographySample(
   const path = `/bff/games/${encodeURIComponent(scope.gameId)}/${scope.perspective}/turns/${scope.turn}/concepts/stellar-cartography/sample`
   const params = new URLSearchParams({ x: String(x), y: String(y) })
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(`${path}?${params.toString()}`, { cache: 'no-store' }, endpointLabel)
+  const r = await bffRequest(
+    { path: `${path}?${params.toString()}`, gameId: scope.gameId },
+    { cache: 'no-store' },
+    endpointLabel
+  )
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -1002,7 +986,7 @@ export async function fetchStellarCartographyTurnSummary(
 ): Promise<StellarCartographyTurnSummaryResponse> {
   const path = `/bff/games/${encodeURIComponent(scope.gameId)}/${scope.perspective}/turns/${scope.turn}/concepts/stellar-cartography/summary`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, { cache: 'no-store' }, endpointLabel)
+  const r = await bffRequest({ path, gameId: scope.gameId }, { cache: 'no-store' }, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -1058,7 +1042,7 @@ export async function fetchDiagnosticsRecent(): Promise<DiagnosticsRecentRespons
   for (const [path, label] of attempts) {
     let r: Response
     try {
-      r = await bffRequest(path, undefined, label)
+      r = await bffRequest({ path, gameId: null }, undefined, label)
     } catch (e) {
       lastNetworkError = e instanceof Error ? e : new Error(String(e))
       continue

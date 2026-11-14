@@ -118,7 +118,7 @@ export async function fetchComputeDiagnosticsFreezeStatus(
 ): Promise<ComputeDiagnosticsFreezeStatusResponse> {
   const path = `/bff/diagnostics/compute/freeze-status?${computeDiagnosticsQuery(scope)}`
   const endpointLabel = 'GET /bff/diagnostics/compute/freeze-status'
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId: scope.gameId }, undefined, endpointLabel)
   if (!r.ok) {
     throw new Error(withEndpointIfGeneric(String(r.status), endpointLabel))
   }
@@ -139,7 +139,7 @@ export async function fetchComputeDiagnosticsSnapshot(
 ): Promise<ComputeDiagnosticsSnapshotResponse> {
   const path = `/bff/diagnostics/compute/snapshot?${computeDiagnosticsQuery(scope)}`
   const endpointLabel = 'GET /bff/diagnostics/compute/snapshot'
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId: scope.gameId }, undefined, endpointLabel)
   return readSnapshotResponse(r, endpointLabel)
 }
 
@@ -166,7 +166,7 @@ export async function putComputeDiagnosticsFreeze(
   const path = '/bff/diagnostics/compute/freeze'
   const endpointLabel = 'PUT /bff/diagnostics/compute/freeze'
   const r = await bffRequest(
-    path,
+    { path, gameId: scope.gameId },
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -189,7 +189,7 @@ export async function putComputeDiagnosticsAllowlist(
   const path = '/bff/diagnostics/compute/allowlist'
   const endpointLabel = 'PUT /bff/diagnostics/compute/allowlist'
   const r = await bffRequest(
-    path,
+    { path, gameId: scope.gameId },
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -211,7 +211,7 @@ export async function postComputeDiagnosticsSingleStep(
   const path = '/bff/diagnostics/compute/single-step'
   const endpointLabel = 'POST /bff/diagnostics/compute/single-step'
   const r = await bffRequest(
-    path,
+    { path, gameId: scope.gameId },
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

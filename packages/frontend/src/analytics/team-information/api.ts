@@ -40,7 +40,7 @@ export async function fetchTeamInformationMap(
   const path = `/bff/analytics/${encodeURIComponent(TEAM_INFORMATION_ANALYTIC_ID)}/map`
   const endpointLabel = `GET ${path}`
   const response = await bffRequest(
-    `${path}${teamInformationScopeQuery(scope)}`,
+    { path: `${path}${teamInformationScopeQuery(scope)}`, gameId: scope.gameId },
     { cache: 'no-store' },
     endpointLabel
   )

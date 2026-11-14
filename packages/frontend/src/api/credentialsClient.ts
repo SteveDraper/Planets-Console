@@ -6,7 +6,7 @@ export async function probeCredentials(username: string): Promise<boolean> {
   const trimmed = username.trim()
   const path = `/bff/credentials/probe?username=${encodeURIComponent(trimmed)}`
   const endpointLabel = `GET ${path}`
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId: null }, undefined, endpointLabel)
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
@@ -19,7 +19,7 @@ export async function exchangeCredentials(username: string, password: string): P
   const path = '/bff/credentials/exchange'
   const endpointLabel = `POST ${path}`
   const r = await bffRequest(
-    path,
+    { path, gameId: null },
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -37,7 +37,7 @@ export async function dropCredentials(username: string): Promise<void> {
   const trimmed = username.trim()
   const path = `/bff/credentials/${encodeURIComponent(trimmed)}`
   const endpointLabel = `DELETE ${path}`
-  const r = await bffRequest(path, { method: 'DELETE' }, endpointLabel)
+  const r = await bffRequest({ path, gameId: null }, { method: 'DELETE' }, endpointLabel)
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }

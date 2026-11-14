@@ -1,76 +1,69 @@
-import { describe, expect, it, vi } from 'vitest'
-import { postBackfillWalksStop } from '../api/backfillWalksClient'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fetchFleetTableStream } from '../api/bff'
 import { connectAnalyticTableStream } from './analyticTableStreamConnect'
 import { requestBackfillWalkStop } from './backfillWalkStop'
-import { deferredStopResponse, flushMicrotasks } from './backfillWalkStopTestFixtures'
-
-vi.mock('../api/backfillWalksClient', () => ({
-  postBackfillWalksStop: vi.fn(),
-}))
-
-const postStop = vi.mocked(postBackfillWalksStop)
+import {
+  flushMicrotasks,
+  stubFetchHoldingBackfillWalkStops,
+} from './backfillWalkStopTestFixtures'
 
 const scope = { gameId: '100', turn: 12, perspective: 1 }
 
-function heldStop(): () => void {
-  const response = deferredStopResponse()
-  postStop.mockReturnValueOnce(response.promise)
-  return response.resolve
+function connectFleetTableStream(signal: AbortSignal) {
+  return connectAnalyticTableStream(scope, [8], {
+    fetchStream: fetchFleetTableStream,
+    signal,
+    onEvent: () => {},
+  })
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('connectAnalyticTableStream', () => {
   it('waits for a pending stop for its game before connecting', async () => {
-    const releaseStop = heldStop()
-    const fetchStream = vi.fn(async () => {})
-    void requestBackfillWalkStop(scope.gameId)
+    const { releaseStops, requestUrls } = stubFetchHoldingBackfillWalkStops('')
+    const stop = requestBackfillWalkStop(scope.gameId)
 
-    const connect = connectAnalyticTableStream(scope, [8], {
-      fetchStream,
-      signal: new AbortController().signal,
-      onEvent: () => {},
-    })
+    const connect = connectFleetTableStream(new AbortController().signal)
     await flushMicrotasks()
-    expect(fetchStream).not.toHaveBeenCalled()
+    expect(requestUrls()).toEqual([])
 
-    releaseStop()
+    releaseStops()
+    await stop
 
     await expect(connect).resolves.toBe('ok')
-    expect(fetchStream).toHaveBeenCalledTimes(1)
+    expect(requestUrls()).toHaveLength(1)
   })
 
   it('does not wait for a stop pending for another game', async () => {
-    const releaseStop = heldStop()
-    const fetchStream = vi.fn(async () => {})
+    const { releaseStops, requestUrls } = stubFetchHoldingBackfillWalkStops('')
     const otherGameStop = requestBackfillWalkStop('200')
 
-    await expect(
-      connectAnalyticTableStream(scope, [8], {
-        fetchStream,
-        signal: new AbortController().signal,
-        onEvent: () => {},
-      })
-    ).resolves.toBe('ok')
-    expect(fetchStream).toHaveBeenCalledTimes(1)
+    await expect(connectFleetTableStream(new AbortController().signal)).resolves.toBe('ok')
+    expect(requestUrls()).toHaveLength(1)
 
-    releaseStop()
+    releaseStops()
     await otherGameStop
   })
 
-  it('does not connect when aborted while waiting for the stop', async () => {
-    const releaseStop = heldStop()
-    const fetchStream = vi.fn(async () => {})
+  it('returns aborted once the stop settles when aborted while waiting', async () => {
+    const { releaseStops } = stubFetchHoldingBackfillWalkStops('')
     const controller = new AbortController()
-    void requestBackfillWalkStop(scope.gameId)
+    const stop = requestBackfillWalkStop(scope.gameId)
+    let isSettled = false
 
-    const connect = connectAnalyticTableStream(scope, [8], {
-      fetchStream,
-      signal: controller.signal,
-      onEvent: () => {},
+    const connect = connectFleetTableStream(controller.signal).finally(() => {
+      isSettled = true
     })
     controller.abort()
-    releaseStop()
+    await flushMicrotasks()
+    expect(isSettled).toBe(false)
+
+    releaseStops()
+    await stop
 
     await expect(connect).resolves.toBe('aborted')
-    expect(fetchStream).not.toHaveBeenCalled()
   })
 })

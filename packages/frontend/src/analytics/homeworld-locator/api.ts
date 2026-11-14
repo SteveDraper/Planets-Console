@@ -33,7 +33,11 @@ async function fetchHomeworldLocator(
   const path = `/bff/analytics/${encodeURIComponent(HOMEWORLD_LOCATOR_ANALYTIC_ID)}/${view}`
   const qs = homeworldScopeQuery(scope)
   const endpointLabel = `GET ${path}`
-  const response = await bffRequest(`${path}${qs}`, { cache: 'no-store' }, endpointLabel)
+  const response = await bffRequest(
+    { path: `${path}${qs}`, gameId: scope.gameId },
+    { cache: 'no-store' },
+    endpointLabel
+  )
   if (!response.ok) {
     await throwBffHttpErrorFromResponse(response, endpointLabel)
   }
@@ -81,7 +85,7 @@ export async function postHomeworldLocatorAssertion(
   const qs = homeworldScopeQuery(scope)
   const endpointLabel = `POST ${path}`
   const response = await bffRequest(
-    `${path}${qs}`,
+    { path: `${path}${qs}`, gameId: scope.gameId },
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -100,7 +104,7 @@ export async function postHomeworldLocatorRefresh(
   const qs = homeworldScopeQuery(scope)
   const endpointLabel = `POST ${path}`
   const response = await bffRequest(
-    `${path}${qs}`,
+    { path: `${path}${qs}`, gameId: scope.gameId },
     { method: 'POST' },
     endpointLabel
   )
@@ -123,7 +127,7 @@ export async function fetchHomeworldFleetAgeRefetch(
   const path = `/bff/analytics/${encodeURIComponent(HOMEWORLD_LOCATOR_ANALYTIC_ID)}/fleet-age-refetch`
   const endpointLabel = `GET ${path}`
   const response = await bffRequest(
-    `${path}?${params.toString()}`,
+    { path: `${path}?${params.toString()}`, gameId: scope.gameId },
     { cache: 'no-store' },
     endpointLabel
   )
