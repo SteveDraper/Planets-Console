@@ -114,6 +114,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/backfill-walks/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Backfill Walks Stop
+         * @description Stop every accepted walk in a game the shell left. 204 for any game id.
+         *
+         *     The stop's queued compute work runs after the response.
+         */
+        post: operations["post_backfill_walks_stop_games__game_id__backfill_walks_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/league-teams": {
         parameters: {
             query?: never;
@@ -821,6 +843,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BackfillEarlierTurnsBody"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_backfill_walks_stop_games__game_id__backfill_walks_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

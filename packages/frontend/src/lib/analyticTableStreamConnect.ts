@@ -1,4 +1,5 @@
 import type { AnalyticShellScope } from '../api/bff'
+import { pendingBackfillWalkStop } from './backfillWalkStop'
 
 const STREAM_INCOMPLETE_RETRY_INITIAL_MS = 250
 const STREAM_INCOMPLETE_RETRY_MAX_ATTEMPTS = 3
@@ -39,6 +40,7 @@ export async function connectAnalyticTableStream<TEvent extends StreamErrorEvent
 ): Promise<AnalyticTableStreamConnectResult> {
   const { fetchStream, signal, onEvent, interceptEvent } = options
 
+  await pendingBackfillWalkStop(scope.gameId)
   if (signal.aborted) {
     return 'aborted'
   }
