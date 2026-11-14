@@ -2,8 +2,8 @@ import { postBackfillWalksStop } from '../api/backfillWalksClient'
 
 /**
  * Client-only, in-memory: the chained stop promise per game id the shell left. An entry exists
- * only while its chain is unsettled, and every chain resolves (a failed stop is logged), so a
- * stream that awaits it before re-entering the game is never blocked indefinitely.
+ * only while its chain is unsettled, and every chain resolves (a failed or timed-out stop is
+ * logged), so a request that awaits it before re-entering the game is never blocked indefinitely.
  */
 const pendingStopsByGameId = new Map<string, Promise<void>>()
 
@@ -27,4 +27,9 @@ export function requestBackfillWalkStop(gameId: string): Promise<void> {
 /** The unsettled stop chain for `gameId`, or undefined when none is pending. */
 export function pendingBackfillWalkStop(gameId: string): Promise<void> | undefined {
   return pendingStopsByGameId.get(gameId)
+}
+
+/** Forget every pending stop, so a stop one test leaves held does not block the next (tests). */
+export function resetPendingBackfillWalkStops(): void {
+  pendingStopsByGameId.clear()
 }

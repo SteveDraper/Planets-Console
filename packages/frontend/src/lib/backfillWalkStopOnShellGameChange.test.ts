@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { postBackfillWalksStop } from '../api/backfillWalksClient'
 import { EMPTY_STELLAR_CARTOGRAPHY_SETTINGS_GATES } from '../analytics/stellar-cartography/layers'
 import { SHELL_STORAGE_KEY, useShellStore, type GameInfoShellContext } from '../stores/shell'
-import { pendingBackfillWalkStop } from './backfillWalkStop'
+import { pendingBackfillWalkStop, resetPendingBackfillWalkStops } from './backfillWalkStop'
 import { installBackfillWalkStopOnShellGameChange } from './backfillWalkStopOnShellGameChange'
 import { deferredStopResponse, flushMicrotasks } from './backfillWalkStopTestFixtures'
 
@@ -35,9 +35,9 @@ describe('installBackfillWalkStopOnShellGameChange', () => {
     uninstall = installBackfillWalkStopOnShellGameChange()
   })
 
-  afterEach(async () => {
+  afterEach(() => {
     uninstall()
-    await Promise.all(['100', '200'].map((gameId) => pendingBackfillWalkStop(gameId)))
+    resetPendingBackfillWalkStops()
   })
 
   it('does not stop on the first game load', async () => {

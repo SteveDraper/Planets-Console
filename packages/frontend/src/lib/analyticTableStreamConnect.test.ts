@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchFleetTableStream } from '../api/bff'
 import { connectAnalyticTableStream } from './analyticTableStreamConnect'
-import { requestBackfillWalkStop } from './backfillWalkStop'
+import { requestBackfillWalkStop, resetPendingBackfillWalkStops } from './backfillWalkStop'
 import {
   flushMicrotasks,
   stubFetchHoldingBackfillWalkStops,
@@ -18,6 +18,7 @@ function connectFleetTableStream(signal: AbortSignal) {
 }
 
 afterEach(() => {
+  resetPendingBackfillWalkStops()
   vi.unstubAllGlobals()
 })
 

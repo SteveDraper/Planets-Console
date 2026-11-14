@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { pendingBackfillWalkStop, requestBackfillWalkStop } from '../lib/backfillWalkStop'
+import {
+  pendingBackfillWalkStop,
+  requestBackfillWalkStop,
+  resetPendingBackfillWalkStops,
+} from '../lib/backfillWalkStop'
 import {
   flushMicrotasks,
   stubFetchHoldingBackfillWalkStops,
 } from '../lib/backfillWalkStopTestFixtures'
 import { fetchAnalyticTable, fetchGames, fetchStoredGameInfo } from './bff'
-import { postBackfillWalksStop } from './backfillWalksClient'
+import { BACKFILL_WALKS_STOP_TIMEOUT_MS, postBackfillWalksStop } from './backfillWalksClient'
 import { putComputeDiagnosticsFreeze } from './bffComputeDiagnostics'
 
 const SNAPSHOT_BODY = JSON.stringify({ shell: { gameId: 100, perspective: 1, turn: 12 } })
@@ -31,6 +35,9 @@ const GAME_SCOPED_REQUESTS = [
 ]
 
 afterEach(() => {
+  resetPendingBackfillWalkStops()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -65,6 +72,24 @@ describe('bffRequest and a pending Backfill walk stop', () => {
       await otherGameStop
     }
   )
+
+  it('a hung stop releases its game\'s waiting request when the stop times out', async () => {
+    vi.useFakeTimers()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { requestUrls } = stubFetchHoldingBackfillWalkStops(SNAPSHOT_BODY)
+    const stop = requestBackfillWalkStop('100')
+
+    const request = fetchStoredGameInfo('100')
+    await vi.advanceTimersByTimeAsync(BACKFILL_WALKS_STOP_TIMEOUT_MS - 1)
+    expect(requestUrls()).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(1)
+    await expect(stop).resolves.toBeUndefined()
+    await request
+    expect(requestUrls()).toHaveLength(1)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(pendingBackfillWalkStop('100')).toBeUndefined()
+  })
 
   it('a request naming no game does not wait for any pending stop', async () => {
     const { releaseStops, requestUrls } = stubFetchHoldingBackfillWalkStops('{"games":[]}')

@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { postBackfillWalksStop } from '../api/backfillWalksClient'
-import { pendingBackfillWalkStop, requestBackfillWalkStop } from './backfillWalkStop'
+import {
+  pendingBackfillWalkStop,
+  requestBackfillWalkStop,
+  resetPendingBackfillWalkStops,
+} from './backfillWalkStop'
 import { deferredStopResponse } from './backfillWalkStopTestFixtures'
 
 vi.mock('../api/backfillWalksClient', () => ({
@@ -12,6 +16,10 @@ const postStop = vi.mocked(postBackfillWalksStop)
 beforeEach(() => {
   postStop.mockReset()
   postStop.mockResolvedValue(undefined)
+})
+
+afterEach(() => {
+  resetPendingBackfillWalkStops()
 })
 
 describe('requestBackfillWalkStop', () => {

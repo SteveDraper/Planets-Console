@@ -18,17 +18,20 @@ export async function flushMicrotasks(): Promise<void> {
 
 /**
  * Stub `fetch` so every Backfill walk stop POST is held until `releaseStops()`, and every other
- * request answers 200 at once with `responseBody`. Like `fetch`, it rejects a request whose signal
- * is already aborted. `requestUrls()` lists the requests other than stops, in send order.
+ * request answers 200 at once with `responseBody`. Like `fetch`, it rejects with the signal's reason
+ * a request whose signal is already aborted, or a held stop whose signal aborts (its timeout).
+ * `requestUrls()` lists the requests other than stops, in send order.
  */
 export function stubFetchHoldingBackfillWalkStops(responseBody = '{}') {
   const heldStops: (() => void)[] = []
   const fetchMock = vi.fn((url: string, init?: RequestInit): Promise<Response> => {
-    if (init?.signal?.aborted) {
-      return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'))
+    const signal = init?.signal
+    if (signal?.aborted) {
+      return Promise.reject(signal.reason)
     }
     if (url.endsWith('/backfill-walks/stop')) {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason))
         heldStops.push(() => resolve(new Response(null, { status: 204 })))
       })
     }

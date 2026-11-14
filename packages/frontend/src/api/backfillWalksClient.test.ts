@@ -7,7 +7,7 @@ describe('postBackfillWalksStop', () => {
     vi.unstubAllGlobals()
   })
 
-  it('posts the stop for the game and accepts 204', async () => {
+  it('posts the stop for the game with a timeout signal and accepts 204', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 204 })))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -15,6 +15,7 @@ describe('postBackfillWalksStop', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/bff/games/628580/backfill-walks/stop', {
       method: 'POST',
+      signal: expect.any(AbortSignal),
     })
   })
 
