@@ -99,9 +99,7 @@ class InferenceRowScheduler(
         on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
         defer_orchestrator_submit: bool = False,
         worker_count: int | None = None,
-        **_deprecated_kwargs: object,
     ) -> None:
-        del _deprecated_kwargs
         self._on_held_solutions_updated = on_held_solutions_updated
         if worker_count == 0:
             defer_orchestrator_submit = True
@@ -788,12 +786,8 @@ def _query_context_for_session(
 def create_inference_row_scheduler(
     *,
     on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
-    **_deprecated_kwargs: object,
 ) -> InferenceRowScheduler:
-    return InferenceRowScheduler(
-        on_held_solutions_updated=on_held_solutions_updated,
-        **_deprecated_kwargs,
-    )
+    return InferenceRowScheduler(on_held_solutions_updated=on_held_solutions_updated)
 
 
 _scheduler: InferenceRowScheduler | None = None
@@ -808,14 +802,12 @@ def inference_row_scheduler_if_initialized() -> InferenceRowScheduler | None:
 def get_inference_row_scheduler(
     *,
     on_held_solutions_updated: OnHeldSolutionsUpdatedCallback | None = None,
-    **_deprecated_kwargs: object,
 ) -> InferenceRowScheduler:
     global _scheduler
     with _scheduler_lock:
         if _scheduler is None:
             _scheduler = create_inference_row_scheduler(
                 on_held_solutions_updated=on_held_solutions_updated,
-                **_deprecated_kwargs,
             )
         return _scheduler
 

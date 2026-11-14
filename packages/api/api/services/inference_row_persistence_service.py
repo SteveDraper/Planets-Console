@@ -9,9 +9,6 @@ from api.analytics.military_score_inference.durable_turn_evidence import (
     is_durable_turn_evidence_row_status,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
-from api.analytics.military_score_inference.inference_stream_session import (
-    InferenceRowStreamSession,
-)
 from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.errors import NotFoundError, ValidationError
@@ -264,22 +261,3 @@ class InferenceRowPersistenceService:
             player_id=player_id,
         )
         self.put_row(game_id, perspective, host_turn, player_id, row, on_walk=on_walk)
-
-    def persist_row_complete(
-        self,
-        session: InferenceRowStreamSession,
-        event: RowComplete,
-        *,
-        on_walk: bool,
-    ) -> None:
-        if session.cancel_token.is_cancelled():
-            return
-        self.persist_row_complete_for_scope(
-            event,
-            game_id=session.game_id,
-            perspective=session.perspective,
-            host_turn=session.turn_number,
-            player_id=session.player_id,
-            query_context=session.query_context,
-            on_walk=on_walk,
-        )

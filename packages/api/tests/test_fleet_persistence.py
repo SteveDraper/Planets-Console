@@ -663,7 +663,6 @@ def _wired_fleet_inference_services(memory_backend):
 
     scheduler = InferenceRowScheduler(
         worker_count=0,
-        on_row_complete=inference_persistence.persist_row_complete,
         on_held_solutions_updated=lambda session: invalidation.on_inference_evidence_updated(
             session.game_id,
             session.perspective,

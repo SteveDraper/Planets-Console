@@ -458,7 +458,7 @@ All table-stream analytics follow the same adapter template ([#199](https://gith
 | NDJSON wire events | Adapter `register_scope_outcome_listener` (and mid-step callbacks for incremental events) |
 | Cache replay at admission | Probe persistence directly (`has_final_ledger`, inference row store, etc.) |
 
-Do not use adapter `on_row_complete` callbacks for durable persistence once migrated.
+Stream adapters never write durable rows themselves; `PersistencePolicy.persist` is the only durable writer.
 
 ---
 
