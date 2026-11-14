@@ -136,7 +136,7 @@ def _assert_scoreboard_stamps(orchestrator, ctx, persistence, player_id: int, tu
         InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         fleet_persistence=persistence,
         orchestrator=lambda: orchestrator,
-    ).on_scores_row_persisted(ctx.game_id, ctx.perspective, turn, player_id)
+    ).on_scores_row_persisted(ctx.game_id, ctx.perspective, turn, player_id, on_walk=False)
     assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == _MARK
 
 

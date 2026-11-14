@@ -540,6 +540,7 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     assert fleet_persistence.get_ledger(628580, 1, 111, 8) is not None
     assert fleet_persistence.get_ledger(628580, 1, 112, 8) is not None
@@ -662,7 +663,6 @@ def _wired_fleet_inference_services(memory_backend):
 
     scheduler = InferenceRowScheduler(
         worker_count=0,
-        on_row_complete=inference_persistence.persist_row_complete,
         on_held_solutions_updated=lambda session: invalidation.on_inference_evidence_updated(
             session.game_id,
             session.perspective,
@@ -770,6 +770,7 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
                 }
             ],
         ),
+        on_walk=False,
     )
     assert fleet_persistence.get_ledger(628580, 1, 111, 8) is not None
     assert not fleet_persistence.has_final_ledger(628580, 1, 111, 8)
@@ -1181,6 +1182,7 @@ def _seed_scores_rows_for_all_players(
                 is_complete=True,
                 solutions=[],
             ),
+            on_walk=False,
         )
 
 

@@ -5,17 +5,27 @@ real ``InferenceRowScheduler``, then runs the real scores ``tier_solve`` wire
 builder and step with the tier job scripted. A scripted tier that continues
 finishes one tier of the run's ladder; one that completes the row finishes the
 ladder.
+
+The ``ladder`` fixture is that ladder for the sample turn's inference target
+player. The ``no_scores_row_runs`` fixture clears every scores RowRun and
+scheduler claim before and after a test; a module opts in with
+``pytest.mark.usefixtures``. ``conftest`` loads this module as a plugin so every
+test module shares both fixtures.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from unittest.mock import patch
 
+import pytest
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
-from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+from api.analytics.military_score_inference.inference_scheduler import (
+    InferenceRowScheduler,
+    reset_inference_row_scheduler_for_tests,
+)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
@@ -26,9 +36,11 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
+from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
 from api.compute.pools import ThreadStepWork
+from api.compute.submission_open import SubmissionOpen
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import export_chain_query_context
@@ -125,13 +137,19 @@ class ShellLadder:
         self.scheduler.enqueue_tier_ladder(session)
         return session
 
-    def submit(self, *, force_fresh: bool = False) -> None:
+    def submit(
+        self,
+        *,
+        force_fresh: bool = False,
+        submission_open: SubmissionOpen | None = None,
+    ) -> None:
         self.orchestrator.submit(
             ComputeRequest(
                 ctx=self.ctx,
                 scope=self.scope,
                 step_kind=SCORES_TIER_SOLVE,
                 force_fresh=force_fresh,
+                submission_open=submission_open,
             )
         )
         assert self.orchestrator.nodes[self.scope].state == "running"
@@ -164,7 +182,8 @@ class ShellLadder:
             "api.analytics.scores.compute_orchestration.run_inference_tier_job",
             side_effect=tier_job,
         ):
-            return self.submitted_work[-1].run(self.scope)
+            work = self.submitted_work[-1]
+            return work.run_step(work.job_wire_for(self.scope))
 
     def complete_tier(self, result_wire: object) -> None:
         """Hand an executed step's result back to the orchestrator, which persists it."""
@@ -184,3 +203,18 @@ class ShellLadder:
             GAME_ID, self.scope.perspective, self.scope.turn, self.player_id
         )
         return None if row is None else row.summary
+
+
+@pytest.fixture
+def ladder(sample_turn, persistence) -> ShellLadder:
+    return ShellLadder(sample_turn, persistence)
+
+
+@pytest.fixture
+def no_scores_row_runs() -> Iterator[None]:
+    """No scores RowRun or scheduler claim survives from another test."""
+    reset_tier_row_run_registry_for_tests()
+    reset_inference_row_scheduler_for_tests()
+    yield
+    reset_tier_row_run_registry_for_tests()
+    reset_inference_row_scheduler_for_tests()

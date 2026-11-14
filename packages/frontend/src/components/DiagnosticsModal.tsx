@@ -5,7 +5,7 @@ import type { AnalyticShellScope } from '../api/bff'
 import {
   isIncludeDiagnosticsSessionEnabled,
   setIncludeDiagnosticsSessionEnabled,
-} from '../api/bff'
+} from '../api/bffSend'
 import type { LayoutPriorReportsResponse } from '../api/bffLayoutPriorDiagnostics'
 import { useModalKeydownFocusTrap } from '../lib/modalKeydownFocusTrap'
 import { restoreFocusToElementOrFallback } from '../lib/restoreFocus'

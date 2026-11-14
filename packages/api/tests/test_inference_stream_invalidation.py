@@ -384,6 +384,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
                     InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
                     summary="before reschedule",
                 ),
+                "onWalk": False,
             },
         ),
     )
@@ -409,6 +410,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
                     InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
                     summary="after reschedule",
                 ),
+                "onWalk": False,
             },
         ),
     )
@@ -443,6 +445,7 @@ def test_recompute_reschedules_all_rows_while_table_stream_active_cases_1_and_2(
                 is_complete=True,
                 solutions=[],
             ),
+            on_walk=False,
         )
 
     before = _run_ids_for_players(scheduler, player_ids)
@@ -525,6 +528,7 @@ def _seed_cached_rows(
                 is_complete=True,
                 solutions=[],
             ),
+            on_walk=False,
         )
 
 

@@ -1,4 +1,8 @@
-"""On-walk persist stamping: walk persists stamp the mark, stray persists bump it."""
+"""On-walk persist stamping: walk persists stamp the mark, stray persists bump it.
+
+Membership is the producing execution's, carried on the persist payload as
+``onWalk``; the classifier does not read the live orchestrator node.
+"""
 
 from __future__ import annotations
 
@@ -55,7 +59,7 @@ def _invalidation(ctx, orchestrator: ComputeOrchestrator) -> InferenceInvalidati
 
 
 def test_on_walk_scoreboard_persist_stamps_and_a_stray_persist_bumps(sample_turn):
-    """Membership is the producing node's, so a walk persist stamps even after a stray bump."""
+    """Membership is the producing execution's, so a walk persist stamps even after a stray bump."""
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
@@ -63,21 +67,21 @@ def test_on_walk_scoreboard_persist_stamps_and_a_stray_persist_bumps(sample_turn
     orchestrator = submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id)
     invalidation = _invalidation(ctx, orchestrator)
 
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id, on_walk=True)
 
     assert (
         persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 1
     )
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 0
 
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 11, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 11, player_id, on_walk=False)
 
     assert (
         persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 2
     )
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 1
 
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id, on_walk=True)
 
     assert (
         persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 2
@@ -85,8 +89,10 @@ def test_on_walk_scoreboard_persist_stamps_and_a_stray_persist_bumps(sample_turn
     assert persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id) == 1
 
 
-def test_scoreboard_persist_after_the_on_walk_node_reached_a_final_state_bumps(sample_turn):
-    """A retained terminal on-walk node is not an in-flight on-walk."""
+def test_scoreboard_persist_produced_off_the_walk_bumps_while_an_on_walk_node_is_live(
+    sample_turn,
+):
+    """An in-flight on-walk node at the scope does not lend its membership to the persist."""
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
@@ -94,10 +100,10 @@ def test_scoreboard_persist_after_the_on_walk_node_reached_a_final_state_bumps(s
     orchestrator = submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id)
     scope = shell_scope(ctx, SCORES_ANALYTIC_ID, 10, player_id)
     assert orchestrator.nodes[scope].submission_open.on_walk
-    orchestrator.nodes[scope].state = "complete"
+    assert not orchestrator.nodes[scope].is_terminal
 
     _invalidation(ctx, orchestrator).on_scores_row_persisted(
-        ctx.game_id, ctx.perspective, 10, player_id
+        ctx.game_id, ctx.perspective, 10, player_id, on_walk=False
     )
 
     assert (
@@ -114,17 +120,17 @@ def test_two_open_turns_stamp_without_discarding_each_other(sample_turn):
     orchestrator = submit_shell(ctx, SCORES_ANALYTIC_ID, 8, player_id)
     submit_shell(ctx, SCORES_ANALYTIC_ID, 10, player_id, orchestrator=orchestrator)
     opens = {
-        turn: orchestrator.non_terminal_submission_open_for(
+        turn: orchestrator.nodes[
             shell_scope(ctx, SCORES_ANALYTIC_ID, turn, player_id)
-        )
+        ].submission_open
         for turn in (8, 10)
     }
     assert opens[8] == SubmissionOpen(open_turn=8, backfill_earlier_turns=True, on_walk=True)
     assert opens[10] == SubmissionOpen(open_turn=10, backfill_earlier_turns=True, on_walk=True)
     invalidation = _invalidation(ctx, orchestrator)
 
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id)
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 8, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 10, player_id, on_walk=True)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 8, player_id, on_walk=True)
 
     assert (
         persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation == 1
@@ -133,7 +139,7 @@ def test_two_open_turns_stamp_without_discarding_each_other(sample_turn):
 
 
 def test_backfill_scoreboard_persist_that_opened_no_walk_bumps(sample_turn):
-    """Backfill on is not membership: the producing node must be on a walk."""
+    """Backfill on is not membership: the producing execution must be on a walk."""
     host, ctx = context_at_turn(sample_turn, 10)
     enable_backfill_earlier_turns(ctx)
     player_id = first_player_id(host)
@@ -143,7 +149,7 @@ def test_backfill_scoreboard_persist_that_opened_no_walk_bumps(sample_turn):
     _scores_node(orchestrator, ctx, player_id, 10, open_turn=10, backfill=True)
 
     _invalidation(ctx, orchestrator).on_scores_row_persisted(
-        ctx.game_id, ctx.perspective, 10, player_id
+        ctx.game_id, ctx.perspective, 10, player_id, on_walk=False
     )
 
     assert (

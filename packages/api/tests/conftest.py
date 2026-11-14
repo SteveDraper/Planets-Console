@@ -37,6 +37,7 @@ from tests.post_lock_callback_guard import failing_on_post_lock_callback_errors
 
 pytest_plugins = [
     "tests.scores_exports_helpers",
+    "tests.scores_ladder_helpers",
     "tests.scores_outlier_repro_harness",
 ]
 

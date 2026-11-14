@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   fetchGames,
-  INCLUDE_DIAGNOSTICS_SESSION_KEY,
   isBffNotFoundError,
   isGenericServerErrorMessage,
   normalizeMapDataResponse,
-  toFetchRejectionError,
   withEndpointIfGeneric,
 } from './bff'
+import { INCLUDE_DIAGNOSTICS_SESSION_KEY } from './bffSend'
 
 describe('withEndpointIfGeneric', () => {
   it('appends endpoint for Internal Server Error', () => {
@@ -63,31 +62,6 @@ describe('isBffNotFoundError', () => {
 describe('isGenericServerErrorMessage', () => {
   it('treats empty as generic', () => {
     expect(isGenericServerErrorMessage('')).toBe(true)
-  })
-})
-
-describe('toFetchRejectionError', () => {
-  it('includes endpoint and request path', () => {
-    const e = toFetchRejectionError(
-      new TypeError('Failed to fetch'),
-      'GET /bff/games/1/info',
-      '/bff/games/1/info'
-    )
-    expect(e.message).toContain('GET /bff/games/1/info')
-    expect(e.message).toContain('request: /bff/games/1/info')
-    expect(e.message).toContain('Failed to fetch')
-    expect(e.message).toContain('No HTTP response')
-  })
-
-  it('appends Error.cause when present', () => {
-    const inner = new Error('connection reset')
-    const e = toFetchRejectionError(
-      Object.assign(new TypeError('Failed to fetch'), { cause: inner }),
-      'POST /bff/games/1/turns/ensure',
-      '/bff/games/1/turns/ensure'
-    )
-    expect(e.message).toContain('cause:')
-    expect(e.message).toContain('connection reset')
   })
 })
 

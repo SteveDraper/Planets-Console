@@ -24,7 +24,7 @@ from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.row_run_admission import RowRunPhase
 
-from tests.scores_ladder_helpers import ShellLadder, durable_row_complete
+from tests.scores_ladder_helpers import durable_row_complete
 from tests.walk_band_helpers import (
     SHELL_TURN,
     WALK_TURNS,
@@ -35,7 +35,6 @@ from tests.walk_band_helpers import (
     end_shell,
     finish_walk,
     no_live_streams,
-    no_scores_row_runs,
     open_shell,
     start_walk_held_at_the_baseline_persist,
 )
@@ -65,14 +64,12 @@ SWITCHES = {
 switches = pytest.mark.parametrize("switch", SWITCHES.values(), ids=SWITCHES.keys())
 
 
+pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
+
+
 @pytest.fixture(autouse=True)
 def _no_live_streams() -> Iterator[None]:
     yield from no_live_streams()
-
-
-@pytest.fixture(autouse=True)
-def _no_scores_row_runs() -> Iterator[None]:
-    yield from no_scores_row_runs()
 
 
 @pytest.fixture
@@ -137,11 +134,6 @@ def test_steps_the_new_walk_does_not_reach_are_picked_at_their_standing_band(wal
 
 
 # --- T3: an executing scoreboard step persists through the switch ---
-
-
-@pytest.fixture
-def ladder(sample_turn, persistence) -> ShellLadder:
-    return ShellLadder(sample_turn, persistence)
 
 
 @pytest.fixture

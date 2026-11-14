@@ -18,17 +18,18 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reschedule_inference_row,
 )
 from api.analytics.off_mode import MarkPersist, off_mode_mark_persist
-from api.analytics.on_walk import scoreboard_persist_belongs_to_on_walk
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
+from api.services.in_flight_orchestrator import (
+    InFlightOrchestrator,
+    OrchestratorResolver,
+    in_flight_orchestrator,
+)
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.off_mode_bump import (
     DeferRecompute,
-    InFlightOrchestrator,
-    OrchestratorResolver,
     ResolvedRecompute,
     claim_player_open_roots,
-    in_flight_orchestrator,
     live_turns_for_limited_recompute,
     recompute_decision_at_wake,
     resolve_durable_scores_evidence,
@@ -58,7 +59,7 @@ class InferenceInvalidationService:
         """Process orchestrator for this persist, or a stand-in when none exists.
 
         The stand-in does not start a worker pool. It has no in-flight roots
-        and nothing to discard.
+        and nothing to settle.
         """
         return in_flight_orchestrator(self._resolve_orchestrator())
 
@@ -261,6 +262,8 @@ class InferenceInvalidationService:
         perspective: int,
         host_turn: int,
         player_id: int,
+        *,
+        on_walk: bool,
     ) -> None:
         """Durable scores evidence.
 
@@ -268,6 +271,10 @@ class InferenceInvalidationService:
         A stamp leaves the mark unchanged. First persist and bump both advance
         it: an absent mark becomes generation 1, and an existing mark increments.
         Ledger files stay in place.
+
+        ``on_walk`` is the producing execution's walk membership, carried on
+        its persist payload, so a persist whose node ended after the write was
+        admitted still stamps for its walk. The live node is not read.
 
         ``DurableScoresEvidence`` holds the split between those steps. The
         carried submission choice classifies stamp versus bump. The current
@@ -319,16 +326,10 @@ class InferenceInvalidationService:
         )
         # The carried choice classifies the mark. An absent carried choice
         # leaves the open turn unset, so the open-turn rule cannot stamp.
-        # An in-flight on-walk stamps the generation it started with instead.
+        # A persist produced on a walk stamps the generation it started with instead.
         carried = evidence.decision_backfill
         mark_persist = off_mode_mark_persist(
-            on_walk=scoreboard_persist_belongs_to_on_walk(
-                orchestrator,
-                game_id=game_id,
-                perspective=perspective,
-                player_id=player_id,
-                host_turn=host_turn,
-            ),
+            on_walk=on_walk,
             mark=mark,
             backfill_enabled=False if carried is None else carried,
             open_turn=evidence.open_turn,

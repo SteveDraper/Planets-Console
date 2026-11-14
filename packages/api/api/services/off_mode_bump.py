@@ -1,123 +1,33 @@
-"""Which turns a bump recomputes while backfill is off.
+"""Which turns a bump recomputes while backfill is off, and what it settles.
 
 A durable scores persist carries the submission's backfill choice on an
 unconsumed root. That choice classifies stamp versus bump. The current
 backfill record chooses the recompute: every known turn, or the shell and
 later live turns. No unconsumed root defers that choice until the wake.
+
+A limited recompute settles the player's in-flight fleet and scores work
+through :class:`BumpDiscardPolicy` before the bump publishes its new epoch.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Protocol, TypeAlias
+from typing import TypeAlias
 
 from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
-from api.compute.orchestrator_state import ComputeNodeRun
-from api.compute.scope import ComputeScope
-from api.compute.submission_open import SubmissionOpen, SubmissionOpenReader
+from api.compute.in_flight_settle import (
+    InFlightCandidate,
+    InFlightSettlePolicy,
+    PlayerWork,
+    RunningDisposition,
+    UnstartedDisposition,
+)
+from api.compute.orchestrator import OpenTurnRoot
+from api.services.in_flight_orchestrator import InFlightOrchestrator
 from api.streaming.table_stream.registry_catalog import active_table_stream_turns_by_analytic
-
-
-class InFlightOrchestrator(SubmissionOpenReader, Protocol):
-    """The orchestrator queries and discard a persist-time bump uses.
-
-    ``ComputeOrchestrator`` satisfies it structurally. The absent-process
-    stand-in subclasses it, so its signatures are checked against this one.
-    """
-
-    def open_turn_roots(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
-        turn: int | None = None,
-    ) -> tuple[OpenTurnRoot, ...]: ...
-
-    def claim_open_turn_roots(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        open_turn: int,
-        analytic_ids: frozenset[str],
-    ) -> tuple[OpenTurnRoot, ...]: ...
-
-    def discard_matching_work(
-        self,
-        should_discard: Callable[[ComputeScope, ComputeNodeRun], bool],
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
-    ) -> None: ...
-
-
-class _AbsentProcessOrchestrator(InFlightOrchestrator):
-    """Stand-in when this process has not created an orchestrator.
-
-    A persist then has no in-flight fleet or scores work. Creating the real
-    orchestrator would start a worker pool, so root queries are empty and
-    discard is a no-op.
-    """
-
-    def open_turn_roots(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
-        turn: int | None = None,
-    ) -> tuple[OpenTurnRoot, ...]:
-        return ()
-
-    def claim_open_turn_roots(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        open_turn: int,
-        analytic_ids: frozenset[str],
-    ) -> tuple[OpenTurnRoot, ...]:
-        return ()
-
-    def discard_matching_work(
-        self,
-        should_discard: Callable[[ComputeScope, ComputeNodeRun], bool],
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
-    ) -> None:
-        return
-
-    def non_terminal_submission_open_for(self, scope: ComputeScope) -> SubmissionOpen | None:
-        """No in-memory node, so no submission open."""
-        return None
-
-
-_ABSENT_PROCESS_ORCHESTRATOR = _AbsentProcessOrchestrator()
-
-OrchestratorResolver: TypeAlias = Callable[[], ComputeOrchestrator | None]
-
-
-def in_flight_orchestrator(
-    orchestrator: ComputeOrchestrator | None,
-) -> InFlightOrchestrator:
-    """Process orchestrator, or a stand-in when none exists yet."""
-    if orchestrator is None:
-        return _ABSENT_PROCESS_ORCHESTRATOR
-    return orchestrator
 
 
 def preferred_unconsumed_root_backfill(
@@ -178,6 +88,27 @@ def claim_player_open_roots(
     )
 
 
+@dataclass(frozen=True)
+class BumpDiscardPolicy(InFlightSettlePolicy):
+    """What a limited bump does to one player's in-flight fleet and scores work.
+
+    ``recompute_turns`` are the shell and live turns. Work on one of them
+    that is already executing is kept, so it can still stamp. Every other
+    executing step finishes without persisting or stamping. Work that has
+    not started is discarded on every turn, so a fresh submit can recompute it.
+    """
+
+    recompute_turns: frozenset[int]
+
+    def unstarted(self, candidate: InFlightCandidate) -> UnstartedDisposition:
+        return UnstartedDisposition.DISCARD
+
+    def running(self, candidate: InFlightCandidate) -> RunningDisposition:
+        if candidate.scope.turn in self.recompute_turns:
+            return RunningDisposition.KEEP
+        return RunningDisposition.FINISH_WITHOUT_STAMP
+
+
 def discard_bumped_player_work(
     orchestrator: InFlightOrchestrator,
     *,
@@ -187,32 +118,21 @@ def discard_bumped_player_work(
     shell_turns: frozenset[int],
     live_turns: frozenset[int],
 ) -> None:
-    """Drop in-flight fleet and scoreboard work that must not stamp a new mark.
+    """Settle one player's in-flight fleet and scoreboard work for a bump.
 
-    A shell turn, and any turn with a live table stream, is left alone when it
-    is already executing so that work can still stamp. The same turn is failed
-    when it has not started, so a fresh submit can recompute it. Every other
-    in-flight turn for this player is dropped: a step that has not started
-    fails now, and a step already executing finishes without persisting or
-    stamping.
-
-    The predicate runs under the orchestrator lock. It must not re-enter the
-    orchestrator and reads node state only.
+    Shell and live turns are the recompute turns of :class:`BumpDiscardPolicy`.
+    The settle drains none of the post-lock work it queues. The bump's
+    enclosing drain applies it, unless another thread's drain of the shared
+    queue runs it first, possibly before the bump publishes its epoch.
     """
-    recompute_turns = set(live_turns)
-    recompute_turns.update(shell_turns)
-
-    def should_discard(scope: ComputeScope, node: ComputeNodeRun) -> bool:
-        if scope.turn in recompute_turns:
-            return node.state != "running"
-        return True
-
-    orchestrator.discard_matching_work(
-        should_discard,
-        game_id=game_id,
-        perspective=perspective,
-        player_id=player_id,
-        analytic_ids=FLEET_WALK_ANALYTIC_IDS,
+    orchestrator.settle_in_flight_work(
+        PlayerWork(
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+            analytic_ids=FLEET_WALK_ANALYTIC_IDS,
+        ),
+        BumpDiscardPolicy(recompute_turns=shell_turns | live_turns),
     )
 
 

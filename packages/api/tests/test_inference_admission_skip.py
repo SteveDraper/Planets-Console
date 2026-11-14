@@ -456,6 +456,7 @@ def test_persist_admits_functional_and_skip_statuses(status, persistence) -> Non
         perspective=8,
         host_turn=111,
         player_id=3,
+        on_walk=False,
     )
     stored = persistence.get_row(GAME_ID, 8, 111, 3)
     assert stored is not None
@@ -478,6 +479,7 @@ def test_persist_rejects_non_durable_statuses(status, persistence) -> None:
         perspective=8,
         host_turn=111,
         player_id=3,
+        on_walk=False,
     )
     assert persistence.get_row(GAME_ID, 8, 111, 3) is None
 
@@ -495,6 +497,7 @@ def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is True
     persistence.put_row(
@@ -509,6 +512,7 @@ def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is False
     persistence.put_row(
@@ -523,6 +527,7 @@ def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is False
     persistence.put_row(
@@ -537,6 +542,7 @@ def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is False
 

@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, Protocol
 
+from api.compute.dag_reach import DagReachNode, dependency_closure
+
 if TYPE_CHECKING:
     from api.compute.registry import AnalyticComputeRegistration
     from api.compute.scope import ComputeScope
@@ -92,14 +94,8 @@ def snapshot_watched_keys(
     return {watch: watch.watched_keys() for watch in watches}
 
 
-class BandDerivationNode(Protocol):
+class BandDerivationNode(DagReachNode, Protocol):
     """The node state the band derivation reads."""
-
-    @property
-    def dependency_scopes(self) -> tuple[ComputeScope, ...]: ...
-
-    @property
-    def is_terminal(self) -> bool: ...
 
     @property
     def standing_band(self) -> ComputeRequestBand: ...
@@ -148,15 +144,7 @@ def derive_priority_bands(
     }
     bands: dict[ComputeScope, ComputePriorityBand] = {}
     for band in _BANDS_BY_PRECEDENCE:
-        pending = [scope for scope, own in own_bands.items() if own == band]
-        while pending:
-            scope = pending.pop()
-            if scope in bands:
-                continue
-            bands[scope] = band
-            pending.extend(
-                dependency
-                for dependency in live_nodes[scope].dependency_scopes
-                if dependency in live_nodes and dependency not in bands
-            )
+        holders = [scope for scope, own in own_bands.items() if own == band and scope not in bands]
+        for scope in dependency_closure(live_nodes, holders):
+            bands.setdefault(scope, band)
     return MappingProxyType(bands)

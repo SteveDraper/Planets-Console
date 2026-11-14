@@ -61,6 +61,9 @@ Shell + admission + cancel seal + session token cancel go only through `apply_sc
 - No parallel `cancel_intent` module or second cancel entrypoint.
 - Scheduler `abort_scope` and stream-map pops stay on the scheduler plane (outside the lifecycle command), invoked from `cancel_run` after CANCEL -- not from DETACH.
 - The tier registry applies the same RETIRE side internally, without a new op, when a `tier_solve` ladder claim stamps one run for a scope: every other `REGISTERED` or `DETACHED` run for that scope is retired (ladder hand-over), as a `DETACHED` shell whose ladder lost the scope already was.
+- `CANCEL` takes a run id or a guarded target, `StampedLadderRun(scope, execution_generation)`: the run the scope's tier-ladder stamp names for that scores node execution. The registry releases the stamp and applies the CANCEL side to the shell it names in one hold, and only while the stamp still has that generation; a stamp written for a newer execution is untouched. This is the same op through the same entry point, not a second cancel API.
+- Two orders reach CANCEL. Explicit `cancel_run` applies CANCEL, then aborts. When the orchestrator aborts first (a game change stopping a walk), the scores scope-outcome listener applies CANCEL on the stamped target for the aborted execution, in place of its plain stamp release, then forgets the run on the scheduler plane. In that order a persist whose `PersistDecision` was taken before the CANCEL may still write (§3).
+- A `tier_solve` claim made for an execution that has already ended changes nothing: it neither stamps nor retires, so a late wire build cannot take a reopened stream's run.
 
 ### 5. Soft defer wake (scores)
 

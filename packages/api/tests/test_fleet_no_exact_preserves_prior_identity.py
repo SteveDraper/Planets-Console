@@ -124,6 +124,7 @@ def _close_scores(
             is_complete=True,
             solutions=closed,
         ),
+        on_walk=False,
     )
 
 

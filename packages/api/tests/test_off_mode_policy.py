@@ -502,6 +502,7 @@ def test_parse_off_mode_wire_rejects_wrong_types_and_catch_up_without_open_turn(
     assert empty.catch_up is False
     assert empty.backfill_earlier_turns is None
     assert empty.player_invalidation_generation is None
+    assert empty.on_walk is None
 
     parsed = parse_off_mode_wire(
         {
@@ -509,18 +510,21 @@ def test_parse_off_mode_wire_rejects_wrong_types_and_catch_up_without_open_turn(
             "catchUp": False,
             "backfillEarlierTurns": True,
             "playerInvalidationGeneration": 2,
+            "onWalk": True,
         }
     )
     assert parsed.open_turn == 40
     assert parsed.catch_up is False
     assert parsed.backfill_earlier_turns is True
     assert parsed.player_invalidation_generation == 2
+    assert parsed.on_walk is True
 
     for wire in (
         {"openTurn": True},
         {"openTurn": 40, "catchUp": 1},
         {"backfillEarlierTurns": 0},
         {"playerInvalidationGeneration": True},
+        {"onWalk": 1},
         {"catchUp": True},
     ):
         with pytest.raises(ValidationError):

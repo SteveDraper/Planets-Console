@@ -1,4 +1,4 @@
-"""Explicit submission opens for direct job-wire builder calls."""
+"""Explicit submission opens and execution probes for direct job-wire builder calls."""
 
 from __future__ import annotations
 
@@ -18,3 +18,8 @@ def explicit_submission_open(
         open_turn=open_turn,
         backfill_earlier_turns=backfill_earlier_turns,
     )
+
+
+def live_execution() -> bool:
+    """The ``is_execution_live`` probe a direct builder call carries: always live."""
+    return True

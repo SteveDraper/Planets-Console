@@ -9,6 +9,7 @@ focused on readiness, singleflight, and terminal lifecycle.
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 from api.compute.backend_runtime import effective_compute_backend
@@ -21,6 +22,7 @@ from api.compute.priority_band import (
 )
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
+from api.compute.running_step import StepExit
 from api.compute.wire import BuildStepJobWireKwargs, DependencyOutputs
 
 if TYPE_CHECKING:
@@ -34,7 +36,7 @@ class OrchestratorStepExecutionMixin:
     Expects the concrete orchestrator to provide ``_condition``, ``_nodes``,
     ``_published_bands``, ``_ready_queue``, ``_metrics``, ``_observers``,
     ``_compute_registry``, ``_pool_submitter``, ``_ctx_for_node``,
-    ``_complete_node``, ``_fail_node``,
+    ``_complete_node``, ``_fail_node``, ``_refuse_step_exit``,
     ``_after_step_success``, ``_deps_complete``, ``_enqueue_ready``,
     ``_ready_depth``, and ``_notify_ready_queue_changed``.
     """
@@ -69,7 +71,8 @@ class OrchestratorStepExecutionMixin:
                 continue
 
             if step.backend == "inline":
-                self._begin_step_execution(node)
+                if not self._begin_step_execution(node):
+                    continue
                 pending_inline.append(
                     PendingInlineExecution(
                         node=node,
@@ -85,7 +88,8 @@ class OrchestratorStepExecutionMixin:
                 self._enqueue_ready(scope)
                 node.state = "ready"
                 break
-            self._begin_step_execution(node)
+            if not self._begin_step_execution(node):
+                continue
             pending_pool.append(
                 PendingPoolSubmission(
                     node=node,
@@ -140,6 +144,7 @@ class OrchestratorStepExecutionMixin:
             node_result_wire=node.result_wire,
             submission_open=node.submission_open,
             execution_generation=node.execution_generation,
+            is_execution_live=partial(node.is_live_execution, node.execution_generation),
         )
 
     def _execute_pending_inlines(
@@ -196,7 +201,15 @@ class OrchestratorStepExecutionMixin:
             )
         return steps[node.profile_step_index]
 
-    def _begin_step_execution(self, node: ComputeNodeRun) -> None:
+    def _begin_step_execution(self, node: ComputeNodeRun) -> bool:
+        """Mark ``node`` running its current step; return False when the gate ends it instead.
+
+        A continued or re-queued execution keeps its ``running_step``, so the
+        start-or-requeue gate decides here whether it may start this step. A
+        fresh execution is ``CONTINUE`` and always starts.
+        """
+        if self._refuse_step_exit(node, StepExit.START):
+            return False
         registration = self._compute_registry[node.scope.analytic_id]
         node.state = "running"
         ctx = self._ctx_for_node(node)
@@ -204,6 +217,7 @@ class OrchestratorStepExecutionMixin:
             ctx,
             node.scope,
         )
+        return True
 
     def _maybe_short_circuit_satisfied(
         self,
@@ -249,7 +263,7 @@ class OrchestratorStepExecutionMixin:
                 self._fail_node(node, exc)
             return
         with self._condition:
-            if node.state != "running":
+            if node.state != "running" or self._refuse_step_exit(node, StepExit.START):
                 return
         self._observers.notify_inline_start(node, pending.step.step_kind)
         try:

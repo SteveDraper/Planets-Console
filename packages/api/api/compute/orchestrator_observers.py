@@ -11,6 +11,7 @@ import logging
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from api.compute.scope import ComputeScope
@@ -58,11 +59,29 @@ ReadyListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
 ReadyQueueChangedListener = Callable[[tuple[ComputeScope, ...]], None]
 # Fired when an inline step begins execution outside the orchestrator lock.
 InlineStartListener = Callable[[ComputeScope, "ComputeNodeRun", str], None]
-# A pool item whose execution is no longer running: ``pool_item_dropped`` when
-# a worker picks it and drops it without running its step, and
-# ``pool_finish_ignored`` when its step finishes after the execution ended.
+# A pool item left unapplied: ``pool_item_dropped`` when a worker picks it and
+# drops it without running its step, and ``pool_finish_ignored`` when its step
+# finishes after the execution ended. ``PoolItemIgnoredReason`` says why.
 PoolItemIgnoredKind = Literal["pool_item_dropped", "pool_finish_ignored"]
 POOL_ITEM_IGNORED_KINDS: frozenset[PoolItemIgnoredKind] = frozenset(get_args(PoolItemIgnoredKind))
+
+
+class PoolItemIgnoredReason(StrEnum):
+    """Why a pool item was left unapplied: the ``reason`` of its ignored-item record.
+
+    The first three say the item's execution is no longer running.
+    ``START_REFUSED`` says it was running, and the start-or-requeue gate
+    ended it at the pick or the thread re-check (``pool_item_dropped`` only).
+    """
+
+    MISSING_NODE = "missing_node"
+    # The item's execution is the node's, and it has ended.
+    NODE_NOT_RUNNING = "node_not_running"
+    # The node is a newer execution than the item's.
+    STALE_EXECUTION = "stale_execution"
+    START_REFUSED = "start_refused"
+
+
 LifecycleEventKind = (
     Literal[
         "force_fresh_replace",
@@ -71,6 +90,7 @@ LifecycleEventKind = (
         "epoch_retry",
         "persist_deferred",
         "step_parked",
+        "dependency_submit_refused",
     ]
     | PoolItemIgnoredKind
 )
@@ -347,7 +367,7 @@ class OrchestratorObservers:
         step_index: int | None = None,
         detail: Mapping[str, Any] | None = None,
     ) -> None:
-        """Schedule causal lifecycle listeners (force_fresh / abort / stale pool item).
+        """Schedule causal lifecycle listeners (force_fresh / abort / stale pool item / refusal).
 
         ``execution_generation`` / ``step_kind`` / ``step_index`` are the
         canonical step identity for this event; every call site passes them

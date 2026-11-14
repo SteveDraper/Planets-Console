@@ -12,6 +12,7 @@ from api.analytics.fleet.types import STAMP_CURRENT_EVIDENCE_MARK
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.registry import build_compute_registry
+from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.exceptions import DiscardedWorkRefused
@@ -184,7 +185,7 @@ def _drive_epoch_lock_refusal_during_persist(sample_turn, monkeypatch, *, shell:
         if shell:
             assert fleet_persist.wake_fleet_scope(scope, orchestrator=orchestrator) is True
             assert node.state == "running"
-            assert node.discard_without_stamp is False
+            assert node.running_step is RunningStepDisposition.CONTINUE
             assert len(node.waiters) == 1
         return real_merge(*args, **kwargs)
 
@@ -217,7 +218,7 @@ def test_shell_inside_persist_is_requeued_when_the_epoch_lock_refuses(sample_tur
     )
 
     assert node.state == "ready"
-    assert node.discard_without_stamp is False
+    assert node.running_step is RunningStepDisposition.CONTINUE
     assert node.error is None
     assert node.generation_at_submit is None
     assert node.scope in orchestrator._ready_queue
@@ -236,7 +237,7 @@ def test_discard_flagged_persist_refusal_is_not_requeued(sample_turn, monkeypatc
     )
 
     assert node.state == "failed"
-    assert node.discard_without_stamp is True
+    assert node.running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
     assert isinstance(node.error, DiscardedWorkRefused)
     assert node.generation_at_submit is not None
     assert node.scope not in orchestrator._ready_queue

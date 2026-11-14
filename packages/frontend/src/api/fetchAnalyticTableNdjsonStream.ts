@@ -1,7 +1,8 @@
+import type { BffRequestTarget } from './bffSend'
 import { readNdjsonStream } from './readNdjsonStream'
 
 type BffRequestFn = (
-  path: string,
+  target: BffRequestTarget,
   init: RequestInit | undefined,
   endpointLabel: string
 ) => Promise<Response>
@@ -16,15 +17,15 @@ export type AnalyticTableNdjsonStreamHandlers<T> = {
 export async function fetchAnalyticTableNdjsonStream<T>(
   bffRequest: BffRequestFn,
   withEndpoint: WithEndpointFn,
-  path: string,
+  route: BffRequestTarget,
   queryParams: URLSearchParams,
   parseLine: (line: string) => T | null,
   handlers: AnalyticTableNdjsonStreamHandlers<T>
 ): Promise<void> {
   const qs = `?${queryParams.toString()}`
-  const endpointLabel = `GET ${path}`
+  const endpointLabel = `GET ${route.path}`
   const r = await bffRequest(
-    `${path}${qs}`,
+    { path: `${route.path}${qs}`, gameId: route.gameId },
     { signal: handlers.signal, cache: 'no-store' },
     endpointLabel
   )

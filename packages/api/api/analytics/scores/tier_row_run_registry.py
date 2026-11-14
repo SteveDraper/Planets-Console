@@ -40,13 +40,20 @@ the unfinished ladder over: the stamped run's ``ladder_state`` and
 execution and scores epoch. Every other ``REGISTERED`` or ``DETACHED`` run for
 the scope is retired, and their ids are returned so the scheduler forgets
 them. A stamp is also released when its shell is dropped (retire-after-write,
-cancel, retire) and when the scores node reaches terminal
+cancel, retire) and when the scores node completes or fails
 (:func:`release_tier_ladder_for_scope`).
+
+A node execution that ends by abort instead cancels the run its stamp names:
+``CANCEL`` on a :class:`StampedLadderRun` releases the stamp and drops and
+records that shell in one hold (:func:`_mark_stamped_row_run_cancelled`),
+only while the stamp still has that execution generation. A claim made for an
+execution that has already ended changes nothing.
 """
 
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -62,7 +69,8 @@ from api.analytics.scores.persist_decision import (
     PersistDecision,
     persist_decision_from_admission,
 )
-from api.compute.scope import ComputeScope
+from api.compute.errors import ComputeExecutionEndedError
+from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 
 
@@ -79,6 +87,18 @@ class TierLadderStamp:
             execution_generation,
             scores_epoch,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class StampedLadderRun:
+    """The RowRun a scope's ladder stamp names for one scores node execution.
+
+    It names a run only while the stamp still has that execution generation:
+    a stamp written for a later execution names nothing for this one.
+    """
+
+    scope: ComputeScope
+    execution_generation: int
 
 
 class ScopeIndexPolicy(Enum):
@@ -158,6 +178,14 @@ def _release_ladder_stamp_locked(scope_key: InferenceRowScope) -> None:
     run = _runs_by_id.get(stamp.run_id)
     if run is not None and run.phase is RowRunPhase.DETACHED:
         _retire_row_run_locked(stamp.run_id)
+
+
+def _stamp_for_execution_locked(stamped: StampedLadderRun) -> TierLadderStamp | None:
+    """The scope's ladder stamp while it has ``stamped``'s generation. Caller holds ``_lock``."""
+    stamp = _ladder_stamp_by_scope_key.get(InferenceRowScope.from_root(stamped.scope))
+    if stamp is None or stamp.execution_generation != stamped.execution_generation:
+        return None
+    return stamp
 
 
 def _forget_cancelled_locked(run_id: str) -> None:
@@ -259,6 +287,7 @@ def claim_tier_ladder(
     *,
     execution_generation: int,
     scores_epoch: int,
+    is_execution_live: Callable[[], bool],
 ) -> LadderClaim | None:
     """Choose the RowRun whose ladder serves this scores node execution, and stamp it.
 
@@ -266,6 +295,14 @@ def claim_tier_ladder(
     ladder over to it, retires every other run for the scope and stamps the
     winner, so a run registered concurrently is either seen here or survives
     to win the next claim.
+
+    An execution that has ended claims nothing: when ``is_execution_live``
+    is false inside the hold, the claim raises
+    :class:`~api.compute.errors.ComputeExecutionEndedError` before it stamps,
+    releases or retires anything. The node's abort lands before its
+    scope-outcome listener runs, and that listener takes this lock to cancel
+    the stamped run, so a claim either sees the execution ended or writes a
+    stamp the listener then cancels.
 
     The winner is the ``REGISTERED`` run indexed for the scope (see
     :class:`ScopeIndexPolicy` for which run that is). With none, it
@@ -284,14 +321,23 @@ def claim_tier_ladder(
     Hand-over holds only the registry lock and never takes a ``tier_lock``.
     It relies on this invariant: a stamp that serves the current execution
     names a run with no tier step in flight. Within one execution the node
-    runs one step at a time and the wire is built between steps; a new
-    execution starts only once the node is terminal, and the only mid-step
-    abort (``cancel_run``) drops the run. A change that lets a new execution
-    start while a step of the old one runs (the #633 game-change abort) must
-    recheck it.
+    runs one step at a time and the wire is built between steps. An aborted
+    execution's step may still be running, but that execution never serves
+    again: its listener cancels the run its stamp names, and a newer
+    execution's claim never treats its stamp as serving. A newer execution
+    may still stamp the same ``REGISTERED`` run (its stream's run, indexed for
+    the scope) while the aborted step runs; the two steps then serialise on
+    that run's ``tier_lock``, and the newer one continues the run's own
+    ladder at the same scores epoch. A late listener for the aborted
+    execution leaves that newer stamp alone.
     """
     scope_key = InferenceRowScope.from_root(scope)
     with _lock:
+        if not is_execution_live():
+            raise ComputeExecutionEndedError(
+                f"scores ladder claim refused: {format_compute_scope_key(scope)} "
+                f"execution {execution_generation} has ended"
+            )
         stamp = _ladder_stamp_by_scope_key.get(scope_key)
         serving_stamp = (
             stamp
@@ -337,16 +383,16 @@ def _hand_over_unfinished_ladder_locked(holder: RowRun, winner: RowRun) -> bool:
     return True
 
 
-def release_tier_ladder_for_scope(scope: ComputeScope, *, execution_generation: int) -> None:
-    """Release the scope's ladder stamp when its scores node execution ends.
+def release_tier_ladder_for_scope(stamped: StampedLadderRun) -> None:
+    """Release the scope's ladder stamp when its scores node execution completes or fails.
 
-    A stamp written for a later node execution is left alone.
+    A stamp written for a later node execution is left alone. An execution
+    that ends by abort cancels its stamped run instead (``CANCEL`` on a
+    :class:`StampedLadderRun` through ``apply_scores_row_lifecycle``).
     """
-    scope_key = InferenceRowScope.from_root(scope)
     with _lock:
-        stamp = _ladder_stamp_by_scope_key.get(scope_key)
-        if stamp is not None and stamp.execution_generation == execution_generation:
-            _release_ladder_stamp_locked(scope_key)
+        if _stamp_for_execution_locked(stamped) is not None:
+            _release_ladder_stamp_locked(InferenceRowScope.from_root(stamped.scope))
 
 
 def get_row_run_phase(run_id: str) -> RowRunPhase | None:
@@ -435,12 +481,32 @@ def _mark_row_run_cancelled(run_id: str) -> RowRun | None:
     session token.
     """
     with _lock:
-        dropped = _drop_shell_locked(run_id)
-        if dropped is not None:
-            _record_cancelled_locked(run_id, InferenceRowScope.from_session(dropped.session))
-            return dropped
-        # Already compact-cancelled (or never registered): leave admission as-is.
-        return None
+        return _mark_cancelled_locked(run_id)
+
+
+def _mark_stamped_row_run_cancelled(stamped: StampedLadderRun) -> RowRun | None:
+    """Registry-private CANCEL side for a stamp target. Public API: ``apply_scores_row_lifecycle``.
+
+    In one hold, and only while the scope's ladder stamp has ``stamped``'s
+    execution generation, release the stamp and cancel the shell it names
+    (the :func:`_mark_row_run_cancelled` side). Returns the dropped shell, or
+    None when the stamp names a later execution, or when there is no stamp.
+    """
+    with _lock:
+        stamp = _stamp_for_execution_locked(stamped)
+        if stamp is None:
+            return None
+        _ladder_stamp_by_scope_key.pop(InferenceRowScope.from_root(stamped.scope))
+        return _mark_cancelled_locked(stamp.run_id)
+
+
+def _mark_cancelled_locked(run_id: str) -> RowRun | None:
+    """Drop ``run_id``'s shell and record its cancelled admission. Caller holds ``_lock``."""
+    dropped = _drop_shell_locked(run_id)
+    if dropped is not None:
+        _record_cancelled_locked(run_id, InferenceRowScope.from_session(dropped.session))
+    # With no shell (already compact-cancelled, or never registered) admission stays as-is.
+    return dropped
 
 
 def _retire_row_run(run_id: str) -> None:

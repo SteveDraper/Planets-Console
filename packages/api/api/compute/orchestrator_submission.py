@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import fields, replace
 from typing import TYPE_CHECKING
@@ -9,7 +10,11 @@ from typing import TYPE_CHECKING
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_turn_fill import prepare_dependency_chain_turns
 from api.compute.dag import PlannedComputeNode, force_root_for_entry_step, plan_compute_dag
-from api.compute.errors import ComputeScopeAbortedError, UnresolvedSubmissionOpenError
+from api.compute.errors import (
+    ComputeRequesterEndedError,
+    ComputeScopeAbortedError,
+    UnresolvedSubmissionOpenError,
+)
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator_pending import AcceptedSubmission
 from api.compute.orchestrator_state import (
@@ -20,7 +25,11 @@ from api.compute.orchestrator_state import (
 )
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.root_plan import IgnoredRootPlan, RootPlan
-from api.compute.scope import ComputeScope, compute_scope_to_export_scope
+from api.compute.scope import (
+    ComputeScope,
+    compute_scope_to_export_scope,
+    format_compute_scope_key,
+)
 from api.compute.submission_open import SubmissionOpen
 
 if TYPE_CHECKING:
@@ -122,7 +131,11 @@ class OrchestratorSubmissionMixin:
     """Submit, wake, attach, and plan compute work under the orchestrator lock."""
 
     def submit(self: ComputeOrchestrator, request: ComputeRequest) -> ComputeHandle:
-        """Submit or attach to in-flight work for one compute scope."""
+        """Submit or attach to in-flight work for one compute scope.
+
+        Raises :class:`ComputeRequesterEndedError`, planning nothing, when
+        ``request.requester`` is set and that execution is no longer live.
+        """
         resolved = resolve_submission_open(request)
         with self._open_root_plan(resolved) as root_plan:
             planned_request = self._prepare_root_planned_request(resolved, root_plan)
@@ -212,7 +225,13 @@ class OrchestratorSubmissionMixin:
         does not read the backfill record. ``planned`` on the result is the plan
         a fresh root registered, or None when the submission attached to
         existing work.
+
+        A request whose ``requester`` execution is no longer live raises
+        :class:`ComputeRequesterEndedError` before anything changes. The check
+        runs in this hold, so an abort that lands while the submit fetched its
+        dependency chain outside the lock still refuses it.
         """
+        self._refuse_ended_requester(request)
         scope = request.scope
         existing = self._nodes.get(scope)
         planned: tuple[PlannedComputeNode, ...] | None = None
@@ -252,6 +271,53 @@ class OrchestratorSubmissionMixin:
         self._nodes[scope].raise_standing_band(request.priority_band)
         pending_inline, pending_pool = self._dispatch()
         return AcceptedSubmission(handle, pending_inline, pending_pool, planned)
+
+    def _refuse_ended_requester(
+        self: ComputeOrchestrator,
+        request: ComputeRequest,
+    ) -> None:
+        """Raise when ``request`` belongs to a node execution that is no longer live.
+
+        Caller holds the orchestrator lock. A request with no requester passes.
+        A refusal records a ``dependency_submit_refused`` lifecycle event on the
+        requester's execution, naming the refused dependency scope.
+        """
+        requester = request.requester
+        if requester is None:
+            return
+        generation = requester.execution_generation
+        node = self._nodes.get(requester.scope)
+        if node is not None and node.is_live_execution(generation):
+            return
+        self._observers.notify_lifecycle(
+            "dependency_submit_refused",
+            requester.scope,
+            execution_generation=generation,
+            node=node if node is not None and node.execution_generation == generation else None,
+            detail={
+                "reason": "requester_ended",
+                "relatedScopeKey": format_compute_scope_key(request.scope),
+                "dependencyStepKind": request.step_kind,
+                "forceFresh": request.force_fresh,
+            },
+        )
+        raise ComputeRequesterEndedError(requester)
+
+    def _submit_dependencies(
+        self: ComputeOrchestrator,
+        requests: Sequence[ComputeRequest],
+    ) -> None:
+        """Submit, in order, the dependency submits one node execution queued post-lock.
+
+        Every request names that execution as its ``requester``. Once one is
+        refused because the execution ended, the rest would be refused too, so
+        they are not submitted. A refusal is the requester's end, not a failure.
+        """
+        try:
+            for request in requests:
+                self.submit(request)
+        except ComputeRequesterEndedError:
+            return
 
     def _plan_submission_locked(
         self: ComputeOrchestrator,
@@ -299,7 +365,9 @@ class OrchestratorSubmissionMixin:
         later-turn fleet attach can restart aborted prior-turn scores.
         Do not recreate on abort itself -- that would fight an in-flight cancel.
         A recreated dependency takes its band from the waiting dependents.
-        Caller holds the orchestrator lock; submits run after release.
+        Caller holds the orchestrator lock; submits run after release, with
+        ``node``'s execution as their requester, so none is planned once that
+        execution has ended.
         """
         to_recreate: dict[ComputeScope, tuple[OrchestrationBundle, SubmissionOpen]] = {}
         seen: set[ComputeScope] = set()
@@ -327,18 +395,18 @@ class OrchestratorSubmissionMixin:
         if not to_recreate:
             return
 
-        def _recreate() -> None:
-            for scope, (bundle, submission_open) in to_recreate.items():
-                self.submit(
-                    ComputeRequest(
-                        scope=scope,
-                        force_fresh=True,
-                        bundle=bundle,
-                        submission_open=submission_open,
-                    )
-                )
-
-        self._observers.schedule_post_lock(_recreate)
+        requester = node.execution_ref
+        recreate_requests = tuple(
+            ComputeRequest(
+                scope=scope,
+                force_fresh=True,
+                bundle=bundle,
+                submission_open=submission_open,
+                requester=requester,
+            )
+            for scope, (bundle, submission_open) in to_recreate.items()
+        )
+        self._observers.schedule_post_lock(lambda: self._submit_dependencies(recreate_requests))
 
     def _attach_to_existing(
         self: ComputeOrchestrator,
@@ -352,6 +420,9 @@ class OrchestratorSubmissionMixin:
                 _condition=self._condition,
             )
         self._adopt_rooted_open_turn(node, request)
+        # A root attach needs the node again; a planned join instead adds the
+        # dependent edge the start-or-requeue gate derives "needed" from.
+        node.running_step = node.running_step.lowered_by_root_attach()
         handle = ComputeHandle(
             scope=node.scope,
             _node=node,

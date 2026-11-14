@@ -334,6 +334,7 @@ def put_persisted_row(
         host_turn if host_turn is not None else sample_turn.settings.turn,
         player_id,
         row,
+        on_walk=False,
     )
 
 

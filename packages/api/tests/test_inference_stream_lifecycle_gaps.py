@@ -96,16 +96,9 @@ def _scheduled_row(sample_turn, *, player_id: int) -> ScheduledInferenceRow:
     )
 
 
-def _install_workerless_scheduler(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    on_row_complete: Callable | None = None,
-) -> InferenceRowScheduler:
+def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(
-        worker_count=0,
-        on_row_complete=on_row_complete,
-    )
+    scheduler = InferenceRowScheduler(worker_count=0)
 
     def _get_scheduler() -> InferenceRowScheduler:
         return scheduler
@@ -121,15 +114,30 @@ def _install_workerless_scheduler(
     return scheduler
 
 
+def _persist_session_row(
+    persistence: InferenceRowPersistenceService,
+    session: InferenceRowStreamSession,
+    row_complete: RowComplete,
+) -> None:
+    persistence.persist_row_complete_for_scope(
+        row_complete,
+        game_id=session.game_id,
+        perspective=session.perspective,
+        host_turn=session.turn_number,
+        player_id=session.player_id,
+        query_context=session.query_context,
+        on_walk=False,
+    )
+
+
 def _complete_row_via_scheduler(
     scheduler: InferenceRowScheduler,
     session: InferenceRowStreamSession,
     row_complete: RowComplete,
     *,
-    persistence: InferenceRowPersistenceService | None = None,
+    persistence: InferenceRowPersistenceService,
 ) -> None:
-    if persistence is not None:
-        persistence.persist_row_complete(session, row_complete)
+    _persist_session_row(persistence, session, row_complete)
     session.event_queue.put(row_complete)
     scheduler._finalize_row_run(session)
 
@@ -238,10 +246,7 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     detaches them.
     """
     persistence = InferenceRowPersistenceService(memory_backend)
-    scheduler = _install_workerless_scheduler(
-        monkeypatch,
-        on_row_complete=persistence.persist_row_complete,
-    )
+    scheduler = _install_workerless_scheduler(monkeypatch)
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -328,10 +333,7 @@ def test_stream_disconnect_ends_before_worker_completes(
 ):
     """Disconnect may end delivery before a worker has produced a terminal."""
     persistence = InferenceRowPersistenceService(memory_backend)
-    scheduler = _install_workerless_scheduler(
-        monkeypatch,
-        on_row_complete=persistence.persist_row_complete,
-    )
+    scheduler = _install_workerless_scheduler(monkeypatch)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     target_player_id = player_ids[1]
@@ -433,10 +435,7 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
 ):
     """Reconnect path serves cached terminal state when persistence already holds the row."""
     persistence = InferenceRowPersistenceService(memory_backend)
-    scheduler = _install_workerless_scheduler(
-        monkeypatch,
-        on_row_complete=persistence.persist_row_complete,
-    )
+    scheduler = _install_workerless_scheduler(monkeypatch)
     player_id = sample_turn.scores[0].ownerid
     turn_number = sample_turn.settings.turn
 
@@ -495,10 +494,7 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
     """
     reset_inference_table_stream_registry_for_tests()
     persistence = InferenceRowPersistenceService(memory_backend)
-    scheduler = _install_workerless_scheduler(
-        monkeypatch,
-        on_row_complete=persistence.persist_row_complete,
-    )
+    scheduler = _install_workerless_scheduler(monkeypatch)
     player_id = sample_turn.scores[0].ownerid
     turn_number = sample_turn.settings.turn
     scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=turn_number)
@@ -561,7 +557,7 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
         summary="persisted while multiplex unbound",
         diagnostics=_diagnostics(turn=turn_number, player_id=player_id),
     )
-    persistence.persist_row_complete(session, row_complete)
+    _persist_session_row(persistence, session, row_complete)
     assert persistence.get_row(628580, 1, turn_number, player_id) is not None
 
     compute_scope = ComputeScope(
@@ -576,7 +572,7 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
             scope=compute_scope,
             state="complete",
             execution_generation=0,
-            result_wire={"runId": run_id, "rowComplete": row_complete},
+            result_wire={"runId": run_id, "rowComplete": row_complete, "onWalk": False},
             error=None,
         ),
     )

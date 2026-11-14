@@ -61,7 +61,7 @@ def test_persistence_row_round_trip(persistence):
         diagnostics={"actionCatalog": {"shipBuildCombos": [{"comboId": "x"}] * 1000}},
         persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
-    persistence.put_row(628580, 1, 111, 8, row)
+    persistence.put_row(628580, 1, 111, 8, row, on_walk=False)
     loaded = persistence.get_row(628580, 1, 111, 8)
     assert loaded is not None
     assert loaded.status == row.status
@@ -88,10 +88,10 @@ def test_row_keys_for_host_turn_is_empty_when_none_stored(persistence):
 
 
 def test_row_keys_for_host_turn_lists_that_turn_only(persistence):
-    persistence.put_row(628580, 1, 111, 9, _cached_row("nine"))
-    persistence.put_row(628580, 1, 111, 8, _cached_row("eight"))
-    persistence.put_row(628580, 1, 110, 7, _cached_row("prior"))
-    persistence.put_row(628580, 2, 111, 8, _cached_row("other perspective"))
+    persistence.put_row(628580, 1, 111, 9, _cached_row("nine"), on_walk=False)
+    persistence.put_row(628580, 1, 111, 8, _cached_row("eight"), on_walk=False)
+    persistence.put_row(628580, 1, 110, 7, _cached_row("prior"), on_walk=False)
+    persistence.put_row(628580, 2, 111, 8, _cached_row("other perspective"), on_walk=False)
 
     assert persistence.row_keys_for_host_turn(628580, 1, 111) == [
         persistence.row_store_key(628580, 1, 111, 8),
@@ -105,9 +105,9 @@ def test_row_keys_for_host_turn_lists_that_turn_only(persistence):
 def test_delete_host_turn_document_removes_player_files_and_shared_document(tmp_path):
     backend = open_file_storage_backend(tmp_path)
     persistence = InferenceRowPersistenceService(backend)
-    persistence.put_row(628580, 1, 111, 8, _cached_row())
-    persistence.put_row(628580, 1, 111, 9, _cached_row("other"))
-    persistence.put_row(628580, 1, 110, 8, _cached_row("prior"))
+    persistence.put_row(628580, 1, 111, 8, _cached_row(), on_walk=False)
+    persistence.put_row(628580, 1, 111, 9, _cached_row("other"), on_walk=False)
+    persistence.put_row(628580, 1, 110, 8, _cached_row("prior"), on_walk=False)
     parent = persistence.host_turn_document_key(628580, 1, 111)
     backend.put(parent, {"leftover": True})
 
@@ -165,10 +165,10 @@ def test_get_row_upgrades_legacy_row_in_that_players_file(tmp_path):
     assert (tmp_path / f"{sibling_key}.json").read_bytes() == sibling_bytes
 
 
-def test_put_row_notify_false_skips_on_row_persisted(persistence):
-    notified: list[tuple[int, int, int, int]] = []
-    persistence.on_row_persisted = lambda game_id, perspective, host_turn, player_id: (
-        notified.append((game_id, perspective, host_turn, player_id))
+def test_put_row_without_notify_skips_on_row_persisted(persistence):
+    notified: list[tuple[int, int, int, int, bool]] = []
+    persistence.on_row_persisted = lambda game_id, perspective, host_turn, player_id, *, on_walk: (
+        notified.append((game_id, perspective, host_turn, player_id, on_walk))
     )
     row = PersistedInferenceRow(
         status=STATUS_EXACT,
@@ -177,16 +177,17 @@ def test_put_row_notify_false_skips_on_row_persisted(persistence):
         is_complete=True,
         solutions=[],
     )
-    persistence.put_row(628580, 1, 111, 8, row, notify=False)
+    persistence.put_row_without_notify(628580, 1, 111, 8, row)
     assert persistence.get_row(628580, 1, 111, 8) is not None
     assert notified == []
-    persistence.put_row(628580, 1, 111, 8, row, notify=True)
-    assert notified == [(628580, 1, 111, 8)]
+    persistence.put_row(628580, 1, 111, 8, row, on_walk=False)
+    persistence.put_row(628580, 1, 111, 8, row, on_walk=True)
+    assert notified == [(628580, 1, 111, 8, False), (628580, 1, 111, 8, True)]
 
 
 def test_put_row_promotes_accelerated_segments_before_dropping_diagnostics(persistence):
     _, player_id, legacy_row = _legacy_v1_split_row_from_turn_three()
-    persistence.put_row(628580, 1, 3, player_id, legacy_row)
+    persistence.put_row(628580, 1, 3, player_id, legacy_row, on_walk=False)
     raw = persistence._storage.get(persistence.row_store_key(628580, 1, 3, player_id))
     assert isinstance(raw, dict)
     assert "diagnostics" not in raw
@@ -377,6 +378,7 @@ def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persis
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     persistence.put_row(
         628580,
@@ -390,6 +392,7 @@ def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persis
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     cleared = persistence.invalidate_for_turn_write(628580, 1, 111)
     assert cleared == {111, 110}
@@ -413,6 +416,7 @@ def test_stream_replays_persisted_row_without_scheduler_work(sample_turn, persis
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     scheduler = get_inference_row_scheduler()
     stream = iter_scores_table_inference_events(
@@ -446,6 +450,7 @@ def test_mask_change_deletes_persisted_row(memory_backend):
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     invalidation.on_hull_mask_changed(628580, 1, 111, 8)
     assert persistence.get_row(628580, 1, 111, 8) is None
@@ -466,6 +471,7 @@ def test_recompute_clears_host_turn_document(memory_backend):
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     analytics.recompute_scores_inference(628580, 1, 111)
     assert persistence.get_row(628580, 1, 111, 8) is None
@@ -486,6 +492,7 @@ def test_turn_store_invalidates_inference_persistence(memory_backend):
             is_complete=True,
             solutions=[],
         ),
+        on_walk=False,
     )
     with open(ASSETS_DIR / "turn_sample.json") as f:
         turns._store_turn_rst(628580, 1, 111, json.load(f))
@@ -700,7 +707,7 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
             turn=sample_turn.settings.turn,
             player_id=score.ownerid,
         ),
-        {"runId": run.run_id, "rowComplete": row_complete},
+        {"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
     )
 
     stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
@@ -758,6 +765,7 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
                 summary="stopped",
             ),
         ),
+        {"runId": run.run_id, "onWalk": False},
     )
     assert step_result.outcome == "persist"
 
@@ -858,7 +866,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
                 turn=sample_turn.settings.turn,
                 player_id=score.ownerid,
             ),
-            {"runId": run_id, "rowComplete": row_complete},
+            {"runId": run_id, "rowComplete": row_complete, "onWalk": False},
         )
         stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
         assert stored is not None

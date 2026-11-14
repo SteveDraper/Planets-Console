@@ -52,7 +52,6 @@ from tests.walk_band_helpers import (
     end_shell,
     finish_walk,
     no_live_streams,
-    no_scores_row_runs,
     start_walk_held_at_the_baseline_persist,
 )
 
@@ -65,11 +64,6 @@ def _no_live_streams() -> Iterator[None]:
 @pytest.fixture
 def walk(sample_turn) -> Walk:
     return Walk.at_shell_turn(sample_turn)
-
-
-@pytest.fixture
-def _no_scores_row_runs() -> Iterator[None]:
-    yield from no_scores_row_runs()
 
 
 class _HeldOpenFleetStreamPolicy:
@@ -109,7 +103,7 @@ def _connect_fleet_stream(walk: Walk) -> Iterator[dict[str, object]]:
 # --- T1: a walk reaches the ensure baseline whether its streams close or stay open ---
 
 
-@pytest.mark.usefixtures("_no_scores_row_runs")
+@pytest.mark.usefixtures("no_scores_row_runs")
 def test_closing_both_streams_mid_walk_still_reaches_the_ensure_baseline(sample_turn):
     walk = start_walk_held_at_the_baseline_persist(sample_turn)
 
@@ -119,7 +113,7 @@ def test_closing_both_streams_mid_walk_still_reaches_the_ensure_baseline(sample_
     assert_walk_stamped_the_ensure_baseline_without_bumping(walk)
 
 
-@pytest.mark.usefixtures("_no_scores_row_runs")
+@pytest.mark.usefixtures("no_scores_row_runs")
 def test_a_walk_with_both_streams_open_reaches_the_ensure_baseline(sample_turn, caplog):
     walk = start_walk_held_at_the_baseline_persist(sample_turn)
 

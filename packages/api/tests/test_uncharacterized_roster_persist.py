@@ -56,6 +56,7 @@ def _persist_refusal(
         perspective=8,
         host_turn=host_turn,
         player_id=player_id,
+        on_walk=False,
     )
     stored = persistence.get_row(GAME_ID, 8, host_turn, player_id)
     assert stored is not None
@@ -163,6 +164,7 @@ def test_uncharacterized_roster_does_not_start_mine_residual_sticky_prior(persis
         perspective=8,
         host_turn=110,
         player_id=3,
+        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is False
 
@@ -184,6 +186,7 @@ def test_export_exposes_roster_status_tagged_leftover_placeholders_and_signature
         perspective=sample_turn.player.id,
         host_turn=sample_turn.settings.turn,
         player_id=player_id,
+        on_walk=False,
     )
     queried = scores_query_context(sample_turn, persistence=persistence).query(
         "scores",
@@ -452,6 +455,7 @@ def test_exact_persist_round_trips_departure_pins(persistence):
         perspective=8,
         host_turn=111,
         player_id=3,
+        on_walk=False,
     )
     replayed = persistence.wire_complete_for_row(GAME_ID, 8, 111, 3)
     assert replayed is not None
@@ -471,6 +475,7 @@ def test_spec_only_exact_persist_omits_departure_pins(persistence):
         perspective=8,
         host_turn=111,
         player_id=3,
+        on_walk=False,
     )
     replayed = persistence.wire_complete_for_row(GAME_ID, 8, 111, 3)
     assert replayed is not None
@@ -553,6 +558,7 @@ def test_exact_finalize_persists_admission_pins_without_readmitting(
         perspective=8,
         host_turn=111,
         player_id=3,
+        on_walk=False,
     )
     replayed = persistence.wire_complete_for_row(GAME_ID, 8, 111, 3)
     assert replayed is not None

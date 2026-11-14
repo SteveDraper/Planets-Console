@@ -133,6 +133,7 @@ def _close_scores_turn_evidence(
             is_complete=True,
             solutions=closed_solutions,
         ),
+        on_walk=False,
     )
 
 

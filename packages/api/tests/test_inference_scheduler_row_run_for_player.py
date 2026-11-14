@@ -2,19 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
-from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
-    reset_inference_row_scheduler_for_tests,
-)
+from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.scores.tier_row_run_registry import (
-    _detach_row_run,
-    get_row_run,
-    reset_tier_row_run_registry_for_tests,
-)
+from api.analytics.scores.tier_row_run_registry import _detach_row_run, get_row_run
 
 from tests.scores_row_lifecycle_test_helpers import _session_for_player
 
@@ -22,13 +13,7 @@ GAME_ID = 628580
 PERSPECTIVE = 1
 
 
-@pytest.fixture(autouse=True)
-def _clean_registries() -> Iterator[None]:
-    reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    yield
-    reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
+pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
 
 @pytest.fixture

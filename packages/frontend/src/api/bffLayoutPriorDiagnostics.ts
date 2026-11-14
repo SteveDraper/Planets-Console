@@ -40,7 +40,7 @@ export async function fetchLayoutPriorReports(
 ): Promise<LayoutPriorReportsResponse> {
   const path = `/bff/diagnostics/homeworld/layout-prior-reports?${layoutPriorReportsQuery(scope)}`
   const endpointLabel = 'GET /bff/diagnostics/homeworld/layout-prior-reports'
-  const r = await bffRequest(path, undefined, endpointLabel)
+  const r = await bffRequest({ path, gameId: scope.gameId }, undefined, endpointLabel)
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }

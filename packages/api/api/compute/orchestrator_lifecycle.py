@@ -8,18 +8,33 @@ wire-ready scope keys on lifecycle details so listeners need not reconstruct
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
+from api.compute.dag_reach import needed_scopes
 from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.running_step import StepExit
 from api.compute.scope import format_compute_scope_key
-from api.compute.wire import coerce_step_result
+from api.compute.wire import StepOutcome, coerce_step_result
 from api.exceptions import DiscardedWorkRefused
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.registry import AnalyticComputeRegistration
+
+# The exit each step outcome takes first once the step has finished.
+_STEP_EXIT_BY_OUTCOME: Mapping[StepOutcome, StepExit] = MappingProxyType(
+    {
+        "persist": StepExit.PERSIST,
+        "complete": StepExit.COMPLETE,
+        "continue": StepExit.START,
+        "park": StepExit.REQUEUE,
+        "waiting_deps": StepExit.REQUEUE,
+    }
+)
 
 
 class OrchestratorLifecycleMixin:
@@ -61,6 +76,9 @@ class OrchestratorLifecycleMixin:
         return prior_step_index
 
     def _retry_step_after_epoch_bump(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """Re-queue an epoch-stale step, unless the start-or-requeue gate ends the node."""
+        if self._refuse_step_exit(node, StepExit.REQUEUE):
+            return
         self._metrics.epoch_discards += 1
         prior_generation = node.generation_at_submit
         current_generation = self._current_invalidation_generation(node)
@@ -94,7 +112,7 @@ class OrchestratorLifecycleMixin:
         while the node is non-terminal, so force_fresh attach could never promote.
         """
         with self._condition:
-            if node.state != "running":
+            if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             self._reset_for_requeue(node)
             node.error = None
@@ -123,11 +141,14 @@ class OrchestratorLifecycleMixin:
         in ``waiting_deps`` (0% CPU hang). Never graft the node's own scope -- that
         self-edge can never become ``complete`` while this node is ``waiting_deps``.
         The force_fresh dependency submit asks for no band of its own: the
-        grafted edge gives it this node's band at the next dispatch pass.
+        grafted edge gives it this node's band at the next dispatch pass. It
+        runs after the lock is released and names this node's execution as its
+        requester, so it plans nothing once that execution has ended (aborted
+        or replaced) before the plan would be registered. The start-or-requeue
+        gate runs first, so a node it ends queues no dependency submit.
         """
-        bundle = node.bundle
         with self._condition:
-            if node.state != "running":
+            if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             prior_step_index = self._reset_for_requeue(node)
             node.error = None
@@ -156,60 +177,88 @@ class OrchestratorLifecycleMixin:
                 },
             )
 
-        if not recovery.force_fresh:
-            return
-
-        step_kind = recovery.step_kind
-        submission_open = node.submission_open
-
-        def _force_fresh_dependency() -> None:
-            self.submit(
-                ComputeRequest(
-                    scope=dependency_scope,
-                    force_fresh=True,
-                    step_kind=step_kind,
-                    bundle=bundle,
-                    submission_open=submission_open,
-                )
+            if not recovery.force_fresh:
+                return
+            dependency_request = ComputeRequest(
+                scope=dependency_scope,
+                force_fresh=True,
+                step_kind=recovery.step_kind,
+                bundle=node.bundle,
+                submission_open=node.submission_open,
+                requester=node.execution_ref,
             )
-
-        self._observers.schedule_post_lock(_force_fresh_dependency)
+            self._observers.schedule_post_lock(
+                lambda: self._submit_dependencies((dependency_request,))
+            )
 
     def _abandon_persist_if_not_running_or_stale(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
+        step_exit: StepExit,
     ) -> bool:
-        """Return True when persist/complete must not proceed. Caller holds the lock."""
+        """Return True when the persist leg must not take ``step_exit``. Caller holds the lock."""
         if node.state != "running":
             return True
-        if node.discard_without_stamp:
-            self._fail_discarded_stamp(node)
+        if self._refuse_step_exit(node, step_exit):
             return True
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return True
         return False
 
-    def _fail_discarded_stamp(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Finish a discarded step without persisting or retrying."""
-        self._fail_node(
-            node,
-            DiscardedWorkRefused("discarded step does not persist or stamp the new evidence mark"),
-        )
+    def _refuse_step_exit(
+        self: ComputeOrchestrator, node: ComputeNodeRun, step_exit: StepExit
+    ) -> bool:
+        """Fail ``node`` when its running-step disposition does not permit ``step_exit``.
+
+        Returns whether it was refused. "Needed" is derived only when the
+        disposition's answer depends on it. Caller holds the lock.
+
+        Asked for ``START`` or ``REQUEUE``, this is the start-or-requeue gate:
+        at the pool pick and the thread re-check (``begin_pool_step``), the
+        inline post-wire-build re-check, ``_begin_step_execution``, and before
+        epoch retry, persist-deferred recovery, soft demotion and park.
+        """
+        if node.running_step.permits(step_exit, is_needed=lambda: self._is_needed(node)):
+            return False
+        self._fail_refused_execution(node)
+        return True
+
+    def _fail_refused_execution(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """End an execution its running-step disposition refused. Caller holds the lock.
+
+        It persists nothing further, stamps nothing further and is not
+        retried. It fails with its disposition's refusal error.
+        """
+        self._fail_node(node, node.running_step.refusal_error())
+
+    def _is_needed(self: ComputeOrchestrator, node: ComputeNodeRun) -> bool:
+        """Whether other non-terminal work still needs ``node``. Caller holds the lock."""
+        others = (scope for scope in self._nodes if scope != node.scope)
+        return node.scope in needed_scopes(self._nodes, others)
 
     def _after_step_success(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
         result_wire: object | None,
     ) -> None:
-        if node.discard_without_stamp:
-            self._fail_discarded_stamp(node)
+        """Apply a finished step's result. Caller holds the lock.
+
+        The result is read only when it can change the outcome: an execution
+        that may take no exit is refused first, and an epoch-stale step is
+        re-queued next, whatever it returned, through the start-or-requeue
+        gate. Otherwise the outcome names the exit the step takes.
+        """
+        if node.running_step.permits_no_exit:
+            self._fail_refused_execution(node)
             return
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return
-
         step_result = coerce_step_result(result_wire)
+        if self._refuse_step_exit(node, _STEP_EXIT_BY_OUTCOME[step_result.outcome]):
+            return
+
         registration = self._compute_registry[node.scope.analytic_id]
         # Persist runs after this lock is released. Keep generation_at_submit so
         # persist-then-complete can still discard if invalidation lands in that window.
@@ -281,7 +330,9 @@ class OrchestratorLifecycleMixin:
                 # Epoch can also advance in this window (durable wipe while persist
                 # is queued); do not stamp ``complete`` over a deleted ledger.
                 with self._condition:
-                    if self._abandon_persist_if_not_running_or_stale(completed_node):
+                    if self._abandon_persist_if_not_running_or_stale(
+                        completed_node, StepExit.PERSIST
+                    ):
                         return
                 ctx = self._ctx_for_node(completed_node)
                 try:
@@ -305,16 +356,22 @@ class OrchestratorLifecycleMixin:
                         return
                     with self._condition:
                         # Epoch refusal from persist. Same split as an epoch that
-                        # moved before the hook: discard-flagged work fails, and
-                        # a running shell or live turn is re-queued.
+                        # moved before the hook: an execution a settle left
+                        # finishing without a stamp fails, and a running shell or
+                        # live turn is re-queued.
                         if isinstance(exc, DiscardedWorkRefused):
-                            if self._abandon_persist_if_not_running_or_stale(completed_node):
+                            if self._abandon_persist_if_not_running_or_stale(
+                                completed_node, StepExit.PERSIST
+                            ):
                                 return
                         if completed_node.state == "running":
                             self._fail_node(completed_node, exc)
                     return
                 with self._condition:
-                    if self._abandon_persist_if_not_running_or_stale(completed_node):
+                    if self._abandon_persist_if_not_running_or_stale(
+                        completed_node,
+                        StepExit.START if should_continue else StepExit.COMPLETE,
+                    ):
                         return
                     if should_continue:
                         self._continue_node_step(completed_node, completed_registration)
@@ -418,7 +475,9 @@ class OrchestratorLifecycleMixin:
 
         Soft park does **not** complete the node (dependents stay blocked), but still
         publishes an immutable outcome snapshot so scores can reattach empty stream
-        delivery without unlocking same-turn fleet.
+        delivery without unlocking same-turn fleet. Its one caller,
+        ``_after_step_success``, has already put the ``park`` outcome's
+        ``REQUEUE`` exit through the start-or-requeue gate in this lock hold.
         """
         if node.state != "running":
             return

@@ -122,7 +122,9 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
             fleet_persistence=persistence,
             orchestrator=lambda: orchestrator,
         )
-        invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 40, player_id)
+        invalidation.on_scores_row_persisted(
+            ctx.game_id, ctx.perspective, 40, player_id, on_walk=False
+        )
         assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == (
             FleetEvidenceMark(evidence_generation=3, applies_from_turn=40)
         )
@@ -276,7 +278,7 @@ def test_cancelled_open_does_not_classify_a_later_lower_turn_as_a_hop(sample_tur
         fleet_persistence=persistence,
         orchestrator=lambda: orchestrator,
     )
-    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 39, player_id)
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 39, player_id, on_walk=False)
 
     assert persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id) == (
         FleetEvidenceMark(evidence_generation=4, applies_from_turn=38)

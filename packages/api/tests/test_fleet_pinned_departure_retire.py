@@ -118,6 +118,7 @@ def _persist_row(
             departure_pins=departure_pins,
             host_turn_targets=host_turn_targets,
         ),
+        on_walk=False,
     )
 
 

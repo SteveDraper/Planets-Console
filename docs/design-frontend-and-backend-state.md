@@ -111,6 +111,19 @@ Some state stays in **component state** when it is **local to the shell** or **e
 
 If a piece of UI state later needs to be shared widely, promote it to Zustand or derive it from query data rather than duplicating.
 
+### Pending Backfill walk stops (client-only, in-memory)
+
+`packages/frontend/src/lib/backfillWalkStop.ts` holds a module-level `Map<gameId, Promise<void>>`. It is neither Zustand nor TanStack Query: it is an ordering barrier between two client actions, not UI state and not server data, and it is never persisted.
+
+- **Trigger:** `installBackfillWalkStopOnShellGameChange()` in `lib/backfillWalkStopOnShellGameChange.ts` is called once in `main.tsx`. It lives apart from the map so `api/bff.ts` can await the map without importing the shell store. It registers one `useShellStore.subscribe` listener that compares `selectedGameId` with the previous state. When the shell leaves a non-null game G (to another game or to null), it calls `requestBackfillWalkStop(G)`. The store starts with no game, so the first load and persist hydration never leave one; a same-game refresh leaves `selectedGameId` unchanged.
+- **Chaining:** `requestBackfillWalkStop(G)` chains a `POST /bff/games/{G}/backfill-walks/stop` onto any stop already pending for G, so a rapid G to H to G to H sends G's stops in order. The entry for G is deleted when its chain settles, unless a later stop for G has replaced it.
+- **Failure:** the stop is fire-and-forget. A failed stop is logged with `console.warn` and its chain resolves, so it never blocks re-entry.
+- **Timeout:** `postBackfillWalksStop` aborts its POST after `BACKFILL_WALKS_STOP_TIMEOUT_MS` (5 s) through `AbortSignal.timeout`. A timed-out stop is a failed stop: it is logged and its chain resolves, so a hung stop holds G's requests for at most that long. The timeout belongs to the stop only; other requests have none.
+- **Tests:** the map is module-level. Every test file that holds stops calls `resetPendingBackfillWalkStops()` in `afterEach`, so a stop one test leaves held does not block the next.
+- **Await:** every BFF request goes through `bffRequest` in `api/bff.ts`, which takes a `BffRequestTarget` of `{ path, gameId }`. `gameId` is required: it names the game the request carries in its path (`/bff/games/{G}/...`), its `gameId` query parameter (analytic table, map, scores inference and the table streams), or its JSON body (compute diagnostics freeze, allowlist and single-step), and is null only for a request that names no game. A request for G awaits `pendingBackfillWalkStop(G)` before it is sent, so every request that re-enters G, including any compute submit, reaches the server after G's stop. Requests for other games and requests naming no game do not wait.
+- **The stop is exempt:** `postBackfillWalksStop` sends through `sendBffRequest` in `api/bffSend.ts`, the lower-level send that `bffRequest` wraps, so a stop never waits on its own chain. No other request uses `sendBffRequest` directly.
+- **Abort while waiting:** a request whose signal aborts while it waits is still held until G's stop settles; `fetch` then rejects it at once without sending. `connectAnalyticTableStream` reports that as `aborted`.
+
 ---
 
 ## 4. Backend: Stateless HTTP and persistent storage
@@ -120,6 +133,8 @@ The **Core REST API**, **BFF**, and **root server** process handle requests **wi
 **Durable** game info, turn blobs, credentials keys, and other stored data live **only** behind the **`StorageBackend`** abstraction (`packages/api/api/storage/`, import `api.storage`). With `storage_backend: file` (repo default), data is persisted as JSON documents at registry **breakpoints** under `storage_root` (default `./.data/`). Services use that protocol; routers do not touch concrete backends. See [design-storage-abstraction-and-crud-api.md](design-storage-abstraction-and-crud-api.md) §15 and [ADR 0001](adr/0001-breakpoint-file-storage.md).
 
 The **BFF** does not introduce its own persistence; it shapes responses for the SPA and may call Core services according to the allowed import surface in architecture rules.
+
+**Leaving a game is an explicit command, not server state.** Because the backend has no "current game", the SPA tells it when the shell leaves game G: `POST /bff/games/{G}/backfill-walks/stop` (Core: `POST /api/v1/games/{G}/backfill-walks/stop`). The command is stateless and returns 204 for any game id. It settles G's accepted Backfill earlier turns walks under the orchestrator lock and drains the queued work in a response background task; no record of the stop is kept. The client-side ordering of stops against re-entry is the pending-stop map in section 3.
 
 ---
 

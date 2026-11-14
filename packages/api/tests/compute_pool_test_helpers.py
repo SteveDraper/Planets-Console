@@ -8,6 +8,8 @@ from api.compute.pools import RemoteStepWork, ThreadStepWork
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import BuildStepJobWireKwargs, DependencyOutputs
 
+from tests.submission_open_helpers import live_execution
+
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
     from api.compute.orchestrator import ComputeOrchestrator
@@ -40,6 +42,7 @@ def ok_thread_step_work(ctx: AnalyticQueryContext) -> ThreadStepWork:
             node_result_wire=None,
             submission_open=SubmissionOpen(),
             execution_generation=0,
+            is_execution_live=live_execution,
         ),
         run_step=lambda _job: {"ok": True},
     )

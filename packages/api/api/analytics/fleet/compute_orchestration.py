@@ -20,6 +20,8 @@ from api.analytics.fleet.serialization import (
 )
 from api.analytics.fleet.types import PersistedFleetLedger
 from api.analytics.off_mode_wire import parse_off_mode_wire, stamp_submission_open
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.persistence import PersistDependencyRecovery
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import (
     WILDCARD,
@@ -189,6 +191,27 @@ def build_fleet_finalization_leg_job_wire(
     )
     stamp_submission_open(payload, scope, submission_open)
     return payload
+
+
+def scores_evidence_recovery(scope: ComputeScope) -> PersistDependencyRecovery:
+    """The dependency a fleet persist defers on while same-turn scores evidence is open.
+
+    It force_freshes the scores solve of the same game, perspective, turn,
+    player and parameters as the fleet ``scope``; the orchestrator grafts
+    that scope onto the fleet node.
+    """
+    return PersistDependencyRecovery(
+        dependency_scope=ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=scope.turn,
+            player_id=scope.player_id,
+            parameters=scope.parameters,
+        ),
+        force_fresh=True,
+        step_kind="tier_solve",
+    )
 
 
 class FleetPersistencePolicy:
@@ -450,27 +473,13 @@ class FleetPersistencePolicy:
             # with force_fresh=True, which refreshes waiting_deps / absent / terminal
             # nodes alike. Do not also call wake_scores_scope for this path -- that
             # would be a second encoding of the same reopen policy.
-            from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-            from api.compute.persistence import PersistDependencyRecovery
             from api.errors import FleetScoresEvidenceOpenError
 
-            scores_scope = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=scope.game_id,
-                perspective=scope.perspective,
-                turn=scope.turn,
-                player_id=scope.player_id,
-                parameters=scope.parameters,
-            )
             raise FleetScoresEvidenceOpenError(
                 f"fleet persist refused for game {scope.game_id} perspective "
                 f"{scope.perspective} player {scope.player_id} turn {scope.turn}: "
                 "scores turn evidence is not closed",
-                recovery=PersistDependencyRecovery(
-                    dependency_scope=scores_scope,
-                    force_fresh=True,
-                    step_kind="tier_solve",
-                ),
+                recovery=scores_evidence_recovery(scope),
             )
 
         from api.analytics.fleet.approximate_fleet import terminal_fleet_ledger

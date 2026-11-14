@@ -35,7 +35,7 @@ from tests.scores_exports_helpers import (
     minimal_stream_query_context,
 )
 from tests.scores_row_lifecycle_test_helpers import _session_for_player
-from tests.submission_open_helpers import explicit_submission_open
+from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 PERSPECTIVE = 1
 
@@ -302,6 +302,7 @@ def test_admit_whose_stream_token_loses_the_scope_still_runs_the_hop(
         ctx=ctx,
         submission_open=explicit_submission_open(),
         execution_generation=1,
+        is_execution_live=live_execution,
     )
 
     assert wire["runId"] == run.run_id

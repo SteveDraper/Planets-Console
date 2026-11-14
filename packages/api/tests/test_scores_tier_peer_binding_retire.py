@@ -94,7 +94,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
         _outcome_snapshot(
             scope,
             state="complete",
-            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+            result_wire={"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
         ),
     )
 
@@ -107,7 +107,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
         _outcome_snapshot(
             scope,
             state="complete",
-            result_wire={"runId": run.run_id, "rowComplete": row_complete},
+            result_wire={"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
         ),
     )
 
