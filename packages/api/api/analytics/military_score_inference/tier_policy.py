@@ -14,14 +14,13 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal
 
-import yaml
-
 from api.analytics.fleet.option_set_mass import DEFAULT_OPTION_SET_MASS_THRESHOLD
 from api.analytics.military_score_inference.models import (
     DEFAULT_NEAR_BEST_OBJECTIVE_THRESHOLD,
     ProbabilityBinBounds,
 )
 from api.analytics.scores_assets import Scores
+from api.serialization.yaml_documents import load_yaml_mapping
 
 SlotCountMode = Literal["none", "partial"]
 FilterAxis = Literal["hulls", "engines", "beams", "launchers"]
@@ -159,11 +158,7 @@ def default_tier_policy_path() -> Path:
 
 
 def load_tier_policy_document(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as handle:
-        document = yaml.safe_load(handle)
-    if not isinstance(document, dict):
-        raise ValueError(f"tier policy root must be a mapping: {path}")
-    return document
+    return load_yaml_mapping(path, document_name="tier policy")
 
 
 def _parse_component_ids(raw: object, *, axis: str, step_id: str) -> tuple[int, ...]:

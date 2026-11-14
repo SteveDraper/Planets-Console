@@ -21,6 +21,7 @@ from api.analytics.scores_assets import Scores
 from api.concepts.game_category import GAME_CATEGORY_RULES_VERSION, GameCategory
 from api.models.game import TurnInfo
 from api.models.space import Minefield
+from api.serialization.yaml_documents import load_yaml_mapping
 
 MINE_STOCK_ASSET_VERSION = 1
 
@@ -260,10 +261,7 @@ def load_or_bootstrap_mine_stock_asset(category: GameCategory, *, base_dir: Path
 
 
 def load_mine_stock_asset(path: Path) -> MineStockAsset:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path} must contain a YAML mapping")
-    return parse_mine_stock_document(raw)
+    return parse_mine_stock_document(load_yaml_mapping(path, document_name="mine-stock asset"))
 
 
 def parse_mine_stock_document(document: Mapping[str, Any]) -> MineStockAsset:

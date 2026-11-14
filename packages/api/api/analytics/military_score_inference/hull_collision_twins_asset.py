@@ -16,6 +16,7 @@ import yaml
 
 from api.analytics.scores_assets import Scores
 from api.concepts.game_category import GameCategory
+from api.serialization.yaml_documents import load_yaml_mapping
 
 HULL_COLLISION_TWINS_VERSION = 1
 
@@ -244,10 +245,7 @@ def parse_hull_collision_twins_document(document: dict[str, Any]) -> HullCollisi
 
 
 def load_hull_collision_twins_asset(path: Path) -> HullCollisionTwinsAsset:
-    with path.open(encoding="utf-8") as handle:
-        document = yaml.safe_load(handle)
-    if not isinstance(document, dict):
-        raise ValueError(f"hull collision twins root must be a mapping: {path}")
+    document = load_yaml_mapping(path, document_name="hull collision twins")
     asset = parse_hull_collision_twins_document(document)
     expected_stem = Path(twin_asset_filename(asset.category)).stem
     if path.stem != expected_stem:

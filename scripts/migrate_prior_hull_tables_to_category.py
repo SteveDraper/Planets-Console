@@ -30,6 +30,7 @@ from api.analytics.military_score_inference.prior_weights_laplace import (  # no
     WILDCARD_COUNT_KEY,
 )
 from api.models.components import Hull  # noqa: E402
+from api.serialization.yaml_documents import load_yaml_mapping  # noqa: E402
 from tests.inference_corpus.fixtures import load_turn_fixture  # noqa: E402
 
 
@@ -136,9 +137,7 @@ def migrate_prior_weights_file(
     hulls_by_id: dict[int, Hull],
     rewrite_commented: bool,
 ) -> bool:
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
-        raise ValueError(f"{path}: root must be a mapping")
+    document = load_yaml_mapping(path, document_name="prior weights")
     if document.get("version", 0) >= 4 and not _band_needs_migration(document.get("hulls", {})):
         return False
     migrated = migrate_document(document, hulls_by_id=hulls_by_id)

@@ -6,10 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from api.analytics.military_score_inference.prior_weights_asset import default_prior_weights_dir
 from api.concepts.game_category import GameCategory
+from api.serialization.yaml_documents import load_yaml_mapping
 
 DEFAULT_PATTERNS_PATH = default_prior_weights_dir() / "prior_mining_patterns_standard.yaml"
 
@@ -34,10 +33,7 @@ def default_patterns_path() -> Path:
 
 
 def load_prior_mining_patterns(path: Path) -> PriorMiningPatternConfig:
-    with path.open(encoding="utf-8") as handle:
-        document = yaml.safe_load(handle)
-    if not isinstance(document, dict):
-        raise ValueError(f"prior mining patterns root must be a mapping: {path}")
+    document = load_yaml_mapping(path, document_name="prior mining patterns")
     return parse_prior_mining_patterns_document(document)
 
 
