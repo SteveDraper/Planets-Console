@@ -49,7 +49,7 @@ from api.streaming.table_stream.row_run_admission import PersistAdmission
 from tests.off_mode_catch_up_helpers import FLEET_SCORES_REGISTRY, context_at_turn
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_exports_helpers import first_player_id
-from tests.scores_ladder_helpers import ShellLadder, durable_row_complete
+from tests.scores_ladder_helpers import durable_row_complete
 from tests.walk_band_helpers import (
     BASELINE_WALK_TURNS,
     SHELL_TURN,
@@ -382,11 +382,6 @@ def test_an_inline_step_whose_node_stops_being_needed_during_its_wire_build_does
 
 
 # --- T3: a running scoreboard tier aborts end to end ---
-
-
-@pytest.fixture
-def ladder(sample_turn, persistence) -> ShellLadder:
-    return ShellLadder(sample_turn, persistence)
 
 
 def test_a_running_scoreboard_tier_aborts_its_stamped_run_and_persists_nothing(ladder, monkeypatch):

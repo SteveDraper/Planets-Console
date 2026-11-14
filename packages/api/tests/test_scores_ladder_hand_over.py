@@ -91,11 +91,6 @@ def _clean_registries() -> Iterator[None]:
     reset_inference_table_stream_registry_for_tests()
 
 
-@pytest.fixture
-def ladder(sample_turn, persistence) -> ShellLadder:
-    return ShellLadder(sample_turn, persistence)
-
-
 def _assert_the_winner_alone_holds_the_scope(
     ladder: ShellLadder, winner_id: str, retired_ids: tuple[str, ...]
 ) -> None:

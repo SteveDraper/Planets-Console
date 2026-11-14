@@ -13,10 +13,7 @@ from unittest.mock import patch
 
 import pytest
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
-from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
-    reset_inference_row_scheduler_for_tests,
-)
+from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.compute_orchestration import build_scores_tier_solve_job_wire
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
@@ -29,36 +26,24 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     register_row_run,
     release_tier_ladder_for_scope,
-    reset_tier_row_run_registry_for_tests,
 )
 from api.compute import ComputeScope
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
-from api.compute.runtime import reset_orchestrators_for_tests
 from api.compute.wire import DependencyOutputs
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id
-from tests.scores_ladder_helpers import (
-    ShellLadder,
-    durable_row_complete,
-    ladder_scope,
-    ladder_session,
-)
+from tests.scores_ladder_helpers import durable_row_complete, ladder_scope, ladder_session
 from tests.submission_open_helpers import explicit_submission_open, live_execution
+from tests.walk_band_helpers import no_scores_row_runs
 
 GENERATION = 7
 EPOCH = 0
 
 
 @pytest.fixture(autouse=True)
-def _clean_registries() -> Iterator[None]:
-    reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    reset_orchestrators_for_tests()
-    yield
-    reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    reset_orchestrators_for_tests()
+def _no_scores_row_runs() -> Iterator[None]:
+    yield from no_scores_row_runs()
 
 
 # --- The resume guard on the registry's ladder claim ---
@@ -191,11 +176,6 @@ def test_the_scope_outcome_listener_retires_the_entry_on_terminal(registry_run, 
 
 
 # --- A ladder on the orchestrator whose stream closes mid-solve ---
-
-
-@pytest.fixture
-def ladder(sample_turn, persistence) -> ShellLadder:
-    return ShellLadder(sample_turn, persistence)
 
 
 def test_closing_the_stream_mid_ladder_resumes_the_same_run_to_a_durable_persist(ladder):

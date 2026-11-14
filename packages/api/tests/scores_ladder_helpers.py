@@ -5,6 +5,9 @@ real ``InferenceRowScheduler``, then runs the real scores ``tier_solve`` wire
 builder and step with the tier job scripted. A scripted tier that continues
 finishes one tier of the run's ladder; one that completes the row finishes the
 ladder.
+
+The ``ladder`` fixture is that ladder for the sample turn's inference target
+player; ``conftest`` loads this module as a plugin so every test module shares it.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from unittest.mock import patch
 
+import pytest
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
@@ -192,3 +196,8 @@ class ShellLadder:
             GAME_ID, self.scope.perspective, self.scope.turn, self.player_id
         )
         return None if row is None else row.summary
+
+
+@pytest.fixture
+def ladder(sample_turn, persistence) -> ShellLadder:
+    return ShellLadder(sample_turn, persistence)

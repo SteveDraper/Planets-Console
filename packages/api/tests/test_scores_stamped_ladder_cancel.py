@@ -20,9 +20,6 @@ from unittest.mock import patch
 
 import pytest
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
-from api.analytics.military_score_inference.inference_scheduler import (
-    reset_inference_row_scheduler_for_tests,
-)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceRowScope
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
@@ -39,12 +36,10 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_row_run_phase,
     register_row_run,
-    reset_tier_row_run_registry_for_tests,
 )
 from api.compute import ComputeScope
 from api.compute.errors import ComputeExecutionEndedError, ComputeScopeAbortedError
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
-from api.compute.runtime import reset_orchestrators_for_tests
 from api.streaming.table_stream.row_run_admission import (
     PersistAdmission,
     RowLifecycleOp,
@@ -60,6 +55,7 @@ from tests.scores_ladder_helpers import (
 )
 from tests.scores_row_lifecycle_test_helpers import _wait_until
 from tests.submission_open_helpers import live_execution
+from tests.walk_band_helpers import no_scores_row_runs
 
 GENERATION = 7
 EPOCH = 0
@@ -67,14 +63,8 @@ CONTINUE = TierJobOutcome(enqueue_continuation=True)
 
 
 @pytest.fixture(autouse=True)
-def _clean_registries() -> Iterator[None]:
-    reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    reset_orchestrators_for_tests()
-    yield
-    reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    reset_orchestrators_for_tests()
+def _no_scores_row_runs() -> Iterator[None]:
+    yield from no_scores_row_runs()
 
 
 def _stamp(scope: ComputeScope) -> TierLadderStamp | None:
@@ -170,11 +160,6 @@ def test_a_stamped_target_takes_only_cancel(registry_run):
 
 
 # --- A scores execution aborted on the orchestrator ---
-
-
-@pytest.fixture
-def ladder(sample_turn, persistence) -> ShellLadder:
-    return ShellLadder(sample_turn, persistence)
 
 
 def _listen(ladder: ShellLadder) -> None:
