@@ -52,6 +52,10 @@ class InFlightOrchestrator(Protocol):
     def drain_post_lock_callbacks(self) -> None: ...
 
 
+PostLockDrain: TypeAlias = Callable[[], None]
+"""One orchestrator's ``drain_post_lock_callbacks``, bound by the service that settled on it."""
+
+
 class _AbsentProcessOrchestrator(InFlightOrchestrator):
     """Stand-in when this process has not created an orchestrator.
 

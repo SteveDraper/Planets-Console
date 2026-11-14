@@ -192,8 +192,7 @@ def post_backfill_walks_stop(
 
     The stop's queued compute work runs after the response.
     """
-    core.stop_backfill_walks(game_id)
-    background_tasks.add_task(core.drain_compute_work)
+    background_tasks.add_task(core.stop_backfill_walks(game_id))
     return Response(status_code=204)
 
 

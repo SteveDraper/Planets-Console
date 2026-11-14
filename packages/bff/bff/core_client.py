@@ -19,7 +19,7 @@ from api.planets_nu import PlanetsNuClient
 from api.services.backfill_walk_stop import stop_backfill_walks
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
-from api.services.in_flight_orchestrator import process_in_flight_orchestrator
+from api.services.in_flight_orchestrator import PostLockDrain, process_in_flight_orchestrator
 from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import get_process_service_stack
@@ -132,16 +132,14 @@ class CoreClient:
         stored = self._invoke(lambda: self._games.set_backfill_earlier_turns(game_id, enabled))
         return BackfillEarlierTurnsBody(backfillEarlierTurns=stored)
 
-    def stop_backfill_walks(self, game_id: int) -> None:
-        """Stop the game's accepted walks; leave the post-lock work for ``drain_compute_work``."""
-        self._invoke(lambda: stop_backfill_walks(process_in_flight_orchestrator(), game_id))
+    def stop_backfill_walks(self, game_id: int) -> PostLockDrain:
+        """Stop the game's accepted walks and return Core's drain for the route to run later.
 
-    def drain_compute_work(self) -> None:
-        """Run the compute post-lock work queued so far, such as a stop's.
-
-        It runs off the response path, and a drain logs rather than raises.
+        Only the stop goes through ``_invoke``. The drain runs in a background
+        task, where an ``HTTPException`` has no response to reach; it logs
+        rather than raises.
         """
-        process_in_flight_orchestrator().drain_post_lock_callbacks()
+        return self._invoke(lambda: stop_backfill_walks(process_in_flight_orchestrator(), game_id))
 
     def league_teams_for_game(self, game_id: int) -> LeagueTeamsResponse:
         """Forward the league team directory read. Planets.nu is called inside Core."""

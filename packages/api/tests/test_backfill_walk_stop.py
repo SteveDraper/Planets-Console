@@ -1,7 +1,8 @@
 """A stop ends every accepted Backfill earlier turns walk in one game.
 
 ``stop_backfill_walks`` settles the game's on-walk fleet and scoreboard nodes in
-every perspective, then the caller drains. A hop no worker has picked is
+every perspective and returns the drain, bound to that orchestrator, that the
+caller runs after it. A hop no worker has picked is
 aborted, and a queued fleet hop is dropped at its pick. A picked fleet step
 finishes and persists, and its node then starts or requeues no further step
 unless something still needs it. A running scoreboard solve aborts, so its
@@ -81,9 +82,9 @@ def walk(sample_turn) -> Walk:
 
 
 def _stop(orchestrator: ComputeOrchestrator, game_id: int) -> None:
-    """Stop the game's walks, then drain, as the stop route's background task does."""
-    stop_backfill_walks(orchestrator, game_id)
-    orchestrator.drain_post_lock_callbacks()
+    """Stop the game's walks, then run the drain the stop returns, as the route's task does."""
+    drain = stop_backfill_walks(orchestrator, game_id)
+    drain()
 
 
 def _node(walk: Walk, turn: int, analytic_id: str = FLEET_ANALYTIC_ID) -> ComputeNodeRun:

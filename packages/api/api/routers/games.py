@@ -112,8 +112,7 @@ def post_backfill_walks_stop(
     Returns 204 for any game id once the stop has settled, and reads no
     storage. The post-lock work the stop queued runs after the response.
     """
-    stop_backfill_walks(orchestrator, game_id)
-    background_tasks.add_task(orchestrator.drain_post_lock_callbacks)
+    background_tasks.add_task(stop_backfill_walks(orchestrator, game_id))
     return Response(status_code=204)
 
 

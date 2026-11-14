@@ -22,7 +22,7 @@ from api.compute.in_flight_settle import (
     RunningDisposition,
     UnstartedDisposition,
 )
-from api.services.in_flight_orchestrator import InFlightOrchestrator
+from api.services.in_flight_orchestrator import InFlightOrchestrator, PostLockDrain
 
 
 @dataclass(frozen=True)
@@ -44,13 +44,16 @@ class WalkStopPolicy(InFlightSettlePolicy):
         return RunningDisposition.KEEP
 
 
-def stop_backfill_walks(orchestrator: InFlightOrchestrator, game_id: int) -> None:
+def stop_backfill_walks(orchestrator: InFlightOrchestrator, game_id: int) -> PostLockDrain:
     """Stop every accepted walk in ``game_id``, in every perspective.
 
-    Only settles, under the orchestrator lock. The caller drains the post-lock
-    work it queues (``InFlightOrchestrator.drain_post_lock_callbacks``).
+    Settles under the orchestrator lock and returns, without running it, the
+    drain of the post-lock work the settle queued, bound to ``orchestrator``.
+    The stamped scoreboard cancel and the abort listeners run only in that
+    drain, so the caller must run it, off any response path.
     """
     orchestrator.settle_in_flight_work(
         GameWork(game_id=game_id, analytic_ids=FLEET_WALK_ANALYTIC_IDS),
         WalkStopPolicy(),
     )
+    return orchestrator.drain_post_lock_callbacks

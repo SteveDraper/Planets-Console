@@ -73,6 +73,7 @@ def test_the_drain_runs_in_the_responses_background_task():
 
     assert response.status_code == 204
     assert [call for call, _work in recording.calls] == ["settle"]
+    assert [task.func for task in background.tasks] == [recording.drain_post_lock_callbacks]
     asyncio.run(background())
     assert [call for call, _work in recording.calls] == ["settle", "drain"]
 

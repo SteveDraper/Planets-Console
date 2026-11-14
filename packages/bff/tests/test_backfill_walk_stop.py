@@ -5,9 +5,14 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from api.compute.runtime import peek_compute_orchestrator, reset_orchestrators_for_tests
+from api.compute.runtime import (
+    get_compute_orchestrator,
+    peek_compute_orchestrator,
+    reset_orchestrators_for_tests,
+)
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
+from api.services.in_flight_orchestrator import PostLockDrain
 from api.storage_factory import clear_backend_cache
 from bff.app import app
 from bff.config import BffConfig
@@ -21,14 +26,14 @@ _STOP_PATH = "/games/{game_id}/backfill-walks/stop"
 
 
 class _RecordingCore:
+    """Records the stop, and the run of the drain the stop returns."""
+
     def __init__(self) -> None:
-        self.calls: list[tuple[str, int | None]] = []
+        self.calls: list[tuple[str, int]] = []
 
-    def stop_backfill_walks(self, game_id: int) -> None:
+    def stop_backfill_walks(self, game_id: int) -> PostLockDrain:
         self.calls.append(("stop", game_id))
-
-    def drain_compute_work(self) -> None:
-        self.calls.append(("drain", None))
+        return lambda: self.calls.append(("drain", game_id))
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +45,7 @@ def _reset():
         ApiConfig(storage_backend="ephemeral", storage_asset_path=None, include_dummy_data=False)
     )
     yield
+    reset_orchestrators_for_tests()
     clear_core_client_cache()
     clear_backend_cache()
 
@@ -58,7 +64,7 @@ def test_the_stop_returns_204_for_any_game_then_drains(core, game_id):
 
     assert response.status_code == 204
     assert response.content == b""
-    assert core.calls == [("stop", game_id), ("drain", None)]
+    assert core.calls == [("stop", game_id), ("drain", game_id)]
 
 
 def test_the_drain_runs_in_the_responses_background_task():
@@ -69,8 +75,18 @@ def test_the_drain_runs_in_the_responses_background_task():
 
     assert response.status_code == 204
     assert recording.calls == [("stop", 628580)]
+    assert len(background.tasks) == 1
     asyncio.run(background())
-    assert recording.calls == [("stop", 628580), ("drain", None)]
+    assert recording.calls == [("stop", 628580), ("drain", 628580)]
+
+
+def test_the_core_client_stop_returns_the_process_orchestrators_drain():
+    """The BFF schedules the drain Core's stop hands back; it never names the compute drain."""
+    orchestrator = get_compute_orchestrator()
+
+    drain = get_core_client().stop_backfill_walks(628580)
+
+    assert drain == orchestrator.drain_post_lock_callbacks
 
 
 def test_the_stop_reaches_core_without_creating_an_orchestrator():
