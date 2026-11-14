@@ -1,4 +1,4 @@
-"""The orchestrator surface services use to read and settle in-flight work.
+"""The orchestrator surface services use to read, settle and drain in-flight work.
 
 ``ComputeOrchestrator`` satisfies :class:`InFlightOrchestrator` structurally.
 When this process has not created an orchestrator, :func:`in_flight_orchestrator`
@@ -13,10 +13,11 @@ from typing import Protocol, TypeAlias
 
 from api.compute.in_flight_settle import InFlightSettlePolicy, InFlightWork
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
+from api.compute.runtime import peek_compute_orchestrator
 
 
 class InFlightOrchestrator(Protocol):
-    """The orchestrator queries and settle that services use for in-flight work.
+    """The orchestrator queries, settle and drain that services use for in-flight work.
 
     The absent-process stand-in subclasses it, so its signatures are checked
     against this one.
@@ -48,12 +49,15 @@ class InFlightOrchestrator(Protocol):
         policy: InFlightSettlePolicy,
     ) -> None: ...
 
+    def drain_post_lock_callbacks(self) -> None: ...
+
 
 class _AbsentProcessOrchestrator(InFlightOrchestrator):
     """Stand-in when this process has not created an orchestrator.
 
     There is then no in-flight work. Creating the real orchestrator would
-    start a worker pool, so root queries are empty and settle is a no-op.
+    start a worker pool, so root queries are empty, and settle and drain
+    are no-ops.
     """
 
     def open_turn_roots(
@@ -85,6 +89,9 @@ class _AbsentProcessOrchestrator(InFlightOrchestrator):
     ) -> None:
         return
 
+    def drain_post_lock_callbacks(self) -> None:
+        return
+
 
 _ABSENT_PROCESS_ORCHESTRATOR = _AbsentProcessOrchestrator()
 
@@ -98,3 +105,8 @@ def in_flight_orchestrator(
     if orchestrator is None:
         return _ABSENT_PROCESS_ORCHESTRATOR
     return orchestrator
+
+
+def process_in_flight_orchestrator() -> InFlightOrchestrator:
+    """This process's orchestrator if it has created one, else the stand-in."""
+    return in_flight_orchestrator(peek_compute_orchestrator())

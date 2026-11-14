@@ -278,8 +278,14 @@ class BaselineWalk:
         return shell_scope(self.ctx, FLEET_ANALYTIC_ID, BASELINE_WALK_TURNS[0], self.player_id)
 
 
-def start_walk_held_at_the_baseline_persist(sample_turn) -> BaselineWalk:
-    """Open the shell's streams, submit the shell, and wait for the baseline hop's persist."""
+def start_walk_held_at_the_baseline_persist(
+    sample_turn, *, before_write: bool = False
+) -> BaselineWalk:
+    """Open the shell's streams, submit the shell, and wait for the baseline hop's persist.
+
+    The hop is held just after its ledger write, or just before it when
+    ``before_write`` is set.
+    """
     ctx, player_id = _quiet_walk_context(sample_turn)
     baseline_turn = BASELINE_WALK_TURNS[0]
     shell_settings = ctx.load_turn(BASELINE_WALK_SHELL_TURN).settings
@@ -292,6 +298,7 @@ def start_walk_held_at_the_baseline_persist(sample_turn) -> BaselineWalk:
         turn_number=baseline_turn,
         leader_mid_chain=baseline_hop_persisting,
         release_leader=release_baseline_hop,
+        before_write=before_write,
     )
     orchestrator = get_compute_orchestrator()
     shell_root = shell_scope(ctx, FLEET_ANALYTIC_ID, BASELINE_WALK_SHELL_TURN, player_id)

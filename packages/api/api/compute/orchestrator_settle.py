@@ -3,14 +3,19 @@
 A settle applies a caller's policy to the non-terminal nodes its work
 selection names, all in one orchestrator lock hold. It never drains post-lock
 callbacks. They share one queue, so the caller's drain, or another thread's
-drain that runs first, applies them.
+drain that runs first, applies them. ``drain_post_lock_callbacks`` is the
+public drain for a caller with no drain of its own.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from enum import Enum
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from api.compute.dag_reach import needed_scopes
+from api.compute.errors import ComputeScopeAbortedError
 from api.compute.in_flight_settle import (
     InFlightCandidate,
     InFlightSettlePolicy,
@@ -27,8 +32,32 @@ if TYPE_CHECKING:
     from api.compute.scope import ComputeScope
 
 
+_AbortReason: TypeAlias = Literal["abort_scope", "settle"]
+
+
+class _Ending(Enum):
+    """How a settle ends a node it does not keep."""
+
+    DISCARD = "discard"
+    ABORT = "abort"
+
+
+_UNSTARTED_ENDING: Mapping[UnstartedDisposition, _Ending] = MappingProxyType(
+    {UnstartedDisposition.DISCARD: _Ending.DISCARD, UnstartedDisposition.ABORT: _Ending.ABORT}
+)
+_RUNNING_ENDING: Mapping[RunningDisposition, _Ending] = MappingProxyType(
+    {RunningDisposition.ABORT: _Ending.ABORT}
+)
+_RUNNING_STEP_RAISED_TO: Mapping[RunningDisposition, RunningStepDisposition] = MappingProxyType(
+    {
+        RunningDisposition.FINISH_WITHOUT_STAMP: RunningStepDisposition.FINISH_WITHOUT_STAMP,
+        RunningDisposition.END_AFTER_STEP: RunningStepDisposition.END_AFTER_STEP,
+    }
+)
+
+
 class OrchestratorSettleMixin:
-    """Settle in-flight work; abort one node."""
+    """Settle in-flight work, drain what it queued, and abort one node."""
 
     def settle_in_flight_work(
         self: ComputeOrchestrator,
@@ -38,46 +67,66 @@ class OrchestratorSettleMixin:
         """Apply ``policy`` to every non-terminal node ``work`` selects.
 
         A running node takes ``policy.running``; any other non-terminal node
-        takes ``policy.unstarted``. ``FINISH_WITHOUT_STAMP`` raises the node's
-        ``running_step``, so its worker finishes and the execution then ends
-        without persisting or stamping. ``DISCARD`` fails the node with
-        ``DiscardedWorkRefused``, unless work this settle leaves alive still
-        needs it (``needed_scopes``): such a node is kept.
+        takes ``policy.unstarted``. ``FINISH_WITHOUT_STAMP`` and
+        ``END_AFTER_STEP`` raise the node's ``running_step``; the start-or-requeue
+        gate then re-derives "needed" for ``END_AFTER_STEP`` each time it asks.
+        ``DISCARD`` fails the node with ``DiscardedWorkRefused`` and ``ABORT``
+        aborts it with ``ComputeScopeAbortedError``, unless work this settle
+        leaves alive still needs it (``needed_scopes``): such a node is kept.
 
         Runs under the orchestrator lock and does not drain the post-lock
         callbacks it queues; another thread's drain may run them before the
         caller's.
         """
         with self._condition:
-            discards: list[ComputeNodeRun] = []
+            endings: list[tuple[ComputeNodeRun, _Ending]] = []
             for scope, node in self._nodes_in(work):
                 if node.is_terminal:
                     continue
                 candidate = InFlightCandidate(scope=scope, submission_open=node.submission_open)
                 if node.state == "running":
-                    if policy.running(candidate) is RunningDisposition.FINISH_WITHOUT_STAMP:
-                        node.running_step = max(
-                            node.running_step,
-                            RunningStepDisposition.FINISH_WITHOUT_STAMP,
-                        )
-                elif policy.unstarted(candidate) is UnstartedDisposition.DISCARD:
-                    discards.append(node)
-            if not discards:
+                    running = policy.running(candidate)
+                    raised_to = _RUNNING_STEP_RAISED_TO.get(running)
+                    if raised_to is not None:
+                        node.running_step = max(node.running_step, raised_to)
+                    ending = _RUNNING_ENDING.get(running)
+                else:
+                    ending = _UNSTARTED_ENDING.get(policy.unstarted(candidate))
+                if ending is not None:
+                    endings.append((node, ending))
+            if not endings:
                 return
-            discarded = {node.scope for node in discards}
+            ended = {node.scope for node, _ending in endings}
             needed = needed_scopes(
                 self._nodes,
-                (scope for scope in self._nodes if scope not in discarded),
+                (scope for scope in self._nodes if scope not in ended),
             )
-            for node in discards:
+            for node, ending in endings:
                 if node.scope in needed:
                     continue
-                self._fail_node(
-                    node,
-                    DiscardedWorkRefused(
-                        "in-flight work was discarded before it started executing"
-                    ),
-                )
+                match ending:
+                    case _Ending.DISCARD:
+                        self._fail_node(
+                            node,
+                            DiscardedWorkRefused(
+                                "in-flight work was discarded before it started executing"
+                            ),
+                        )
+                    case _Ending.ABORT:
+                        self._abort_node_locked(
+                            node,
+                            ComputeScopeAbortedError("in-flight work was aborted by a settle"),
+                            reason="settle",
+                        )
+
+    def drain_post_lock_callbacks(self: ComputeOrchestrator) -> None:
+        """Run the post-lock work queued so far, including what a settle queued.
+
+        A settle does not drain. A caller that settles outside a drain of its
+        own runs this afterwards, for example off the response path of the
+        request that settled.
+        """
+        self._observers.drain_post_lock_callbacks()
 
     def abort_scope(
         self: ComputeOrchestrator,
@@ -109,7 +158,7 @@ class OrchestratorSettleMixin:
                 and node.execution_generation != expected_execution_generation
             ):
                 return False
-            self._abort_node_locked(node, error)
+            self._abort_node_locked(node, error, reason="abort_scope")
         self._observers.drain_post_lock_callbacks()
         return True
 
@@ -117,11 +166,13 @@ class OrchestratorSettleMixin:
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
         error: BaseException,
+        *,
+        reason: _AbortReason,
     ) -> None:
         """Fail non-terminal ``node`` with ``error`` and record the abort. Caller holds the lock.
 
-        A running node also records its step as finished ``failed``. Nothing
-        is drained.
+        ``reason`` names the caller in the ``abort`` lifecycle record. A running
+        node also records its step as finished ``failed``. Nothing is drained.
         """
         prior_state = node.state
         was_running = prior_state == "running"
@@ -146,7 +197,7 @@ class OrchestratorSettleMixin:
             step_kind=finished_step_kind,
             step_index=finished_step_index,
             detail={
-                "reason": "abort_scope",
+                "reason": reason,
                 "priorState": prior_state,
                 "priorProfileStepIndex": node.profile_step_index,
                 "wasRunning": was_running,

@@ -21,22 +21,29 @@ class UnstartedDisposition(Enum):
     """What a settle does to a selected node no worker is running.
 
     ``DISCARD`` fails the node with ``DiscardedWorkRefused``, which its
-    dependents inherit. A discarded node that live work still needs is kept.
+    dependents inherit. ``ABORT`` aborts it with ``ComputeScopeAbortedError``,
+    which they do not, so a later submit replaces it. A discarded or aborted
+    node that live work still needs is kept.
     """
 
     KEEP = "keep"
     DISCARD = "discard"
+    ABORT = "abort"
 
 
 class RunningDisposition(Enum):
     """What a settle does to a selected running node.
 
-    ``FINISH_WITHOUT_STAMP`` raises the node's ``running_step`` to
-    ``RunningStepDisposition.FINISH_WITHOUT_STAMP``.
+    ``ABORT`` aborts the execution as ``UnstartedDisposition.ABORT`` does,
+    and is likewise kept when live work still needs the node.
+    ``FINISH_WITHOUT_STAMP`` and ``END_AFTER_STEP`` raise the node's
+    ``running_step`` to the ``RunningStepDisposition`` of the same name.
     """
 
     KEEP = "keep"
+    ABORT = "abort"
     FINISH_WITHOUT_STAMP = "finish_without_stamp"
+    END_AFTER_STEP = "end_after_step"
 
 
 @dataclass(frozen=True)

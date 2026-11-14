@@ -76,6 +76,9 @@ class OrchestratorLifecycleMixin:
         return prior_step_index
 
     def _retry_step_after_epoch_bump(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """Re-queue an epoch-stale step, unless the start-or-requeue gate ends the node."""
+        if self._refuse_step_exit(node, StepExit.REQUEUE):
+            return
         self._metrics.epoch_discards += 1
         prior_generation = node.generation_at_submit
         current_generation = self._current_invalidation_generation(node)
@@ -109,7 +112,7 @@ class OrchestratorLifecycleMixin:
         while the node is non-terminal, so force_fresh attach could never promote.
         """
         with self._condition:
-            if node.state != "running":
+            if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             self._reset_for_requeue(node)
             node.error = None
@@ -141,10 +144,11 @@ class OrchestratorLifecycleMixin:
         grafted edge gives it this node's band at the next dispatch pass. It
         runs after the lock is released and names this node's execution as its
         requester, so it plans nothing once that execution has ended (aborted
-        or replaced) before the plan would be registered.
+        or replaced) before the plan would be registered. The start-or-requeue
+        gate runs first, so a node it ends queues no dependency submit.
         """
         with self._condition:
-            if node.state != "running":
+            if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             prior_step_index = self._reset_for_requeue(node)
             node.error = None
@@ -209,6 +213,11 @@ class OrchestratorLifecycleMixin:
 
         Returns whether it was refused. "Needed" is derived only when the
         disposition's answer depends on it. Caller holds the lock.
+
+        Asked for ``START`` or ``REQUEUE``, this is the start-or-requeue gate:
+        at the pool pick and the thread re-check (``begin_pool_step``), the
+        inline post-wire-build re-check, ``_begin_step_execution``, and before
+        epoch retry, persist-deferred recovery, soft demotion and park.
         """
         if node.running_step.permits(step_exit, is_needed=lambda: self._is_needed(node)):
             return False
@@ -218,12 +227,10 @@ class OrchestratorLifecycleMixin:
     def _fail_refused_execution(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """End an execution its running-step disposition refused. Caller holds the lock.
 
-        It persists nothing, stamps nothing and is not retried.
+        It persists nothing further, stamps nothing further and is not
+        retried. It fails with its disposition's refusal error.
         """
-        self._fail_node(
-            node,
-            DiscardedWorkRefused("discarded step does not persist or stamp the new evidence mark"),
-        )
+        self._fail_node(node, node.running_step.refusal_error())
 
     def _is_needed(self: ComputeOrchestrator, node: ComputeNodeRun) -> bool:
         """Whether other non-terminal work still needs ``node``. Caller holds the lock."""
@@ -239,8 +246,8 @@ class OrchestratorLifecycleMixin:
 
         The result is read only when it can change the outcome: an execution
         that may take no exit is refused first, and an epoch-stale step is
-        retried next, whatever it returned. Otherwise the outcome names the
-        exit the step takes.
+        re-queued next, whatever it returned, through the start-or-requeue
+        gate. Otherwise the outcome names the exit the step takes.
         """
         if node.running_step.permits_no_exit:
             self._fail_refused_execution(node)
@@ -468,7 +475,9 @@ class OrchestratorLifecycleMixin:
 
         Soft park does **not** complete the node (dependents stay blocked), but still
         publishes an immutable outcome snapshot so scores can reattach empty stream
-        delivery without unlocking same-turn fleet.
+        delivery without unlocking same-turn fleet. Its one caller,
+        ``_after_step_success``, has already put the ``park`` outcome's
+        ``REQUEUE`` exit through the start-or-requeue gate in this lock hold.
         """
         if node.state != "running":
             return

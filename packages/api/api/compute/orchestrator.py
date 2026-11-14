@@ -29,6 +29,7 @@ from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
 from api.compute.pools import ComputeWorkerPool, PoolSubmitter
 from api.compute.priority_band import ComputePriorityBand
 from api.compute.registry import AnalyticComputeRegistration
+from api.compute.running_step import StepExit
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.turn_cache import TurnInfoCache, get_process_turn_info_cache
@@ -302,15 +303,20 @@ class ComputeOrchestrator(
 
         A pool item is bound to the execution that dispatched it. When that
         execution of ``scope`` is no longer running (aborted, or replaced by a
-        newer execution), the item is dropped: this records
-        ``pool_item_dropped`` and returns False. A worker asks at the pick and,
-        for a thread step, again after building the wire, since the execution
-        can end during the build. :meth:`complete_pool_step` checks the binding
-        once more, since the execution can end while the step runs.
+        newer execution), or the start-or-requeue gate ends it here, the item
+        is dropped: this records ``pool_item_dropped`` and returns False. A
+        worker asks at the pick and, for a thread step, again after building
+        the wire, since the execution can end during the build.
+        :meth:`complete_pool_step` checks the binding once more, since the
+        execution can end while the step runs.
         """
         with self._condition:
             node = self._nodes.get(scope)
-            if node is not None and node.is_running_execution(execution_generation):
+            if (
+                node is not None
+                and node.is_running_execution(execution_generation)
+                and not self._refuse_step_exit(node, StepExit.START)
+            ):
                 return True
             self._notify_pool_item_ignored(
                 "pool_item_dropped",

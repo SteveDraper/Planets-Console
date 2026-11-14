@@ -14,6 +14,8 @@ optional ``sectorName`` from in-process memo or ``games/{id}/info`` (empty list 
 stay in Core. **GET /games/{game_id}/{perspective}/territory-movie** forwards the packed
 Territory movie; Core packs it. **GET/PUT /games/{game_id}/backfill-earlier-turns** reads and
 stores the game-wide Backfill earlier turns choice. The Settings checkbox is the writer.
+**POST /games/{game_id}/backfill-walks/stop** stops the game's accepted walks when the shell
+leaves the game; the stop's queued compute work drains after the 204.
 **POST /games/{game_id}/info** refreshes game info from Planets.nu.
 **POST .../turns/ensure** loads a turn when missing. **GET .../viewpoint-eligibility** returns the
 Core allowed **perspective** set for a login (username query required). Warp-well and Stellar
@@ -37,7 +39,7 @@ from api.transport.league_teams import LeagueTeamsResponse
 from api.transport.load_all_turns import stream_load_all_turns
 from api.transport.territory_movie import TerritoryMovieResponse
 from api.transport.turn_ensure import TurnEnsureRequest
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Path, Query, Response
 from fastapi.responses import StreamingResponse
 
 from bff.core_client import CoreClient, get_core_client
@@ -177,6 +179,22 @@ def put_backfill_earlier_turns(
 ) -> BackfillEarlierTurnsBody:
     """Store one Backfill earlier turns choice for this game. The Settings checkbox calls this."""
     return core.set_backfill_earlier_turns(game_id, body.backfill_earlier_turns)
+
+
+@router.post("/{game_id}/backfill-walks/stop", status_code=204)
+def post_backfill_walks_stop(
+    game_id: int,
+    background_tasks: BackgroundTasks,
+    *,
+    core: CoreClientDep,
+) -> Response:
+    """Stop every accepted walk in a game the shell left. 204 for any game id.
+
+    The stop's queued compute work runs after the response.
+    """
+    core.stop_backfill_walks(game_id)
+    background_tasks.add_task(core.drain_compute_work)
+    return Response(status_code=204)
 
 
 @router.get("/{game_id}/league-teams", response_model=LeagueTeamsResponse)

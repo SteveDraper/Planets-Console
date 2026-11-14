@@ -374,6 +374,7 @@ def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():
         "open_turn_roots",
         "claim_open_turn_roots",
         "settle_in_flight_work",
+        "drain_post_lock_callbacks",
     }
     for name in members:
         stand_in = inspect.signature(getattr(absent, name))

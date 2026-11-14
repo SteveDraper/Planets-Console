@@ -420,6 +420,9 @@ class OrchestratorSubmissionMixin:
                 _condition=self._condition,
             )
         self._adopt_rooted_open_turn(node, request)
+        # A root attach needs the node again; a planned join instead adds the
+        # dependent edge the start-or-requeue gate derives "needed" from.
+        node.running_step = node.running_step.lowered_by_root_attach()
         handle = ComputeHandle(
             scope=node.scope,
             _node=node,

@@ -2,11 +2,12 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
+from api.services.backfill_walk_stop import stop_backfill_walks
 from api.services.deps import (
     get_game_service,
     get_league_team_directory_service,
@@ -16,6 +17,10 @@ from api.services.deps import (
     get_turn_load_service,
 )
 from api.services.game_service import GameService
+from api.services.in_flight_orchestrator import (
+    InFlightOrchestrator,
+    process_in_flight_orchestrator,
+)
 from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.territory_movie import TerritoryMovieService
@@ -94,6 +99,22 @@ def put_backfill_earlier_turns(
     """Store one Backfill earlier turns choice for this game id."""
     enabled = svc.set_backfill_earlier_turns(game_id, body.backfill_earlier_turns)
     return BackfillEarlierTurnsBody(backfillEarlierTurns=enabled)
+
+
+@router.post("/{game_id}/backfill-walks/stop", status_code=204)
+def post_backfill_walks_stop(
+    game_id: int,
+    background_tasks: BackgroundTasks,
+    orchestrator: InFlightOrchestrator = Depends(process_in_flight_orchestrator),
+) -> Response:
+    """Stop every accepted Backfill earlier turns walk in this game, in every perspective.
+
+    Returns 204 for any game id once the stop has settled, and reads no
+    storage. The post-lock work the stop queued runs after the response.
+    """
+    stop_backfill_walks(orchestrator, game_id)
+    background_tasks.add_task(orchestrator.drain_post_lock_callbacks)
+    return Response(status_code=204)
 
 
 @router.get("/{game_id}/league-teams", response_model=LeagueTeamsResponse)

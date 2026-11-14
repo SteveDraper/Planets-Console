@@ -170,7 +170,12 @@ def install_mid_chain_put_ledger_gate(
     turn_number: int,
     leader_mid_chain: threading.Event,
     release_leader: threading.Event,
+    before_write: bool = False,
 ) -> None:
+    """Hold the first ``put_ledger`` for the player and turn until ``release_leader`` is set.
+
+    The hold comes after the write, or before it when ``before_write`` is set.
+    """
     original_put_ledger = persistence.put_ledger
     mid_chain_puts = 0
 
@@ -178,13 +183,18 @@ def install_mid_chain_put_ledger_gate(
         nonlocal mid_chain_puts
         hooked_turn_number = args[2]
         hooked_player_id = args[3]
-        put_result = original_put_ledger(*args, **kwargs)
-        if (
+        is_held = (
             hooked_player_id == player_id
             and hooked_turn_number == turn_number
             and mid_chain_puts == 0
-        ):
+        )
+        if is_held:
             mid_chain_puts += 1
+        if is_held and before_write:
+            leader_mid_chain.set()
+            assert release_leader.wait(timeout=5)
+        put_result = original_put_ledger(*args, **kwargs)
+        if is_held and not before_write:
             leader_mid_chain.set()
             assert release_leader.wait(timeout=5)
         return put_result
