@@ -35,7 +35,6 @@ from tests.walk_band_helpers import (
     end_shell,
     finish_walk,
     no_live_streams,
-    no_scores_row_runs,
     open_shell,
     start_walk_held_at_the_baseline_persist,
 )
@@ -65,14 +64,12 @@ SWITCHES = {
 switches = pytest.mark.parametrize("switch", SWITCHES.values(), ids=SWITCHES.keys())
 
 
+pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
+
+
 @pytest.fixture(autouse=True)
 def _no_live_streams() -> Iterator[None]:
     yield from no_live_streams()
-
-
-@pytest.fixture(autouse=True)
-def _no_scores_row_runs() -> Iterator[None]:
-    yield from no_scores_row_runs()
 
 
 @pytest.fixture

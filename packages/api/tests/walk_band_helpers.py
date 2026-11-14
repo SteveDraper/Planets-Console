@@ -27,17 +27,13 @@ from api.analytics.fleet.fleet_table_stream_registry import (
     reset_fleet_table_stream_registry_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
-from api.analytics.military_score_inference.inference_scheduler import (
-    get_inference_row_scheduler,
-    reset_inference_row_scheduler_for_tests,
-)
+from api.analytics.military_score_inference.inference_scheduler import get_inference_row_scheduler
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     detach_inference_table_stream,
     get_inference_table_stream_registry,
     reset_inference_table_stream_registry_for_tests,
 )
-from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeWorkerPool
 from api.compute.orchestrator import ComputeHandle, ComputeOrchestrator, ComputeRequest
@@ -76,15 +72,6 @@ def no_live_streams() -> Iterator[None]:
     reset_fleet_table_stream_registry_for_tests()
     reset_inference_table_stream_registry_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
-
-
-def no_scores_row_runs() -> Iterator[None]:
-    """Fixture body: no scores RowRun or scheduler claim survives from another test."""
-    reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    yield
-    reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
 
 
 def all_at(band: ComputePriorityBand, turns: tuple[int, ...] = WALK_TURNS) -> dict:

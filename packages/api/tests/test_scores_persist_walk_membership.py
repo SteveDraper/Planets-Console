@@ -13,8 +13,6 @@ turn one before the shell turn that rooted the walk.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
 from api.analytics.off_mode_wire import copy_submission_open_fields
 from api.analytics.scores.compute_orchestration import SCORES_PERSISTENCE_POLICY
@@ -27,14 +25,11 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_ladder_helpers import ShellLadder, durable_row_complete
-from tests.walk_band_helpers import no_scores_row_runs
 
 _INVALIDATION_MODULE = "api.services.inference_invalidation_service"
 
 
-@pytest.fixture(autouse=True)
-def _no_scores_row_runs() -> Iterator[None]:
-    yield from no_scores_row_runs()
+pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
 
 @pytest.fixture

@@ -15,7 +15,6 @@ that orchestrator only where a test needs it to run on abort.
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -55,16 +54,13 @@ from tests.scores_ladder_helpers import (
 )
 from tests.scores_row_lifecycle_test_helpers import _wait_until
 from tests.submission_open_helpers import live_execution
-from tests.walk_band_helpers import no_scores_row_runs
 
 GENERATION = 7
 EPOCH = 0
 CONTINUE = TierJobOutcome(enqueue_continuation=True)
 
 
-@pytest.fixture(autouse=True)
-def _no_scores_row_runs() -> Iterator[None]:
-    yield from no_scores_row_runs()
+pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
 
 def _stamp(scope: ComputeScope) -> TierLadderStamp | None:

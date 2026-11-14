@@ -8,7 +8,6 @@ epoch; anything else retires it and takes the admit path.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -35,15 +34,12 @@ from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id
 from tests.scores_ladder_helpers import durable_row_complete, ladder_scope, ladder_session
 from tests.submission_open_helpers import explicit_submission_open, live_execution
-from tests.walk_band_helpers import no_scores_row_runs
 
 GENERATION = 7
 EPOCH = 0
 
 
-@pytest.fixture(autouse=True)
-def _no_scores_row_runs() -> Iterator[None]:
-    yield from no_scores_row_runs()
+pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
 
 # --- The resume guard on the registry's ladder claim ---
