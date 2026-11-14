@@ -88,7 +88,33 @@ describe('bffRequest and a pending Backfill walk stop', () => {
     await request
     expect(requestUrls()).toHaveLength(1)
     expect(warn).toHaveBeenCalledTimes(1)
+    const [, timeoutError] = warn.mock.calls[0]
+    expect(timeoutError).toBeInstanceOf(Error)
+    expect((timeoutError as Error).message).toMatch(
+      `Backfill walk stop for game 100 timed out after ${BACKFILL_WALKS_STOP_TIMEOUT_MS} ms`
+    )
+    expect((timeoutError as Error).message).not.toMatch('No HTTP response')
+    expect((timeoutError as Error).cause).toMatchObject({ name: 'TimeoutError' })
     expect(pendingBackfillWalkStop('100')).toBeUndefined()
+  })
+
+  it('a stop that fails without timing out keeps the no-HTTP-response message', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('Failed to fetch')))
+    )
+
+    await expect(requestBackfillWalkStop('100')).resolves.toBeUndefined()
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    const [label, failure] = warn.mock.calls[0]
+    expect(label).toBe('Backfill walk stop failed for game 100')
+    expect((failure as Error).message).toMatch(
+      'TypeError: Failed to fetch — POST /bff/games/100/backfill-walks/stop'
+    )
+    expect((failure as Error).message).toMatch('No HTTP response')
+    expect((failure as Error).message).not.toMatch('timed out')
   })
 
   it('a request naming no game does not wait for any pending stop', async () => {

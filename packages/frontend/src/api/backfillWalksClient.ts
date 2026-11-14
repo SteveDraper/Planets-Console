@@ -13,16 +13,26 @@ export const BACKFILL_WALKS_STOP_TIMEOUT_MS = 5_000
 /**
  * Stateless stop of every accepted Backfill earlier turns walk in a game the shell left (204).
  * It is sent without waiting for a pending stop, because it is the request that stop chains wait on.
- * It rejects when it fails or takes longer than {@link BACKFILL_WALKS_STOP_TIMEOUT_MS}.
+ * It rejects when it fails, and when it takes longer than {@link BACKFILL_WALKS_STOP_TIMEOUT_MS}
+ * with an error naming the game and that bound, whose `cause` is the timeout's abort reason.
  */
 export async function postBackfillWalksStop(gameId: string): Promise<void> {
   const path = `/bff${BACKFILL_WALKS_STOP_ROUTE.replace('{game_id}', encodeURIComponent(gameId))}`
   const endpointLabel = `POST ${path}`
-  const r = await sendBffRequest(
-    path,
-    { method: 'POST', signal: AbortSignal.timeout(BACKFILL_WALKS_STOP_TIMEOUT_MS) },
-    endpointLabel
-  )
+  const timeout = AbortSignal.timeout(BACKFILL_WALKS_STOP_TIMEOUT_MS)
+  let r: Response
+  try {
+    r = await sendBffRequest(path, { method: 'POST', signal: timeout }, endpointLabel)
+  } catch (error) {
+    if (timeout.aborted) {
+      throw new Error(
+        `Backfill walk stop for game ${gameId} timed out after ` +
+          `${BACKFILL_WALKS_STOP_TIMEOUT_MS} ms (${endpointLabel})`,
+        { cause: timeout.reason }
+      )
+    }
+    throw error
+  }
   if (!r.ok) {
     await throwBffHttpErrorFromResponse(r, endpointLabel)
   }
