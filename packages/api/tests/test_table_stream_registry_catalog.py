@@ -24,8 +24,6 @@ from api.streaming.table_stream.registry_bootstrap import (
 )
 from api.streaming.table_stream.registry_catalog import (
     active_table_stream_bindings,
-    active_table_stream_turns,
-    active_table_stream_turns_by_analytic,
     live_table_streams,
     reset_table_stream_registry_catalog_for_tests,
 )
@@ -156,45 +154,6 @@ def test_active_table_stream_bindings_lists_fleet_and_scores_streams() -> None:
         "perspective": 2,
         "turn": 8,
     } in bindings
-
-
-def test_active_table_stream_turns_filters_game_perspective_and_analytic() -> None:
-    get_fleet_table_stream_registry().attach(
-        FleetTableStreamScope(game_id=10, perspective=2, turn_number=8),
-        object(),
-    )
-    get_fleet_table_stream_registry().attach(
-        FleetTableStreamScope(game_id=10, perspective=2, turn_number=9),
-        object(),
-    )
-    get_fleet_table_stream_registry().attach(
-        FleetTableStreamScope(game_id=11, perspective=2, turn_number=8),
-        object(),
-    )
-    get_fleet_table_stream_registry().attach(
-        FleetTableStreamScope(game_id=10, perspective=3, turn_number=7),
-        object(),
-    )
-    get_inference_table_stream_registry().attach(
-        InferenceStreamScope(game_id=10, perspective=2, turn_number=9),
-        object(),
-    )
-    get_inference_table_stream_registry().attach(
-        InferenceStreamScope(game_id=10, perspective=2, turn_number=4),
-        object(),
-    )
-
-    assert active_table_stream_turns(10, 2, ("fleet", "scores")) == frozenset({8, 9, 4})
-    assert active_table_stream_turns_by_analytic(10, 2, ("fleet", "scores")) == {
-        "fleet": frozenset({8, 9}),
-        "scores": frozenset({9, 4}),
-    }
-    assert active_table_stream_turns(10, 2, ("scores",)) == frozenset({9, 4})
-    assert active_table_stream_turns(10, 2, ("fleet",)) == frozenset({8, 9})
-    assert active_table_stream_turns(11, 2, ("fleet", "scores")) == frozenset({8})
-    assert active_table_stream_turns(10, 3, ("fleet",)) == frozenset({7})
-    assert active_table_stream_turns(10, 2, ()) == frozenset()
-    assert active_table_stream_turns(10, 2, ("homeworld-locator",)) == frozenset()
 
 
 def test_live_table_streams_yield_attached_controllers_on_the_named_registries() -> None:

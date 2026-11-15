@@ -11,8 +11,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
+import pytest
 from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.registration import TurnAnalyticRegistration
+from api.analytics.scores.compute_orchestration import (
+    SCORES_MATERIALIZE,
+    ScoresPersistencePolicy,
+)
 from api.compute import (
     AnalyticComputeProfile,
     ComputeOrchestrator,
@@ -23,7 +28,9 @@ from api.compute import (
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.in_flight_settle import GameWork, RunningDisposition
 from api.compute.orchestrator_observers import StepItemIgnoredReason
+from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
+from api.services.backfill_walk_stop import stop_backfill_walks
 
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
@@ -208,3 +215,52 @@ def test_an_inline_step_a_settle_aborts_while_it_runs_does_not_continue_into_its
     assert harness.ignored == [
         ("inline_finish_ignored", StepItemIgnoredReason.NODE_NOT_RUNNING, False)
     ]
+
+
+@pytest.mark.usefixtures("no_scores_row_runs")
+def test_a_scoreboard_materialize_the_game_stop_aborts_while_it_runs_is_not_resumed(
+    ladder, monkeypatch
+):
+    """The real scores materialize step runs while a game stop aborts its walk node.
+
+    Its return is ignored: the node stays aborted and never continues into
+    its tier solve. The sample turn's scoreboard evidence is already closed,
+    so the submit names its entry step and satisfaction is turned off, for
+    the step to run at all.
+    """
+    monkeypatch.setattr(ScoresPersistencePolicy, "is_satisfied", lambda *_args: False)
+    started: list[str] = []
+    ignored: list[IgnoredFinish] = []
+
+    def stop_the_game_while_materialize_runs(scope, _node, step_kind) -> None:
+        if scope == ladder.scope and step_kind == SCORES_MATERIALIZE:
+            started.append(step_kind)
+            stop_backfill_walks(ladder.orchestrator, ladder.ctx.game_id)()
+
+    def record(kind, _scope, _node, _generation, _step_kind, _step_index, detail) -> None:
+        if kind == "inline_finish_ignored":
+            ignored.append((kind, detail["reason"], detail["hadError"]))
+
+    ladder.orchestrator.observers.register_inline_start_listener(
+        stop_the_game_while_materialize_runs
+    )
+    ladder.orchestrator.observers.register_lifecycle_listener(record)
+
+    ladder.orchestrator.submit(
+        ComputeRequest(
+            ctx=ladder.ctx,
+            scope=ladder.scope,
+            step_kind=SCORES_MATERIALIZE,
+            submission_open=SubmissionOpen(
+                open_turn=ladder.scope.turn + 1, backfill_earlier_turns=True, on_walk=True
+            ),
+        )
+    )
+
+    assert started == [SCORES_MATERIALIZE]
+    node = ladder.orchestrator.nodes[ladder.scope]
+    assert node.state == "failed"
+    assert isinstance(node.error, ComputeScopeAbortedError)
+    assert ladder.submitted_work == []
+    assert ignored == [("inline_finish_ignored", StepItemIgnoredReason.NODE_NOT_RUNNING, False)]
+    assert ladder.persisted_summary() is None

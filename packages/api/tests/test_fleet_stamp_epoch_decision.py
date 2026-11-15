@@ -9,6 +9,8 @@ from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import STAMP_CURRENT_EVIDENCE_MARK
+from api.compute.errors import ComputeScopeAbortedError
+from api.compute.in_flight_settle import PlayerWork
 from api.compute.orchestration_bundle import OrchestrationBundle
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.registry import build_compute_registry
@@ -16,7 +18,7 @@ from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.exceptions import DiscardedWorkRefused
-from api.services.evidence_bump import discard_bumped_player_work
+from api.services.evidence_bump import BumpSettlePolicy
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fleet_exports_helpers import first_player_id
@@ -125,8 +127,10 @@ def test_put_without_a_job_epoch_stamps_the_mark_after_a_durable_bump(sample_tur
 def _drive_epoch_lock_refusal_during_persist(sample_turn, monkeypatch, *, shell: bool):
     """Running fleet persist loses the generation lock after the fast epoch check.
 
-    ``shell`` is a running shell turn: the bump leaves it unflagged and a wake
-    attaches before the put refuses. Otherwise the bump flags the running turn.
+    ``shell`` is a running off-walk node on a watched turn: the bump keeps it,
+    and a wake attaches before the put refuses. Otherwise the bump aborts it.
+    The bump settles and moves the mark in one orchestrator lock hold, as
+    production does.
     """
     host, ctx = context_at_turn(sample_turn, 40)
     player_id = first_player_id(host)
@@ -164,23 +168,24 @@ def _drive_epoch_lock_refusal_during_persist(sample_turn, monkeypatch, *, shell:
     )
     orchestrator.nodes[scope] = node
     real_merge = fleet_persist.observation_merge_generation
-    shell_turns = frozenset({40}) if shell else frozenset()
+    watched_turns = frozenset({40}) if shell else frozenset()
 
     def move_mark_then_merge(*args, **kwargs):
-        discard_bumped_player_work(
-            orchestrator,
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            player_id=player_id,
-            shell_turns=shell_turns,
-            live_turns=frozenset(),
-        )
-        persistence.invalidate_player_ledgers_from_turn(
-            ctx.game_id,
-            ctx.perspective,
-            40,
-            player_id,
-            durable=True,
+        orchestrator.settle_in_flight_work(
+            PlayerWork(
+                game_id=ctx.game_id,
+                perspective=ctx.perspective,
+                player_id=player_id,
+                analytic_ids=frozenset({FLEET_ANALYTIC_ID}),
+            ),
+            BumpSettlePolicy(watched_turns=watched_turns),
+            then=lambda: persistence.invalidate_player_ledgers_from_turn(
+                ctx.game_id,
+                ctx.perspective,
+                40,
+                player_id,
+                durable=True,
+            ),
         )
         if shell:
             assert fleet_persist.wake_fleet_scope(scope, orchestrator=orchestrator) is True
@@ -228,8 +233,8 @@ def test_shell_inside_persist_is_requeued_when_the_epoch_lock_refuses(sample_tur
     assert node.waiters[0].error is None
 
 
-def test_discard_flagged_persist_refusal_is_not_requeued(sample_turn, monkeypatch):
-    """Off-screen work flagged during persist fails and is not retried."""
+def test_a_node_the_bump_aborts_during_its_persist_stays_aborted(sample_turn, monkeypatch):
+    """Work the bump does not keep is aborted mid-persist; the refused put does not revive it."""
     orchestrator, node = _drive_epoch_lock_refusal_during_persist(
         sample_turn,
         monkeypatch,
@@ -237,9 +242,8 @@ def test_discard_flagged_persist_refusal_is_not_requeued(sample_turn, monkeypatc
     )
 
     assert node.state == "failed"
-    assert node.running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
-    assert isinstance(node.error, DiscardedWorkRefused)
-    assert node.generation_at_submit is not None
+    assert node.running_step is RunningStepDisposition.CONTINUE
+    assert isinstance(node.error, ComputeScopeAbortedError)
     assert node.scope not in orchestrator._ready_queue
     assert orchestrator.metrics.epoch_discards == 0
     assert node.waiters == []

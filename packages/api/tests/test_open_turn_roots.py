@@ -20,9 +20,6 @@ from api.compute.orchestrator_state import NodeState
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.services.evidence_bump import (
-    DeferRecompute,
-    LimitedRecompute,
-    WakeAllRecompute,
     preferred_unconsumed_root_backfill,
     resolve_durable_scores_evidence,
 )
@@ -245,7 +242,7 @@ def test_preferred_unconsumed_root_backfill_lets_the_caller_choose():
 
 
 def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record():
-    """Stamp reads the carried root. Wake reads the current record and the claim snapshot."""
+    """Stamp reads the carried root. The current record only says what a bump watches."""
     fleet = OpenTurnRoot(
         analytic_id=FLEET_ANALYTIC_ID,
         open_turn=40,
@@ -258,54 +255,10 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
         backfill_earlier_turns=False,
         consumed=False,
     )
-    preferred = resolve_durable_scores_evidence(
-        (fleet, scores),
-        host_turn=40,
-        wake_backfill=False,
-        live_turns_by_analytic={FLEET_ANALYTIC_ID: frozenset({40})},
-    )
+    preferred = resolve_durable_scores_evidence((fleet, scores), host_turn=40, wake_backfill=True)
+    assert preferred.open_turn == 40
     assert preferred.decision_backfill is False
-    assert preferred.wake_backfill is False
-    assert isinstance(preferred.recompute, LimitedRecompute)
-
-    early_shell = OpenTurnRoot(
-        analytic_id=FLEET_ANALYTIC_ID,
-        open_turn=39,
-        backfill_earlier_turns=True,
-        consumed=False,
-    )
-    evidence = resolve_durable_scores_evidence(
-        (early_shell, scores),
-        host_turn=40,
-        wake_backfill=False,
-        live_turns_by_analytic={
-            FLEET_ANALYTIC_ID: frozenset({39}),
-            SCORES_ANALYTIC_ID: frozenset({40}),
-        },
-    )
-    assert evidence.open_turn == 40
-    assert evidence.decision_backfill is False
-    assert evidence.wake_backfill is False
-    assert isinstance(evidence.recompute, LimitedRecompute)
-    limited = evidence.recompute
-    assert limited.shell_turns == frozenset({39, 40})
-    assert limited.live_turns_by_analytic == {
-        FLEET_ANALYTIC_ID: frozenset({39}),
-        SCORES_ANALYTIC_ID: frozenset({40}),
-    }
-    assert limited.turns == frozenset({40})
-    assert limited.live_scores_turns_to_wake(set()) == frozenset({40})
-
-    # The current record wakes every known turn even when the carried choice is off.
-    woken = resolve_durable_scores_evidence(
-        (scores,),
-        host_turn=40,
-        wake_backfill=True,
-        live_turns_by_analytic={},
-    )
-    assert woken.decision_backfill is False
-    assert woken.wake_backfill is True
-    assert isinstance(woken.recompute, WakeAllRecompute)
+    assert preferred.wake_backfill is True
 
     consumed = OpenTurnRoot(
         analytic_id=SCORES_ANALYTIC_ID,
@@ -313,43 +266,25 @@ def test_resolve_durable_scores_evidence_splits_carried_choice_from_wake_record(
         backfill_earlier_turns=True,
         consumed=True,
     )
-    absent = resolve_durable_scores_evidence(
-        (consumed,),
-        host_turn=40,
-        wake_backfill=True,
-        live_turns_by_analytic={SCORES_ANALYTIC_ID: frozenset({40})},
-    )
+    absent = resolve_durable_scores_evidence((consumed,), host_turn=40, wake_backfill=False)
     assert absent.open_turn is None
     assert absent.decision_backfill is None
-    assert absent.wake_backfill is True
-    assert isinstance(absent.recompute, DeferRecompute)
-    carried = preferred_unconsumed_root_backfill(
-        (consumed,),
-        host_turn=40,
-        preferred_analytic_id=SCORES_ANALYTIC_ID,
+    assert absent.wake_backfill is False
+
+
+def test_absent_process_orchestrator_still_runs_the_settles_then():
+    ran: list[str] = []
+
+    stopped = in_flight_orchestrator(None).settle_in_flight_work(
+        PlayerWork(
+            game_id=1, perspective=1, player_id=7, analytic_ids=frozenset({SCORES_ANALYTIC_ID})
+        ),
+        _UnreachablePolicy(),
+        then=lambda: ran.append("then"),
     )
-    assert carried is None
 
-
-def test_resolved_recompute_names_the_turns_it_wakes():
-    """Wake-all uses the ledger bump. A limited choice uses the turns it stored."""
-    wake_all = WakeAllRecompute()
-    assert wake_all.turns_to_wake({4, 6}) == {4, 6}
-    assert wake_all.live_scores_turns_to_wake({4, 6}) == frozenset()
-    absent = in_flight_orchestrator(None)
-    wake_all.discard_bumped_work(absent, game_id=1, perspective=1, player_id=7)
-
-    limited = LimitedRecompute(
-        turns=frozenset({40}),
-        shell_turns=frozenset({39, 40}),
-        live_turns_by_analytic={
-            FLEET_ANALYTIC_ID: frozenset({39}),
-            SCORES_ANALYTIC_ID: frozenset({40, 41}),
-        },
-    )
-    assert limited.turns_to_wake({39, 40, 41}) == frozenset({40})
-    assert limited.live_scores_turns_to_wake({39, 40, 41}) == frozenset({40})
-    limited.discard_bumped_work(absent, game_id=1, perspective=1, player_id=7)
+    assert stopped == frozenset()
+    assert ran == ["then"]
 
 
 def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
@@ -361,7 +296,6 @@ def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
         "analytic_ids": frozenset({SCORES_ANALYTIC_ID}),
     }
 
-    assert absent.open_turn_roots(**keys) == ()
     assert absent.claim_open_turn_roots(open_turn=40, **keys) == ()
     assert absent.settle_in_flight_work(PlayerWork(**keys), _UnreachablePolicy()) == frozenset()
 
@@ -371,7 +305,6 @@ def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():
     members = get_protocol_members(InFlightOrchestrator)
 
     assert members == {
-        "open_turn_roots",
         "claim_open_turn_roots",
         "settle_in_flight_work",
         "drain_post_lock_callbacks",

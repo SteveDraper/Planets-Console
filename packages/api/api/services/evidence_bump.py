@@ -1,33 +1,47 @@
-"""Which turns a bump recomputes while backfill is off, and what it settles.
+"""What a fleet evidence bump settles, and which live rows it wakes.
 
-A durable scores persist carries the submission's backfill choice on an
-unconsumed root. That choice classifies stamp versus bump. The current
-backfill record chooses the recompute: every known turn, or the shell and
-later live turns. No unconsumed root defers that choice until the wake.
+A durable bump (a persisted scores row, or a changed hull mask) moves one
+player's evidence mark, so that player's in-flight fleet and scoreboard work
+must not stamp the old one. :class:`DurableRecompute` watches and wakes only
+the player's live fleet and scoreboard rows, under either **Backfill earlier
+turns** setting:
 
-A limited recompute settles the player's in-flight fleet and scores work
-through :class:`BumpSettlePolicy` before the bump publishes its new epoch.
+- :class:`BumpSettlePolicy` keeps only a running off-walk node on a watched
+  turn and aborts everything else. Watched turns are the live-row turns with
+  the setting off, and none with it on (:func:`bump_watched_turns`).
+- The settle publishes the new mark and epoch in its own lock hold.
+- The wake reschedules live rows at the evidence host turn and later, plus each
+  live row whose own root the settle stopped. A rescheduled row re-admits with
+  its stream's query context, which submits the replacement walk.
+
+Held admission (:class:`HeldRecompute`) settles nothing and wakes every known
+fleet turn.
+
+The carried submission choice on an unconsumed root still classifies stamp
+versus bump (:func:`resolve_durable_scores_evidence`); it no longer chooses
+what wakes.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
-from types import MappingProxyType
-from typing import TypeAlias
+from typing import Protocol, TypeAlias
 
+from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.analytics.walk_row_reschedule import has_stopped_scope
+from api.analytics.walk_shell_watch import LiveWalkShell, live_walk_shells
 from api.compute.in_flight_settle import (
     InFlightCandidate,
     InFlightSettlePolicy,
-    PlayerWork,
     RunningDisposition,
     UnstartedDisposition,
 )
 from api.compute.orchestrator import OpenTurnRoot
+from api.compute.scope import ComputeScope
 from api.services.in_flight_orchestrator import InFlightOrchestrator
-from api.streaming.table_stream.registry_catalog import active_table_stream_turns_by_analytic
 
 
 def preferred_unconsumed_root_backfill(
@@ -52,21 +66,6 @@ def preferred_unconsumed_root_backfill(
     return found
 
 
-def _player_submission_roots(
-    orchestrator: InFlightOrchestrator,
-    game_id: int,
-    perspective: int,
-    player_id: int,
-) -> tuple[OpenTurnRoot, ...]:
-    """In-flight fleet and scores submission roots for one player."""
-    return orchestrator.open_turn_roots(
-        game_id=game_id,
-        perspective=perspective,
-        player_id=player_id,
-        analytic_ids=FLEET_WALK_ANALYTIC_IDS,
-    )
-
-
 def claim_player_open_roots(
     orchestrator: InFlightOrchestrator,
     *,
@@ -88,226 +87,162 @@ def claim_player_open_roots(
     )
 
 
+def player_live_walk_rows(
+    game_id: int,
+    perspective: int,
+    player_id: int,
+) -> tuple[LiveWalkShell, ...]:
+    """The player's live fleet and scoreboard rows in one game and perspective.
+
+    One registry scan of published snapshots; it takes no lock.
+    """
+    return tuple(
+        row
+        for row in live_walk_shells()
+        if row.key.game_id == game_id
+        and row.key.perspective == perspective
+        and row.key.player_id == player_id
+    )
+
+
+def bump_watched_turns(
+    *,
+    backfill_enabled: bool,
+    live_rows: Iterable[LiveWalkShell],
+) -> frozenset[int]:
+    """The turns whose running off-walk work a durable bump keeps.
+
+    With the setting off, the turns of the player's live rows: work there
+    still serves an open row and the wake re-admits that row. With the
+    setting on, none: every live row submits a new walk.
+    """
+    if backfill_enabled:
+        return frozenset()
+    return frozenset(row.key.turn for row in live_rows)
+
+
 @dataclass(frozen=True)
 class BumpSettlePolicy(InFlightSettlePolicy):
-    """What a limited bump does to one player's in-flight fleet and scores work.
+    """What a durable bump does to one node of the player's fleet and scoreboard work.
 
-    ``recompute_turns`` are the shell and live turns. Work on one of them
-    that is already executing is kept, so it can still stamp. Every other
-    executing step finishes without persisting or stamping. Work that has
-    not started is discarded on every turn, so a fresh submit can recompute it.
+    A running node off the walk on a watched turn is kept. Every other node
+    is aborted, so the player's walk always stops and nothing it ran can
+    stamp the old mark.
     """
 
-    recompute_turns: frozenset[int]
+    watched_turns: frozenset[int]
 
     def unstarted(self, candidate: InFlightCandidate) -> UnstartedDisposition:
-        return UnstartedDisposition.DISCARD
+        return UnstartedDisposition.ABORT
 
     def running(self, candidate: InFlightCandidate) -> RunningDisposition:
-        if candidate.scope.turn in self.recompute_turns:
+        if not candidate.submission_open.on_walk and candidate.scope.turn in self.watched_turns:
             return RunningDisposition.KEEP
-        return RunningDisposition.FINISH_WITHOUT_STAMP
-
-
-def discard_bumped_player_work(
-    orchestrator: InFlightOrchestrator,
-    *,
-    game_id: int,
-    perspective: int,
-    player_id: int,
-    shell_turns: frozenset[int],
-    live_turns: frozenset[int],
-) -> None:
-    """Settle one player's in-flight fleet and scoreboard work for a bump.
-
-    Shell and live turns are the recompute turns of :class:`BumpSettlePolicy`.
-    The settle drains none of the post-lock work it queues. The bump's
-    enclosing drain applies it, unless another thread's drain of the shared
-    queue runs it first, possibly before the bump publishes its epoch.
-    """
-    orchestrator.settle_in_flight_work(
-        PlayerWork(
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-            analytic_ids=FLEET_WALK_ANALYTIC_IDS,
-        ),
-        BumpSettlePolicy(recompute_turns=shell_turns | live_turns),
-    )
-
-
-def _limits_recompute(*, durable: bool, backfill_enabled: bool) -> bool:
-    """A durable bump with backfill off recomputes shell and later live turns."""
-    return durable and not backfill_enabled
-
-
-def live_turns_for_limited_recompute(
-    game_id: int,
-    perspective: int,
-    *,
-    durable: bool,
-    backfill_enabled: bool,
-) -> dict[str, frozenset[int]]:
-    """Live fleet and scores streams by analytic id, or empty when unused.
-
-    One registry walk over published snapshots; it takes no lock. Held
-    admission and backfill on wake every known turn and do not scan.
-    """
-    if not _limits_recompute(durable=durable, backfill_enabled=backfill_enabled):
-        return {}
-    return active_table_stream_turns_by_analytic(game_id, perspective, FLEET_WALK_ANALYTIC_IDS)
+        return RunningDisposition.ABORT
 
 
 @dataclass(frozen=True)
-class DeferRecompute:
-    """No claim snapshot. The wake reads current roots and live streams."""
+class LiveRowWake:
+    """Reschedule one live fleet or scoreboard row through its stream."""
+
+    row: LiveWalkShell
 
 
 @dataclass(frozen=True)
-class WakeAllRecompute:
-    """Every known turn wakes. In-flight work is not discarded."""
+class FleetScopeWake:
+    """Wake one fleet scope: its open stream's row, or a ``force_fresh`` submit."""
 
-    def turns_to_wake(self, rescheduled: set[int]) -> set[int] | frozenset[int]:
-        """The ledger bump's known turns."""
-        return rescheduled
+    scope: ComputeScope
 
-    def discard_bumped_work(
+
+WakeTarget: TypeAlias = LiveRowWake | FleetScopeWake
+
+
+class BumpRecompute(Protocol):
+    """What one bump settles and wakes."""
+
+    def settle_policy(self, live_rows: tuple[LiveWalkShell, ...]) -> InFlightSettlePolicy | None:
+        """The policy the bump settles the player's work with, or None to settle nothing."""
+        ...
+
+    def wake_targets(
         self,
-        orchestrator: InFlightOrchestrator,
         *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-    ) -> None:
-        """In-flight fleet and scoreboard work stays."""
-        return
+        known_turns: frozenset[int],
+        stopped: frozenset[ComputeScope],
+        live_rows: tuple[LiveWalkShell, ...],
+    ) -> tuple[WakeTarget, ...]:
+        """What to wake once the bump has published.
 
-    def live_scores_turns_to_wake(self, rescheduled: set[int]) -> frozenset[int]:
-        """Scores rows stay on their own schedule."""
-        return frozenset()
+        ``known_turns`` are the ledger bump's turns, ``stopped`` the scopes the
+        settle stopped, and ``live_rows`` a scan taken after the publish.
+        """
+        ...
 
 
 @dataclass(frozen=True)
-class LimitedRecompute:
-    """Shell and live turns a durable bump recomputes while backfill is off.
+class DurableRecompute(BumpRecompute):
+    """A durable bump from evidence at ``host_turn``: the one live-row rule."""
 
-    ``turns`` are those sets restricted to the evidence host turn and later.
-    Discard uses the unfiltered sets: a shell or live turn before the evidence
-    host turn is still in-flight work for this player.
+    host_turn: int
+    backfill_enabled: bool
 
-    ``live_turns_by_analytic`` is that bump's one live-stream scan, split by
-    analytic id. Discard and the turns to wake use every analytic. Scores
-    reschedule uses the scores id from this same scan.
-    """
-
-    turns: frozenset[int]
-    shell_turns: frozenset[int]
-    live_turns_by_analytic: Mapping[str, frozenset[int]]
-
-    def turns_to_wake(self, rescheduled: set[int]) -> set[int] | frozenset[int]:
-        """Shell and live turns at the evidence host turn and later."""
-        return self.turns
-
-    def discard_bumped_work(
-        self,
-        orchestrator: InFlightOrchestrator,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-    ) -> None:
-        """Drop in-flight work that must not stamp the new mark."""
-        discard_bumped_player_work(
-            orchestrator,
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-            shell_turns=self.shell_turns,
-            live_turns=_union_live_turns(self.live_turns_by_analytic),
+    def settle_policy(self, live_rows: tuple[LiveWalkShell, ...]) -> BumpSettlePolicy:
+        return BumpSettlePolicy(
+            watched_turns=bump_watched_turns(
+                backfill_enabled=self.backfill_enabled, live_rows=live_rows
+            )
         )
 
-    def live_scores_turns_to_wake(self, rescheduled: set[int]) -> frozenset[int]:
-        """Woken turns this scan recorded as live scores streams."""
-        scores_turns = self.live_turns_by_analytic.get(SCORES_ANALYTIC_ID, frozenset())
-        return frozenset(turn for turn in self.turns_to_wake(rescheduled) if turn in scores_turns)
+    def wake_targets(
+        self,
+        *,
+        known_turns: frozenset[int],
+        stopped: frozenset[ComputeScope],
+        live_rows: tuple[LiveWalkShell, ...],
+    ) -> tuple[WakeTarget, ...]:
+        """Live rows at ``host_turn`` and later, and live rows whose own root was stopped.
+
+        A known turn with no live row is not woken: it keeps its old generation
+        until something opens it.
+        """
+        return tuple(
+            LiveRowWake(row=row)
+            for row in live_rows
+            if row.key.turn >= self.host_turn or has_stopped_scope(row, stopped)
+        )
 
 
-RecomputeDecision: TypeAlias = DeferRecompute | WakeAllRecompute | LimitedRecompute
-ResolvedRecompute: TypeAlias = WakeAllRecompute | LimitedRecompute
+@dataclass(frozen=True)
+class HeldRecompute(BumpRecompute):
+    """Held admission: settle nothing and wake every known fleet turn of the player."""
 
+    game_id: int
+    perspective: int
+    player_id: int
 
-def _union_live_turns(live_turns_by_analytic: Mapping[str, frozenset[int]]) -> frozenset[int]:
-    """Every turn in a per-analytic live-stream scan."""
-    return frozenset().union(*live_turns_by_analytic.values())
+    def settle_policy(self, live_rows: tuple[LiveWalkShell, ...]) -> None:
+        return None
 
-
-def _assemble_recompute(
-    *,
-    host_turn: int,
-    durable: bool,
-    backfill_enabled: bool,
-    live_turns_by_analytic: Mapping[str, frozenset[int]],
-    roots: tuple[OpenTurnRoot, ...],
-) -> ResolvedRecompute:
-    """Wake every known turn unless this is a durable bump with backfill off.
-
-    The limited case wakes shell turns and live turns at ``host_turn`` and
-    later. Shell turns are the open turns of ``roots``. A consumed root stays
-    a shell. A live table stream is not itself an open: turn 41 streaming
-    while the user opened 40 stays a later turn. Discard keeps the unfiltered
-    shell and live sets.
-    """
-    if not _limits_recompute(durable=durable, backfill_enabled=backfill_enabled):
-        return WakeAllRecompute()
-    shell_turns = frozenset(root.open_turn for root in roots)
-    live_turns = _union_live_turns(live_turns_by_analytic)
-    turns = {turn for turn in live_turns if turn >= host_turn}
-    turns.update(turn for turn in shell_turns if turn >= host_turn)
-    return LimitedRecompute(
-        turns=frozenset(turns),
-        shell_turns=shell_turns,
-        live_turns_by_analytic=MappingProxyType(dict(live_turns_by_analytic)),
-    )
-
-
-def recompute_decision_at_wake(
-    *,
-    host_turn: int,
-    durable: bool,
-    backfill_enabled: bool,
-    game_id: int,
-    perspective: int,
-    player_id: int,
-    orchestrator: InFlightOrchestrator,
-) -> ResolvedRecompute:
-    """Recompute choice when the claim did not snapshot one.
-
-    Held admission wakes every known turn and does not read roots. A durable
-    bump reads live streams and in-flight roots only while backfill is off,
-    then uses the same assembly as a claim snapshot.
-    """
-    limited = _limits_recompute(durable=durable, backfill_enabled=backfill_enabled)
-    return _assemble_recompute(
-        host_turn=host_turn,
-        durable=durable,
-        backfill_enabled=backfill_enabled,
-        live_turns_by_analytic=live_turns_for_limited_recompute(
-            game_id,
-            perspective,
-            durable=durable,
-            backfill_enabled=backfill_enabled,
-        ),
-        roots=(
-            _player_submission_roots(
-                orchestrator,
-                game_id,
-                perspective,
-                player_id,
+    def wake_targets(
+        self,
+        *,
+        known_turns: frozenset[int],
+        stopped: frozenset[ComputeScope],
+        live_rows: tuple[LiveWalkShell, ...],
+    ) -> tuple[WakeTarget, ...]:
+        return tuple(
+            FleetScopeWake(
+                scope=ComputeScope(
+                    analytic_id=FLEET_ANALYTIC_ID,
+                    game_id=self.game_id,
+                    perspective=self.perspective,
+                    turn=turn,
+                    player_id=self.player_id,
+                )
             )
-            if limited
-            else ()
-        ),
-    )
+            for turn in sorted(known_turns)
+        )
 
 
 @dataclass(frozen=True)
@@ -318,19 +253,13 @@ class DurableScoresEvidence:
     and ``open_turn``. Both are None when this host turn has no unconsumed
     root, and that persist cannot stamp.
 
-    ``wake_backfill`` is the current backfill record. It chooses which turns
-    wake after a bump or first persist. It does not classify the mark.
-
-    ``recompute`` is taken from the claim while that root was still unconsumed.
-    ``DeferRecompute`` when ``open_turn`` is None; the wake then reads current
-    roots and live streams. A limited recompute keeps the per-analytic split
-    of the scan that chose it, and the scores wake reads that split.
+    ``wake_backfill`` is the current backfill record. It chooses what a bump
+    watches. It does not classify the mark.
     """
 
     open_turn: int | None
     decision_backfill: bool | None
     wake_backfill: bool
-    recompute: RecomputeDecision
 
 
 def resolve_durable_scores_evidence(
@@ -338,37 +267,20 @@ def resolve_durable_scores_evidence(
     *,
     host_turn: int,
     wake_backfill: bool,
-    live_turns_by_analytic: Mapping[str, frozenset[int]],
 ) -> DurableScoresEvidence:
     """Carried submission choice and the current backfill record.
 
     ``open_turn`` is set exactly when an unconsumed root at ``host_turn``
     carries a backfill choice. A scores root wins over a fleet root. That is
-    also when that root is consumed. ``live_turns_by_analytic`` is the
-    pre-claim stream scan, split by analytic id. It is unused when
-    ``wake_backfill`` is on, because that setting wakes every known turn.
+    also when that root is consumed.
     """
     carried = preferred_unconsumed_root_backfill(
         roots,
         host_turn=host_turn,
         preferred_analytic_id=SCORES_ANALYTIC_ID,
     )
-    if carried is None:
-        return DurableScoresEvidence(
-            open_turn=None,
-            decision_backfill=None,
-            wake_backfill=wake_backfill,
-            recompute=DeferRecompute(),
-        )
     return DurableScoresEvidence(
-        open_turn=host_turn,
+        open_turn=None if carried is None else host_turn,
         decision_backfill=carried,
         wake_backfill=wake_backfill,
-        recompute=_assemble_recompute(
-            host_turn=host_turn,
-            durable=True,
-            backfill_enabled=wake_backfill,
-            live_turns_by_analytic=live_turns_by_analytic,
-            roots=roots,
-        ),
     )

@@ -16,12 +16,17 @@ from api.analytics.walk_shell_watch import LiveWalkShell
 from api.compute.scope import ComputeScope
 
 
+def has_stopped_scope(row: LiveWalkShell, stopped: frozenset[ComputeScope]) -> bool:
+    """Whether ``row``'s own root scope is in ``stopped``."""
+    return row.own_scope in stopped
+
+
 def rows_with_stopped_scope(
     stopped: frozenset[ComputeScope],
     live_rows: Iterable[LiveWalkShell],
 ) -> tuple[LiveWalkShell, ...]:
     """The live rows whose own root scope is in ``stopped``."""
-    return tuple(row for row in live_rows if row.own_scope in stopped)
+    return tuple(row for row in live_rows if has_stopped_scope(row, stopped))
 
 
 def reschedule_walk_rows(rows: Iterable[LiveWalkShell]) -> None:

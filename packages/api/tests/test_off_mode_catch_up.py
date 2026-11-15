@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Iterator
+
+import pytest
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.compute_orchestration import FleetPersistencePolicy
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -20,8 +24,10 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
-from api.compute.running_step import RunningStepDisposition, StepExit
+from api.compute.pools import reset_compute_worker_pool_for_tests
+from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
@@ -30,13 +36,13 @@ from api.serialization.backfill_earlier_turns import (
     backfill_earlier_turns_document,
     backfill_earlier_turns_store_key,
 )
-from api.services.evidence_bump import discard_bumped_player_work
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fleet_exports_helpers import first_player_id
 from tests.off_mode_catch_up_helpers import (
+    FLEET_SCORES_REGISTRY,
     context_at_turn,
     install_submission_root,
     open_turn_fields,
@@ -45,6 +51,78 @@ from tests.off_mode_catch_up_helpers import (
     store_generation,
     write_evidence_mark,
 )
+from tests.on_walk_live_helpers import LiveStream, attach_stream
+from tests.walk_band_helpers import no_live_streams
+
+
+@pytest.fixture(autouse=True)
+def _no_live_streams() -> Iterator[None]:
+    yield from no_live_streams()
+
+
+def _close_live_streams() -> None:
+    reset_fleet_table_stream_registry_for_tests()
+    reset_inference_table_stream_registry_for_tests()
+
+
+def _invalidation(persistence, orchestrator: ComputeOrchestrator) -> InferenceInvalidationService:
+    return InferenceInvalidationService(
+        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
+        fleet_persistence=persistence,
+        orchestrator=lambda: orchestrator,
+    )
+
+
+def _record_fleet_scope_wakes(monkeypatch) -> list[int]:
+    """The turns of fleet scopes the bump wakes without a live row; a durable bump wakes none."""
+    woken: list[int] = []
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
+        lambda scope, _player_id: woken.append(scope.turn_number) or False,
+    )
+    monkeypatch.setattr(
+        "api.services.inference_invalidation_service.wake_fleet_scope",
+        lambda scope, **_kwargs: woken.append(scope.turn) or True,
+    )
+    return woken
+
+
+def _open_fleet_row(ctx, player_id: int, turn: int) -> LiveStream:
+    return attach_stream(
+        get_fleet_table_stream_registry(),
+        FleetTableStreamScope(ctx.game_id, ctx.perspective, turn),
+        None,
+        ctx,
+        [player_id],
+    )
+
+
+def _open_scoreboard_row(ctx, player_id: int, turn: int) -> LiveStream:
+    return attach_stream(
+        get_inference_table_stream_registry(),
+        InferenceStreamScope(ctx.game_id, ctx.perspective, turn),
+        None,
+        ctx,
+        [player_id],
+    )
+
+
+def _put_node(
+    orchestrator: ComputeOrchestrator, ctx, player_id: int, analytic_id: str, turn: int, state
+) -> ComputeScope:
+    scope = ComputeScope(
+        analytic_id=analytic_id,
+        game_id=ctx.game_id,
+        perspective=ctx.perspective,
+        turn=turn,
+        player_id=player_id,
+    )
+    orchestrator.nodes[scope] = ComputeNodeRun(
+        scope=scope, dependency_scopes=(), state=state, submission_open=SubmissionOpen()
+    )
+    if state == "ready":
+        orchestrator._ready_queue.append(scope)
+    return scope
 
 
 def test_stale_open_refreshes_back_through_the_mark_and_skips_scoreboard(sample_turn):
@@ -332,11 +410,8 @@ def test_scores_root_backfill_wins_and_a_later_turn_does_not_consume(sample_turn
     assert fresh.open_turn_consumed is False
 
 
-def test_root_bump_wakes_the_shell_chosen_before_consume(
-    sample_turn,
-    monkeypatch,
-):
-    """A bump of the open root still wakes that shell after the claim consumes it."""
+def test_root_bump_consumes_the_root_and_wakes_live_rows_not_the_root(sample_turn, monkeypatch):
+    """The claim still consumes the open root; the wake follows live rows, not roots."""
     host, ctx = context_at_turn(sample_turn, 6)
     player_id = first_player_id(host)
     persistence = ctx.export_services[FLEET_ANALYTIC_ID].persistence
@@ -348,60 +423,27 @@ def test_root_bump_wakes_the_shell_chosen_before_consume(
         generation=2,
         applies_from=4,
     )
-    store_generation(persistence, ctx.game_id, ctx.perspective, 4, player_id, 2, ship_id=4)
-    store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 2, ship_id=5)
-    store_generation(persistence, ctx.game_id, ctx.perspective, 6, player_id, 2, ship_id=6)
+    for turn in (4, 5, 6):
+        store_generation(
+            persistence, ctx.game_id, ctx.perspective, turn, player_id, 2, ship_id=turn
+        )
     orchestrator = ComputeOrchestrator(compute_registry={})
     root = install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 4)
     root.submission_open = SubmissionOpen(
         open_turn=root.submission_open.open_turn,
         backfill_earlier_turns=True,
     )
-    woken: list[int] = []
+    fleet_scope_wakes = _record_fleet_scope_wakes(monkeypatch)
+    row = _open_fleet_row(ctx, player_id, 5)
+    invalidation = _invalidation(persistence, orchestrator)
 
-    def spy_reschedule(_scope, _player_id):
-        return False
-
-    def spy_wake(scope, **_kwargs):
-        woken.append(scope.turn)
-        return True
-
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
-        spy_reschedule,
-    )
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.wake_fleet_scope",
-        spy_wake,
-    )
-    live_scope = FleetTableStreamScope(
-        game_id=ctx.game_id,
-        perspective=ctx.perspective,
-        turn_number=5,
-    )
-
-    class _LiveStream:
-        stream_token = "turn-5"
-
-    get_fleet_table_stream_registry().attach(live_scope, _LiveStream())
-    invalidation = InferenceInvalidationService(
-        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-        fleet_persistence=persistence,
-        orchestrator=lambda: orchestrator,
-    )
-    try:
-        invalidation.on_scores_row_persisted(
-            ctx.game_id, ctx.perspective, 4, player_id, on_walk=False
-        )
-    finally:
-        reset_fleet_table_stream_registry_for_tests()
+    invalidation.on_scores_row_persisted(ctx.game_id, ctx.perspective, 4, player_id, on_walk=False)
 
     assert root.open_turn_consumed is True
     bumped = persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
     assert bumped.evidence_generation == 3
-    assert 4 in woken
-    assert 5 in woken
-    assert 6 not in woken
+    assert row.rescheduled_player_ids == [player_id]
+    assert fleet_scope_wakes == []
     untouched = persistence.get_ledger(ctx.game_id, ctx.perspective, 6, player_id)
     assert untouched is not None and untouched.ledger.records[0].record_id == "ship-6"
 
@@ -499,75 +541,30 @@ def test_persist_requires_the_job_epoch(sample_turn):
     assert stored.ledger.records[0].record_id == "ship-40"
 
 
-def test_bump_drops_offscreen_hops_and_refuses_an_executing_step():
-    orchestrator = ComputeOrchestrator(compute_registry={})
-    ready = ComputeScope(
-        analytic_id=FLEET_ANALYTIC_ID,
-        game_id=1,
-        perspective=1,
-        turn=39,
-        player_id=7,
-    )
-    running = ComputeScope(
-        analytic_id=SCORES_ANALYTIC_ID,
-        game_id=1,
-        perspective=1,
-        turn=39,
-        player_id=7,
-    )
-    shell = ComputeScope(
-        analytic_id=FLEET_ANALYTIC_ID,
-        game_id=1,
-        perspective=1,
-        turn=40,
-        player_id=7,
-    )
-    orchestrator.nodes[ready] = ComputeNodeRun(
-        scope=ready, dependency_scopes=(), state="ready", submission_open=SubmissionOpen()
-    )
-    orchestrator.nodes[running] = ComputeNodeRun(
-        scope=running,
-        dependency_scopes=(),
-        state="running",
-        submission_open=SubmissionOpen(),
-    )
-    orchestrator.nodes[shell] = ComputeNodeRun(
-        scope=shell,
-        dependency_scopes=(),
-        state="waiting_deps",
-        submission_open=SubmissionOpen(),
-    )
-    orchestrator._ready_queue.append(ready)
+def _other_thread_can_take(orchestrator: ComputeOrchestrator) -> bool:
+    """Whether a second thread could take the orchestrator lock right now."""
+    taken: list[bool] = []
 
-    discard_bumped_player_work(
-        orchestrator,
-        game_id=1,
-        perspective=1,
-        player_id=7,
-        shell_turns=frozenset({40}),
-        live_turns=frozenset(),
-    )
+    def probe() -> None:
+        acquired = orchestrator._condition.acquire(blocking=False)
+        if acquired:
+            orchestrator._condition.release()
+        taken.append(acquired)
 
-    assert orchestrator.nodes[ready].state == "failed"
-    assert ready not in orchestrator._ready_queue
-    assert orchestrator.nodes[running].state == "running"
-    assert orchestrator.nodes[running].running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
-    assert orchestrator.nodes[shell].state == "failed"
-
-    with orchestrator._condition:
-        abandoned = orchestrator._abandon_persist_if_not_running_or_stale(
-            orchestrator.nodes[running], StepExit.PERSIST
-        )
-    assert abandoned is True
-    assert orchestrator.nodes[running].state == "failed"
+    thread = threading.Thread(target=probe)
+    thread.start()
+    thread.join()
+    return taken[0]
 
 
-def test_executing_offscreen_work_is_flagged_before_the_epoch_bump(sample_turn, monkeypatch):
-    """Both bump paths flag off-screen work before the epoch or the mark moves.
+def test_the_bump_settles_then_publishes_in_one_lock_hold_then_wakes(sample_turn, monkeypatch):
+    """Both durable entry points settle, publish the mark and epoch, then wake.
 
-    The flag and the failed hop are already applied when
-    ``invalidate_player_ledgers_from_turn`` is entered. Wake runs after that
-    call returns. A shell step that is already running stays running.
+    When ``invalidate_player_ledgers_from_turn`` is entered, the settle has
+    aborted the off-screen work and kept the running off-walk node on the
+    watched live-row turn, the epoch and mark have not moved, and the
+    orchestrator lock is still held, so no plan can register in between.
+    The live row is rescheduled only after that call returns.
     """
     host, ctx = context_at_turn(sample_turn, 40)
     player_id = first_player_id(host)
@@ -580,86 +577,26 @@ def test_executing_offscreen_work_is_flagged_before_the_epoch_bump(sample_turn, 
         generation=3,
         applies_from=39,
     )
-    reset_fleet_table_stream_registry_for_tests()
-    reset_inference_table_stream_registry_for_tests()
-    phase = {"invalidate_returned": False, "wake_before": False}
-    woken: list[int] = []
-
-    def note_wake(turn: int) -> None:
-        if not phase["invalidate_returned"]:
-            phase["wake_before"] = True
-        woken.append(turn)
-
-    def spy_reschedule(scope, _player_id):
-        note_wake(scope.turn_number)
-        return False
-
-    def spy_wake(scope, **_kwargs):
-        note_wake(scope.turn)
-        return True
-
-    def spy_scores(scope, _player_id):
-        note_wake(scope.turn_number)
-        return True
-
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
-        spy_reschedule,
-    )
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.wake_fleet_scope",
-        spy_wake,
-    )
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.reschedule_inference_row",
-        spy_scores,
-    )
+    _record_fleet_scope_wakes(monkeypatch)
     original_invalidate = persistence.invalidate_player_ledgers_from_turn
 
     def drive(call) -> None:
-        orchestrator = ComputeOrchestrator(compute_registry={})
-        shell = ComputeScope(
-            analytic_id=FLEET_ANALYTIC_ID,
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            turn=40,
-            player_id=player_id,
+        # The bump drains what its settle queued, so the orchestrator needs the
+        # real registrations; its pool has no workers, so nothing runs.
+        orchestrator = ComputeOrchestrator(
+            compute_registry=FLEET_SCORES_REGISTRY,
+            worker_pool=reset_compute_worker_pool_for_tests(worker_count=0),
         )
-        running = ComputeScope(
-            analytic_id=SCORES_ANALYTIC_ID,
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            turn=38,
-            player_id=player_id,
-        )
-        ready = ComputeScope(
-            analytic_id=FLEET_ANALYTIC_ID,
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            turn=37,
-            player_id=player_id,
-        )
-        shell_node = install_submission_root(
+        row_scope = install_submission_root(
             orchestrator, ctx.game_id, ctx.perspective, player_id, 40
-        )
-        shell_node.state = "running"
-        orchestrator.nodes[running] = ComputeNodeRun(
-            scope=running,
-            dependency_scopes=(),
-            state="running",
-            submission_open=SubmissionOpen(),
-        )
-        orchestrator.nodes[ready] = ComputeNodeRun(
-            scope=ready,
-            dependency_scopes=(),
-            state="ready",
-            submission_open=SubmissionOpen(),
-        )
-        orchestrator._ready_queue.append(ready)
-        invalidation = InferenceInvalidationService(
-            InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-            fleet_persistence=persistence,
-            orchestrator=lambda: orchestrator,
+        ).scope
+        orchestrator.nodes[row_scope].state = "running"
+        running = _put_node(orchestrator, ctx, player_id, SCORES_ANALYTIC_ID, 38, "running")
+        ready = _put_node(orchestrator, ctx, player_id, FLEET_ANALYTIC_ID, 37, "ready")
+        row = _open_fleet_row(ctx, player_id, 40)
+        order: list[str] = []
+        monkeypatch.setattr(
+            row, "reschedule_player", lambda _player_id: order.append("reschedule") or True
         )
         epoch_before = persistence.player_invalidation_generation(
             ctx.game_id, ctx.perspective, player_id
@@ -668,41 +605,42 @@ def test_executing_offscreen_work_is_flagged_before_the_epoch_bump(sample_turn, 
             ctx.game_id, ctx.perspective, player_id
         ).evidence_generation
         seen: dict[str, object] = {}
-        phase["invalidate_returned"] = False
-        phase["wake_before"] = False
-        woken.clear()
 
         def spy_invalidate(*args, **kwargs):
-            seen["flagged"] = orchestrator.nodes[running].running_step
-            seen["ready_state"] = orchestrator.nodes[ready].state
+            seen["running"] = orchestrator.nodes[running].state
+            seen["ready"] = orchestrator.nodes[ready].state
             seen["ready_queued"] = ready in orchestrator._ready_queue
-            seen["shell_flagged"] = orchestrator.nodes[shell].running_step
-            seen["shell_state"] = orchestrator.nodes[shell].state
+            seen["row"] = orchestrator.nodes[row_scope].state
             seen["epoch"] = persistence.player_invalidation_generation(
                 ctx.game_id, ctx.perspective, player_id
             )
             seen["mark"] = persistence.evidence_mark(
                 ctx.game_id, ctx.perspective, player_id
             ).evidence_generation
+            seen["lock_held"] = not _other_thread_can_take(orchestrator)
             result = original_invalidate(*args, **kwargs)
-            phase["invalidate_returned"] = True
+            order.append("published")
             return result
 
         persistence.invalidate_player_ledgers_from_turn = spy_invalidate
         try:
-            call(invalidation)
+            call(_invalidation(persistence, orchestrator))
         finally:
             persistence.invalidate_player_ledgers_from_turn = original_invalidate
+            _close_live_streams()
 
-        assert seen["flagged"] is RunningStepDisposition.FINISH_WITHOUT_STAMP
-        assert seen["ready_state"] == "failed"
-        assert seen["ready_queued"] is False
-        assert seen["shell_flagged"] is RunningStepDisposition.CONTINUE
-        assert seen["shell_state"] == "running"
-        assert seen["epoch"] == epoch_before
-        assert seen["mark"] == mark_before
-        assert phase["wake_before"] is False
-        assert 40 in woken
+        assert seen == {
+            "running": "failed",
+            "ready": "failed",
+            "ready_queued": False,
+            "row": "running",
+            "epoch": epoch_before,
+            "mark": mark_before,
+            "lock_held": True,
+        }
+        assert isinstance(orchestrator.nodes[running].error, ComputeScopeAbortedError)
+        assert orchestrator.nodes[row_scope].running_step is RunningStepDisposition.CONTINUE
+        assert order == ["published", "reschedule"]
         assert (
             persistence.player_invalidation_generation(ctx.game_id, ctx.perspective, player_id)
             == epoch_before + 1
@@ -711,8 +649,6 @@ def test_executing_offscreen_work_is_flagged_before_the_epoch_bump(sample_turn, 
             persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id).evidence_generation
             == mark_before + 1
         )
-        assert orchestrator.nodes[running].state == "running"
-        assert orchestrator.nodes[shell].state == "running"
 
     def persist_scores(invalidation: InferenceInvalidationService) -> None:
         invalidation.on_scores_row_persisted(
@@ -795,180 +731,47 @@ def test_held_admission_leaves_executing_work_for_epoch_retry(sample_turn, monke
     )
 
 
-def test_bump_recomputes_shell_and_live_turns_and_leaves_other_later_turns_on_disk(
-    sample_turn,
-    monkeypatch,
+@pytest.mark.parametrize("backfill_enabled", [False, True])
+def test_a_durable_bump_wakes_live_rows_from_the_host_turn_and_leaves_other_turns_on_disk(
+    sample_turn, monkeypatch, backfill_enabled
 ):
-    """A durable bump wakes the shell and any later turn that already has a live stream.
+    """Under either setting, only the player's live rows at the host turn and later wake.
 
-    A later turn with no live stream stays on disk.
-    """
-    host, ctx = context_at_turn(sample_turn, 6)
-    player_id = first_player_id(host)
-    services = ctx.export_services[FLEET_ANALYTIC_ID]
-    persistence = services.persistence
-    store_generation(persistence, ctx.game_id, ctx.perspective, 4, player_id, 1, ship_id=4)
-    store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 1, ship_id=5)
-    store_generation(persistence, ctx.game_id, ctx.perspective, 6, player_id, 1, ship_id=6)
-    orchestrator = ComputeOrchestrator(compute_registry={})
-    install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 4)
-    rescheduled: list[int] = []
-    woken: list[int] = []
-
-    def spy_reschedule(scope, _player_id):
-        rescheduled.append(scope.turn_number)
-        return False
-
-    def spy_wake(scope, **_kwargs):
-        woken.append(scope.turn)
-        return True
-
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
-        spy_reschedule,
-    )
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.wake_fleet_scope",
-        spy_wake,
-    )
-    live_scope = FleetTableStreamScope(
-        game_id=ctx.game_id,
-        perspective=ctx.perspective,
-        turn_number=5,
-    )
-
-    class _LiveStream:
-        stream_token = "turn-5"
-
-    get_fleet_table_stream_registry().attach(live_scope, _LiveStream())
-    invalidation = InferenceInvalidationService(
-        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-        fleet_persistence=persistence,
-        orchestrator=lambda: orchestrator,
-    )
-    try:
-        invalidation.on_inference_evidence_updated(
-            ctx.game_id,
-            ctx.perspective,
-            4,
-            player_id,
-            durable=True,
-        )
-    finally:
-        reset_fleet_table_stream_registry_for_tests()
-
-    assert 4 in rescheduled or 4 in woken
-    assert 5 in rescheduled or 5 in woken
-    assert 6 not in rescheduled
-    assert 6 not in woken
-    live = persistence.get_ledger(ctx.game_id, ctx.perspective, 5, player_id)
-    untouched = persistence.get_ledger(ctx.game_id, ctx.perspective, 6, player_id)
-    assert live is not None and live.ledger.records[0].record_id == "ship-5"
-    assert untouched is not None and untouched.ledger.records[0].record_id == "ship-6"
-
-
-def test_limited_bump_reschedules_scores_rows_from_the_same_live_scan(
-    sample_turn,
-    monkeypatch,
-):
-    """A limited bump walks live streams once and wakes scores only on that scan.
-
-    A fleet-only stream and a scores stream before the host turn do not
-    reschedule a scores row.
+    A submission root with no live row, a known later turn with no live row,
+    and a live row below the host turn whose work the bump did not stop are
+    not woken, and their ledgers stay at the old generation.
     """
     host, ctx = context_at_turn(sample_turn, 6)
     player_id = first_player_id(host)
     persistence = ctx.export_services[FLEET_ANALYTIC_ID].persistence
-    store_generation(persistence, ctx.game_id, ctx.perspective, 4, player_id, 1, ship_id=4)
-    store_generation(persistence, ctx.game_id, ctx.perspective, 5, player_id, 1, ship_id=5)
-    store_generation(persistence, ctx.game_id, ctx.perspective, 6, player_id, 1, ship_id=6)
+    for turn in (4, 5, 6):
+        store_generation(
+            persistence, ctx.game_id, ctx.perspective, turn, player_id, 1, ship_id=turn
+        )
     orchestrator = ComputeOrchestrator(compute_registry={})
     install_submission_root(orchestrator, ctx.game_id, ctx.perspective, player_id, 4)
-    fleet_turns: list[int] = []
-    scores_turns: list[int] = []
-    scan_calls = {"fleet": 0, "scores": 0}
+    fleet_scope_wakes = _record_fleet_scope_wakes(monkeypatch)
+    fleet_row = _open_fleet_row(ctx, player_id, 5)
+    early_scoreboard = _open_scoreboard_row(ctx, player_id, 3)
+    later_scoreboard = _open_scoreboard_row(ctx, player_id, 6)
 
-    def spy_fleet(scope, _player_id):
-        fleet_turns.append(scope.turn_number)
-        return False
+    _invalidation(persistence, orchestrator).on_inference_evidence_updated(
+        ctx.game_id,
+        ctx.perspective,
+        4,
+        player_id,
+        durable=True,
+        backfill_earlier_turns=backfill_enabled,
+    )
 
-    def spy_scores(scope, _player_id):
-        scores_turns.append(scope.turn_number)
-        return True
-
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.reschedule_fleet_table_player",
-        spy_fleet,
-    )
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.wake_fleet_scope",
-        lambda _scope, **_kwargs: True,
-    )
-    monkeypatch.setattr(
-        "api.services.inference_invalidation_service.reschedule_inference_row",
-        spy_scores,
-    )
-    reset_fleet_table_stream_registry_for_tests()
-    reset_inference_table_stream_registry_for_tests()
-    get_fleet_table_stream_registry().attach(
-        FleetTableStreamScope(
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            turn_number=5,
-        ),
-        object(),
-    )
-    scores_registry = get_inference_table_stream_registry()
-    scores_registry.attach(
-        InferenceStreamScope(
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            turn_number=3,
-        ),
-        object(),
-    )
-    scores_registry.attach(
-        InferenceStreamScope(
-            game_id=ctx.game_id,
-            perspective=ctx.perspective,
-            turn_number=6,
-        ),
-        object(),
-    )
-    fleet_registry = get_fleet_table_stream_registry()
-    fleet_items = fleet_registry.items
-    scores_items = scores_registry.items
-
-    def counting_fleet():
-        scan_calls["fleet"] += 1
-        return fleet_items()
-
-    def counting_scores():
-        scan_calls["scores"] += 1
-        return scores_items()
-
-    monkeypatch.setattr(fleet_registry, "items", counting_fleet)
-    monkeypatch.setattr(scores_registry, "items", counting_scores)
-    invalidation = InferenceInvalidationService(
-        InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
-        fleet_persistence=persistence,
-        orchestrator=lambda: orchestrator,
-    )
-    try:
-        invalidation.on_inference_evidence_updated(
-            ctx.game_id,
-            ctx.perspective,
-            4,
-            player_id,
-            durable=True,
-        )
-    finally:
-        reset_fleet_table_stream_registry_for_tests()
-        reset_inference_table_stream_registry_for_tests()
-
-    assert fleet_turns == [4, 5, 6]
-    assert scores_turns == [6]
-    assert scan_calls == {"fleet": 1, "scores": 1}
+    assert fleet_row.rescheduled_player_ids == [player_id]
+    assert later_scoreboard.rescheduled_player_ids == [player_id]
+    assert early_scoreboard.rescheduled_player_ids == []
+    assert fleet_scope_wakes == []
+    for turn in (5, 6):
+        stored = persistence.get_ledger(ctx.game_id, ctx.perspective, turn, player_id)
+        assert stored is not None and stored.evidence_generation == 1
+        assert stored.ledger.records[0].record_id == f"ship-{turn}"
 
 
 def test_backfill_on_keeps_the_final_prior_dependency(sample_turn):
