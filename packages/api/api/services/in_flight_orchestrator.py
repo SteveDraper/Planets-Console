@@ -14,6 +14,7 @@ from typing import Protocol, TypeAlias
 from api.compute.in_flight_settle import InFlightSettlePolicy, InFlightWork
 from api.compute.orchestrator import ComputeOrchestrator, OpenTurnRoot
 from api.compute.runtime import peek_compute_orchestrator
+from api.compute.scope import ComputeScope
 
 
 class InFlightOrchestrator(Protocol):
@@ -47,21 +48,17 @@ class InFlightOrchestrator(Protocol):
         self,
         work: InFlightWork,
         policy: InFlightSettlePolicy,
-    ) -> None: ...
+    ) -> frozenset[ComputeScope]: ...
 
     def drain_post_lock_callbacks(self) -> None: ...
-
-
-PostLockDrain: TypeAlias = Callable[[], None]
-"""One orchestrator's ``drain_post_lock_callbacks``, bound by the service that settled on it."""
 
 
 class _AbsentProcessOrchestrator(InFlightOrchestrator):
     """Stand-in when this process has not created an orchestrator.
 
     There is then no in-flight work. Creating the real orchestrator would
-    start a worker pool, so root queries are empty, and settle and drain
-    are no-ops.
+    start a worker pool, so root queries are empty, a settle stops nothing,
+    and a drain does nothing.
     """
 
     def open_turn_roots(
@@ -90,8 +87,8 @@ class _AbsentProcessOrchestrator(InFlightOrchestrator):
         self,
         work: InFlightWork,
         policy: InFlightSettlePolicy,
-    ) -> None:
-        return
+    ) -> frozenset[ComputeScope]:
+        return frozenset()
 
     def drain_post_lock_callbacks(self) -> None:
         return

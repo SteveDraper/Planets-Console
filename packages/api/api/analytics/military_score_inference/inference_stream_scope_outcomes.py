@@ -56,7 +56,7 @@ class InferenceStreamScopeOutcomesMixin:
         # stamped run's solve and refuses its persist. Do not fail (or
         # orphan-complete) the open multiplex -- a reopen or reschedule admits
         # a replacement.
-        if self._is_cancel_abort_failure(snapshot):
+        if snapshot.is_intentional_abort:
             self._cancel_stamped_ladder_run(stamped)
             return
         if snapshot.state in {"complete", "failed"}:

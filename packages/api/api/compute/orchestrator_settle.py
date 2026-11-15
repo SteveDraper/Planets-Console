@@ -63,8 +63,8 @@ class OrchestratorSettleMixin:
         self: ComputeOrchestrator,
         work: InFlightWork,
         policy: InFlightSettlePolicy,
-    ) -> None:
-        """Apply ``policy`` to every non-terminal node ``work`` selects.
+    ) -> frozenset[ComputeScope]:
+        """Apply ``policy`` to every non-terminal node ``work`` selects; return what it stopped.
 
         A running node takes ``policy.running``; any other non-terminal node
         takes ``policy.unstarted``. ``FINISH_WITHOUT_STAMP`` and
@@ -74,12 +74,18 @@ class OrchestratorSettleMixin:
         aborts it with ``ComputeScopeAbortedError``, unless work this settle
         leaves alive still needs it (``needed_scopes``): such a node is kept.
 
+        The returned scopes are the nodes this settle stopped: those it ended,
+        and the running ones whose ``running_step`` it raised and that no
+        kept work needs. A node kept because kept work needs it is not
+        returned.
+
         Runs under the orchestrator lock and does not drain the post-lock
         callbacks it queues; another thread's drain may run them before the
         caller's.
         """
         with self._condition:
             endings: list[tuple[ComputeNodeRun, _Ending]] = []
+            limited: list[ComputeScope] = []
             for scope, node in self._nodes_in(work):
                 if node.is_terminal:
                     continue
@@ -89,21 +95,24 @@ class OrchestratorSettleMixin:
                     raised_to = _RUNNING_STEP_RAISED_TO.get(running)
                     if raised_to is not None:
                         node.running_step = max(node.running_step, raised_to)
+                        limited.append(scope)
                     ending = _RUNNING_ENDING.get(running)
                 else:
                     ending = _UNSTARTED_ENDING.get(policy.unstarted(candidate))
                 if ending is not None:
                     endings.append((node, ending))
-            if not endings:
-                return
-            ended = {node.scope for node, _ending in endings}
+            if not endings and not limited:
+                return frozenset()
+            ending_scopes = {node.scope for node, _ending in endings}
             needed = needed_scopes(
                 self._nodes,
-                (scope for scope in self._nodes if scope not in ended),
+                (scope for scope in self._nodes if scope not in ending_scopes),
             )
+            stopped = {scope for scope in limited if scope not in needed}
             for node, ending in endings:
                 if node.scope in needed:
                     continue
+                stopped.add(node.scope)
                 match ending:
                     case _Ending.DISCARD:
                         self._fail_node(
@@ -118,6 +127,7 @@ class OrchestratorSettleMixin:
                             ComputeScopeAbortedError("in-flight work was aborted by a settle"),
                             reason="settle",
                         )
+            return frozenset(stopped)
 
     def drain_post_lock_callbacks(self: ComputeOrchestrator) -> None:
         """Run the post-lock work queued so far, including what a settle queued.

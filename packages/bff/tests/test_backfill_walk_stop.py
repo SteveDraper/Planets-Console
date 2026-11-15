@@ -1,4 +1,4 @@
-"""BFF ``POST /games/{game_id}/backfill-walks/stop``: 204 for any game, drain after the response."""
+"""BFF ``POST /games/{game_id}/backfill-walks/stop``: 204 for any game, then the follow-up."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from api.compute.runtime import (
 )
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
-from api.services.in_flight_orchestrator import PostLockDrain
+from api.services.backfill_walk_stop import WalkStopFollowUp
 from api.storage_factory import clear_backend_cache
 from bff.app import app
 from bff.config import BffConfig
@@ -26,14 +26,14 @@ _STOP_PATH = "/games/{game_id}/backfill-walks/stop"
 
 
 class _RecordingCore:
-    """Records the stop, and the run of the drain the stop returns."""
+    """Records the stop, and the run of the follow-up the stop returns."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
 
-    def stop_backfill_walks(self, game_id: int) -> PostLockDrain:
+    def stop_backfill_walks(self, game_id: int) -> WalkStopFollowUp:
         self.calls.append(("stop", game_id))
-        return lambda: self.calls.append(("drain", game_id))
+        return lambda: self.calls.append(("follow_up", game_id))
 
 
 @pytest.fixture(autouse=True)
@@ -59,15 +59,15 @@ def core() -> _RecordingCore:
 
 
 @pytest.mark.parametrize("game_id", [628580, 999999])
-def test_the_stop_returns_204_for_any_game_then_drains(core, game_id):
+def test_the_stop_returns_204_for_any_game_then_runs_its_follow_up(core, game_id):
     response = TestClient(app).post(_STOP_PATH.format(game_id=game_id))
 
     assert response.status_code == 204
     assert response.content == b""
-    assert core.calls == [("stop", game_id), ("drain", game_id)]
+    assert core.calls == [("stop", game_id), ("follow_up", game_id)]
 
 
-def test_the_drain_runs_in_the_responses_background_task():
+def test_the_follow_up_runs_in_the_responses_background_task():
     recording = _RecordingCore()
     background = BackgroundTasks()
 
@@ -77,16 +77,22 @@ def test_the_drain_runs_in_the_responses_background_task():
     assert recording.calls == [("stop", 628580)]
     assert len(background.tasks) == 1
     asyncio.run(background())
-    assert recording.calls == [("stop", 628580), ("drain", 628580)]
+    assert recording.calls == [("stop", 628580), ("follow_up", 628580)]
 
 
-def test_the_core_client_stop_returns_the_process_orchestrators_drain():
-    """The BFF schedules the drain Core's stop hands back; it never names the compute drain."""
+def test_the_core_client_stop_returns_a_follow_up_that_drains_the_process_orchestrator(
+    monkeypatch,
+):
+    """The BFF schedules the follow-up Core's stop hands back; it never names the compute drain."""
     orchestrator = get_compute_orchestrator()
+    drains: list[str] = []
+    monkeypatch.setattr(orchestrator, "drain_post_lock_callbacks", lambda: drains.append("drained"))
 
-    drain = get_core_client().stop_backfill_walks(628580)
+    follow_up = get_core_client().stop_backfill_walks(628580)
+    assert drains == []
+    follow_up()
 
-    assert drain == orchestrator.drain_post_lock_callbacks
+    assert drains == ["drained"]
 
 
 def test_the_stop_reaches_core_without_creating_an_orchestrator():

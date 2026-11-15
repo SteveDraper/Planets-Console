@@ -1,8 +1,9 @@
 """A stop ends every accepted Backfill earlier turns walk in one game.
 
 ``stop_backfill_walks`` settles the game's on-walk fleet and scoreboard nodes in
-every perspective and returns the drain, bound to that orchestrator, that the
-caller runs after it. A hop no worker has picked is
+every perspective and returns its follow-up, which the caller runs after it:
+the drain of what the stop queued, then a reschedule of each live row whose own
+root the stop stopped. A hop no worker has picked is
 aborted, and a queued fleet hop is dropped at its pick. A picked fleet step
 finishes and persists, and its node then starts or requeues no further step
 unless something still needs it. A running scoreboard solve aborts, so its
@@ -79,9 +80,9 @@ def walk(sample_turn) -> Walk:
 
 
 def _stop(orchestrator: ComputeOrchestrator, game_id: int) -> None:
-    """Stop the game's walks, then run the drain the stop returns, as the route's task does."""
-    drain = stop_backfill_walks(orchestrator, game_id)
-    drain()
+    """Stop the game's walks, then run the follow-up the stop returns, as the route's task does."""
+    follow_up = stop_backfill_walks(orchestrator, game_id)
+    follow_up()
 
 
 def _node(walk: Walk, turn: int, analytic_id: str = FLEET_ANALYTIC_ID) -> ComputeNodeRun:
@@ -638,3 +639,76 @@ def test_a_stop_in_a_game_with_no_walk_changes_nothing_and_the_rows_detach(sampl
         for scope, node in walk.orchestrator.nodes.items()
     } == before
     assert live_table_streams(_WALK_ANALYTIC_IDS) == ()
+
+
+# --- Rows still open on the game: the follow-up reschedules those whose own root it stopped ---
+
+_STOPPED_ROOT_CASES = {
+    "unstarted fleet root on the walk aborts": (FLEET_ANALYTIC_ID, "parked", True, True),
+    "running fleet root on the walk ends after its step": (
+        FLEET_ANALYTIC_ID,
+        "running",
+        True,
+        True,
+    ),
+    "running scoreboard root on the walk aborts": (SCORES_ANALYTIC_ID, "running", True, True),
+    "unstarted fleet root off the walk is kept": (FLEET_ANALYTIC_ID, "parked", False, False),
+    "running fleet root off the walk is kept": (FLEET_ANALYTIC_ID, "running", False, False),
+}
+
+
+@pytest.mark.parametrize(
+    ("analytic_id", "state", "on_walk", "is_rescheduled"),
+    _STOPPED_ROOT_CASES.values(),
+    ids=_STOPPED_ROOT_CASES.keys(),
+)
+def test_the_follow_up_reschedules_a_live_row_whose_own_root_the_stop_stopped(
+    walk, analytic_id, state, on_walk, is_rescheduled
+):
+    shell = walk.open_shell()
+    _plant(walk, analytic_id=analytic_id, state=state, on_walk=on_walk)
+    row_stream, other_stream = (
+        (shell.fleet_stream, shell.scores_stream)
+        if analytic_id == FLEET_ANALYTIC_ID
+        else (shell.scores_stream, shell.fleet_stream)
+    )
+
+    follow_up = stop_backfill_walks(walk.orchestrator, walk.ctx.game_id)
+    assert row_stream.rescheduled_player_ids == []
+    follow_up()
+
+    assert row_stream.rescheduled_player_ids == ([walk.player_id] if is_rescheduled else [])
+    assert other_stream.rescheduled_player_ids == []
+    end_shell(shell)
+
+
+def test_the_follow_up_reschedules_only_after_its_drain_ran_the_abort_listeners(walk, monkeypatch):
+    shell = walk.open_shell()
+    root = _plant(walk, on_walk=True)
+    order: list[tuple[str, object]] = []
+    walk.orchestrator.observers.register_scope_outcome_listener(
+        lambda snapshot: order.append(("outcome", snapshot.scope))
+    )
+    reschedule_player = shell.fleet_stream.reschedule_player
+
+    def record_reschedule(player_id: int) -> bool:
+        order.append(("reschedule", player_id))
+        return reschedule_player(player_id)
+
+    monkeypatch.setattr(shell.fleet_stream, "reschedule_player", record_reschedule)
+
+    _stop(walk.orchestrator, walk.ctx.game_id)
+
+    assert order == [("outcome", root), ("reschedule", walk.player_id)]
+    end_shell(shell)
+
+
+def test_a_row_closed_before_the_follow_up_runs_is_not_rescheduled(walk):
+    shell = walk.open_shell()
+    _plant(walk, on_walk=True)
+
+    follow_up = stop_backfill_walks(walk.orchestrator, walk.ctx.game_id)
+    end_shell(shell)
+    follow_up()
+
+    assert shell.fleet_stream.rescheduled_player_ids == []

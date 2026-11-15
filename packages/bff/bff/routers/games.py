@@ -15,7 +15,8 @@ stay in Core. **GET /games/{game_id}/{perspective}/territory-movie** forwards th
 Territory movie; Core packs it. **GET/PUT /games/{game_id}/backfill-earlier-turns** reads and
 stores the game-wide Backfill earlier turns choice. The Settings checkbox is the writer.
 **POST /games/{game_id}/backfill-walks/stop** stops the game's accepted walks when the shell
-leaves the game; the stop's queued compute work drains after the 204.
+leaves the game; after the 204, the stop's queued compute work drains and any row still open on
+the game restarts its walk.
 **POST /games/{game_id}/info** refreshes game info from Planets.nu.
 **POST .../turns/ensure** loads a turn when missing. **GET .../viewpoint-eligibility** returns the
 Core allowed **perspective** set for a login (username query required). Warp-well and Stellar
@@ -190,11 +191,12 @@ def post_backfill_walks_stop(
 ) -> Response:
     """Stop every accepted walk in a game the shell left. 204 for any game id.
 
-    The stop settles before the response. Only the drain of the compute work
-    it queued runs after the response, as a background task.
+    The stop settles before the response. After the response, as a background
+    task, the compute work it queued drains and any row still open on the game
+    restarts its walk.
     """
-    drain = core.stop_backfill_walks(game_id)
-    background_tasks.add_task(drain)
+    follow_up = core.stop_backfill_walks(game_id)
+    background_tasks.add_task(follow_up)
     return Response(status_code=204)
 
 

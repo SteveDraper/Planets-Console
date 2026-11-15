@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
+from api.compute.errors import ComputeScopeAbortedError
 from api.compute.profile import StepSurface
 from api.compute.scope import ComputeScope
 
@@ -38,6 +39,16 @@ class ScopeLifecycleSnapshot:
     # Profile position at settlement, so diagnostics can name the failed step.
     step_index: int | None = None
     profile_step_index: int | None = None
+
+    @property
+    def is_intentional_abort(self) -> bool:
+        """Whether the node failed because something ended it on purpose.
+
+        An abort (an explicit cancel, a settle, or a stopped execution nothing
+        needs) fails with ``ComputeScopeAbortedError``. It is not a row error:
+        whoever ended the node also reschedules or tears down the row it served.
+        """
+        return self.state == "failed" and isinstance(self.error, ComputeScopeAbortedError)
 
 
 ScopeOutcomeListener = Callable[[ScopeLifecycleSnapshot], None]

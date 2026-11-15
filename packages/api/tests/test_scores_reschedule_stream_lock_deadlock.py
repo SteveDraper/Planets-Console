@@ -1,4 +1,4 @@
-"""Reproduce scores reschedule_row holding stream_lock across schedule (0% CPU).
+"""Reproduce scores reschedule_player holding stream_lock across schedule (0% CPU).
 
 Fingerprint (game 680224, turn 11): pool workers stuck inFlight with timeline
 frozen after mid-tier completes; UI rows stay in-progress with no CPU.
@@ -7,10 +7,10 @@ Fleet already fixed the sibling hang: ``FleetTableStreamController.reschedule_pl
 must not hold ``stream_lock`` across ``dispatch_admission`` / schedule / orchestrator
 submit (see ``test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation``).
 
-Scores ``InferenceTableStreamController.reschedule_row`` must use the same shared
+Scores ``InferenceTableStreamController.reschedule_player`` must use the same shared
 choreography (``TableStreamControllerBase.reschedule_one``): cancel and schedule
 outside the lock; install under lock only. Nested ``deliver_domain_event`` /
-``reschedule_row`` needs the same non-reentrant lock and self-deadlocks if held.
+``reschedule_player`` needs the same non-reentrant lock and self-deadlocks if held.
 """
 
 from __future__ import annotations
@@ -82,8 +82,8 @@ def test_reschedule_row_does_not_hold_stream_lock_across_schedule(
 ) -> None:
     """Schedule under stream_lock must not re-enter reschedule (fleet parity).
 
-    Production hang: ``reschedule_row`` held ``stream_lock`` across schedule.
-    Nested invalidation / domain delivery / another ``reschedule_row`` blocks
+    Production hang: ``reschedule_player`` held ``stream_lock`` across schedule.
+    Nested invalidation / domain delivery / another ``reschedule_player`` blocks
     forever on the same non-reentrant lock (0% CPU; turn-11 workers stuck
     behind wedged inFlight).
     """
@@ -125,23 +125,23 @@ def test_reschedule_row_does_not_hold_stream_lock_across_schedule(
             assert_stream_lock_not_held(
                 controller.stream_lock,
                 message=(
-                    "reschedule_row deadlocked (schedule re-entered stream_lock "
+                    "reschedule_player deadlocked (schedule re-entered stream_lock "
                     "via nested scores invalidation / re-admit; 680224 turn-11 hang)"
                 ),
             )
-            assert controller.reschedule_row(player_id) is True
+            assert controller.reschedule_player(player_id) is True
         session = _session(sample_turn, player_id=player_id)
         return ScheduledInferenceRow(player_id=player_id, session=session)
 
     monkeypatch.setattr(controller, "schedule_player_row", schedule_that_reenters_reschedule)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(controller.reschedule_row, player_id)
+        future = pool.submit(controller.reschedule_player, player_id)
         try:
             assert future.result(timeout=5.0) is True
         except concurrent.futures.TimeoutError as exc:
             raise AssertionError(
-                "reschedule_row deadlocked (held stream_lock across schedule; "
+                "reschedule_player deadlocked (held stream_lock across schedule; "
                 "680224 turn-11 hang fingerprint)"
             ) from exc
 
