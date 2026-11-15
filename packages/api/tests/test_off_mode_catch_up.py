@@ -30,9 +30,9 @@ from api.serialization.backfill_earlier_turns import (
     backfill_earlier_turns_document,
     backfill_earlier_turns_store_key,
 )
+from api.services.evidence_bump import discard_bumped_player_work
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.services.off_mode_bump import discard_bumped_player_work
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fleet_exports_helpers import first_player_id

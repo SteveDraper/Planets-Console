@@ -6,7 +6,7 @@ backfill record chooses the recompute: every known turn, or the shell and
 later live turns. No unconsumed root defers that choice until the wake.
 
 A limited recompute settles the player's in-flight fleet and scores work
-through :class:`BumpDiscardPolicy` before the bump publishes its new epoch.
+through :class:`BumpSettlePolicy` before the bump publishes its new epoch.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def claim_player_open_roots(
 
 
 @dataclass(frozen=True)
-class BumpDiscardPolicy(InFlightSettlePolicy):
+class BumpSettlePolicy(InFlightSettlePolicy):
     """What a limited bump does to one player's in-flight fleet and scores work.
 
     ``recompute_turns`` are the shell and live turns. Work on one of them
@@ -120,7 +120,7 @@ def discard_bumped_player_work(
 ) -> None:
     """Settle one player's in-flight fleet and scoreboard work for a bump.
 
-    Shell and live turns are the recompute turns of :class:`BumpDiscardPolicy`.
+    Shell and live turns are the recompute turns of :class:`BumpSettlePolicy`.
     The settle drains none of the post-lock work it queues. The bump's
     enclosing drain applies it, unless another thread's drain of the shared
     queue runs it first, possibly before the bump publishes its epoch.
@@ -132,7 +132,7 @@ def discard_bumped_player_work(
             player_id=player_id,
             analytic_ids=FLEET_WALK_ANALYTIC_IDS,
         ),
-        BumpDiscardPolicy(recompute_turns=shell_turns | live_turns),
+        BumpSettlePolicy(recompute_turns=shell_turns | live_turns),
     )
 
 

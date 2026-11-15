@@ -43,7 +43,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepOutcome, StepResult
 from api.exceptions import DiscardedWorkRefused, FleetScoresEvidenceOpenError
 from api.services.backfill_walk_stop import stop_backfill_walks
-from api.services.off_mode_bump import discard_bumped_player_work
+from api.services.evidence_bump import discard_bumped_player_work
 from api.streaming.table_stream.registry_catalog import live_table_streams
 from api.streaming.table_stream.row_run_admission import PersistAdmission
 

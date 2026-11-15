@@ -9,7 +9,7 @@ from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.exceptions import DiscardedWorkRefused
-from api.services.off_mode_bump import discard_bumped_player_work
+from api.services.evidence_bump import discard_bumped_player_work
 
 
 def _put_fleet(

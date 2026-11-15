@@ -20,13 +20,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.off_mode import MarkPersist, off_mode_mark_persist
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
-from api.services.in_flight_orchestrator import (
-    InFlightOrchestrator,
-    OrchestratorResolver,
-    in_flight_orchestrator,
-)
-from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-from api.services.off_mode_bump import (
+from api.services.evidence_bump import (
     DeferRecompute,
     ResolvedRecompute,
     claim_player_open_roots,
@@ -34,6 +28,12 @@ from api.services.off_mode_bump import (
     recompute_decision_at_wake,
     resolve_durable_scores_evidence,
 )
+from api.services.in_flight_orchestrator import (
+    InFlightOrchestrator,
+    OrchestratorResolver,
+    in_flight_orchestrator,
+)
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
 def _no_process_orchestrator() -> ComputeOrchestrator | None:
@@ -133,7 +133,7 @@ class InferenceInvalidationService:
             player_id=player_id,
             orchestrator=orchestrator,
         )
-        return self._discard_bump_and_wake(
+        return self._settle_bump_and_wake(
             fleet,
             game_id,
             perspective,
@@ -144,7 +144,7 @@ class InferenceInvalidationService:
             orchestrator=orchestrator,
         )
 
-    def _discard_bump_and_wake(
+    def _settle_bump_and_wake(
         self,
         fleet: FleetSnapshotPersistenceService,
         game_id: int,
@@ -350,7 +350,7 @@ class InferenceInvalidationService:
             )
         else:
             resolved = recompute
-        self._discard_bump_and_wake(
+        self._settle_bump_and_wake(
             fleet,
             game_id,
             perspective,

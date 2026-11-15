@@ -16,7 +16,7 @@ from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.exceptions import DiscardedWorkRefused
-from api.services.off_mode_bump import discard_bumped_player_work
+from api.services.evidence_bump import discard_bumped_player_work
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fleet_exports_helpers import first_player_id

@@ -19,14 +19,14 @@ from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, OpenTu
 from api.compute.orchestrator_state import NodeState
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
-from api.services.in_flight_orchestrator import InFlightOrchestrator, in_flight_orchestrator
-from api.services.off_mode_bump import (
+from api.services.evidence_bump import (
     DeferRecompute,
     LimitedRecompute,
     WakeAllRecompute,
     preferred_unconsumed_root_backfill,
     resolve_durable_scores_evidence,
 )
+from api.services.in_flight_orchestrator import InFlightOrchestrator, in_flight_orchestrator
 
 _ANALYTICS = frozenset({"alpha", "beta"})
 
