@@ -63,6 +63,7 @@ Shell + admission + cancel seal + session token cancel go only through `apply_sc
 - The tier registry applies the same RETIRE side internally, without a new op, when a `tier_solve` ladder claim stamps one run for a scope: every other `REGISTERED` or `DETACHED` run for that scope is retired (ladder hand-over), as a `DETACHED` shell whose ladder lost the scope already was.
 - `CANCEL` takes a run id or a guarded target, `StampedLadderRun(scope, execution_generation)`: the run the scope's tier-ladder stamp names for that scores node execution. The registry releases the stamp and applies the CANCEL side to the shell it names in one hold, and only while the stamp still has that generation; a stamp written for a newer execution is untouched. This is the same op through the same entry point, not a second cancel API.
 - Two orders reach CANCEL. Explicit `cancel_run` applies CANCEL, then aborts. When the orchestrator aborts first (a game change stopping a walk), the scores scope-outcome listener applies CANCEL on the stamped target for the aborted execution, in place of its plain stamp release, then forgets the run on the scheduler plane. In that order a persist whose `PersistDecision` was taken before the CANCEL may still write (§3).
+- An intentional abort is not a row terminal. `ScopeLifecycleSnapshot.is_intentional_abort` (failed with `ComputeScopeAbortedError`) is the one test, read by the scores listener above and by the fleet listener (§7). Whoever ended the node owns the row's next step: an explicit cancel re-admits or tears down the row itself, and a settle reschedules the live rows whose own root it stopped (`analytics/walk_row_reschedule.py`, through `OnWalkStreamController.reschedule_player`). The **Backfill walk stop** does this in its follow-up, after its drain, so a row still open on the game (a second tab, or a stop that arrives late) restarts its walk instead of erroring or hanging.
 - A `tier_solve` claim made for an execution that has already ended changes nothing: it neither stamps nor retires, so a late wire build cannot take a reopened stream's run.
 
 ### 5. Soft defer wake (scores)
@@ -97,6 +98,7 @@ Fleet does **not** adopt scores shell/admission machinery.
 - `cancel_player_run` is **token-only** (cancel session token + drop scheduler map).
 - Drain silence uses the generic multiplex token-observed `seal_canceled` path.
 - No `abort_scope` on fleet cancel; reschedule submits with `force_fresh=True`.
+- The fleet scope-outcome listener paints no error for an intentional abort of any node on a row's chain (§4); the settle that ended it reschedules the row.
 
 Copying scores `PersistAdmission` / retained shells into fleet to “unify cancel” is out of scope unless a future ADR revises this asymmetry.
 

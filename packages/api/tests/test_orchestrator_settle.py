@@ -284,3 +284,43 @@ def test_end_after_step_never_lowers_finish_without_stamp():
     )
 
     assert orchestrator.nodes[running].running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
+
+
+def test_a_settle_returns_the_scopes_it_ended_but_not_those_kept_as_needed():
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    hop = _put(orchestrator, "alpha", 38)
+    unneeded_running = _put(orchestrator, "alpha", 37, state="running")
+    needed_running = _put(orchestrator, "beta", 38, state="running")
+    _put(orchestrator, "gamma", 39, state="waiting_deps", dependency_scopes=(needed_running,))
+
+    stopped = orchestrator.settle_in_flight_work(
+        _player_work(), _StopEverything(RunningDisposition.ABORT)
+    )
+
+    assert stopped == frozenset({hop, unneeded_running})
+    assert orchestrator.nodes[needed_running].state == "running"
+
+
+def test_a_settle_returns_running_work_it_ends_after_its_step_unless_kept_work_needs_it():
+    """A limited node nothing needs ends after its step, so the settle counts it as stopped."""
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    hop = _put(orchestrator, "alpha", 39)
+    unneeded_running = _put(orchestrator, "alpha", 37, state="running")
+    needed_running = _put(orchestrator, "beta", 38, state="running")
+    _put(orchestrator, "gamma", 39, state="waiting_deps", dependency_scopes=(needed_running,))
+
+    stopped = orchestrator.settle_in_flight_work(
+        _player_work(), _StopEverything(RunningDisposition.END_AFTER_STEP)
+    )
+
+    assert stopped == frozenset({hop, unneeded_running})
+    for limited in (unneeded_running, needed_running):
+        assert orchestrator.nodes[limited].running_step is RunningStepDisposition.END_AFTER_STEP
+
+
+def test_a_settle_that_keeps_everything_returns_no_scopes():
+    orchestrator = ComputeOrchestrator(compute_registry={})
+    _put(orchestrator, "alpha", 39)
+    _put(orchestrator, "alpha", 38, state="running")
+
+    assert orchestrator.settle_in_flight_work(_player_work(), _KeepEverything()) == frozenset()

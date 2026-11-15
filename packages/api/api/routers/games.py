@@ -110,11 +110,12 @@ def post_backfill_walks_stop(
     """Stop every accepted Backfill earlier turns walk in this game, in every perspective.
 
     The stop settles before the response; 204 follows for any game id, and the
-    route reads no storage. Only the drain of the post-lock work the stop
-    queued runs after the response, as a background task.
+    route reads no storage. The stop's follow-up runs after the response, as a
+    background task: it drains the post-lock work the stop queued, then
+    reschedules the live rows whose own work the stop ended.
     """
-    drain = stop_backfill_walks(orchestrator, game_id)
-    background_tasks.add_task(drain)
+    follow_up = stop_backfill_walks(orchestrator, game_id)
+    background_tasks.add_task(follow_up)
     return Response(status_code=204)
 
 

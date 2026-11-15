@@ -44,6 +44,13 @@ class OnWalkStreamController(WorkAcceptedSink, Protocol):
     A controller with no query context has nothing to submit an on-walk with.
     """
 
+    def reschedule_player(self, player_id: int) -> bool:
+        """Cancel ``player_id``'s row run and re-admit it.
+
+        Returns whether the re-admission is in place.
+        """
+        ...
+
     @property
     def turn(self) -> TurnInfo: ...
 

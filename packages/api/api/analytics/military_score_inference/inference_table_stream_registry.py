@@ -67,7 +67,7 @@ def reschedule_inference_row(scope: InferenceStreamScope, player_id: int) -> boo
     controller = controller_for_scope(scope)
     if controller is None:
         return False
-    return controller.reschedule_row(player_id)
+    return controller.reschedule_player(player_id)
 
 
 def reschedule_all_inference_rows(

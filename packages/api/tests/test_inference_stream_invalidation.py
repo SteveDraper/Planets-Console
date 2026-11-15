@@ -392,7 +392,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     assert binding.orchestrator.nodes[scope].state == "complete"
     assert binding.orchestrator.metrics.pool_submissions == len(player_ids)
 
-    assert controller.reschedule_row(target_player_id)
+    assert controller.reschedule_player(target_player_id)
     after_run_id = scheduled_rows[target_player_id].session.run_id
 
     assert after_run_id != before_run_id
@@ -997,7 +997,7 @@ def test_adopt_admission_rejects_cancelled_connect_run(
 def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeypatch, request):
     """Cancel/abort must not re-enter stream_lock via node-complete delivery.
 
-    Production hang: fleet ledger persist -> reschedule_row (held stream_lock) ->
+    Production hang: fleet ledger persist -> reschedule_player (held stream_lock) ->
     cancel_run (held scheduler lock) -> abort_scope -> orphan terminal ->
     deliver_domain_event (re-enter stream_lock) -> permanent deadlock, no CPU.
     """
@@ -1051,12 +1051,12 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
     assert binding.orchestrator.nodes[scope].state == "running"
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(controller.reschedule_row, target_player_id)
+        future = pool.submit(controller.reschedule_player, target_player_id)
         try:
             assert future.result(timeout=5.0) is True
         except concurrent.futures.TimeoutError as exc:
             raise AssertionError(
-                "reschedule_row deadlocked (cancel/abort re-entered stream_lock)"
+                "reschedule_player deadlocked (cancel/abort re-entered stream_lock)"
             ) from exc
 
     after = controller.scheduled_rows.get(target_player_id)
@@ -1273,7 +1273,7 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
     orchestrator = get_compute_orchestrator()
     assert orchestrator.nodes[scope].state == "running"
 
-    assert controller.reschedule_row(player_id) is True
+    assert controller.reschedule_player(player_id) is True
     after = controller.scheduled_rows.get(player_id)
     assert after is not None
     assert after.session.run_id != before_run_id

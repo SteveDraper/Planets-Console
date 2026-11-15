@@ -363,7 +363,7 @@ def test_absent_process_orchestrator_answers_every_in_flight_query_empty():
 
     assert absent.open_turn_roots(**keys) == ()
     assert absent.claim_open_turn_roots(open_turn=40, **keys) == ()
-    assert absent.settle_in_flight_work(PlayerWork(**keys), _UnreachablePolicy()) is None
+    assert absent.settle_in_flight_work(PlayerWork(**keys), _UnreachablePolicy()) == frozenset()
 
 
 def test_absent_process_orchestrator_matches_the_real_orchestrator_signatures():

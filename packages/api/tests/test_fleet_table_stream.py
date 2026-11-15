@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ from api.analytics.fleet.serialization import (
 )
 from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
 from api.analytics.turn_roster import iter_turn_players
+from api.compute.errors import ComputeScopeAbortedError
 from api.serialization.turn import turn_info_from_json
 from api.storage.memory_asset import MemoryAssetBackend
 from api.transport.fleet_table_stream import (
@@ -863,6 +865,56 @@ def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
 
     assert not any(event.get("type") == "error" for event in events), events
     assert any(event.get("type") == "complete" for event in events)
+
+
+@pytest.mark.parametrize(
+    ("error", "paints_error"),
+    [
+        (ComputeScopeAbortedError("in-flight work was aborted by a settle"), False),
+        (RuntimeError("the observation step failed"), True),
+    ],
+)
+def test_a_failed_fleet_node_on_a_rows_chain_paints_an_error_unless_it_was_aborted(
+    load_turn, error, paints_error
+):
+    """An abort is not a row error: whoever ended the node reschedules the row."""
+    from api.analytics.fleet.constants import ANALYTIC_ID
+    from api.analytics.fleet.fleet_table_player_run import FleetPlayerStreamSession
+    from api.analytics.fleet.fleet_table_stream_scheduler import _FleetPlayerOrchestratorRun
+    from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
+    from api.compute.scope import ComputeScope
+
+    turn = load_turn(112)
+    assert turn is not None
+    player_id = turn.scores[0].ownerid
+    session = FleetPlayerStreamSession(
+        player_id=player_id, turn=turn, game_id=628580, perspective=1
+    )
+    root_scope = ComputeScope(
+        analytic_id=ANALYTIC_ID, game_id=628580, perspective=1, turn=112, player_id=player_id
+    )
+    scheduler = FleetTableStreamScheduler()
+    scheduler._runs[session.run_id] = _FleetPlayerOrchestratorRun(
+        session=session,
+        host_turn_number=112,
+        progress_tracker=None,  # type: ignore[arg-type]
+        root_scope=root_scope,
+    )
+
+    scheduler._on_orchestrator_scope_outcome(
+        ScopeLifecycleSnapshot(
+            scope=replace(root_scope, turn=110),
+            state="failed",
+            execution_generation=0,
+            result_wire=None,
+            error=error,
+        ),
+    )
+
+    events = []
+    while not session.event_queue.empty():
+        events.append(session.event_queue.get_nowait())
+    assert [event["type"] for event in events] == (["error"] if paints_error else [])
 
 
 @pytest.mark.slow
