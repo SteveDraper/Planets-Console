@@ -32,7 +32,7 @@ from api.analytics.scores.tier_row_run_registry import get_persist_admission, ge
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeHandle, ComputeOrchestrator, ComputeRequest
-from api.compute.orchestrator_observers import PoolItemIgnoredReason
+from api.compute.orchestrator_observers import StepItemIgnoredReason
 from api.compute.orchestrator_state import ComputeNodeRun, NodeState
 from api.compute.pools import PoolWorkItem
 from api.compute.running_step import RunningStepDisposition
@@ -179,7 +179,7 @@ def _assert_dropped_by_the_start_gate(
     details: list[Mapping[str, object]], running_step: RunningStepDisposition
 ) -> None:
     (detail,) = details
-    assert detail["reason"] == PoolItemIgnoredReason.START_REFUSED
+    assert detail["reason"] == StepItemIgnoredReason.START_REFUSED
     assert detail["runningStep"] == running_step.name.lower()
 
 

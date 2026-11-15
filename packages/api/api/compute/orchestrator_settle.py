@@ -181,12 +181,13 @@ class OrchestratorSettleMixin:
         if was_running:
             registration = self._compute_registry.get(node.scope.analytic_id)
             if registration is not None:
-                finished_step_kind = self._current_step_spec(node, registration).step_kind
+                finished_step = self._current_step_spec(node, registration)
+                finished_step_kind = finished_step.step_kind
                 self._observers.notify_step_complete(
                     node,
                     finished_step_kind,
                     step_index=finished_step_index,
-                    surface="pool",
+                    surface=finished_step.surface,
                     terminal_state="failed",
                 )
         self._observers.notify_lifecycle(

@@ -16,8 +16,8 @@ from api.compute.orchestrator_ensure import OrchestratorEnsureMixin
 from api.compute.orchestrator_lifecycle import OrchestratorLifecycleMixin
 from api.compute.orchestrator_observers import (
     OrchestratorObservers,
-    PoolItemIgnoredKind,
-    PoolItemIgnoredReason,
+    StepItemIgnoredKind,
+    StepItemIgnoredReason,
 )
 from api.compute.orchestrator_settle import OrchestratorSettleMixin
 from api.compute.orchestrator_state import (
@@ -317,12 +317,12 @@ class ComputeOrchestrator(
         with self._condition:
             node = self._nodes.get(scope)
             if node is None or not node.is_running_execution(execution_generation):
-                reason = _unbound_pool_item_reason(node, execution_generation)
+                reason = _unbound_step_item_reason(node, execution_generation)
             elif self._refuse_step_exit(node, StepExit.START):
-                reason = PoolItemIgnoredReason.START_REFUSED
+                reason = StepItemIgnoredReason.START_REFUSED
             else:
                 return True
-            self._notify_pool_item_ignored(
+            self._notify_step_item_ignored(
                 "pool_item_dropped",
                 scope,
                 node,
@@ -369,19 +369,15 @@ class ComputeOrchestrator(
         name it in that record.
         """
         with self._condition:
-            node = self._nodes.get(scope)
-            if node is None or not node.is_running_execution(execution_generation):
-                self._notify_pool_item_ignored(
-                    "pool_finish_ignored",
-                    scope,
-                    node,
-                    execution_generation,
-                    _unbound_pool_item_reason(node, execution_generation),
-                    step_kind=step_kind,
-                    step_index=step_index,
-                    had_error=error is not None,
-                )
-            else:
+            node = self._running_execution_or_record_ignored(
+                "pool_finish_ignored",
+                scope,
+                execution_generation,
+                step_kind=step_kind,
+                step_index=step_index,
+                had_error=error is not None,
+            )
+            if node is not None:
                 finished_step_kind = self._current_step_spec(
                     node,
                     self._compute_registry[node.scope.analytic_id],
@@ -407,22 +403,53 @@ class ComputeOrchestrator(
                     self._after_step_success(node, result_wire)
         self._observers.drain_post_lock_callbacks()
 
-    def _notify_pool_item_ignored(
+    def _running_execution_or_record_ignored(
         self,
-        kind: PoolItemIgnoredKind,
+        kind: StepItemIgnoredKind,
+        scope: ComputeScope,
+        execution_generation: int,
+        *,
+        step_kind: str | None,
+        step_index: int | None,
+        had_error: bool,
+    ) -> ComputeNodeRun | None:
+        """The node running execution ``execution_generation`` of ``scope``, if it still is.
+
+        Otherwise the finished step is left unapplied: this records ``kind``
+        with the reason and returns None. Caller holds the orchestrator lock.
+        A pool finish and an inline finish both bind to their execution here.
+        """
+        node = self._nodes.get(scope)
+        if node is not None and node.is_running_execution(execution_generation):
+            return node
+        self._notify_step_item_ignored(
+            kind,
+            scope,
+            node,
+            execution_generation,
+            _unbound_step_item_reason(node, execution_generation),
+            step_kind=step_kind,
+            step_index=step_index,
+            had_error=had_error,
+        )
+        return None
+
+    def _notify_step_item_ignored(
+        self,
+        kind: StepItemIgnoredKind,
         scope: ComputeScope,
         node: ComputeNodeRun | None,
         execution_generation: int,
-        reason: PoolItemIgnoredReason,
+        reason: StepItemIgnoredReason,
         *,
         step_kind: str | None,
         step_index: int | None,
         had_error: bool,
     ) -> None:
-        """Record a pool item left unapplied, for ``reason``.
+        """Record a step item left unapplied, for ``reason``.
 
         Caller holds the orchestrator lock. ``execution_generation`` /
-        ``step_kind`` / ``step_index`` name the pool item, which may differ from
+        ``step_kind`` / ``step_index`` name the item, which may differ from
         the node's current execution and step. ``runningStep`` is the node's
         running-step disposition, which names what a settle asked of a
         ``START_REFUSED`` execution.
@@ -703,15 +730,15 @@ class ComputeOrchestrator(
         )
 
 
-def _unbound_pool_item_reason(
+def _unbound_step_item_reason(
     node: ComputeNodeRun | None, execution_generation: int
-) -> PoolItemIgnoredReason:
-    """Why a pool item's execution ``execution_generation`` is no longer running on ``node``.
+) -> StepItemIgnoredReason:
+    """Why a step item's execution ``execution_generation`` is no longer running on ``node``.
 
     The caller has found that it is not running.
     """
     if node is None:
-        return PoolItemIgnoredReason.MISSING_NODE
+        return StepItemIgnoredReason.MISSING_NODE
     if node.execution_generation == execution_generation:
-        return PoolItemIgnoredReason.NODE_NOT_RUNNING
-    return PoolItemIgnoredReason.STALE_EXECUTION
+        return StepItemIgnoredReason.NODE_NOT_RUNNING
+    return StepItemIgnoredReason.STALE_EXECUTION

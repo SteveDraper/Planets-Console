@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
+from api.compute.profile import StepSurface
 from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
@@ -46,7 +47,7 @@ StepCompleteListener = Callable[
         "ComputeNodeRun",
         str,
         int,
-        Literal["inline", "pool"],
+        StepSurface,
         Literal["success", "failed"],
     ],
     None,
@@ -59,15 +60,16 @@ ReadyListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
 ReadyQueueChangedListener = Callable[[tuple[ComputeScope, ...]], None]
 # Fired when an inline step begins execution outside the orchestrator lock.
 InlineStartListener = Callable[[ComputeScope, "ComputeNodeRun", str], None]
-# A pool item left unapplied: ``pool_item_dropped`` when a worker picks it and
-# drops it without running its step, and ``pool_finish_ignored`` when its step
-# finishes after the execution ended. ``PoolItemIgnoredReason`` says why.
-PoolItemIgnoredKind = Literal["pool_item_dropped", "pool_finish_ignored"]
-POOL_ITEM_IGNORED_KINDS: frozenset[PoolItemIgnoredKind] = frozenset(get_args(PoolItemIgnoredKind))
+# A step item left unapplied: ``pool_item_dropped`` when a worker picks a pool
+# item and drops it without running its step, ``pool_finish_ignored`` when a
+# pool step finishes after its execution ended, and ``inline_finish_ignored``
+# when an inline step does. ``StepItemIgnoredReason`` says why.
+StepItemIgnoredKind = Literal["pool_item_dropped", "pool_finish_ignored", "inline_finish_ignored"]
+STEP_ITEM_IGNORED_KINDS: frozenset[StepItemIgnoredKind] = frozenset(get_args(StepItemIgnoredKind))
 
 
-class PoolItemIgnoredReason(StrEnum):
-    """Why a pool item was left unapplied: the ``reason`` of its ignored-item record.
+class StepItemIgnoredReason(StrEnum):
+    """Why a step item was left unapplied: the ``reason`` of its ignored-item record.
 
     The first three say the item's execution is no longer running.
     ``START_REFUSED`` says it was running, and the start-or-requeue gate
@@ -92,7 +94,7 @@ LifecycleEventKind = (
         "step_parked",
         "dependency_submit_refused",
     ]
-    | PoolItemIgnoredKind
+    | StepItemIgnoredKind
 )
 # Causal restart / abort / stale-item events for compute diagnostics.
 # ``execution_generation`` / ``step_kind`` / ``step_index`` are the canonical
@@ -326,7 +328,7 @@ class OrchestratorObservers:
         step_kind: str,
         *,
         step_index: int,
-        surface: Literal["inline", "pool"],
+        surface: StepSurface,
         terminal_state: Literal["success", "failed"],
     ) -> None:
         """Schedule step-complete listeners with the finished ``step_index``.

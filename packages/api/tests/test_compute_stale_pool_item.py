@@ -24,7 +24,7 @@ from api.compute import (
     build_compute_registry,
 )
 from api.compute.errors import ComputeScopeAbortedError
-from api.compute.orchestrator_observers import POOL_ITEM_IGNORED_KINDS
+from api.compute.orchestrator_observers import STEP_ITEM_IGNORED_KINDS
 from api.compute.profile import ComputeBackend
 
 from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
@@ -121,7 +121,7 @@ class _StaleItemHarness:
     def _record_ignored(
         self, kind, _scope, _node, _generation, _step_kind, _step_index, detail
     ) -> None:
-        if kind in POOL_ITEM_IGNORED_KINDS:
+        if kind in STEP_ITEM_IGNORED_KINDS:
             self.ignored.append((kind, detail["reason"]))
 
     def submit(self, *, force_fresh: bool = False) -> int:
