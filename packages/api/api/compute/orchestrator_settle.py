@@ -9,7 +9,7 @@ public drain for a caller with no drain of its own.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, TypeAlias
@@ -63,6 +63,8 @@ class OrchestratorSettleMixin:
         self: ComputeOrchestrator,
         work: InFlightWork,
         policy: InFlightSettlePolicy,
+        *,
+        then: Callable[[], None] | None = None,
     ) -> frozenset[ComputeScope]:
         """Apply ``policy`` to every non-terminal node ``work`` selects; return what it stopped.
 
@@ -79,55 +81,71 @@ class OrchestratorSettleMixin:
         kept work needs. A node kept because kept work needs it is not
         returned.
 
+        ``then`` runs after the settle, in the same orchestrator lock hold,
+        whether or not anything was stopped. No plan can register between the
+        settle and what ``then`` publishes. It must not call back into the
+        orchestrator from another thread or wait on one that does.
+
         Runs under the orchestrator lock and does not drain the post-lock
         callbacks it queues; another thread's drain may run them before the
         caller's.
         """
         with self._condition:
-            endings: list[tuple[ComputeNodeRun, _Ending]] = []
-            limited: list[ComputeScope] = []
-            for scope, node in self._nodes_in(work):
-                if node.is_terminal:
-                    continue
-                candidate = InFlightCandidate(scope=scope, submission_open=node.submission_open)
-                if node.state == "running":
-                    running = policy.running(candidate)
-                    raised_to = _RUNNING_STEP_RAISED_TO.get(running)
-                    if raised_to is not None:
-                        node.running_step = max(node.running_step, raised_to)
-                        limited.append(scope)
-                    ending = _RUNNING_ENDING.get(running)
-                else:
-                    ending = _UNSTARTED_ENDING.get(policy.unstarted(candidate))
-                if ending is not None:
-                    endings.append((node, ending))
-            if not endings and not limited:
-                return frozenset()
-            ending_scopes = {node.scope for node, _ending in endings}
-            needed = needed_scopes(
-                self._nodes,
-                (scope for scope in self._nodes if scope not in ending_scopes),
-            )
-            stopped = {scope for scope in limited if scope not in needed}
-            for node, ending in endings:
-                if node.scope in needed:
-                    continue
-                stopped.add(node.scope)
-                match ending:
-                    case _Ending.DISCARD:
-                        self._fail_node(
-                            node,
-                            DiscardedWorkRefused(
-                                "in-flight work was discarded before it started executing"
-                            ),
-                        )
-                    case _Ending.ABORT:
-                        self._abort_node_locked(
-                            node,
-                            ComputeScopeAbortedError("in-flight work was aborted by a settle"),
-                            reason="settle",
-                        )
-            return frozenset(stopped)
+            stopped = self._settle_locked(work, policy)
+            if then is not None:
+                then()
+            return stopped
+
+    def _settle_locked(
+        self: ComputeOrchestrator,
+        work: InFlightWork,
+        policy: InFlightSettlePolicy,
+    ) -> frozenset[ComputeScope]:
+        """The body of :meth:`settle_in_flight_work`. Caller holds the lock."""
+        endings: list[tuple[ComputeNodeRun, _Ending]] = []
+        limited: list[ComputeScope] = []
+        for scope, node in self._nodes_in(work):
+            if node.is_terminal:
+                continue
+            candidate = InFlightCandidate(scope=scope, submission_open=node.submission_open)
+            if node.state == "running":
+                running = policy.running(candidate)
+                raised_to = _RUNNING_STEP_RAISED_TO.get(running)
+                if raised_to is not None:
+                    node.running_step = max(node.running_step, raised_to)
+                    limited.append(scope)
+                ending = _RUNNING_ENDING.get(running)
+            else:
+                ending = _UNSTARTED_ENDING.get(policy.unstarted(candidate))
+            if ending is not None:
+                endings.append((node, ending))
+        if not endings and not limited:
+            return frozenset()
+        ending_scopes = {node.scope for node, _ending in endings}
+        needed = needed_scopes(
+            self._nodes,
+            (scope for scope in self._nodes if scope not in ending_scopes),
+        )
+        stopped = {scope for scope in limited if scope not in needed}
+        for node, ending in endings:
+            if node.scope in needed:
+                continue
+            stopped.add(node.scope)
+            match ending:
+                case _Ending.DISCARD:
+                    self._fail_node(
+                        node,
+                        DiscardedWorkRefused(
+                            "in-flight work was discarded before it started executing"
+                        ),
+                    )
+                case _Ending.ABORT:
+                    self._abort_node_locked(
+                        node,
+                        ComputeScopeAbortedError("in-flight work was aborted by a settle"),
+                        reason="settle",
+                    )
+        return frozenset(stopped)
 
     def drain_post_lock_callbacks(self: ComputeOrchestrator) -> None:
         """Run the post-lock work queued so far, including what a settle queued.

@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -156,6 +157,19 @@ def _attach_active_table_stream(
     )
 
 
+def _invalidation_with_fleet(
+    persistence: InferenceRowPersistenceService,
+    scheduler: InferenceRowScheduler,
+    storage: MemoryAssetBackend,
+) -> InferenceInvalidationService:
+    """The invalidation service wired to fleet persistence, as the service stack wires it."""
+    return InferenceInvalidationService(
+        persistence,
+        scheduler=scheduler,
+        fleet_persistence=FleetSnapshotPersistenceService(storage),
+    )
+
+
 def _run_ids_for_players(
     scheduler: InferenceRowScheduler,
     player_ids: tuple[int, ...],
@@ -257,7 +271,7 @@ def test_mask_change_reschedules_in_flight_row_while_table_stream_active_case_3(
 
     _attach_active_table_stream(sample_turn, scheduler, player_ids)
     persistence = InferenceRowPersistenceService(memory_backend)
-    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+    invalidation = _invalidation_with_fleet(persistence, scheduler, memory_backend)
 
     target_player_id, other_player_id = player_ids
     before = _run_ids_for_players(scheduler, player_ids)
@@ -294,7 +308,7 @@ def test_mask_change_reschedules_completed_row_while_table_stream_active_case_4(
         player_ids,
     )
     persistence = InferenceRowPersistenceService(memory_backend)
-    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+    invalidation = _invalidation_with_fleet(persistence, scheduler, memory_backend)
 
     target_player_id, other_player_id = player_ids
     completed_row = scheduled_rows[target_player_id]
@@ -470,7 +484,7 @@ def test_mask_change_integration_via_table_stream_generator_case_3(
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     persistence = InferenceRowPersistenceService(memory_backend)
-    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+    invalidation = _invalidation_with_fleet(persistence, scheduler, memory_backend)
 
     stream = iter_scores_table_inference_events(
         sample_turn,
@@ -543,7 +557,7 @@ def test_all_cached_replay_keeps_stream_open_for_mask_invalidation_case_4_integr
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     persistence = InferenceRowPersistenceService(memory_backend)
-    invalidation = InferenceInvalidationService(persistence, scheduler=scheduler)
+    invalidation = _invalidation_with_fleet(persistence, scheduler, memory_backend)
     _seed_cached_rows(persistence, turn_number=turn_number, player_ids=player_ids)
 
     stream = iter_scores_table_inference_events(

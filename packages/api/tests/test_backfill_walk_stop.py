@@ -28,10 +28,12 @@ from api.analytics.fleet.compute_orchestration import (
     scores_evidence_recovery,
 )
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
 from api.analytics.scores.tier_row_run_registry import get_persist_admission, get_row_run
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
+from api.compute.in_flight_settle import PlayerWork
 from api.compute.orchestrator import ComputeHandle, ComputeOrchestrator, ComputeRequest
 from api.compute.orchestrator_observers import StepItemIgnoredReason
 from api.compute.orchestrator_state import ComputeNodeRun, NodeState
@@ -41,9 +43,9 @@ from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_fo
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepOutcome, StepResult
-from api.exceptions import DiscardedWorkRefused, FleetScoresEvidenceOpenError
+from api.exceptions import FleetScoresEvidenceOpenError
 from api.services.backfill_walk_stop import stop_backfill_walks
-from api.services.off_mode_bump import discard_bumped_player_work
+from api.services.evidence_bump import BumpSettlePolicy
 from api.streaming.table_stream.registry_catalog import live_table_streams
 from api.streaming.table_stream.row_run_admission import PersistAdmission
 
@@ -223,28 +225,29 @@ def test_a_stop_aborts_unstarted_hops_in_every_perspective_and_drops_queued_ones
     assert _non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id) == set()
 
 
-def test_a_bump_discarded_step_not_yet_picked_fails_at_the_pick_as_before(walk):
-    """The gate drops it with the bump's own refusal, which still cascades."""
+def test_a_bump_aborts_a_queued_step_and_its_pick_drops_it_as_not_running(walk):
+    """The bump aborts the queued hop at its settle, so the pick finds no running node."""
     walk.submit_shell()
 
-    discard_bumped_player_work(
-        walk.orchestrator,
-        game_id=walk.ctx.game_id,
-        perspective=walk.ctx.perspective,
-        player_id=walk.player_id,
-        shell_turns=frozenset(),
-        live_turns=frozenset(),
+    walk.orchestrator.settle_in_flight_work(
+        PlayerWork(
+            game_id=walk.ctx.game_id,
+            perspective=walk.ctx.perspective,
+            player_id=walk.player_id,
+            analytic_ids=FLEET_WALK_ANALYTIC_IDS,
+        ),
+        BumpSettlePolicy(watched_turns=frozenset()),
     )
     walk.orchestrator.drain_post_lock_callbacks()
     queued = _node(walk, 3)
-    assert queued.running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
+    _assert_aborted(queued)
     dropped = _dropped_item_details(walk.orchestrator)
 
     assert not _begin(walk, _take_queued_item(walk))
 
-    assert queued.state == "failed"
-    assert isinstance(queued.error, DiscardedWorkRefused)
-    _assert_dropped_by_the_start_gate(dropped, RunningStepDisposition.FINISH_WITHOUT_STAMP)
+    _assert_aborted(queued)
+    (detail,) = dropped
+    assert detail["reason"] == StepItemIgnoredReason.NODE_NOT_RUNNING
 
 
 # --- T2: a picked fleet step ends at its next start or requeue, and submits nothing ---

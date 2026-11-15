@@ -84,6 +84,7 @@ class InferenceTableStreamController(
             load_scoreboard_turn=self.load_scoreboard_turn,
             persistence=self.persistence,
             force_schedule=force_schedule,
+            query_context=self.query_context,
         )
 
     def schedule_player_row(self, player_id: int) -> ScheduledInferenceRow | None:

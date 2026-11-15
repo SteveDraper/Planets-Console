@@ -37,6 +37,7 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
+from api.analytics.military_score_inference.prior_fleet_walk import row_awaits_its_walk
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     FleetTorpInputStatus,
     PriorTurnFleetTorpResolution,
@@ -154,8 +155,18 @@ def resolve_row_stream_admission(
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     persistence: InferenceRowPersistenceService | None = None,
     force_schedule: bool = False,
+    query_context: AnalyticQueryContext | None = None,
 ) -> RowStreamAdmission:
-    """Decide whether a table-stream row is immediate, cached-complete, or tier-scheduled."""
+    """Decide whether a table-stream row is immediate, cached-complete, or tier-scheduled.
+
+    A stored row is cached-complete unless ``force_schedule`` is set or the
+    row awaits its walk (``row_awaits_its_walk``, read only when
+    ``query_context`` is given): with Backfill earlier turns on, a row whose
+    prior fleet is not ensure-final schedules, so its walk is submitted
+    instead of the stored row standing in for it. A table stream passes its
+    context; the export snapshot does not, so export precedence and the
+    ensure probe still read a stored row as terminal.
+    """
     immediate = immediate_row_inference_events(
         turn,
         player_id,
@@ -172,7 +183,13 @@ def resolve_row_stream_admission(
             turn_number,
             player_id,
         )
-        if cached is not None:
+        if cached is not None and not row_awaits_its_walk(
+            query_context,
+            turn,
+            game_id=game_id,
+            perspective=perspective,
+            player_id=player_id,
+        ):
             return CachedCompleteRowAdmission(event=cached)
 
     return ScheduleRowAdmission()

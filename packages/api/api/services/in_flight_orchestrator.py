@@ -24,16 +24,6 @@ class InFlightOrchestrator(Protocol):
     against this one.
     """
 
-    def open_turn_roots(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
-        turn: int | None = None,
-    ) -> tuple[OpenTurnRoot, ...]: ...
-
     def claim_open_turn_roots(
         self,
         *,
@@ -48,6 +38,8 @@ class InFlightOrchestrator(Protocol):
         self,
         work: InFlightWork,
         policy: InFlightSettlePolicy,
+        *,
+        then: Callable[[], None] | None = None,
     ) -> frozenset[ComputeScope]: ...
 
     def drain_post_lock_callbacks(self) -> None: ...
@@ -57,20 +49,9 @@ class _AbsentProcessOrchestrator(InFlightOrchestrator):
     """Stand-in when this process has not created an orchestrator.
 
     There is then no in-flight work. Creating the real orchestrator would
-    start a worker pool, so root queries are empty, a settle stops nothing,
-    and a drain does nothing.
+    start a worker pool, so root queries are empty, a settle stops nothing
+    but still runs its ``then``, and a drain does nothing.
     """
-
-    def open_turn_roots(
-        self,
-        *,
-        game_id: int,
-        perspective: int,
-        player_id: int,
-        analytic_ids: frozenset[str],
-        turn: int | None = None,
-    ) -> tuple[OpenTurnRoot, ...]:
-        return ()
 
     def claim_open_turn_roots(
         self,
@@ -87,7 +68,11 @@ class _AbsentProcessOrchestrator(InFlightOrchestrator):
         self,
         work: InFlightWork,
         policy: InFlightSettlePolicy,
+        *,
+        then: Callable[[], None] | None = None,
     ) -> frozenset[ComputeScope]:
+        if then is not None:
+            then()
         return frozenset()
 
     def drain_post_lock_callbacks(self) -> None:
