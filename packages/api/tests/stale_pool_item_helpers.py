@@ -20,9 +20,12 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator_observers import STEP_ITEM_IGNORED_KINDS
 from api.compute.profile import ComputeBackend
 
+from tests.compute_lifecycle_records import record_lifecycle
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
 from tests.fixtures.export_framework.harness import make_fixture_query_context
-from tests.test_compute_foundation import _StubPersistencePolicy
 from tests.test_compute_pools import (
     _ANALYTIC_ID,
     _POOL_EXPORT_REGISTRY,
@@ -75,7 +78,7 @@ def generation_echo_registration(
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend=backend),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             (
                 "materialize",
@@ -106,16 +109,9 @@ class StaleItemHarness:
         )
         self.finished_items: list[PoolWorkItem] = []
         self.pool.set_on_item_finished(self.finished_items.append)
-        self.ignored: list[tuple[str, object]] = []
-        self.orchestrator.observers.register_lifecycle_listener(self._record_ignored)
+        self.ignored = record_lifecycle(self.orchestrator, STEP_ITEM_IGNORED_KINDS)
         self.remote_executor = ManualRemoteExecutor()
         self.pool._interpreter_executor = self.remote_executor  # type: ignore[assignment]
-
-    def _record_ignored(
-        self, kind, _scope, _node, _generation, _step_kind, _step_index, detail
-    ) -> None:
-        if kind in STEP_ITEM_IGNORED_KINDS:
-            self.ignored.append((kind, detail["reason"]))
 
     def submit(self, *, force_fresh: bool = False) -> int:
         """Submit the scope and return the generation of the execution now running."""

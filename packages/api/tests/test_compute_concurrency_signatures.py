@@ -41,8 +41,10 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 from tests.fixtures.export_framework.harness import make_fixture_query_context
-from tests.test_compute_foundation import _StubPersistencePolicy
 
 
 @pytest.fixture(autouse=True)
@@ -234,7 +236,7 @@ def _probe_registration(
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend=backend),),  # type: ignore[arg-type]
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": format_compute_scope_key(scope)}),
         ),

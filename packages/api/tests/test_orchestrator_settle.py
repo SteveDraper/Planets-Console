@@ -20,6 +20,8 @@ from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 
+from tests.compute_lifecycle_records import record_lifecycle
+
 _WALK = frozenset({"alpha", "beta"})
 
 
@@ -185,17 +187,6 @@ def test_settle_leaves_post_lock_work_for_the_caller_to_drain():
     assert [outcome.scope for outcome in outcomes] == [ready]
 
 
-def _abort_records(orchestrator: ComputeOrchestrator) -> list[tuple[ComputeScope, dict]]:
-    records: list[tuple[ComputeScope, dict]] = []
-
-    def record(kind, scope, _node, _generation, _step_kind, _step_index, detail):
-        if kind == "abort":
-            records.append((scope, dict(detail)))
-
-    orchestrator.observers.register_lifecycle_listener(record)
-    return records
-
-
 def test_abort_keeps_a_running_node_that_kept_work_needs():
     orchestrator = ComputeOrchestrator(compute_registry={})
     hop = _put(orchestrator, "alpha", 38)
@@ -213,7 +204,7 @@ def test_abort_keeps_a_running_node_that_kept_work_needs():
 
 def test_a_running_abort_nothing_needs_fails_the_execution():
     orchestrator = ComputeOrchestrator(compute_registry={})
-    aborts = _abort_records(orchestrator)
+    aborts = record_lifecycle(orchestrator, ("abort",))
     running = _put(orchestrator, "beta", 38, state="running")
 
     orchestrator.settle_in_flight_work(_player_work(), _StopEverything(RunningDisposition.ABORT))
@@ -222,9 +213,9 @@ def test_a_running_abort_nothing_needs_fails_the_execution():
     assert isinstance(orchestrator.nodes[running].error, ComputeScopeAbortedError)
     assert orchestrator.nodes[running].running_step is RunningStepDisposition.CONTINUE
     orchestrator.drain_post_lock_callbacks()
-    assert [(scope, detail["reason"], detail["wasRunning"]) for scope, detail in aborts] == [
-        (running, "settle", True)
-    ]
+    assert [
+        (record.scope, record.detail["reason"], record.detail["wasRunning"]) for record in aborts
+    ] == [(running, "settle", True)]
 
 
 def test_an_aborted_dependency_leaves_its_kept_dependent_waiting():

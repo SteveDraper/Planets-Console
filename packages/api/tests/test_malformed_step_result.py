@@ -20,6 +20,15 @@ from api.compute import (
 )
 from api.compute.wire import MalformedStepResultError
 
+from tests.compute_orchestrator_fixtures import (
+    ROW_SCOPE_KEY,
+    RecordingPersistencePolicy,
+    catalog_entry,
+    inline_compute_registration,
+    make_compute_scope,
+    make_export_scope,
+    pool_compute_registration,
+)
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fixtures.export_framework.diamond_exports import (
     BRANCH_B_ID,
@@ -30,15 +39,6 @@ from tests.fixtures.export_framework.diamond_exports import (
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
-)
-from tests.test_compute_orchestrator import (
-    _ROW_SCOPE_KEY,
-    _catalog_entry,
-    _compute_scope,
-    _export_scope,
-    _inline_compute_registration,
-    _pool_compute_registration,
-    _RecordingPersistencePolicy,
 )
 
 _MALFORMED_RESULT = {"outcome": "not-an-outcome"}
@@ -64,14 +64,14 @@ def _inline_registration_returning(
     analytic_id: str, result_wire: object
 ) -> TurnAnalyticRegistration:
     return TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(analytic_id),
+        catalog_entry=catalog_entry(analytic_id),
         compute=lambda _ctx: {"analyticId": analytic_id},
         export_catalog=empty_export_catalog_for(analytic_id),
-        scope_key_spec=_ROW_SCOPE_KEY,
+        scope_key_spec=ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
         ),
-        persistence_policy=_RecordingPersistencePolicy(),
+        persistence_policy=RecordingPersistencePolicy(),
         build_step_job_wires=(("materialize", lambda _scope, **_kwargs: {}),),
         run_steps=(("materialize", lambda _job: result_wire),),
     )
@@ -79,8 +79,8 @@ def _inline_registration_returning(
 
 def _running_pool_node(sample_turn):
     ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
-    scope = _compute_scope(SHARED_ID, _export_scope(sample_turn))
-    persistence = _RecordingPersistencePolicy()
+    scope = make_compute_scope(SHARED_ID, make_export_scope(sample_turn))
+    persistence = RecordingPersistencePolicy()
 
     def pool_submitter(node, step, **_kwargs) -> None:
         del node, step
@@ -88,7 +88,7 @@ def _running_pool_node(sample_turn):
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry(
             (
-                _pool_compute_registration(
+                pool_compute_registration(
                     SHARED_ID, backend="thread", persistence_policy=persistence
                 ),
             )
@@ -119,13 +119,13 @@ def test_malformed_result_of_an_inline_step_fails_its_node_and_dependents(
     sample_turn, malformed_result
 ):
     ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry(
             (
-                _inline_compute_registration(ROOT_ID),
-                _inline_compute_registration(BRANCH_B_ID),
-                _inline_compute_registration(BRANCH_C_ID),
+                inline_compute_registration(ROOT_ID),
+                inline_compute_registration(BRANCH_B_ID),
+                inline_compute_registration(BRANCH_C_ID),
                 _inline_registration_returning(SHARED_ID, malformed_result),
             )
         )
@@ -133,10 +133,10 @@ def test_malformed_result_of_an_inline_step_fails_its_node_and_dependents(
     step_completions = _record_step_completions(orchestrator)
 
     root_handle = orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=_compute_scope(ROOT_ID, export_scope))
+        ComputeRequest(ctx=ctx, scope=make_compute_scope(ROOT_ID, export_scope))
     )
 
-    shared = orchestrator.nodes[_compute_scope(SHARED_ID, export_scope)]
+    shared = orchestrator.nodes[make_compute_scope(SHARED_ID, export_scope)]
     assert step_completions == ["inline:materialize:failed"]
     assert shared.state == "failed"
     assert isinstance(shared.error, MalformedStepResultError)

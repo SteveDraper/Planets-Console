@@ -243,15 +243,16 @@ class OrchestratorSubmissionMixin:
                     node=existing,
                     request=request,
                 )
-                self._maybe_wake_parked_node(existing)
-                # Parked wake is handled above. ``waiting_deps`` / ``ready`` still
-                # need a readiness refresh when deps are already terminal (e.g.
-                # evidence-close force_fresh after scores completed but the
-                # dependent missed the dependency-terminal callback).
-                if existing.state in {"waiting_deps", "ready"}:
+                # Resolve readiness once: a parked node wakes; a waiting or
+                # ready node is refreshed, since its dependencies may have
+                # settled without reaching it (e.g. evidence-close force_fresh
+                # after scores completed). A running node is left alone.
+                if existing.state == "parked":
+                    self._wake_parked_node(existing)
+                else:
                     self._refresh_node_readiness(existing)
-                    if existing.state == "waiting_deps":
-                        self._schedule_recreate_aborted_dependencies(existing)
+                if existing.state == "waiting_deps":
+                    self._schedule_recreate_aborted_dependencies(existing)
             handle = self._attach_to_existing(existing, request)
         else:
             if existing is not None:

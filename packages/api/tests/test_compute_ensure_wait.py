@@ -22,6 +22,9 @@ from api.compute import (
     normalize_export_scope_to_compute_scope,
 )
 
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
@@ -29,7 +32,6 @@ from tests.fixtures.export_framework.harness import (
     first_player_id,
     make_fixture_query_context,
 )
-from tests.test_compute_foundation import _StubPersistencePolicy
 
 _ROW_SCOPE_KEY = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
@@ -57,7 +59,7 @@ def _thread_registration(
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
         ),
-        persistence_policy=persistence_policy or _StubPersistencePolicy(),
+        persistence_policy=persistence_policy or StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -186,7 +188,7 @@ def test_handle_wait_raises_node_failure(sample_turn):
     thread.join(timeout=1.0)
 
 
-class _SatisfiedPersistencePolicy(_StubPersistencePolicy):
+class _SatisfiedPersistencePolicy(StubPersistencePolicy):
     def is_satisfied(self, _ctx, _scope) -> bool:
         return True
 
@@ -234,7 +236,7 @@ def test_ensure_scope_rebuilds_hollow_terminal_without_force_fresh(sample_turn):
     )
     export_scope = _export_scope(sample_turn)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
-    policy = _StubPersistencePolicy()
+    policy = StubPersistencePolicy()
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry(
             (_thread_registration(SHARED_ID, persistence_policy=policy),)
@@ -334,7 +336,7 @@ def test_ensure_scope_rebuilds_hollow_dependency_terminals(sample_turn):
     export_scope = _export_scope(sample_turn)
     shared_scope = _compute_scope(SHARED_ID, export_scope)
     branch_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    policy = _StubPersistencePolicy()
+    policy = StubPersistencePolicy()
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry(
             (
@@ -533,7 +535,7 @@ def test_ensure_scopes_returns_handles_in_request_order(sample_turn):
     scopes = (miss_first, hit, miss_last)
     hit_player_id = hit.player_id
 
-    class _MixedPersistencePolicy(_StubPersistencePolicy):
+    class _MixedPersistencePolicy(StubPersistencePolicy):
         def is_satisfied(self, _ctx, scope) -> bool:
             return scope.player_id == hit_player_id
 

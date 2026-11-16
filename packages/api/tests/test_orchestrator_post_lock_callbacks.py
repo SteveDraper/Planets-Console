@@ -10,6 +10,12 @@ from api.compute import ComputeOrchestrator, ComputeRequest, build_compute_regis
 from api.compute.orchestrator_observers import OrchestratorObservers
 from api.compute.wire import StepResult
 
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+    make_compute_scope,
+    make_export_scope,
+    pool_compute_registration,
+)
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
@@ -17,12 +23,6 @@ from tests.fixtures.export_framework.harness import (
     make_fixture_query_context,
 )
 from tests.post_lock_callback_guard import failing_on_post_lock_callback_errors
-from tests.test_compute_foundation import _StubPersistencePolicy
-from tests.test_compute_orchestrator import (
-    _compute_scope,
-    _export_scope,
-    _pool_compute_registration,
-)
 
 OBSERVERS_LOGGER = "api.compute.orchestrator_observers"
 
@@ -79,7 +79,7 @@ def test_callbacks_a_survivor_schedules_still_run_in_the_same_drain(caplog):
     assert len(_callback_failure_records(caplog)) == 1
 
 
-class _PersistWithRaisingNotification(_StubPersistencePolicy):
+class _PersistWithRaisingNotification(StubPersistencePolicy):
     """Persist succeeds and hands back a notification that raises after complete."""
 
     def persist(self, _ctx, _scope, _result_wire):
@@ -91,23 +91,23 @@ def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency
     sample_turn, caplog
 ):
     ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     dispatched: list[str] = []
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry(
             (
-                _pool_compute_registration(
+                pool_compute_registration(
                     SHARED_ID,
                     backend="thread",
                     persistence_policy=_PersistWithRaisingNotification(),
                 ),
-                _pool_compute_registration(BRANCH_B_ID, backend="thread"),
+                pool_compute_registration(BRANCH_B_ID, backend="thread"),
             )
         ),
         pool_submitter=lambda node, _step, **_kwargs: dispatched.append(node.scope.analytic_id),
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_scope))
     assert dispatched == [SHARED_ID]
 

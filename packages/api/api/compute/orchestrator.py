@@ -629,16 +629,31 @@ class ComputeOrchestrator(
 
     def _refresh_all_readiness(self) -> None:
         for node in self._nodes.values():
-            if node.blocks_readiness_refresh:
-                continue
             self._refresh_node_readiness(node)
 
     def _refresh_node_readiness(self, node: ComputeNodeRun) -> None:
+        """Re-check a waiting or ready node's dependencies; skip every other node.
+
+        Dependency sweeps use this. A running or parked node is skipped, so a
+        dependency that fails meanwhile is seen when the node re-enters
+        dispatch through :meth:`_resolve_readiness`.
+        """
         if node.blocks_readiness_refresh:
             return
-        failed_dependency_error = self._failed_dependency_error(node)
-        if failed_dependency_error is not None:
-            self._fail_node(node, failed_dependency_error)
+        self._resolve_readiness(node)
+
+    def _resolve_readiness(self, node: ComputeNodeRun) -> None:
+        """Settle non-terminal ``node`` from its dependencies. Caller holds the lock.
+
+        A dependency failure that cascades fails the node. Otherwise the node
+        is ``ready`` and queued when every dependency is complete, else
+        ``waiting_deps``. Every path that returns a node to dispatch calls
+        this, including from ``running`` or ``parked``, so a dependency that
+        failed while the node took no refresh is not missed.
+        """
+        if node.is_terminal:
+            raise RuntimeError(f"cannot resolve readiness of terminal node {node.scope!r}")
+        if self._fail_on_failed_dependency(node):
             return
         if self._deps_complete(node):
             if node.state != "ready":
@@ -649,8 +664,37 @@ class ComputeOrchestrator(
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
 
-    def _failed_dependency_error(self, node: ComputeNodeRun) -> BaseException | None:
+    def _fail_on_failed_dependency(
+        self,
+        node: ComputeNodeRun,
+        *,
+        excluding: frozenset[ComputeScope] = frozenset(),
+    ) -> bool:
+        """Fail ``node`` with a dependency's error when that failure cascades.
+
+        Dependencies in ``excluding`` are not checked. Returns whether the
+        node was failed. Caller holds the lock.
+        """
+        failed_dependency_error = self._failed_dependency_error(node, excluding=excluding)
+        if failed_dependency_error is None:
+            return False
+        self._fail_node(node, failed_dependency_error)
+        return True
+
+    def _failed_dependency_error(
+        self,
+        node: ComputeNodeRun,
+        *,
+        excluding: frozenset[ComputeScope],
+    ) -> BaseException | None:
+        """The error of a failed dependency of ``node`` that cascades to it, if any.
+
+        An abort-failed dependency (``ComputeScopeAbortedError``) does not
+        cascade. Dependencies in ``excluding`` are skipped.
+        """
         for dependency_scope in node.dependency_scopes:
+            if dependency_scope in excluding:
+                continue
             dependency = self._nodes.get(dependency_scope)
             if dependency is None or dependency.state != "failed":
                 continue
@@ -708,8 +752,6 @@ class ComputeOrchestrator(
     def _on_dependency_terminal(self, completed_scope: ComputeScope) -> None:
         for node in self._nodes.values():
             if completed_scope not in node.dependency_scopes:
-                continue
-            if node.blocks_readiness_refresh:
                 continue
             self._refresh_node_readiness(node)
         # Defer dispatch: this runs under the orchestrator lock via

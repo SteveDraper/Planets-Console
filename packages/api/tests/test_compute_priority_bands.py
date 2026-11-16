@@ -23,7 +23,9 @@ from api.compute.registry import AnalyticComputeRegistration
 from api.compute.root_plan import open_ignored_root_plan
 from api.compute.scope import WILDCARD, ComputeScope, ScopeAxisValue, ScopeKeySpec
 
-from tests.test_compute_foundation import _StubPersistencePolicy
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 
 GAME_ID = 628580
 PERSPECTIVE = 1
@@ -74,7 +76,7 @@ def _registration(analytic_id: str, watch: ShellStreamWatch) -> AnalyticComputeR
         analytic_id=analytic_id,
         scope_key_spec=ScopeKeySpec(axes=("perspective", "turn", "player_id")),
         compute_profile=AnalyticComputeProfile(steps=()),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wire={},
         run_step={},
         open_root_plan=open_ignored_root_plan,

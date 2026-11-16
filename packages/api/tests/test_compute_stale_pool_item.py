@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterator
 import pytest
 from api.compute.profile import ComputeBackend
 
+from tests.compute_lifecycle_records import kinds_and_reasons
 from tests.stale_pool_item_helpers import (
     StaleItemHarness,
 )
@@ -41,7 +42,7 @@ def test_stale_thread_item_neither_runs_nor_completes_the_newer_execution(make_h
 
     assert harness.thread_runs == []
     assert harness.node_outcome() == ("running", None)
-    assert harness.ignored == [("pool_item_dropped", "stale_execution")]
+    assert kinds_and_reasons(harness.ignored) == [("pool_item_dropped", "stale_execution")]
     assert len(harness.finished_items) == 1
 
     harness.run_next_item()
@@ -60,7 +61,7 @@ def test_stale_remote_item_is_not_submitted_to_its_executor(make_harness):
 
     assert harness.remote_executor.submitted == []
     assert harness.node_outcome() == ("running", None)
-    assert harness.ignored == [("pool_item_dropped", "stale_execution")]
+    assert kinds_and_reasons(harness.ignored) == [("pool_item_dropped", "stale_execution")]
     assert len(harness.finished_items) == 1
 
     harness.run_next_item()
@@ -80,7 +81,7 @@ def test_stale_remote_future_finishing_late_does_not_complete_the_newer_executio
 
     assert harness.remote_executor.submitted[0][0] == {"generation": stale_generation}
     assert harness.node_outcome() == ("running", None)
-    assert harness.ignored == [("pool_finish_ignored", "stale_execution")]
+    assert kinds_and_reasons(harness.ignored) == [("pool_finish_ignored", "stale_execution")]
     assert len(harness.finished_items) == 1
 
     harness.run_next_item()

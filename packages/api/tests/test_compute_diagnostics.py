@@ -41,6 +41,9 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 from tests.compute_pool_test_helpers import QUEUED_ONLY_STEP_WORK, complete_running_pool_step
 from tests.compute_published_band_helpers import enqueue_held_item
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
@@ -48,7 +51,6 @@ from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
-from tests.test_compute_foundation import _StubPersistencePolicy
 
 
 def _take_queued_item(pool: ComputeWorkerPool) -> PoolWorkItem | None:
@@ -160,7 +162,7 @@ def _thread_pool_registration(analytic_id: str) -> TurnAnalyticRegistration:
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -184,7 +186,7 @@ def _scores_inline_materialize_registration() -> TurnAnalyticRegistration:
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -333,7 +335,7 @@ def test_pool_persist_failure_under_freeze_matches_ghost_running_fingerprint(sam
     """
     persist_error = RuntimeError("persist failed")
 
-    class _RaisingPersistence(_StubPersistencePolicy):
+    class _RaisingPersistence(StubPersistencePolicy):
         def persist(self, _ctx, scope, result_wire):
             del scope, result_wire
             raise persist_error
@@ -436,7 +438,7 @@ def test_slow_pool_persist_under_freeze_must_not_look_idle(sample_turn):
     persist_release = threading.Event()
     step_completions: list[str] = []
 
-    class _BlockingPersistence(_StubPersistencePolicy):
+    class _BlockingPersistence(StubPersistencePolicy):
         def persist(self, _ctx, scope, result_wire):
             del scope, result_wire
             persist_entered.set()
@@ -1312,7 +1314,7 @@ def _pool_held_item_fixture(sample_turn, *, worker_count: int = 0):
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             (
                 "materialize",

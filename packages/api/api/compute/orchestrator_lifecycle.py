@@ -31,6 +31,7 @@ from api.exceptions import DiscardedWorkRefused
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.registry import AnalyticComputeRegistration
+    from api.compute.scope import ComputeScope
 
 # The exit each step outcome takes first once the step has finished.
 _STEP_EXIT_BY_OUTCOME: Mapping[StepOutcome, StepExit] = MappingProxyType(
@@ -83,16 +84,17 @@ class OrchestratorLifecycleMixin:
         return prior_step_index
 
     def _retry_step_after_epoch_bump(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Re-queue an epoch-stale step, unless the start-or-requeue gate ends the node."""
+        """Re-queue an epoch-stale step, unless the start-or-requeue gate ends the node.
+
+        The node resolves its readiness after the ``epoch_retry`` record, so a
+        dependency that failed while the step ran fails it here.
+        """
         if self._refuse_step_exit(node, StepExit.REQUEUE):
             return
         self._metrics.epoch_discards += 1
         prior_generation = node.generation_at_submit
         current_generation = self._current_invalidation_generation(node)
         prior_step_index = self._reset_for_requeue(node)
-        node.state = "ready"
-        self._enqueue_ready(node.scope)
-        self._observers.notify_ready(node)
         self._observers.notify_lifecycle(
             "epoch_retry",
             node.scope,
@@ -106,8 +108,30 @@ class OrchestratorLifecycleMixin:
                 "currentGeneration": current_generation,
             },
         )
+        self._resolve_readiness(node)
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._observers.schedule_post_lock(self.dispatch_ready_work)
+
+    def _demote_unless_dependency_failed(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        *,
+        excluding: frozenset[ComputeScope] = frozenset(),
+    ) -> bool:
+        """Settle a requeued demotion onto ``waiting_deps``. Caller holds the lock.
+
+        Counts the discarded step, then fails the node instead when a
+        dependency outside ``excluding`` failed while it ran and that failure
+        cascades. Never promotes: the analytic has just asked the node to
+        wait. Returns whether the node is now ``waiting_deps``.
+        """
+        self._metrics.epoch_discards += 1
+        if self._fail_on_failed_dependency(node, excluding=excluding):
+            return False
+        node.error = None
+        node.state = "waiting_deps"
+        self._dequeue_ready(node.scope)
+        return True
 
     def _demote_to_waiting_deps(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """Demote a running node to ``waiting_deps`` without grafting dependencies.
@@ -122,10 +146,7 @@ class OrchestratorLifecycleMixin:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             self._reset_for_requeue(node)
-            node.error = None
-            node.state = "waiting_deps"
-            self._dequeue_ready(node.scope)
-            self._metrics.epoch_discards += 1
+            self._demote_unless_dependency_failed(node)
 
     def _recover_after_persist_deferred(
         self: ComputeOrchestrator,
@@ -153,21 +174,29 @@ class OrchestratorLifecycleMixin:
         requester, so it plans nothing once that execution has ended (aborted
         or replaced) before the plan would be registered. The start-or-requeue
         gate runs first, so a node it ends queues no dependency submit.
+
+        After the graft, a failed dependency whose failure cascades fails the
+        node, with no ``persist_deferred`` record and no dependency submit.
+        The recovery dependency is left out of that check when it is
+        force_freshed, since the analytic asked for it to be recreated; a
+        failure of the recreation reaches the node as a dependency-terminal
+        refresh. The exclusion holds only for this lock hold: until the
+        submit replaces it, the failed recovery dependency is still the node
+        a later refresh sees.
         """
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             prior_step_index = self._reset_for_requeue(node)
-            node.error = None
             dependency_scope = recovery.dependency_scope
             if dependency_scope != node.scope and dependency_scope not in node.dependency_scopes:
                 node.dependency_scopes = (
                     *node.dependency_scopes,
                     dependency_scope,
                 )
-            node.state = "waiting_deps"
-            self._dequeue_ready(node.scope)
-            self._metrics.epoch_discards += 1
+            recreating = frozenset({dependency_scope}) if recovery.force_fresh else frozenset()
+            if not self._demote_unless_dependency_failed(node, excluding=recreating):
+                return
             self._observers.notify_lifecycle(
                 "persist_deferred",
                 node.scope,
@@ -451,9 +480,7 @@ class OrchestratorLifecycleMixin:
                 # Advance profile; retain prior step claims until node terminal so
                 # peers cannot rematerialize while this node is still non-terminal.
                 node.profile_step_index = next_profile_index
-        node.state = "ready"
-        self._enqueue_ready(node.scope)
-        self._observers.notify_ready(node)
+        self._resolve_readiness(node)
         # Defer dispatch so pool submit is never nested under this lock.
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
@@ -536,16 +563,12 @@ class OrchestratorLifecycleMixin:
             },
         )
 
-    def _maybe_wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""
-        if node.state != "parked":
-            return
+    def _wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """Return parked ``node`` to dispatch on explicit ``force_fresh`` attach.
+
+        The node resolves its readiness, so it fails on a dependency that
+        failed while it was parked. Caller holds the lock.
+        """
         node.park_reason = None
         node.generation_at_submit = None
-        if self._deps_complete(node):
-            node.state = "ready"
-            self._enqueue_ready(node.scope)
-            self._observers.notify_ready(node)
-        else:
-            node.state = "waiting_deps"
-            self._dequeue_ready(node.scope)
+        self._resolve_readiness(node)
