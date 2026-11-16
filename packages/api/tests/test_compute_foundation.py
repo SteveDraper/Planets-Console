@@ -20,22 +20,9 @@ from api.compute import (
 )
 from api.compute.priority_band import UNWATCHED, ShellStreamWatch, WatchedShellKey
 
-
-class _StubPersistencePolicy:
-    def is_satisfied(self, _ctx, _scope) -> bool:
-        return False
-
-    def satisfied_result_wire(self, _ctx, _scope) -> None:
-        return None
-
-    def persist(self, _ctx, _scope, _result_wire) -> None:
-        return None
-
-    def invalidate(self, _ctx, _scope) -> None:
-        return None
-
-    def invalidation_generation(self, _ctx, _scope) -> int:
-        return 0
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 
 
 def _catalog_entry(analytic_id: str = "test-analytic") -> TurnAnalyticCatalogEntry:
@@ -60,7 +47,7 @@ def _compute_registration(**kwargs) -> TurnAnalyticRegistration:
             steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
         ),
     )
-    persistence_policy = kwargs.get("persistence_policy", _StubPersistencePolicy())
+    persistence_policy = kwargs.get("persistence_policy", StubPersistencePolicy())
     build_step_job_wires = kwargs.get(
         "build_step_job_wires",
         (("materialize", lambda **_kwargs: {"job": True}),),

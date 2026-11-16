@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from api.analytics.catalog import TurnAnalyticCatalogEntry
-from api.analytics.export_types import ExportScope
 from api.analytics.exports.empty import empty_export_catalog_for
 from api.analytics.registration import TurnAnalyticRegistration
 from api.compute import (
@@ -14,19 +12,24 @@ from api.compute import (
     ComputeScope,
     ComputeStepSpec,
     DependencyOutputs,
-    ScopeKeySpec,
     build_compute_registry,
-    normalize_export_scope_to_compute_scope,
     plan_compute_dag,
 )
-from api.compute.profile import ComputeBackend
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 
+from tests.compute_orchestrator_fixtures import (
+    ROW_SCOPE_KEY,
+    RecordingPersistencePolicy,
+    StubPersistencePolicy,
+    catalog_entry,
+    inline_compute_registration,
+    make_compute_scope,
+    make_export_scope,
+    pool_compute_registration,
+)
 from tests.compute_pool_test_helpers import (
     complete_running_pool_step,
-    run_interpreter_materialize,
-    run_process_materialize,
 )
 from tests.fixtures.export_framework.diamond_exports import (
     BRANCH_B_ID,
@@ -36,51 +39,8 @@ from tests.fixtures.export_framework.diamond_exports import (
 )
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
-    first_player_id,
     make_fixture_query_context,
 )
-from tests.test_compute_foundation import _StubPersistencePolicy
-
-_ROW_SCOPE_KEY = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
-
-
-def _catalog_entry(analytic_id: str) -> TurnAnalyticCatalogEntry:
-    return TurnAnalyticCatalogEntry(
-        id=analytic_id,
-        name=analytic_id,
-        supports_table=True,
-        supports_map=False,
-        type="selectable",
-    )
-
-
-def _inline_compute_registration(
-    analytic_id: str,
-    *,
-    step_kind: str = "materialize",
-) -> TurnAnalyticRegistration:
-    return TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(analytic_id),
-        compute=lambda _ctx: {"analyticId": analytic_id},
-        export_catalog=empty_export_catalog_for(analytic_id),
-        scope_key_spec=_ROW_SCOPE_KEY,
-        compute_profile=AnalyticComputeProfile(
-            steps=(ComputeStepSpec(step_kind=step_kind, backend="inline"),),
-        ),
-        persistence_policy=_StubPersistencePolicy(),
-        build_step_job_wires=(
-            (
-                step_kind,
-                lambda scope, **_kwargs: {"scope": scope.analytic_id},
-            ),
-        ),
-        run_steps=(
-            (
-                step_kind,
-                lambda job: {"result": job["scope"]},
-            ),
-        ),
-    )
 
 
 def _two_step_inline_compute_registration(
@@ -99,17 +59,17 @@ def _two_step_inline_compute_registration(
         )
 
     return TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(analytic_id),
+        catalog_entry=catalog_entry(analytic_id),
         compute=lambda _ctx: {"analyticId": analytic_id},
         export_catalog=empty_export_catalog_for(analytic_id),
-        scope_key_spec=_ROW_SCOPE_KEY,
+        scope_key_spec=ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
             steps=(
                 ComputeStepSpec(step_kind="tier1", backend="inline"),
                 ComputeStepSpec(step_kind="tier2", backend="inline"),
             ),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("tier1", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
             ("tier2", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
@@ -122,66 +82,17 @@ def _two_step_inline_compute_registration(
 
 
 def _thread_compute_registration(analytic_id: str) -> TurnAnalyticRegistration:
-    return _pool_compute_registration(analytic_id, backend="thread")
-
-
-def _pool_run_step_for_backend(backend: ComputeBackend):
-    if backend == "thread":
-        return lambda job: {"result": job["scope"]}
-    if backend == "interpreter":
-        return run_interpreter_materialize
-    if backend == "process":
-        return run_process_materialize
-    raise ValueError(f"unsupported pool backend {backend!r}")
-
-
-def _pool_compute_registration(
-    analytic_id: str,
-    *,
-    backend: ComputeBackend,
-    persistence_policy: object | None = None,
-) -> TurnAnalyticRegistration:
-    return TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(analytic_id),
-        compute=lambda _ctx: {"analyticId": analytic_id},
-        export_catalog=empty_export_catalog_for(analytic_id),
-        scope_key_spec=_ROW_SCOPE_KEY,
-        compute_profile=AnalyticComputeProfile(
-            steps=(ComputeStepSpec(step_kind="materialize", backend=backend),),
-        ),
-        persistence_policy=persistence_policy or _StubPersistencePolicy(),
-        build_step_job_wires=(
-            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
-        ),
-        run_steps=(("materialize", _pool_run_step_for_backend(backend)),),
-    )
+    return pool_compute_registration(analytic_id, backend="thread")
 
 
 def _diamond_compute_registry():
     registrations = (
-        _inline_compute_registration(ROOT_ID),
-        _inline_compute_registration(BRANCH_B_ID),
-        _inline_compute_registration(BRANCH_C_ID),
-        _inline_compute_registration(SHARED_ID),
+        inline_compute_registration(ROOT_ID),
+        inline_compute_registration(BRANCH_B_ID),
+        inline_compute_registration(BRANCH_C_ID),
+        inline_compute_registration(SHARED_ID),
     )
     return build_compute_registry(registrations)
-
-
-def _export_scope(sample_turn) -> ExportScope:
-    return ExportScope(
-        game_id=sample_turn.game.id,
-        perspective=1,
-        turn=sample_turn.settings.turn,
-        player_id=first_player_id(sample_turn),
-    )
-
-
-def _compute_scope(analytic_id: str, export_scope: ExportScope) -> ComputeScope:
-    return normalize_export_scope_to_compute_scope(
-        export_scope,
-        analytic_id=analytic_id,
-        scope_key_spec=_ROW_SCOPE_KEY,
-    )
 
 
 def test_plan_compute_dag_orders_diamond_dependencies(sample_turn):
@@ -189,7 +100,7 @@ def test_plan_compute_dag_orders_diamond_dependencies(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     compute_registry = _diamond_compute_registry()
 
     planned = plan_compute_dag(
@@ -218,11 +129,11 @@ def test_orchestrator_runs_diamond_dag_in_dependency_order(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     compute_registry = _diamond_compute_registry()
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
 
-    root_scope = _compute_scope(ROOT_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     assert handle.state == "complete"
@@ -246,7 +157,7 @@ def test_blocked_nodes_are_not_ready_until_dependencies_complete(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     pool_submissions: list[str] = []
 
     def pool_submitter(node, _step, **_kwargs) -> None:
@@ -265,12 +176,12 @@ def test_blocked_nodes_are_not_ready_until_dependencies_complete(sample_turn):
         pool_submitter=pool_submitter,
     )
 
-    root_scope = _compute_scope(ROOT_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
 
     assert orchestrator.nodes[shared_scope].state == "running"
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
@@ -285,14 +196,14 @@ def test_attach_inflight_while_leader_not_terminal(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
 
     ready_orchestrator = ComputeOrchestrator(
         compute_registry=thread_registry,
         pool_submitter=None,
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
     ready_leader = ready_orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     ready_waiter = ready_orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
@@ -312,7 +223,7 @@ def test_attach_inflight_while_leader_not_terminal(sample_turn):
         compute_registry=diamond_registry,
         pool_submitter=lambda _node, _step, **_kwargs: None,
     )
-    root_scope = _compute_scope(ROOT_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
     deps_leader = deps_orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
     deps_waiter = deps_orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
@@ -329,7 +240,7 @@ def test_compute_scope_aborted_does_not_cascade_fail_dependents(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     compute_registry = build_compute_registry(
         (
             _thread_compute_registration(ROOT_ID),
@@ -342,8 +253,8 @@ def test_compute_scope_aborted_does_not_cascade_fail_dependents(sample_turn):
         compute_registry=compute_registry,
         pool_submitter=lambda _node, _step, **_kwargs: None,
     )
-    root_scope = _compute_scope(ROOT_ID, export_scope)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
     assert orchestrator.nodes[shared_scope].state == "running"
@@ -362,7 +273,7 @@ def test_abort_scope_does_not_abort_replacement_execution(sample_turn):
     from api.compute.orchestrator import ComputeNodeRun
 
     orchestrator = ComputeOrchestrator(compute_registry={})
-    scope = _compute_scope(SHARED_ID, _export_scope(sample_turn))
+    scope = make_compute_scope(SHARED_ID, make_export_scope(sample_turn))
     replacement = ComputeNodeRun(
         scope=scope,
         dependency_scopes=(),
@@ -389,7 +300,7 @@ def test_attach_inflight_does_not_double_pool_workers(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
     pool_submissions: list[str] = []
 
@@ -400,7 +311,7 @@ def test_attach_inflight_does_not_double_pool_workers(sample_turn):
         compute_registry=thread_registry,
         pool_submitter=pool_submitter,
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     leader = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     waiter = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -421,7 +332,7 @@ def test_submit_reuses_terminal_node_unless_fresh_requested(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     run_payloads: list[int] = []
 
     def run_step(_job):
@@ -430,14 +341,14 @@ def test_submit_reuses_terminal_node_unless_fresh_requested(sample_turn):
         return {"run": run_payload}
 
     registration = TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(SHARED_ID),
+        catalog_entry=catalog_entry(SHARED_ID),
         compute=lambda _ctx: {"analyticId": SHARED_ID},
         export_catalog=empty_export_catalog_for(SHARED_ID),
-        scope_key_spec=_ROW_SCOPE_KEY,
+        scope_key_spec=ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -446,7 +357,7 @@ def test_submit_reuses_terminal_node_unless_fresh_requested(sample_turn):
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((registration,)),
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     first = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     duplicate = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
@@ -469,7 +380,7 @@ def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     call_count = 0
 
     def run_step(_job):
@@ -480,14 +391,14 @@ def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
         return {"run": call_count}
 
     registration = TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(SHARED_ID),
+        catalog_entry=catalog_entry(SHARED_ID),
         compute=lambda _ctx: {"analyticId": SHARED_ID},
         export_catalog=empty_export_catalog_for(SHARED_ID),
-        scope_key_spec=_ROW_SCOPE_KEY,
+        scope_key_spec=ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -496,7 +407,7 @@ def test_park_then_force_fresh_wake_resumes_and_completes(sample_turn):
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((registration,)),
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     parked = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
@@ -528,7 +439,7 @@ def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sam
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     shared_calls = 0
 
     def run_shared(_job):
@@ -541,25 +452,25 @@ def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sam
     registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
-                persistence_policy=_StubPersistencePolicy(),
+                persistence_policy=StubPersistencePolicy(),
                 build_step_job_wires=(
                     ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
                 ),
                 run_steps=(("materialize", run_shared),),
             ),
-            _inline_compute_registration(BRANCH_B_ID),
+            inline_compute_registration(BRANCH_B_ID),
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=registry)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
 
@@ -585,7 +496,7 @@ def test_parked_ensure_dependency_second_park_also_needs_explicit_wake(sample_tu
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     shared_calls = 0
 
     def run_shared(_job):
@@ -598,25 +509,25 @@ def test_parked_ensure_dependency_second_park_also_needs_explicit_wake(sample_tu
     registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
-                persistence_policy=_StubPersistencePolicy(),
+                persistence_policy=StubPersistencePolicy(),
                 build_step_job_wires=(
                     ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
                 ),
                 run_steps=(("materialize", run_shared),),
             ),
-            _inline_compute_registration(BRANCH_B_ID),
+            inline_compute_registration(BRANCH_B_ID),
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=registry)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_b_scope))
     assert shared_calls == 1
@@ -639,7 +550,7 @@ def test_fresh_submit_replaces_failed_terminal_node(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     run_count = 0
 
     def run_step(_job):
@@ -650,14 +561,14 @@ def test_fresh_submit_replaces_failed_terminal_node(sample_turn):
         return {"run": run_count}
 
     registration = TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(SHARED_ID),
+        catalog_entry=catalog_entry(SHARED_ID),
         compute=lambda _ctx: {"analyticId": SHARED_ID},
         export_catalog=empty_export_catalog_for(SHARED_ID),
-        scope_key_spec=_ROW_SCOPE_KEY,
+        scope_key_spec=ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -666,7 +577,7 @@ def test_fresh_submit_replaces_failed_terminal_node(sample_turn):
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((registration,)),
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     failed = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     fresh = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope, force_fresh=True))
@@ -683,7 +594,7 @@ def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     inline_calls: list[str] = []
 
     def run_root_step(job):
@@ -692,14 +603,14 @@ def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
 
     registrations = (
         TurnAnalyticRegistration(
-            catalog_entry=_catalog_entry(ROOT_ID),
+            catalog_entry=catalog_entry(ROOT_ID),
             compute=lambda _ctx: {"analyticId": ROOT_ID},
             export_catalog=empty_export_catalog_for(ROOT_ID),
-            scope_key_spec=_ROW_SCOPE_KEY,
+            scope_key_spec=ROW_SCOPE_KEY,
             compute_profile=AnalyticComputeProfile(
                 steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
             ),
-            persistence_policy=_StubPersistencePolicy(),
+            persistence_policy=StubPersistencePolicy(),
             build_step_job_wires=(
                 ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
             ),
@@ -715,10 +626,10 @@ def test_submit_does_not_run_step_before_dependencies_complete(sample_turn):
         pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
-    root_scope = _compute_scope(ROOT_ID, export_scope)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
@@ -743,7 +654,7 @@ def test_run_until_idle_terminates_after_ancestor_failure(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     thread_registry = build_compute_registry(
         (
             _thread_compute_registration(ROOT_ID),
@@ -757,10 +668,10 @@ def test_run_until_idle_terminates_after_ancestor_failure(sample_turn):
         pool_submitter=lambda _node, _step, **_kwargs: None,
     )
 
-    root_scope = _compute_scope(ROOT_ID, export_scope)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
@@ -783,7 +694,7 @@ def test_leader_handle_exposes_error_after_inline_failure(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     inline_failure = RuntimeError("inline step failed")
 
     def failing_run_step(_job):
@@ -792,14 +703,14 @@ def test_leader_handle_exposes_error_after_inline_failure(sample_turn):
     compute_registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
-                persistence_policy=_StubPersistencePolicy(),
+                persistence_policy=StubPersistencePolicy(),
                 build_step_job_wires=(
                     ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
                 ),
@@ -808,7 +719,7 @@ def test_leader_handle_exposes_error_after_inline_failure(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
@@ -821,13 +732,13 @@ def test_orchestrator_runs_multi_step_inline_profile_in_order(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     step_calls: list[str] = []
     compute_registry = build_compute_registry(
         (_two_step_inline_compute_registration(SHARED_ID, step_calls),)
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
@@ -844,14 +755,14 @@ def test_leader_handle_exposes_error_after_pool_failure(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     thread_registry = build_compute_registry((_thread_compute_registration(SHARED_ID),))
     pool_failure = RuntimeError("pool step failed")
     orchestrator = ComputeOrchestrator(
         compute_registry=thread_registry,
         pool_submitter=lambda _node, _step, **_kwargs: None,
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert handle.state == "running"
@@ -860,27 +771,6 @@ def test_leader_handle_exposes_error_after_pool_failure(sample_turn):
 
     assert handle.state == "failed"
     assert handle.error is pool_failure
-
-
-class _RecordingPersistencePolicy:
-    def __init__(self) -> None:
-        self.generation = 0
-        self.persist_calls: list[tuple[ComputeScope, object]] = []
-
-    def is_satisfied(self, _ctx, _scope) -> bool:
-        return False
-
-    def satisfied_result_wire(self, _ctx, _scope) -> None:
-        return None
-
-    def persist(self, _ctx, scope, result_wire) -> None:
-        self.persist_calls.append((scope, result_wire))
-
-    def invalidate(self, _ctx, _scope) -> None:
-        self.generation += 1
-
-    def invalidation_generation(self, _ctx, _scope) -> int:
-        return self.generation
 
 
 def test_dependency_outputs_require_projects_jsonpath_slices():
@@ -915,9 +805,9 @@ def test_wire_builder_receives_dependency_slices(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     captured: list[dict[str, object]] = []
 
     def build_branch_b_wire(scope, *, dependency_outputs, **_kwargs):
@@ -936,25 +826,25 @@ def test_wire_builder_receives_dependency_slices(sample_turn):
 
     compute_registry = build_compute_registry(
         (
-            _inline_compute_registration(ROOT_ID),
+            inline_compute_registration(ROOT_ID),
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(BRANCH_B_ID),
+                catalog_entry=catalog_entry(BRANCH_B_ID),
                 compute=lambda _ctx: {"analyticId": BRANCH_B_ID},
                 export_catalog=empty_export_catalog_for(BRANCH_B_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
-                persistence_policy=_StubPersistencePolicy(),
+                persistence_policy=StubPersistencePolicy(),
                 build_step_job_wires=(("materialize", build_branch_b_wire),),
                 run_steps=(("materialize", lambda job: {"result": job["scope"]}),),
             ),
-            _inline_compute_registration(BRANCH_C_ID),
-            _inline_compute_registration(SHARED_ID),
+            inline_compute_registration(BRANCH_C_ID),
+            inline_compute_registration(SHARED_ID),
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    root_scope = _compute_scope(ROOT_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
@@ -973,8 +863,8 @@ def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, back
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    persistence = _RecordingPersistencePolicy()
+    export_scope = make_export_scope(sample_turn)
+    persistence = RecordingPersistencePolicy()
     pool_submissions: list[tuple[str, str]] = []
 
     def pool_submitter(node, step, **_kwargs) -> None:
@@ -982,7 +872,7 @@ def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, back
 
     compute_registry = build_compute_registry(
         (
-            _pool_compute_registration(
+            pool_compute_registration(
                 SHARED_ID,
                 backend=backend,
                 persistence_policy=persistence,
@@ -993,7 +883,7 @@ def test_stale_epoch_discards_result_and_requeues_pool_backend(sample_turn, back
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert handle.state == "running"
@@ -1024,8 +914,8 @@ def test_stale_epoch_during_persist_does_not_complete(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    persistence = _RecordingPersistencePolicy()
+    export_scope = make_export_scope(sample_turn)
+    persistence = RecordingPersistencePolicy()
 
     def persist_and_invalidate(ctx, scope, result_wire):
         if not persistence.persist_calls:
@@ -1040,7 +930,7 @@ def test_stale_epoch_during_persist_does_not_complete(sample_turn):
 
     compute_registry = build_compute_registry(
         (
-            _pool_compute_registration(
+            pool_compute_registration(
                 SHARED_ID,
                 backend="thread",
                 persistence_policy=persistence,
@@ -1051,7 +941,7 @@ def test_stale_epoch_during_persist_does_not_complete(sample_turn):
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert handle.state == "running"
@@ -1078,15 +968,15 @@ def test_wake_fleet_scope_replaces_complete_node(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    persistence = _RecordingPersistencePolicy()
+    export_scope = make_export_scope(sample_turn)
+    persistence = RecordingPersistencePolicy()
     compute_registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
@@ -1099,7 +989,7 @@ def test_wake_fleet_scope_replaces_complete_node(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     assert handle.state == "complete"
@@ -1113,9 +1003,9 @@ def test_wake_fleet_scope_replaces_complete_node(sample_turn):
 def test_wake_fleet_scope_noops_when_node_absent(sample_turn):
     from api.analytics.fleet.compute_orchestration import wake_fleet_scope
 
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     assert wake_fleet_scope(shared_scope, orchestrator=orchestrator) is False
     assert shared_scope not in orchestrator.nodes
@@ -1126,9 +1016,9 @@ def test_stale_epoch_discards_result_and_requeues_inline(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    persistence = _RecordingPersistencePolicy()
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    persistence = RecordingPersistencePolicy()
     run_attempts = 0
 
     def run_materialize(job):
@@ -1141,10 +1031,10 @@ def test_stale_epoch_discards_result_and_requeues_inline(sample_turn):
     compute_registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
@@ -1173,15 +1063,15 @@ def test_orchestrator_persists_after_inline_node_completes(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    persistence = _RecordingPersistencePolicy()
+    export_scope = make_export_scope(sample_turn)
+    persistence = RecordingPersistencePolicy()
     compute_registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
@@ -1194,7 +1084,7 @@ def test_orchestrator_persists_after_inline_node_completes(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
@@ -1213,14 +1103,14 @@ def _outcome_compute_registration(
         return StepResult(outcome=outcome, payload={"result": analytic_id})
 
     return TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(analytic_id),
+        catalog_entry=catalog_entry(analytic_id),
         compute=lambda _ctx: {"analyticId": analytic_id},
         export_catalog=empty_export_catalog_for(analytic_id),
-        scope_key_spec=_ROW_SCOPE_KEY,
+        scope_key_spec=ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
         ),
-        persistence_policy=persistence_policy or _StubPersistencePolicy(),
+        persistence_policy=persistence_policy or StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -1233,8 +1123,8 @@ def test_step_outcome_persist_calls_persistence_policy(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    persistence = _RecordingPersistencePolicy()
+    export_scope = make_export_scope(sample_turn)
+    persistence = RecordingPersistencePolicy()
     compute_registry = build_compute_registry(
         (
             _outcome_compute_registration(
@@ -1243,7 +1133,7 @@ def test_step_outcome_persist_calls_persistence_policy(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
@@ -1265,11 +1155,11 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     events: list[str] = []
     durable_ready = False
 
-    class _OrderingPersistence(_StubPersistencePolicy):
+    class _OrderingPersistence(StubPersistencePolicy):
         def persist(self, _ctx, scope, result_wire):
             nonlocal durable_ready
             del scope, result_wire
@@ -1292,7 +1182,7 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=registry)
-    scope = _compute_scope(SHARED_ID, export_scope)
+    scope = make_compute_scope(SHARED_ID, export_scope)
 
     def on_outcome(snapshot) -> None:
         events.append("complete_listener")
@@ -1308,8 +1198,8 @@ def test_persist_finishes_before_node_complete_and_notifications(sample_turn):
 
 def test_scope_outcome_listener_receives_park_snapshot_after_node_wakes(sample_turn):
     """A post-lock outcome callback keeps the park state it observed under lock."""
-    export_scope = _export_scope(sample_turn)
-    scope = _compute_scope(SHARED_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    scope = make_compute_scope(SHARED_ID, export_scope)
     orchestrator = ComputeOrchestrator(compute_registry={})
     observed = []
     orchestrator.observers.register_scope_outcome_listener(observed.append)
@@ -1343,8 +1233,8 @@ def test_step_outcome_complete_skips_persistence_policy(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    persistence = _RecordingPersistencePolicy()
+    export_scope = make_export_scope(sample_turn)
+    persistence = RecordingPersistencePolicy()
     compute_registry = build_compute_registry(
         (
             _outcome_compute_registration(
@@ -1353,7 +1243,7 @@ def test_step_outcome_complete_skips_persistence_policy(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
@@ -1368,7 +1258,7 @@ def test_step_outcome_continue_requeues_same_step_kind(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     run_attempts = 0
 
     def run_materialize(_job):
@@ -1384,14 +1274,14 @@ def test_step_outcome_continue_requeues_same_step_kind(sample_turn):
     compute_registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
-                persistence_policy=_StubPersistencePolicy(),
+                persistence_policy=StubPersistencePolicy(),
                 build_step_job_wires=(
                     ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
                 ),
@@ -1400,7 +1290,7 @@ def test_step_outcome_continue_requeues_same_step_kind(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
@@ -1415,7 +1305,7 @@ def test_submit_entry_step_kind_selects_profile_step(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     step_calls: list[str] = []
 
     def run_materialize(_job):
@@ -1429,17 +1319,17 @@ def test_submit_entry_step_kind_selects_profile_step(sample_turn):
     compute_registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(
                         ComputeStepSpec(step_kind="materialize", backend="inline"),
                         ComputeStepSpec(step_kind="tier_solve", backend="inline"),
                     ),
                 ),
-                persistence_policy=_StubPersistencePolicy(),
+                persistence_policy=StubPersistencePolicy(),
                 build_step_job_wires=(
                     ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
                     ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
@@ -1452,7 +1342,7 @@ def test_submit_entry_step_kind_selects_profile_step(sample_turn):
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=compute_registry)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     handle = orchestrator.submit(
         ComputeRequest(ctx=ctx, scope=shared_scope, step_kind="tier_solve"),
@@ -1469,7 +1359,7 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     pool_submissions: list[str] = []
     gated_analytic_id = BRANCH_B_ID
 
@@ -1492,10 +1382,10 @@ def test_dispatch_gate_skips_gated_ready_nodes_without_starving_others(sample_tu
         lambda node: node.scope.analytic_id != gated_analytic_id,
     )
 
-    root_scope = _compute_scope(ROOT_ID, export_scope)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
 
@@ -1517,7 +1407,7 @@ def test_pool_submitter_never_runs_while_orchestrator_lock_is_held(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     submit_calls = 0
 
     thread_registry = build_compute_registry(
@@ -1540,7 +1430,7 @@ def test_pool_submitter_never_runs_while_orchestrator_lock_is_held(sample_turn):
 
     orchestrator._pool_submitter = pool_submitter  # noqa: SLF001
 
-    root_scope = _compute_scope(ROOT_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
     assert submit_calls >= 1
 
@@ -1551,7 +1441,7 @@ def test_inline_job_wire_builder_never_runs_while_orchestrator_lock_is_held(samp
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     builder_saw_lock_held = False
     orchestrator_holder: dict[str, ComputeOrchestrator] = {}
 
@@ -1564,14 +1454,14 @@ def test_inline_job_wire_builder_never_runs_while_orchestrator_lock_is_held(samp
     registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
-                persistence_policy=_StubPersistencePolicy(),
+                persistence_policy=StubPersistencePolicy(),
                 build_step_job_wires=(("materialize", build_wire),),
                 run_steps=(
                     (
@@ -1587,7 +1477,7 @@ def test_inline_job_wire_builder_never_runs_while_orchestrator_lock_is_held(samp
         pool_submitter=lambda *_args, **_kwargs: None,
     )
     orchestrator_holder["orch"] = orchestrator
-    scope = _compute_scope(SHARED_ID, export_scope)
+    scope = make_compute_scope(SHARED_ID, export_scope)
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert orchestrator.nodes[scope].state == "complete"
     assert builder_saw_lock_held is False
@@ -1599,11 +1489,11 @@ def test_persist_never_runs_while_orchestrator_lock_is_held(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     persist_saw_lock_held = False
     orchestrator_holder: dict[str, ComputeOrchestrator] = {}
 
-    class _LockCheckingPersistence(_StubPersistencePolicy):
+    class _LockCheckingPersistence(StubPersistencePolicy):
         def persist(self, _ctx, scope, result_wire):
             nonlocal persist_saw_lock_held
             orch = orchestrator_holder["orch"]
@@ -1621,7 +1511,7 @@ def test_persist_never_runs_while_orchestrator_lock_is_held(sample_turn):
     )
     orchestrator = ComputeOrchestrator(compute_registry=registry)
     orchestrator_holder["orch"] = orchestrator
-    scope = _compute_scope(SHARED_ID, export_scope)
+    scope = make_compute_scope(SHARED_ID, export_scope)
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert handle.state == "complete"
     assert persist_saw_lock_held is False
@@ -1638,10 +1528,10 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     persist_error = RuntimeError("persist failed")
 
-    class _RaisingPersistence(_StubPersistencePolicy):
+    class _RaisingPersistence(StubPersistencePolicy):
         def persist(self, _ctx, scope, result_wire):
             del scope, result_wire
             raise persist_error
@@ -1652,10 +1542,10 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
     registry = build_compute_registry(
         (
             TurnAnalyticRegistration(
-                catalog_entry=_catalog_entry(SHARED_ID),
+                catalog_entry=catalog_entry(SHARED_ID),
                 compute=lambda _ctx: {"analyticId": SHARED_ID},
                 export_catalog=empty_export_catalog_for(SHARED_ID),
-                scope_key_spec=_ROW_SCOPE_KEY,
+                scope_key_spec=ROW_SCOPE_KEY,
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="tier_solve", backend="thread"),),
                 ),
@@ -1676,7 +1566,7 @@ def test_pool_persist_failure_must_not_leave_node_running(sample_turn):
         compute_registry=registry,
         pool_submitter=pool_submitter,
     )
-    scope = _compute_scope(SHARED_ID, export_scope)
+    scope = make_compute_scope(SHARED_ID, export_scope)
     orchestrator.submit(
         ComputeRequest(
             ctx=ctx,
@@ -1721,16 +1611,16 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
         force_fresh=True,
         step_kind="materialize",
     )
 
-    class _DeferredOncePersistence(_StubPersistencePolicy):
+    class _DeferredOncePersistence(StubPersistencePolicy):
         def __init__(self) -> None:
             self.calls = 0
 
@@ -1751,8 +1641,8 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
 
     registry = build_compute_registry(
         (
-            _pool_compute_registration(SHARED_ID, backend="thread"),
-            _pool_compute_registration(
+            pool_compute_registration(SHARED_ID, backend="thread"),
+            pool_compute_registration(
                 BRANCH_B_ID,
                 backend="thread",
                 persistence_policy=deferred_persistence,
@@ -1835,16 +1725,16 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
         force_fresh=True,
         step_kind="materialize",
     )
 
-    class _DeferredOncePersistence(_StubPersistencePolicy):
+    class _DeferredOncePersistence(StubPersistencePolicy):
         def __init__(self) -> None:
             self.calls = 0
 
@@ -1865,8 +1755,8 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
 
     registry = build_compute_registry(
         (
-            _pool_compute_registration(SHARED_ID, backend="thread"),
-            _pool_compute_registration(
+            pool_compute_registration(SHARED_ID, backend="thread"),
+            pool_compute_registration(
                 BRANCH_B_ID,
                 backend="thread",
                 persistence_policy=deferred_persistence,
@@ -1932,16 +1822,16 @@ def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
         force_fresh=True,
         step_kind="materialize",
     )
 
-    class _DeferredOncePersistence(_StubPersistencePolicy):
+    class _DeferredOncePersistence(StubPersistencePolicy):
         def __init__(self) -> None:
             self.calls = 0
 
@@ -1962,8 +1852,8 @@ def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
 
     registry = build_compute_registry(
         (
-            _pool_compute_registration(SHARED_ID, backend="thread"),
-            _pool_compute_registration(
+            pool_compute_registration(SHARED_ID, backend="thread"),
+            pool_compute_registration(
                 BRANCH_B_ID,
                 backend="thread",
                 persistence_policy=deferred_persistence,
@@ -2030,11 +1920,11 @@ def test_recreate_aborted_dependencies_enqueues_shared_dep_once(sample_turn):
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
     bundle = OrchestrationBundle.from_context(ctx)
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
-    root_scope = _compute_scope(ROOT_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
     abort_error = ComputeScopeAbortedError("scores inference row run cancelled")
 
     shared = ComputeNodeRun(
@@ -2106,18 +1996,18 @@ def test_force_fresh_diamond_recreates_shared_abort_failed_dep_once(sample_turn)
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
-    root_scope = _compute_scope(ROOT_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
         force_fresh=True,
         step_kind="materialize",
     )
 
-    class _DeferredOncePersistence(_StubPersistencePolicy):
+    class _DeferredOncePersistence(StubPersistencePolicy):
         def __init__(self) -> None:
             self.calls = 0
 
@@ -2139,18 +2029,18 @@ def test_force_fresh_diamond_recreates_shared_abort_failed_dep_once(sample_turn)
 
     registry = build_compute_registry(
         (
-            _pool_compute_registration(SHARED_ID, backend="thread"),
-            _pool_compute_registration(
+            pool_compute_registration(SHARED_ID, backend="thread"),
+            pool_compute_registration(
                 BRANCH_B_ID,
                 backend="thread",
                 persistence_policy=deferred_b,
             ),
-            _pool_compute_registration(
+            pool_compute_registration(
                 BRANCH_C_ID,
                 backend="thread",
                 persistence_policy=deferred_c,
             ),
-            _pool_compute_registration(ROOT_ID, backend="thread"),
+            pool_compute_registration(ROOT_ID, backend="thread"),
         )
     )
     orchestrator = ComputeOrchestrator(
@@ -2213,18 +2103,18 @@ def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn)
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
-    root_scope = _compute_scope(ROOT_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
         force_fresh=True,
         step_kind="materialize",
     )
 
-    class _DeferredOncePersistence(_StubPersistencePolicy):
+    class _DeferredOncePersistence(StubPersistencePolicy):
         def __init__(self) -> None:
             self.calls = 0
 
@@ -2245,14 +2135,14 @@ def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn)
 
     registry = build_compute_registry(
         (
-            _pool_compute_registration(SHARED_ID, backend="thread"),
-            _pool_compute_registration(
+            pool_compute_registration(SHARED_ID, backend="thread"),
+            pool_compute_registration(
                 BRANCH_B_ID,
                 backend="thread",
                 persistence_policy=deferred_b,
             ),
-            _pool_compute_registration(BRANCH_C_ID, backend="thread"),
-            _pool_compute_registration(ROOT_ID, backend="thread"),
+            pool_compute_registration(BRANCH_C_ID, backend="thread"),
+            pool_compute_registration(ROOT_ID, backend="thread"),
         )
     )
     orchestrator = ComputeOrchestrator(
@@ -2334,16 +2224,16 @@ def test_force_fresh_waiting_deps_does_not_recreate_non_abort_failed_dep(sample_
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
         force_fresh=True,
         step_kind="materialize",
     )
 
-    class _DeferredOncePersistence(_StubPersistencePolicy):
+    class _DeferredOncePersistence(StubPersistencePolicy):
         def __init__(self) -> None:
             self.calls = 0
 
@@ -2364,8 +2254,8 @@ def test_force_fresh_waiting_deps_does_not_recreate_non_abort_failed_dep(sample_
 
     registry = build_compute_registry(
         (
-            _pool_compute_registration(SHARED_ID, backend="thread"),
-            _pool_compute_registration(
+            pool_compute_registration(SHARED_ID, backend="thread"),
+            pool_compute_registration(
                 BRANCH_B_ID,
                 backend="thread",
                 persistence_policy=deferred_persistence,
@@ -2418,7 +2308,7 @@ def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_tur
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     pool_submissions: list[str] = []
 
     def pool_submitter(node, _step, **_kwargs) -> None:
@@ -2440,10 +2330,10 @@ def test_diagnostics_snapshot_captures_nodes_and_ready_under_one_lock(sample_tur
         lambda node: node.scope.analytic_id != BRANCH_B_ID,
     )
 
-    root_scope = _compute_scope(ROOT_ID, export_scope)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
     complete_running_pool_step(orchestrator, shared_scope, result_wire={"result": SHARED_ID})
@@ -2465,7 +2355,7 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     pool_submissions: list[ComputeScope] = []
     is_paused = False
 
@@ -2473,14 +2363,14 @@ def test_dispatch_ready_work_releases_continuation_after_gate_clears(sample_turn
         pool_submissions.append(node.scope)
 
     compute_registry = build_compute_registry(
-        (_pool_compute_registration(SHARED_ID, backend="thread"),)
+        (pool_compute_registration(SHARED_ID, backend="thread"),)
     )
     orchestrator = ComputeOrchestrator(
         compute_registry=compute_registry,
         pool_submitter=pool_submitter,
     )
     unregister_pause = orchestrator.observers.register_dispatch_gate(lambda _node: not is_paused)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
     is_paused = True
@@ -2510,7 +2400,7 @@ def test_continue_payload_kept_when_terminal_complete_has_no_payload(sample_turn
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     calls = {"materialize": 0, "tier": 0}
 
     def run_materialize(_job):
@@ -2522,17 +2412,17 @@ def test_continue_payload_kept_when_terminal_complete_has_no_payload(sample_turn
         return StepResult(outcome="complete")
 
     registration = TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(SHARED_ID),
+        catalog_entry=catalog_entry(SHARED_ID),
         compute=lambda _ctx: {"analyticId": SHARED_ID},
         export_catalog=empty_export_catalog_for(SHARED_ID),
-        scope_key_spec=_ROW_SCOPE_KEY,
+        scope_key_spec=ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
             steps=(
                 ComputeStepSpec(step_kind="materialize", backend="inline"),
                 ComputeStepSpec(step_kind="tier_solve", backend="inline"),
             ),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
             ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
@@ -2545,7 +2435,7 @@ def test_continue_payload_kept_when_terminal_complete_has_no_payload(sample_turn
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((registration,)),
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert calls == {"materialize": 1, "tier": 1}
@@ -2563,20 +2453,20 @@ def test_complete_without_payload_defaults_empty_result_wire(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
 
     def run_tier(_job):
         return StepResult(outcome="complete")
 
     registration = TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(SHARED_ID),
+        catalog_entry=catalog_entry(SHARED_ID),
         compute=lambda _ctx: {"analyticId": SHARED_ID},
         export_catalog=empty_export_catalog_for(SHARED_ID),
-        scope_key_spec=_ROW_SCOPE_KEY,
+        scope_key_spec=ROW_SCOPE_KEY,
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="tier_solve", backend="inline"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("tier_solve", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -2585,7 +2475,7 @@ def test_complete_without_payload_defaults_empty_result_wire(sample_turn):
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((registration,)),
     )
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared_scope))
 
     assert handle.state == "complete"
@@ -2598,7 +2488,7 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
+    export_scope = make_export_scope(sample_turn)
     pool_submissions: list[str] = []
     pause_blocks = False
     freeze_blocks_branch_b = False
@@ -2623,10 +2513,10 @@ def test_composed_dispatch_gates_and_together_and_unregister_is_selective(sample
         lambda node: not (freeze_blocks_branch_b and node.scope.analytic_id == BRANCH_B_ID),
     )
 
-    root_scope = _compute_scope(ROOT_ID, export_scope)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
-    branch_c_scope = _compute_scope(BRANCH_C_ID, export_scope)
+    root_scope = make_compute_scope(ROOT_ID, export_scope)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    branch_c_scope = make_compute_scope(BRANCH_C_ID, export_scope)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope))
     assert pool_submissions == [SHARED_ID]
@@ -2688,7 +2578,7 @@ def test_submit_prepares_dependency_chain_before_dag_plan(monkeypatch, sample_tu
     )
     orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())
     orchestrator.submit(
-        ComputeRequest(ctx=ctx, scope=_compute_scope(ROOT_ID, _export_scope(sample_turn)))
+        ComputeRequest(ctx=ctx, scope=make_compute_scope(ROOT_ID, make_export_scope(sample_turn)))
     )
     assert order[0] == "fill"
     assert order.index("fill") < order.index("plan")
@@ -2702,7 +2592,11 @@ def test_ensure_scopes_prepares_dependency_chain_before_dag_plan(monkeypatch, sa
     )
     orchestrator = ComputeOrchestrator(compute_registry=_diamond_compute_registry())
     orchestrator.ensure_scopes(
-        (ComputeRequest(ctx=ctx, scope=_compute_scope(ROOT_ID, _export_scope(sample_turn))),)
+        (
+            ComputeRequest(
+                ctx=ctx, scope=make_compute_scope(ROOT_ID, make_export_scope(sample_turn))
+            ),
+        )
     )
     assert order[0] == "fill"
     assert order.index("fill") < order.index("plan")
@@ -2723,7 +2617,7 @@ def test_submit_passes_force_root_matching_entry_step(monkeypatch, sample_turn):
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
     registry = _diamond_compute_registry()
-    scope = _compute_scope(ROOT_ID, _export_scope(sample_turn))
+    scope = make_compute_scope(ROOT_ID, make_export_scope(sample_turn))
     ComputeOrchestrator(compute_registry=registry).submit(
         ComputeRequest(ctx=ctx, scope=scope, step_kind="materialize"),
     )

@@ -35,10 +35,12 @@ from api.compute import (
 from api.compute.turn_cache import TurnInfoCache
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
 
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.fixtures.export_framework.harness import build_stored_turn_chain
 from tests.submission_open_helpers import explicit_submission_open
-from tests.test_compute_foundation import _StubPersistencePolicy
 
 _ROW_SCOPE_KEY = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 _FLEET_ANALYTIC_ID = "fleet"
@@ -210,7 +212,7 @@ def test_orchestrator_exposes_cached_load_turn(sample_turn) -> None:
                 compute_profile=AnalyticComputeProfile(
                     steps=(ComputeStepSpec(step_kind="materialize", backend="inline"),),
                 ),
-                persistence_policy=_StubPersistencePolicy(),
+                persistence_policy=StubPersistencePolicy(),
                 build_step_job_wires=(("materialize", lambda *_a, **_k: {}),),
                 run_steps=(("materialize", lambda job: job),),
             ),

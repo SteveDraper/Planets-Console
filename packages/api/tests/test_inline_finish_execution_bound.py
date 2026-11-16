@@ -32,18 +32,18 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.services.backfill_walk_stop import stop_backfill_walks
 
+from tests.compute_orchestrator_fixtures import (
+    ROW_SCOPE_KEY,
+    RecordingPersistencePolicy,
+    make_compute_scope,
+    make_export_scope,
+)
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
 from tests.test_compute_foundation import _catalog_entry
-from tests.test_compute_orchestrator import (
-    _ROW_SCOPE_KEY,
-    _compute_scope,
-    _export_scope,
-    _RecordingPersistencePolicy,
-)
 from tests.test_orchestrator_settle import _StopEverything
 
 _ABORT = ComputeScopeAbortedError("ended while its inline step ran")
@@ -66,8 +66,8 @@ class _InlineHarness:
         next_step_kind: str | None = None,
     ) -> None:
         self.ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
-        self.scope = _compute_scope(SHARED_ID, _export_scope(sample_turn))
-        self.persistence = _RecordingPersistencePolicy()
+        self.scope = make_compute_scope(SHARED_ID, make_export_scope(sample_turn))
+        self.persistence = RecordingPersistencePolicy()
         self.runs = 0
         self.pool_submissions: list[str] = []
 
@@ -89,7 +89,7 @@ class _InlineHarness:
                         catalog_entry=_catalog_entry(SHARED_ID),
                         compute=lambda _ctx: {"analyticId": SHARED_ID},
                         export_catalog=empty_export_catalog_for(SHARED_ID),
-                        scope_key_spec=_ROW_SCOPE_KEY,
+                        scope_key_spec=ROW_SCOPE_KEY,
                         compute_profile=AnalyticComputeProfile(steps=tuple(steps)),
                         persistence_policy=self.persistence,
                         build_step_job_wires=tuple(build_wires),

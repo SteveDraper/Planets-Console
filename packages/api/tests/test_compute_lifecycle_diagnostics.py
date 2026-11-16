@@ -32,6 +32,13 @@ from api.compute.pools import (
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
+from tests.compute_orchestrator_fixtures import (
+    RecordingPersistencePolicy,
+    StubPersistencePolicy,
+    make_compute_scope,
+    make_export_scope,
+    pool_compute_registration,
+)
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
@@ -39,13 +46,6 @@ from tests.fixtures.export_framework.harness import (
     make_fixture_query_context,
 )
 from tests.stale_pool_item_helpers import ManualRemoteExecutor, generation_echo_registration
-from tests.test_compute_foundation import _StubPersistencePolicy
-from tests.test_compute_orchestrator import (
-    _compute_scope,
-    _export_scope,
-    _pool_compute_registration,
-    _RecordingPersistencePolicy,
-)
 from tests.test_compute_pools import (
     _POOL_EXPORT_REGISTRY,
     _multi_step_thread_registration,
@@ -68,15 +68,15 @@ def test_force_fresh_replace_and_stale_pool_finish_appear_on_timeline(sample_tur
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
     pool_submissions: list[object] = []
 
     def pool_submitter(node, step, **_kwargs) -> None:
         del step
         pool_submissions.append(node.scope)
 
-    registry = build_compute_registry((_pool_compute_registration(SHARED_ID, backend="thread"),))
+    registry = build_compute_registry((pool_compute_registration(SHARED_ID, backend="thread"),))
     orchestrator = ComputeOrchestrator(
         compute_registry=registry,
         pool_submitter=pool_submitter,
@@ -142,16 +142,16 @@ def test_persist_deferred_lifecycle_event_includes_related_scope(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    branch_b_scope = _compute_scope(BRANCH_B_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
         force_fresh=True,
         step_kind="materialize",
     )
 
-    class _DeferredOncePersistence(_StubPersistencePolicy):
+    class _DeferredOncePersistence(StubPersistencePolicy):
         def __init__(self) -> None:
             self.calls = 0
 
@@ -173,8 +173,8 @@ def test_persist_deferred_lifecycle_event_includes_related_scope(sample_turn):
 
     registry = build_compute_registry(
         (
-            _pool_compute_registration(SHARED_ID, backend="thread"),
-            _pool_compute_registration(
+            pool_compute_registration(SHARED_ID, backend="thread"),
+            pool_compute_registration(
                 BRANCH_B_ID,
                 backend="thread",
                 persistence_policy=deferred_persistence,
@@ -216,15 +216,15 @@ def test_epoch_retry_lifecycle_event_reports_canonical_step_index(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
-    persistence = _RecordingPersistencePolicy()
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
+    persistence = RecordingPersistencePolicy()
 
     def pool_submitter(node, step, **_kwargs) -> None:
         del node, step
 
     registry = build_compute_registry(
-        (_pool_compute_registration(SHARED_ID, backend="thread", persistence_policy=persistence),)
+        (pool_compute_registration(SHARED_ID, backend="thread", persistence_policy=persistence),)
     )
     orchestrator = ComputeOrchestrator(
         compute_registry=registry,
@@ -255,13 +255,13 @@ def test_step_parked_lifecycle_event_reports_canonical_step_index(sample_turn):
         sample_turn,
         registry=DIAMOND_FIXTURE_EXPORT_REGISTRY,
     )
-    export_scope = _export_scope(sample_turn)
-    shared_scope = _compute_scope(SHARED_ID, export_scope)
+    export_scope = make_export_scope(sample_turn)
+    shared_scope = make_compute_scope(SHARED_ID, export_scope)
 
     def pool_submitter(node, step, **_kwargs) -> None:
         del node, step
 
-    registry = build_compute_registry((_pool_compute_registration(SHARED_ID, backend="thread"),))
+    registry = build_compute_registry((pool_compute_registration(SHARED_ID, backend="thread"),))
     orchestrator = ComputeOrchestrator(
         compute_registry=registry,
         pool_submitter=pool_submitter,

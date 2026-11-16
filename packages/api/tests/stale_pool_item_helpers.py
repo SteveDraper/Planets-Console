@@ -20,9 +20,11 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator_observers import STEP_ITEM_IGNORED_KINDS
 from api.compute.profile import ComputeBackend
 
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
 from tests.fixtures.export_framework.harness import make_fixture_query_context
-from tests.test_compute_foundation import _StubPersistencePolicy
 from tests.test_compute_pools import (
     _ANALYTIC_ID,
     _POOL_EXPORT_REGISTRY,
@@ -75,7 +77,7 @@ def generation_echo_registration(
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend=backend),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             (
                 "materialize",

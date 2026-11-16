@@ -36,6 +36,9 @@ from api.compute.backend_runtime import (
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 
+from tests.compute_orchestrator_fixtures import (
+    StubPersistencePolicy,
+)
 from tests.compute_pool_test_helpers import (
     QUEUED_ONLY_STEP_WORK,
     ok_thread_step_work,
@@ -44,7 +47,6 @@ from tests.compute_pool_test_helpers import (
 )
 from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
 from tests.fixtures.export_framework.harness import make_fixture_query_context
-from tests.test_compute_foundation import _StubPersistencePolicy
 
 _ROW_SCOPE_KEY = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 _ANALYTIC_ID = "pool-fairness"
@@ -143,7 +145,7 @@ def _multi_step_thread_registration(
                 ComputeStepSpec(step_kind="tier2", backend="thread"),
             ),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             (
                 "tier1",
@@ -250,7 +252,7 @@ def _interpreter_backend_registration() -> TurnAnalyticRegistration:
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="interpreter"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -533,7 +535,7 @@ def _process_backend_registration() -> TurnAnalyticRegistration:
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="process"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
         ),
@@ -592,7 +594,7 @@ def _single_step_thread_registration() -> TurnAnalyticRegistration:
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"player_id": scope.player_id}),
         ),
@@ -615,7 +617,7 @@ def _gated_single_step_thread_registration(
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="thread"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             ("materialize", lambda scope, **_kwargs: {"player_id": scope.player_id}),
         ),
@@ -740,7 +742,7 @@ def _fleet_materialization_leg_registration() -> TurnAnalyticRegistration:
                 ComputeStepSpec(step_kind=FLEET_FINALIZATION_LEG, backend="inline"),
             ),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(
             (FLEET_MATERIALIZATION_LEG, build_job_wire),
             (FLEET_FINALIZATION_LEG, build_finalization_wire),
@@ -883,7 +885,7 @@ def _interpreter_wire_registration(build_wire):
         compute_profile=AnalyticComputeProfile(
             steps=(ComputeStepSpec(step_kind="materialize", backend="interpreter"),),
         ),
-        persistence_policy=_StubPersistencePolicy(),
+        persistence_policy=StubPersistencePolicy(),
         build_step_job_wires=(("materialize", build_wire),),
         run_steps=(
             (
