@@ -28,7 +28,7 @@ from api.compute import (
 )
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.in_flight_settle import GameWork, RunningDisposition
-from api.compute.orchestrator_observers import POOL_ITEM_IGNORED_KINDS, PoolItemIgnoredReason
+from api.compute.orchestrator_observers import STEP_ITEM_IGNORED_KINDS, StepItemIgnoredReason
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.scope import format_compute_scope_key
@@ -324,7 +324,7 @@ class _ThreadStepHarness:
         return {"ok": True}
 
     def _record_ignored(self, kind, _scope, _node, _generation, _step_kind, _step_index, detail):
-        if kind in POOL_ITEM_IGNORED_KINDS:
+        if kind in STEP_ITEM_IGNORED_KINDS:
             self.ignored.append((kind, detail["reason"]))
 
     def submit_and_run_picked_step(self) -> None:
@@ -382,7 +382,7 @@ def test_a_thread_step_its_start_gate_refuses_while_its_wire_builds_never_runs(
 
     assert harness.run_step_calls == 0
     assert isinstance(harness.node().error, ComputeScopeAbortedError)
-    assert harness.ignored == [("pool_item_dropped", PoolItemIgnoredReason.START_REFUSED)]
+    assert harness.ignored == [("pool_item_dropped", StepItemIgnoredReason.START_REFUSED)]
     assert len(harness.finished_items) == 1
 
 

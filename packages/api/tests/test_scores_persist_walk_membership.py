@@ -49,7 +49,8 @@ def wakes(monkeypatch) -> list[tuple[str, object]]:
         f"{_INVALIDATION_MODULE}.reschedule_fleet_table_player", record("fleet stream", False)
     )
     monkeypatch.setattr(
-        f"{_INVALIDATION_MODULE}.reschedule_inference_row", record("scores row", None)
+        f"{_INVALIDATION_MODULE}.reschedule_walk_rows",
+        lambda rows: recorded.extend(("live row", row) for row in rows),
     )
     return recorded
 
@@ -66,8 +67,8 @@ def _hop_open(ladder: ShellLadder, *, on_walk: bool) -> SubmissionOpen:
 def _wire_classification(ladder: ShellLadder) -> None:
     """Route the ladder's row persists through the production stamp-versus-bump callback.
 
-    Backfill earlier turns is on for the game, as it is while a walk runs, so a
-    bump wakes every known turn.
+    Backfill earlier turns is on for the game, as it is while a walk runs. A
+    bump wakes only the player's live rows, and the ladder opens none.
     """
     enable_backfill_earlier_turns(ladder.ctx)
     InferenceInvalidationService(
@@ -130,7 +131,9 @@ def test_t13_a_persist_admitted_on_a_walk_stamps_after_its_node_is_aborted(
     assert wakes == []
 
 
-def test_a_persist_admitted_off_any_walk_takes_the_ordinary_bump(ladder, wakes, monkeypatch):
+def test_a_persist_admitted_off_any_walk_takes_the_ordinary_bump_and_wakes_no_closed_turn(
+    ladder, wakes, monkeypatch
+):
     payload = _persist_payload(ladder, on_walk=False)
     assert payload["onWalk"] is False
     _wire_classification(ladder)
@@ -141,7 +144,7 @@ def test_a_persist_admitted_off_any_walk_takes_the_ordinary_bump(ladder, wakes, 
 
     assert ladder.persisted_summary() == "hop row"
     assert _mark_and_epoch(ladder) == (generation + 1, epoch + 1)
-    assert wakes != []
+    assert wakes == []
 
 
 def test_a_scores_persist_payload_without_on_walk_is_refused_before_the_write(ladder):

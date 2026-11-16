@@ -17,7 +17,6 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.compute.orchestrator import ComputeOrchestrator
-from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
@@ -164,7 +163,7 @@ class InferenceStreamTeardownMixin:
         # Abort outside the scheduler lock: ``abort_scope`` drains node-complete
         # listeners that may deliver stream events (controller ``stream_lock``) or
         # call ``owns_table_stream`` (needs this lock). Holding ``_lock`` here ABBA /
-        # self-deadlocks with ``reschedule_row`` (stream_lock -> cancel -> abort).
+        # self-deadlocks with ``reschedule_player`` (stream_lock -> cancel -> abort).
         if abort_scope is not None and abort_generation is not None:
             self._abort_orchestrator_scope(abort_scope, abort_generation)
 
@@ -261,14 +260,6 @@ class InferenceStreamTeardownMixin:
         self._held_initial_submissions = [
             held for held in self._held_initial_submissions if held.root_scope != root_scope
         ]
-
-    @staticmethod
-    def _is_cancel_abort_failure(snapshot: ScopeLifecycleSnapshot) -> bool:
-        if snapshot.state != "failed":
-            return False
-        from api.compute.errors import ComputeScopeAbortedError
-
-        return isinstance(snapshot.error, ComputeScopeAbortedError)
 
     def _adapter_row_run(self: InferenceRowScheduler, run_id: str) -> RowRun | None:
         """Resolve RowRun from the single registry owner (any retained phase)."""

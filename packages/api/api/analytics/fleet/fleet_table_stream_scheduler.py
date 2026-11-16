@@ -386,6 +386,9 @@ class FleetTableStreamScheduler:
             return
         if scope.player_id == "*" or not isinstance(scope.player_id, int):
             return
+        # Whoever ended the node on purpose reschedules or tears down its row.
+        if snapshot.is_intentional_abort:
+            return
 
         with self._lock:
             matching_runs = [

@@ -314,13 +314,7 @@ def _live_shells(game_id: int) -> list[_LiveShell]:
             continue
         shells.append(
             _LiveShell(
-                compute_scope=ComputeScope(
-                    analytic_id=walk_shell.stream.analytic_id,
-                    game_id=key.game_id,
-                    perspective=key.perspective,
-                    turn=key.turn,
-                    player_id=key.player_id,
-                ),
+                compute_scope=walk_shell.own_scope,
                 stream=walk_shell.stream,
                 ctx=ctx,
             )

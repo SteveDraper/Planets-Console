@@ -84,6 +84,7 @@ class InferenceTableStreamController(
             load_scoreboard_turn=self.load_scoreboard_turn,
             persistence=self.persistence,
             force_schedule=force_schedule,
+            query_context=self.query_context,
         )
 
     def schedule_player_row(self, player_id: int) -> ScheduledInferenceRow | None:
@@ -246,13 +247,13 @@ class InferenceTableStreamController(
             return None
         return active.session.run_id
 
-    def reschedule_row(self, player_id: int) -> bool:
+    def reschedule_player(self, player_id: int) -> bool:
         """Cancel and re-admit one row without holding ``stream_lock`` across schedule.
 
         ``dispatch_admission`` may ``enqueue_tier_ladder`` / ``orchestrator.submit``, and
-        fleet ledger persist (or soft-defer delivery) can re-enter ``reschedule_row`` or
+        fleet ledger persist (or soft-defer delivery) can re-enter ``reschedule_player`` or
         ``deliver_domain_event``. Holding ``stream_lock`` across that path self-deadlocks
-        on the non-reentrant lock (fleet ``reschedule_player`` parity).
+        on the non-reentrant lock, as it would for the fleet controller.
 
         Cancel runs outside ``stream_lock``: cancel aborts orchestrator scopes and drains
         node-complete listeners that call ``deliver_domain_event`` (needs this lock).

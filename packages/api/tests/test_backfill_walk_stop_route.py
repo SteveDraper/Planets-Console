@@ -1,4 +1,4 @@
-"""``POST /v1/games/{game_id}/backfill-walks/stop``: 204 for any game, drain after the response."""
+"""``POST /v1/games/{game_id}/backfill-walks/stop``: 204 for any game, then the follow-up."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import asyncio
 import pytest
 from api.compute.in_flight_settle import GameWork, InFlightSettlePolicy, InFlightWork
 from api.compute.runtime import peek_compute_orchestrator, reset_orchestrators_for_tests
+from api.compute.scope import ComputeScope
 from api.config import ApiConfig, set_config
 from api.routers.games import post_backfill_walks_stop
 from api.services.backfill_walk_stop import WalkStopPolicy
@@ -22,9 +23,12 @@ class _RecordingOrchestrator:
     def __init__(self) -> None:
         self.calls: list[tuple[str, InFlightWork | None]] = []
 
-    def settle_in_flight_work(self, work: InFlightWork, policy: InFlightSettlePolicy) -> None:
+    def settle_in_flight_work(
+        self, work: InFlightWork, policy: InFlightSettlePolicy
+    ) -> frozenset[ComputeScope]:
         assert isinstance(policy, WalkStopPolicy)
         self.calls.append(("settle", work))
+        return frozenset()
 
     def drain_post_lock_callbacks(self) -> None:
         self.calls.append(("drain", None))
@@ -65,7 +69,7 @@ def test_the_stop_returns_204_for_any_game_and_settles_that_game(orchestrator, g
     assert orchestrator.calls[1:] == [("drain", None)]
 
 
-def test_the_drain_runs_in_the_responses_background_task():
+def test_the_follow_up_drain_runs_in_the_responses_background_task():
     recording = _RecordingOrchestrator()
     background = BackgroundTasks()
 
@@ -73,7 +77,7 @@ def test_the_drain_runs_in_the_responses_background_task():
 
     assert response.status_code == 204
     assert [call for call, _work in recording.calls] == ["settle"]
-    assert [task.func for task in background.tasks] == [recording.drain_post_lock_callbacks]
+    assert len(background.tasks) == 1
     asyncio.run(background())
     assert [call for call, _work in recording.calls] == ["settle", "drain"]
 

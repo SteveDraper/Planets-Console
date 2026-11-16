@@ -12,6 +12,7 @@ from api.analytics.fleet.injected_services import (
 from api.analytics.fleet.prior_selection import resolve_fleet_prior_persisted
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import FleetTurnSnapshot, PersistedFleetLedger
+from api.analytics.military_score_inference.prior_fleet_walk import prior_fleet_compute_scope
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
     records_for_scope,
@@ -19,30 +20,9 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     resolve_prior_turn_fleet_torp_overlay,
 )
 from api.analytics.off_mode import PriorFleetRelation, off_mode_prior_relation
-from api.compute.scope import WILDCARD, ComputeScope, compute_scope_to_export_scope
+from api.compute.scope import WILDCARD, compute_scope_to_export_scope
 from api.compute.wire import DependencyOutputs
-from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
-from api.models.game import GameSettings, TurnInfo
-
-
-def prior_fleet_compute_scope(
-    *,
-    game_id: str,
-    perspective: int,
-    turn: int,
-    player_id: int,
-    settings: GameSettings,
-) -> ComputeScope | None:
-    """Fleet scope for scores@N prior (fleet@(N-1)), or None when not applicable."""
-    if turn <= accelerated_ensure_floor(settings, turn):
-        return None
-    return ComputeScope(
-        analytic_id=FLEET_ANALYTIC_ID,
-        game_id=game_id,
-        perspective=perspective,
-        turn=turn - 1,
-        player_id=player_id,
-    )
+from api.models.game import TurnInfo
 
 
 def _resolution_from_persisted_fleet(

@@ -48,7 +48,7 @@ class LiveStream:
     """Typed stand-in for a fleet or inference table-stream controller.
 
     Calls the compute side makes on an open stream are recorded in order:
-    ``rescheduled_player_ids`` for ``reschedule_row`` and ``delivered_events``
+    ``rescheduled_player_ids`` for ``reschedule_player`` and ``delivered_events``
     for ``deliver_domain_event``.
     """
 
@@ -80,7 +80,7 @@ class LiveStream:
         self.rescheduled_player_ids: list[int] = []
         self.delivered_events: list[tuple[int, object]] = []
 
-    def reschedule_row(self, player_id: int) -> bool:
+    def reschedule_player(self, player_id: int) -> bool:
         """Record a row reschedule; the row stays scheduled, as a successful re-admit leaves it."""
         self.rescheduled_player_ids.append(player_id)
         self.wake_multiplex.set()

@@ -37,8 +37,9 @@ class OrchestratorStepExecutionMixin:
     ``_published_bands``, ``_ready_queue``, ``_metrics``, ``_observers``,
     ``_compute_registry``, ``_pool_submitter``, ``_ctx_for_node``,
     ``_complete_node``, ``_fail_node``, ``_refuse_step_exit``,
-    ``_after_step_success``, ``_deps_complete``, ``_enqueue_ready``,
-    ``_ready_depth``, and ``_notify_ready_queue_changed``.
+    ``_after_step_success``, ``_running_execution_or_record_ignored``,
+    ``_deps_complete``, ``_enqueue_ready``, ``_ready_depth``, and
+    ``_notify_ready_queue_changed``.
     """
 
     def _dispatch(
@@ -245,22 +246,19 @@ class OrchestratorStepExecutionMixin:
         return True
 
     def _run_inline_outside_lock(self, pending: PendingInlineExecution) -> None:
-        """Build the wire, then run an inline step without the orchestrator lock."""
+        """Build the wire, then run an inline step without the orchestrator lock.
+
+        The execution can end while its wire builds or its step runs, for
+        example aborted by a settle. Each finish applies only while the
+        execution is still running; otherwise it is recorded as
+        ``inline_finish_ignored`` and the ended node is left as it is.
+        """
         node = pending.node
         try:
             builder = pending.registration.build_step_job_wire[pending.step.step_kind]
             job_wire = builder(node.scope, **pending.job_wire_kwargs)
         except BaseException as exc:
-            with self._condition:
-                self._metrics.inline_executions += 1
-                self._observers.notify_step_complete(
-                    node,
-                    pending.step.step_kind,
-                    step_index=node.step_index,
-                    surface="inline",
-                    terminal_state="failed",
-                )
-                self._fail_node(node, exc)
+            self._finish_inline_step(pending, failure=exc)
             return
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.START):
@@ -269,27 +267,42 @@ class OrchestratorStepExecutionMixin:
         try:
             result_wire = pending.registration.run_step[pending.step.step_kind](job_wire)
         except BaseException as exc:
-            with self._condition:
-                self._metrics.inline_executions += 1
-                self._observers.notify_step_complete(
-                    node,
-                    pending.step.step_kind,
-                    step_index=node.step_index,
-                    surface="inline",
-                    terminal_state="failed",
-                )
-                self._fail_node(node, exc)
+            self._finish_inline_step(pending, failure=exc)
             return
+        self._finish_inline_step(pending, result_wire=result_wire)
+
+    def _finish_inline_step(
+        self,
+        pending: PendingInlineExecution,
+        *,
+        result_wire: object | None = None,
+        failure: BaseException | None = None,
+    ) -> None:
+        """Apply an inline step's result or failure to its execution, if still running."""
+        node = pending.node
         with self._condition:
             self._metrics.inline_executions += 1
-            self._observers.notify_step_complete(
-                node,
-                pending.step.step_kind,
+            running = self._running_execution_or_record_ignored(
+                "inline_finish_ignored",
+                node.scope,
+                node.execution_generation,
+                step_kind=pending.step.step_kind,
                 step_index=node.step_index,
-                surface="inline",
-                terminal_state="success",
+                had_error=failure is not None,
             )
-            self._after_step_success(node, result_wire)
+            if running is None:
+                return
+            self._observers.notify_step_complete(
+                running,
+                pending.step.step_kind,
+                step_index=running.step_index,
+                surface="inline",
+                terminal_state="failed" if failure is not None else "success",
+            )
+            if failure is not None:
+                self._fail_node(running, failure)
+            else:
+                self._after_step_success(running, result_wire)
 
     def _flush_pending_pool_submissions(
         self,

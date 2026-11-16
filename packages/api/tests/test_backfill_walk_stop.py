@@ -1,8 +1,9 @@
 """A stop ends every accepted Backfill earlier turns walk in one game.
 
 ``stop_backfill_walks`` settles the game's on-walk fleet and scoreboard nodes in
-every perspective and returns the drain, bound to that orchestrator, that the
-caller runs after it. A hop no worker has picked is
+every perspective and returns its follow-up, which the caller runs after it:
+the drain of what the stop queued, then a reschedule of each live row whose own
+root the stop stopped. A hop no worker has picked is
 aborted, and a queued fleet hop is dropped at its pick. A picked fleet step
 finishes and persists, and its node then starts or requeues no further step
 unless something still needs it. A running scoreboard solve aborts, so its
@@ -27,12 +28,14 @@ from api.analytics.fleet.compute_orchestration import (
     scores_evidence_recovery,
 )
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
+from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
 from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
 from api.analytics.scores.tier_row_run_registry import get_persist_admission, get_row_run
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
+from api.compute.in_flight_settle import PlayerWork
 from api.compute.orchestrator import ComputeHandle, ComputeOrchestrator, ComputeRequest
-from api.compute.orchestrator_observers import PoolItemIgnoredReason
+from api.compute.orchestrator_observers import StepItemIgnoredReason
 from api.compute.orchestrator_state import ComputeNodeRun, NodeState
 from api.compute.pools import PoolWorkItem
 from api.compute.running_step import RunningStepDisposition
@@ -40,9 +43,9 @@ from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_fo
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepOutcome, StepResult
-from api.exceptions import DiscardedWorkRefused, FleetScoresEvidenceOpenError
+from api.exceptions import FleetScoresEvidenceOpenError
 from api.services.backfill_walk_stop import stop_backfill_walks
-from api.services.off_mode_bump import discard_bumped_player_work
+from api.services.evidence_bump import BumpSettlePolicy
 from api.streaming.table_stream.registry_catalog import live_table_streams
 from api.streaming.table_stream.row_run_admission import PersistAdmission
 
@@ -79,9 +82,9 @@ def walk(sample_turn) -> Walk:
 
 
 def _stop(orchestrator: ComputeOrchestrator, game_id: int) -> None:
-    """Stop the game's walks, then run the drain the stop returns, as the route's task does."""
-    drain = stop_backfill_walks(orchestrator, game_id)
-    drain()
+    """Stop the game's walks, then run the follow-up the stop returns, as the route's task does."""
+    follow_up = stop_backfill_walks(orchestrator, game_id)
+    follow_up()
 
 
 def _node(walk: Walk, turn: int, analytic_id: str = FLEET_ANALYTIC_ID) -> ComputeNodeRun:
@@ -179,7 +182,7 @@ def _assert_dropped_by_the_start_gate(
     details: list[Mapping[str, object]], running_step: RunningStepDisposition
 ) -> None:
     (detail,) = details
-    assert detail["reason"] == PoolItemIgnoredReason.START_REFUSED
+    assert detail["reason"] == StepItemIgnoredReason.START_REFUSED
     assert detail["runningStep"] == running_step.name.lower()
 
 
@@ -222,28 +225,29 @@ def test_a_stop_aborts_unstarted_hops_in_every_perspective_and_drops_queued_ones
     assert _non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id) == set()
 
 
-def test_a_bump_discarded_step_not_yet_picked_fails_at_the_pick_as_before(walk):
-    """The gate drops it with the bump's own refusal, which still cascades."""
+def test_a_bump_aborts_a_queued_step_and_its_pick_drops_it_as_not_running(walk):
+    """The bump aborts the queued hop at its settle, so the pick finds no running node."""
     walk.submit_shell()
 
-    discard_bumped_player_work(
-        walk.orchestrator,
-        game_id=walk.ctx.game_id,
-        perspective=walk.ctx.perspective,
-        player_id=walk.player_id,
-        shell_turns=frozenset(),
-        live_turns=frozenset(),
+    walk.orchestrator.settle_in_flight_work(
+        PlayerWork(
+            game_id=walk.ctx.game_id,
+            perspective=walk.ctx.perspective,
+            player_id=walk.player_id,
+            analytic_ids=FLEET_WALK_ANALYTIC_IDS,
+        ),
+        BumpSettlePolicy(watched_turns=frozenset()),
     )
     walk.orchestrator.drain_post_lock_callbacks()
     queued = _node(walk, 3)
-    assert queued.running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
+    _assert_aborted(queued)
     dropped = _dropped_item_details(walk.orchestrator)
 
     assert not _begin(walk, _take_queued_item(walk))
 
-    assert queued.state == "failed"
-    assert isinstance(queued.error, DiscardedWorkRefused)
-    _assert_dropped_by_the_start_gate(dropped, RunningStepDisposition.FINISH_WITHOUT_STAMP)
+    _assert_aborted(queued)
+    (detail,) = dropped
+    assert detail["reason"] == StepItemIgnoredReason.NODE_NOT_RUNNING
 
 
 # --- T2: a picked fleet step ends at its next start or requeue, and submits nothing ---
@@ -638,3 +642,76 @@ def test_a_stop_in_a_game_with_no_walk_changes_nothing_and_the_rows_detach(sampl
         for scope, node in walk.orchestrator.nodes.items()
     } == before
     assert live_table_streams(_WALK_ANALYTIC_IDS) == ()
+
+
+# --- Rows still open on the game: the follow-up reschedules those whose own root it stopped ---
+
+_STOPPED_ROOT_CASES = {
+    "unstarted fleet root on the walk aborts": (FLEET_ANALYTIC_ID, "parked", True, True),
+    "running fleet root on the walk ends after its step": (
+        FLEET_ANALYTIC_ID,
+        "running",
+        True,
+        True,
+    ),
+    "running scoreboard root on the walk aborts": (SCORES_ANALYTIC_ID, "running", True, True),
+    "unstarted fleet root off the walk is kept": (FLEET_ANALYTIC_ID, "parked", False, False),
+    "running fleet root off the walk is kept": (FLEET_ANALYTIC_ID, "running", False, False),
+}
+
+
+@pytest.mark.parametrize(
+    ("analytic_id", "state", "on_walk", "is_rescheduled"),
+    _STOPPED_ROOT_CASES.values(),
+    ids=_STOPPED_ROOT_CASES.keys(),
+)
+def test_the_follow_up_reschedules_a_live_row_whose_own_root_the_stop_stopped(
+    walk, analytic_id, state, on_walk, is_rescheduled
+):
+    shell = walk.open_shell()
+    _plant(walk, analytic_id=analytic_id, state=state, on_walk=on_walk)
+    row_stream, other_stream = (
+        (shell.fleet_stream, shell.scores_stream)
+        if analytic_id == FLEET_ANALYTIC_ID
+        else (shell.scores_stream, shell.fleet_stream)
+    )
+
+    follow_up = stop_backfill_walks(walk.orchestrator, walk.ctx.game_id)
+    assert row_stream.rescheduled_player_ids == []
+    follow_up()
+
+    assert row_stream.rescheduled_player_ids == ([walk.player_id] if is_rescheduled else [])
+    assert other_stream.rescheduled_player_ids == []
+    end_shell(shell)
+
+
+def test_the_follow_up_reschedules_only_after_its_drain_ran_the_abort_listeners(walk, monkeypatch):
+    shell = walk.open_shell()
+    root = _plant(walk, on_walk=True)
+    order: list[tuple[str, object]] = []
+    walk.orchestrator.observers.register_scope_outcome_listener(
+        lambda snapshot: order.append(("outcome", snapshot.scope))
+    )
+    reschedule_player = shell.fleet_stream.reschedule_player
+
+    def record_reschedule(player_id: int) -> bool:
+        order.append(("reschedule", player_id))
+        return reschedule_player(player_id)
+
+    monkeypatch.setattr(shell.fleet_stream, "reschedule_player", record_reschedule)
+
+    _stop(walk.orchestrator, walk.ctx.game_id)
+
+    assert order == [("outcome", root), ("reschedule", walk.player_id)]
+    end_shell(shell)
+
+
+def test_a_row_closed_before_the_follow_up_runs_is_not_rescheduled(walk):
+    shell = walk.open_shell()
+    _plant(walk, on_walk=True)
+
+    follow_up = stop_backfill_walks(walk.orchestrator, walk.ctx.game_id)
+    end_shell(shell)
+    follow_up()
+
+    assert shell.fleet_stream.rescheduled_player_ids == []

@@ -35,7 +35,6 @@ from api.serialization.backfill_earlier_turns import (
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
-from api.streaming.table_stream.registry_catalog import active_table_stream_turns
 
 from tests.fleet_exports_helpers import first_player_id
 from tests.off_mode_catch_up_helpers import (
@@ -83,11 +82,7 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
 
     get_fleet_table_stream_registry().attach(later_scope, _LaterStream())
     try:
-        assert 41 in active_table_stream_turns(
-            ctx.game_id,
-            ctx.perspective,
-            (FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID),
-        )
+        assert later_scope in get_fleet_table_stream_registry().list_active_scopes()
         export_41 = ExportScope(
             game_id=ctx.game_id,
             perspective=ctx.perspective,

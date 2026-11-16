@@ -16,10 +16,10 @@ from api.handlers.stellar_cartography import (
 from api.handlers.warp_well import coordinate_in_well, warp_well_cells
 from api.models.game import GameInfo, TurnInfo
 from api.planets_nu import PlanetsNuClient
-from api.services.backfill_walk_stop import stop_backfill_walks
+from api.services.backfill_walk_stop import WalkStopFollowUp, stop_backfill_walks
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
-from api.services.in_flight_orchestrator import PostLockDrain, process_in_flight_orchestrator
+from api.services.in_flight_orchestrator import process_in_flight_orchestrator
 from api.services.league_team_directory import LeagueTeamDirectoryService
 from api.services.load_all_turns import LoadAllTurnsService
 from api.services.stack import get_process_service_stack
@@ -132,12 +132,12 @@ class CoreClient:
         stored = self._invoke(lambda: self._games.set_backfill_earlier_turns(game_id, enabled))
         return BackfillEarlierTurnsBody(backfillEarlierTurns=stored)
 
-    def stop_backfill_walks(self, game_id: int) -> PostLockDrain:
-        """Stop the game's accepted walks and return Core's drain for the route to run later.
+    def stop_backfill_walks(self, game_id: int) -> WalkStopFollowUp:
+        """Stop the game's accepted walks and return Core's follow-up for the route to run later.
 
-        Only the stop goes through ``_invoke``. The drain runs in a background
-        task, where an ``HTTPException`` has no response to reach; it logs
-        rather than raises.
+        Only the stop goes through ``_invoke``. The follow-up runs in a
+        background task, where an ``HTTPException`` has no response to reach;
+        it logs rather than raises.
         """
         return self._invoke(lambda: stop_backfill_walks(process_in_flight_orchestrator(), game_id))
 

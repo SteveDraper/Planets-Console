@@ -12,6 +12,9 @@ ComputeBackend = Literal["inline", "thread", RemoteComputeBackend]
 REMOTE_COMPUTE_BACKENDS: tuple[RemoteComputeBackend, ...] = get_args(RemoteComputeBackend)
 VALID_COMPUTE_BACKENDS: frozenset[ComputeBackend] = frozenset(get_args(ComputeBackend))
 
+# Where a step runs: on the submitting thread, or as a pool item.
+StepSurface = Literal["inline", "pool"]
+
 
 @dataclass(frozen=True)
 class ComputeStepSpec:
@@ -19,6 +22,11 @@ class ComputeStepSpec:
 
     step_kind: str
     backend: ComputeBackend
+
+    @property
+    def surface(self) -> StepSurface:
+        """``inline`` for the inline backend; every other backend runs as a pool item."""
+        return "inline" if self.backend == "inline" else "pool"
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,7 @@ from api.compute.diagnostics.profile_steps import profile_step_at, profile_step_
 from api.compute.diagnostics.timeline import node_event_step_key
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_observers import (
-    POOL_ITEM_IGNORED_KINDS,
+    STEP_ITEM_IGNORED_KINDS,
     LifecycleEventKind,
     ScopeLifecycleSnapshot,
 )
@@ -419,8 +419,8 @@ class DiagnosticsOrchestratorBindMixin:
         *,
         orchestrator_id: int | None = None,
     ) -> None:
-        if kind in POOL_ITEM_IGNORED_KINDS:
-            # An ignored pool item's execution is over: release its open start
+        if kind in STEP_ITEM_IGNORED_KINDS:
+            # An ignored step item's execution is over: release its open start
             # whatever shell is active now.
             self._timeline.close_execution(
                 node_event_step_key(

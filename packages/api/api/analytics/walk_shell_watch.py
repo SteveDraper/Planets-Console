@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
 from api.compute.priority_band import ShellStreamWatch, WatchedShellKey
+from api.compute.scope import ComputeScope
 from api.streaming.table_stream.registry_catalog import LiveTableStream, live_table_streams
 
 
@@ -25,6 +26,17 @@ class LiveWalkShell:
 
     key: WatchedShellKey
     stream: LiveTableStream
+
+    @property
+    def own_scope(self) -> ComputeScope:
+        """The scope of the node this shell's row submits as its root."""
+        return ComputeScope(
+            analytic_id=self.stream.analytic_id,
+            game_id=self.key.game_id,
+            perspective=self.key.perspective,
+            turn=self.key.turn,
+            player_id=self.key.player_id,
+        )
 
 
 def live_walk_shells() -> tuple[LiveWalkShell, ...]:
