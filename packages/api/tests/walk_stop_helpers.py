@@ -6,8 +6,6 @@ plants nodes, picks queued items and finishes steps itself.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
@@ -91,18 +89,6 @@ def finish_step(walk: Walk, item: PoolWorkItem, result_wire: object) -> None:
     walk.orchestrator.complete_pool_step(
         item.scope, item.execution_generation, result_wire=result_wire
     )
-
-
-def dropped_item_details(orchestrator: ComputeOrchestrator) -> list[Mapping[str, object]]:
-    """The detail of each ``pool_item_dropped`` record from now on."""
-    details: list[Mapping[str, object]] = []
-
-    def record(kind, _scope, walk_node, _generation, _step_kind, _step_index, detail) -> None:
-        if kind == "pool_item_dropped":
-            details.append(detail)
-
-    orchestrator.observers.register_lifecycle_listener(record)
-    return details
 
 
 def non_terminal_walk_scopes(orchestrator: ComputeOrchestrator, game_id: int) -> set:

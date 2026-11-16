@@ -34,6 +34,7 @@ from api.compute.persistence import PersistDeferredError, PersistDependencyRecov
 from api.compute.scope import format_compute_scope_key
 from api.compute.wire import StepResult
 
+from tests.compute_lifecycle_records import kinds_and_reasons, record_lifecycle
 from tests.compute_orchestrator_fixtures import (
     StubPersistencePolicy,
     make_compute_scope,
@@ -107,17 +108,15 @@ class _PersistDeferredHarness:
             ),
             pool_submitter=lambda node, _step, **_kwargs: self.pool_submissions.append(node.scope),
         )
-        self.refusals: list[tuple[ComputeScope, int, ComputeNodeRun | None, dict[str, object]]] = []
-        self.orchestrator.observers.register_lifecycle_listener(self._record_refusal)
-
-    def _record_refusal(self, kind, scope, node, generation, _step_kind, _step_index, detail):
-        if kind == "dependency_submit_refused":
-            self.refusals.append((scope, generation, node, dict(detail)))
+        self.refusals = record_lifecycle(self.orchestrator, ("dependency_submit_refused",))
 
     def assert_one_refused_shared_submit(self, *, dependency_step_kind: str | None) -> None:
         """One refusal names the aborted ``branch_b`` execution and the refused ``shared``."""
         requester = self.node(self.branch_b_scope)
-        assert self.refusals == [
+        assert [
+            (record.scope, record.execution_generation, record.node, record.detail)
+            for record in self.refusals
+        ] == [
             (
                 self.branch_b_scope,
                 requester.execution_generation,
@@ -214,9 +213,9 @@ def test_a_refusal_after_the_requester_was_replaced_names_no_node(sample_turn, m
     harness.finish_branch_b_with_persist()
 
     assert harness.node(harness.branch_b_scope).execution_generation > ended_generation
-    assert [(scope, generation, node) for scope, generation, node, _ in harness.refusals] == [
-        (harness.branch_b_scope, ended_generation, None)
-    ]
+    assert [
+        (record.scope, record.execution_generation, record.node) for record in harness.refusals
+    ] == [(harness.branch_b_scope, ended_generation, None)]
 
 
 def test_t11c_an_abort_during_the_dependency_chain_fetch_plans_nothing(sample_turn, monkeypatch):
@@ -312,8 +311,7 @@ class _ThreadStepHarness:
         self.scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
         self.finished_items: list[PoolWorkItem] = []
         self.pool.set_on_item_finished(self.finished_items.append)
-        self.ignored: list[tuple[str, str]] = []
-        self.orchestrator.observers.register_lifecycle_listener(self._record_ignored)
+        self.ignored = record_lifecycle(self.orchestrator, STEP_ITEM_IGNORED_KINDS)
 
     def _build_wire(self, _scope, **_kwargs) -> dict[str, object]:
         self.on_build()
@@ -322,10 +320,6 @@ class _ThreadStepHarness:
     def _run_step(self, _job: object) -> dict[str, bool]:
         self.run_step_calls += 1
         return {"ok": True}
-
-    def _record_ignored(self, kind, _scope, _node, _generation, _step_kind, _step_index, detail):
-        if kind in STEP_ITEM_IGNORED_KINDS:
-            self.ignored.append((kind, detail["reason"]))
 
     def submit_and_run_picked_step(self) -> None:
         self.orchestrator.submit(ComputeRequest(ctx=self.ctx, scope=self.scope))
@@ -363,7 +357,7 @@ def test_t12_a_thread_step_whose_execution_ends_while_its_wire_builds_never_runs
 
     assert harness.run_step_calls == 0
     assert harness.node().error is _ABORT
-    assert harness.ignored == [("pool_item_dropped", "node_not_running")]
+    assert kinds_and_reasons(harness.ignored) == [("pool_item_dropped", "node_not_running")]
     assert len(harness.finished_items) == 1
 
 
@@ -382,7 +376,9 @@ def test_a_thread_step_its_start_gate_refuses_while_its_wire_builds_never_runs(
 
     assert harness.run_step_calls == 0
     assert isinstance(harness.node().error, ComputeScopeAbortedError)
-    assert harness.ignored == [("pool_item_dropped", StepItemIgnoredReason.START_REFUSED)]
+    assert kinds_and_reasons(harness.ignored) == [
+        ("pool_item_dropped", StepItemIgnoredReason.START_REFUSED)
+    ]
     assert len(harness.finished_items) == 1
 
 

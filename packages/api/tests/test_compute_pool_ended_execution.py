@@ -14,6 +14,7 @@ import pytest
 from api.compute import ComputeRequest
 from api.compute.errors import ComputeScopeAbortedError
 
+from tests.compute_lifecycle_records import kinds_and_reasons
 from tests.stale_pool_item_helpers import StaleItemHarness
 
 
@@ -46,7 +47,7 @@ def test_an_aborted_execution_item_is_picked_and_dropped(harness):
     harness.run_next_item()
 
     assert harness.thread_runs == []
-    assert harness.ignored == [("pool_item_dropped", "node_not_running")]
+    assert kinds_and_reasons(harness.ignored) == [("pool_item_dropped", "node_not_running")]
     assert harness.pool.snapshot_work_queue() == ()
 
 
@@ -58,7 +59,7 @@ def test_a_replaced_execution_item_is_dropped_and_the_newer_one_stays_held(harne
     harness.run_next_item()
 
     assert harness.thread_runs == []
-    assert harness.ignored == [("pool_item_dropped", "stale_execution")]
+    assert kinds_and_reasons(harness.ignored) == [("pool_item_dropped", "stale_execution")]
     (held,) = harness.pool.snapshot_work_queue()
     assert held.item.execution_generation == fresh_generation
     assert harness.pool.take_next_item_for_tests() is None

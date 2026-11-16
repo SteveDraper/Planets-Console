@@ -28,12 +28,13 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.compute_lifecycle_records import record_lifecycle
 from tests.compute_pool_test_helpers import QUEUED_ONLY_STEP_WORK
 from tests.off_mode_catch_up_helpers import context_at_turn, store_generation, write_evidence_mark
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_exports_helpers import first_player_id
 from tests.walk_band_helpers import SHELL_TURN, WALK_TURNS, Walk, end_shell, no_live_streams
-from tests.walk_stop_helpers import assert_aborted, dropped_item_details, plant_node, walk_node
+from tests.walk_stop_helpers import assert_aborted, plant_node, walk_node
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
@@ -125,7 +126,7 @@ def test_a_bump_drops_the_queued_hop_the_dequeue_hold_holds(walk):
     assert hop.state == "running"
     assert len(_queued_items(controller, shell)) == 1
     assert walk.pool.take_next_item_for_tests() is None
-    dropped = dropped_item_details(walk.orchestrator)
+    dropped = record_lifecycle(walk.orchestrator, ("pool_item_dropped",))
 
     _bump(walk, BASELINE_TURN + 1)
     assert_aborted(hop)
@@ -135,7 +136,7 @@ def test_a_bump_drops_the_queued_hop_the_dequeue_hold_holds(walk):
     assert picked is not None and picked.item.scope == hop.scope
     walk.pool._execute_item(picked)
 
-    assert [detail["reason"] for detail in dropped] == ["node_not_running"]
+    assert [record.detail["reason"] for record in dropped] == ["node_not_running"]
     assert _queued_items(controller, shell) == []
     assert (
         fleet_persistence(walk.ctx).get_ledger(

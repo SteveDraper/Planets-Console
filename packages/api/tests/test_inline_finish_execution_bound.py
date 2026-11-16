@@ -32,6 +32,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import StepResult
 from api.services.backfill_walk_stop import stop_backfill_walks
 
+from tests.compute_lifecycle_records import LifecycleRecord, record_lifecycle
 from tests.compute_orchestrator_fixtures import (
     ROW_SCOPE_KEY,
     RecordingPersistencePolicy,
@@ -48,7 +49,10 @@ from tests.test_orchestrator_settle import _StopEverything
 
 _ABORT = ComputeScopeAbortedError("ended while its inline step ran")
 
-IgnoredFinish = tuple[str, str, bool]
+
+def _reasons_and_errors(ignored: list[LifecycleRecord]) -> list[tuple[object, object]]:
+    """``(reason, hadError)`` of each recorded ``inline_finish_ignored``."""
+    return [(record.detail["reason"], record.detail["hadError"]) for record in ignored]
 
 
 class _InlineHarness:
@@ -101,18 +105,7 @@ class _InlineHarness:
                 step.step_kind
             ),
         )
-        self.ignored = self._record_ignored_finishes()
-
-    def _record_ignored_finishes(self) -> list[IgnoredFinish]:
-        """``(kind, reason, hadError)`` of each ``inline_finish_ignored`` record."""
-        ignored: list[IgnoredFinish] = []
-
-        def record(kind, _scope, _node, _generation, _step_kind, _step_index, detail) -> None:
-            if kind == "inline_finish_ignored":
-                ignored.append((kind, detail["reason"], detail["hadError"]))
-
-        self.orchestrator.observers.register_lifecycle_listener(record)
-        return ignored
+        self.ignored = record_lifecycle(self.orchestrator, ("inline_finish_ignored",))
 
     def abort_and_bump_epoch(self) -> None:
         """What a bump's settle does to this execution while its step runs."""
@@ -148,9 +141,7 @@ def test_an_aborted_inline_step_that_returns_after_an_epoch_bump_is_not_requeued
 
     harness.assert_ended_once(error=_ABORT)
     assert handle.error is _ABORT
-    assert harness.ignored == [
-        ("inline_finish_ignored", StepItemIgnoredReason.NODE_NOT_RUNNING, False)
-    ]
+    assert _reasons_and_errors(harness.ignored) == [(StepItemIgnoredReason.NODE_NOT_RUNNING, False)]
 
 
 def test_an_aborted_inline_step_that_raises_keeps_the_abort_as_its_error(sample_turn):
@@ -165,9 +156,7 @@ def test_an_aborted_inline_step_that_raises_keeps_the_abort_as_its_error(sample_
     harness.submit()
 
     harness.assert_ended_once(error=_ABORT)
-    assert harness.ignored == [
-        ("inline_finish_ignored", StepItemIgnoredReason.NODE_NOT_RUNNING, True)
-    ]
+    assert _reasons_and_errors(harness.ignored) == [(StepItemIgnoredReason.NODE_NOT_RUNNING, True)]
 
 
 def test_aborting_a_running_inline_step_records_its_completion_on_the_inline_surface(
@@ -212,9 +201,7 @@ def test_an_inline_step_a_settle_aborts_while_it_runs_does_not_continue_into_its
     harness.submit()
 
     harness.assert_ended_once()
-    assert harness.ignored == [
-        ("inline_finish_ignored", StepItemIgnoredReason.NODE_NOT_RUNNING, False)
-    ]
+    assert _reasons_and_errors(harness.ignored) == [(StepItemIgnoredReason.NODE_NOT_RUNNING, False)]
 
 
 @pytest.mark.usefixtures("no_scores_row_runs")
@@ -230,21 +217,16 @@ def test_a_scoreboard_materialize_the_game_stop_aborts_while_it_runs_is_not_resu
     """
     monkeypatch.setattr(ScoresPersistencePolicy, "is_satisfied", lambda *_args: False)
     started: list[str] = []
-    ignored: list[IgnoredFinish] = []
 
     def stop_the_game_while_materialize_runs(scope, _node, step_kind) -> None:
         if scope == ladder.scope and step_kind == SCORES_MATERIALIZE:
             started.append(step_kind)
             stop_backfill_walks(ladder.orchestrator, ladder.ctx.game_id)()
 
-    def record(kind, _scope, _node, _generation, _step_kind, _step_index, detail) -> None:
-        if kind == "inline_finish_ignored":
-            ignored.append((kind, detail["reason"], detail["hadError"]))
-
     ladder.orchestrator.observers.register_inline_start_listener(
         stop_the_game_while_materialize_runs
     )
-    ladder.orchestrator.observers.register_lifecycle_listener(record)
+    ignored = record_lifecycle(ladder.orchestrator, ("inline_finish_ignored",))
 
     ladder.orchestrator.submit(
         ComputeRequest(
@@ -262,5 +244,5 @@ def test_a_scoreboard_materialize_the_game_stop_aborts_while_it_runs_is_not_resu
     assert node.state == "failed"
     assert isinstance(node.error, ComputeScopeAbortedError)
     assert ladder.submitted_work == []
-    assert ignored == [("inline_finish_ignored", StepItemIgnoredReason.NODE_NOT_RUNNING, False)]
+    assert _reasons_and_errors(ignored) == [(StepItemIgnoredReason.NODE_NOT_RUNNING, False)]
     assert ladder.persisted_summary() is None

@@ -18,7 +18,7 @@ write.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 import pytest
@@ -48,6 +48,7 @@ from api.services.evidence_bump import BumpSettlePolicy
 from api.streaming.table_stream.registry_catalog import live_table_streams
 from api.streaming.table_stream.row_run_admission import PersistAdmission
 
+from tests.compute_lifecycle_records import LifecycleRecord, record_lifecycle
 from tests.off_mode_catch_up_helpers import FLEET_SCORES_REGISTRY, context_at_turn
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_exports_helpers import first_player_id
@@ -67,7 +68,6 @@ from tests.walk_stop_helpers import (
     WALK_ANALYTIC_IDS,
     assert_aborted,
     begin_pick,
-    dropped_item_details,
     finish_step,
     non_terminal_walk_scopes,
     pick_baseline_hop,
@@ -95,20 +95,12 @@ def _stop(orchestrator: ComputeOrchestrator, game_id: int) -> None:
     follow_up()
 
 
-def _lifecycle_kinds(orchestrator: ComputeOrchestrator) -> list[str]:
-    kinds: list[str] = []
-    orchestrator.observers.register_lifecycle_listener(
-        lambda kind, *_args: kinds.append(kind),
-    )
-    return kinds
-
-
 def _assert_dropped_by_the_start_gate(
-    details: list[Mapping[str, object]], running_step: RunningStepDisposition
+    dropped: list[LifecycleRecord], running_step: RunningStepDisposition
 ) -> None:
-    (detail,) = details
-    assert detail["reason"] == StepItemIgnoredReason.START_REFUSED
-    assert detail["runningStep"] == running_step.name.lower()
+    (record,) = dropped
+    assert record.detail["reason"] == StepItemIgnoredReason.START_REFUSED
+    assert record.detail["runningStep"] == running_step.name.lower()
 
 
 # --- T1: unstarted hops abort; a queued hop drops at its pick; game H is untouched ---
@@ -120,7 +112,7 @@ def test_a_stop_aborts_unstarted_hops_in_every_perspective_and_drops_queued_ones
     walk.submit_shell()
     other_perspective = plant_node(walk, perspective_offset=1, on_walk=True)
     other_game = plant_node(walk, game_offset=1, on_walk=True)
-    dropped = dropped_item_details(walk.orchestrator)
+    dropped = record_lifecycle(walk.orchestrator, ("pool_item_dropped",))
 
     _stop(walk.orchestrator, walk.ctx.game_id)
 
@@ -155,13 +147,13 @@ def test_a_bump_aborts_a_queued_step_and_its_pick_drops_it_as_not_running(walk):
     walk.orchestrator.drain_post_lock_callbacks()
     queued = walk_node(walk, 3)
     assert_aborted(queued)
-    dropped = dropped_item_details(walk.orchestrator)
+    dropped = record_lifecycle(walk.orchestrator, ("pool_item_dropped",))
 
     assert not begin_pick(walk, take_queued_item(walk))
 
     assert_aborted(queued)
-    (detail,) = dropped
-    assert detail["reason"] == StepItemIgnoredReason.NODE_NOT_RUNNING
+    (record,) = dropped
+    assert record.detail["reason"] == StepItemIgnoredReason.NODE_NOT_RUNNING
 
 
 # --- T2: a picked fleet step ends at its next start or requeue, and submits nothing ---
@@ -215,7 +207,7 @@ def test_a_picked_fleet_step_ends_at_its_next_start_or_requeue_and_submits_nothi
     walk, ending, monkeypatch
 ):
     item = pick_baseline_hop(walk)
-    kinds = _lifecycle_kinds(walk.orchestrator)
+    restarts = record_lifecycle(walk.orchestrator, ("epoch_retry", "persist_deferred"))
     _stop(walk.orchestrator, walk.ctx.game_id)
     ending.before_finish(walk, monkeypatch)
     nodes_before = set(walk.orchestrator.nodes)
@@ -225,8 +217,7 @@ def test_a_picked_fleet_step_ends_at_its_next_start_or_requeue_and_submits_nothi
     assert_aborted(walk_node(walk, 3))
     assert set(walk.orchestrator.nodes) == nodes_before
     assert walk.pool.snapshot_work_queue() == ()
-    assert "epoch_retry" not in kinds
-    assert "persist_deferred" not in kinds
+    assert restarts == []
     assert walk.orchestrator.metrics.epoch_discards == 0
 
 
@@ -401,7 +392,7 @@ def test_a_picked_fleet_step_stamps_the_walk_generation_then_its_node_ends(held_
 
 def test_after_a_bump_the_picked_fleet_persist_is_refused_and_its_node_ends(held_walk):
     orchestrator = get_compute_orchestrator()
-    kinds = _lifecycle_kinds(orchestrator)
+    epoch_retries = record_lifecycle(orchestrator, ("epoch_retry",))
     _stop(orchestrator, held_walk.ctx.game_id)
     game_id, perspective, player_id = _walk_keys(held_walk)
     persistence = fleet_persistence(held_walk.ctx)
@@ -416,7 +407,7 @@ def test_after_a_bump_the_picked_fleet_persist_is_refused_and_its_node_ends(held
         _wait_terminal(hop)
 
     assert persistence.get_ledger(game_id, perspective, baseline_turn, player_id) is None
-    assert "epoch_retry" not in kinds
+    assert epoch_retries == []
     assert non_terminal_walk_scopes(orchestrator, game_id) == set()
 
 

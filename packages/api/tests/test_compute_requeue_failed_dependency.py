@@ -27,6 +27,7 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
 from api.compute.wire import StepResult
 
+from tests.compute_lifecycle_records import record_lifecycle
 from tests.compute_orchestrator_fixtures import (
     RecordingPersistencePolicy,
     inline_compute_registration,
@@ -230,18 +231,6 @@ def _complete_other_player_shared(setup: RunningBranch, sample_turn) -> ComputeS
     return other_shared
 
 
-def _persist_deferred_scopes(orchestrator: ComputeOrchestrator) -> list[ComputeScope]:
-    """The scope of each ``persist_deferred`` lifecycle record from now on."""
-    scopes: list[ComputeScope] = []
-
-    def record(kind, scope, _node, _generation, _step_kind, _step_index, _detail) -> None:
-        if kind == "persist_deferred":
-            scopes.append(scope)
-
-    orchestrator.observers.register_lifecycle_listener(record)
-    return scopes
-
-
 def _persist_branch_step_deferred(
     setup: RunningBranch, recovery: PersistDependencyRecovery
 ) -> None:
@@ -274,7 +263,7 @@ def test_persist_deferred_cascades_a_failed_dependency_it_is_not_recreating(samp
     other_shared_node = setup.orchestrator.nodes[other_shared]
     shared_failure = RuntimeError("shared replacement failed")
     _fail_shared_while_branch_runs(setup, shared_failure)
-    persist_deferred_scopes = _persist_deferred_scopes(setup.orchestrator)
+    persist_deferred = record_lifecycle(setup.orchestrator, ("persist_deferred",))
 
     _persist_branch_step_deferred(
         setup,
@@ -288,14 +277,14 @@ def test_persist_deferred_cascades_a_failed_dependency_it_is_not_recreating(samp
     assert branch_node.error is shared_failure
     assert setup.orchestrator.nodes[other_shared] is other_shared_node
     assert other_shared_node.state == "complete"
-    assert persist_deferred_scopes == []
+    assert persist_deferred == []
 
 
 def test_persist_deferred_recreates_a_failed_recovery_dependency(sample_turn):
     setup = _running_branch(sample_turn)
     _fail_shared_while_branch_runs(setup, RuntimeError("shared replacement failed"))
     failed_shared = setup.orchestrator.nodes[setup.shared]
-    persist_deferred_scopes = _persist_deferred_scopes(setup.orchestrator)
+    persist_deferred = record_lifecycle(setup.orchestrator, ("persist_deferred",))
 
     _persist_branch_step_deferred(
         setup,
@@ -305,7 +294,7 @@ def test_persist_deferred_recreates_a_failed_recovery_dependency(sample_turn):
     )
 
     assert setup.orchestrator.nodes[setup.branch].state == "waiting_deps"
-    assert persist_deferred_scopes == [setup.branch]
+    assert [record.scope for record in persist_deferred] == [setup.branch]
     recreated_shared = setup.orchestrator.nodes[setup.shared]
     assert recreated_shared is not failed_shared
     assert recreated_shared.state == "running"

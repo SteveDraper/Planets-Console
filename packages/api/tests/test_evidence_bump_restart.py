@@ -15,7 +15,7 @@ makes itself where it matters.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 
 import pytest
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -38,6 +38,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 from api.streaming.table_stream.connect import AdmissionDispatch
 
+from tests.compute_lifecycle_records import record_lifecycle
 from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.off_mode_catch_up_helpers import context_at_turn, write_evidence_mark
 from tests.on_walk_helpers import fleet_persistence
@@ -93,18 +94,6 @@ def _bump(walk: Walk, host_turn: int, *, backfill_enabled: bool = True) -> set[i
     )
 
 
-def _ignored_finishes(walk: Walk) -> list[Mapping[str, object]]:
-    """The detail of each ``pool_finish_ignored`` record from now on."""
-    details: list[Mapping[str, object]] = []
-
-    def record(kind, _scope, walk_node, _generation, _step_kind, _step_index, detail) -> None:
-        if kind == "pool_finish_ignored":
-            details.append(detail)
-
-    walk.orchestrator.observers.register_lifecycle_listener(record)
-    return details
-
-
 def _mark_generation(walk: Walk) -> int:
     keys = (walk.ctx.game_id, walk.ctx.perspective, walk.player_id)
     return fleet_persistence(walk.ctx).evidence_mark(*keys).evidence_generation
@@ -117,7 +106,7 @@ def test_with_the_setting_on_the_bump_aborts_the_walk_and_reschedules_the_live_r
     shell = walk.open_shell()
     item = pick_baseline_hop(walk)
     assert non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id)
-    ignored = _ignored_finishes(walk)
+    ignored = record_lifecycle(walk.orchestrator, ("pool_finish_ignored",))
     persistence = fleet_persistence(walk.ctx)
     keys = (walk.ctx.game_id, walk.ctx.perspective, walk.player_id)
     mark_before = _mark_generation(walk)
@@ -135,7 +124,9 @@ def test_with_the_setting_on_the_bump_aborts_the_walk_and_reschedules_the_live_r
     finish_step(walk, item, StepResult(outcome="persist", payload={}))
 
     assert persistence.get_ledger(*keys[:2], BASELINE_TURN, keys[2]) is None
-    assert [detail["reason"] for detail in ignored] == [StepItemIgnoredReason.NODE_NOT_RUNNING]
+    assert [record.detail["reason"] for record in ignored] == [
+        StepItemIgnoredReason.NODE_NOT_RUNNING
+    ]
     assert walk.orchestrator.metrics.epoch_discards == 0
     end_shell(shell)
 
