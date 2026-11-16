@@ -188,3 +188,46 @@ describe('usePerPlayerAnalyticStream under compute diagnostics freeze', () => {
     expect(result.current.publishedByPlayerId.get(7)?.status).toBe('failed')
   })
 })
+
+describe('usePerPlayerAnalyticStream client stream rows', () => {
+  beforeEach(() => {
+    useComputeDiagnosticsStore.setState({
+      enabled: true,
+      freezeStatus: null,
+      snapshot: null,
+      clientStreams: [],
+    })
+  })
+
+  it('keeps separate clientStreams rows for different streamIds', async () => {
+    const connectUntilComplete = vi.fn(async () => 'ok' as const)
+    const policy = makePolicy(connectUntilComplete)
+
+    renderHook(() => {
+      usePerPlayerAnalyticStream({
+        streamId: 'fleet',
+        scope,
+        enabled: true,
+        playerIdsKey: '3,7',
+        policy,
+      })
+      usePerPlayerAnalyticStream({
+        streamId: 'scores',
+        scope,
+        enabled: true,
+        playerIdsKey: '3,7',
+        policy,
+      })
+    })
+
+    await waitFor(() => {
+      const streams = useComputeDiagnosticsStore.getState().clientStreams
+      expect(streams).toHaveLength(2)
+    })
+
+    const streams = useComputeDiagnosticsStore.getState().clientStreams
+    const byStreamId = Object.fromEntries(streams.map((entry) => [entry.streamId, entry]))
+    expect(byStreamId.fleet?.connectionKey.startsWith('fleet:')).toBe(true)
+    expect(byStreamId.scores?.connectionKey.startsWith('scores:')).toBe(true)
+  })
+})

@@ -14,6 +14,11 @@ export type ComputeDiagnosticsFreezeStatusResponse = {
   allowlistedPlayerIds: number[]
 }
 
+/** The snapshot after a single-step, and whether a step was released. */
+export type ComputeDiagnosticsSingleStepResponse = ComputeDiagnosticsSnapshotResponse & {
+  released: boolean
+}
+
 export type NextSingleStepTarget = {
   scopeKey: string
   analyticId: string
@@ -207,7 +212,7 @@ export async function putComputeDiagnosticsAllowlist(
 
 export async function postComputeDiagnosticsSingleStep(
   scope: AnalyticShellScope
-): Promise<ComputeDiagnosticsSnapshotResponse> {
+): Promise<ComputeDiagnosticsSingleStepResponse> {
   const path = '/bff/diagnostics/compute/single-step'
   const endpointLabel = 'POST /bff/diagnostics/compute/single-step'
   const r = await bffRequest(
@@ -223,5 +228,10 @@ export async function postComputeDiagnosticsSingleStep(
     },
     endpointLabel
   )
-  return readSnapshotResponse(r, endpointLabel)
+  const snapshot: ComputeDiagnosticsSnapshotResponse & { released?: unknown } =
+    await readSnapshotResponse(r, endpointLabel)
+  if (typeof snapshot.released !== 'boolean') {
+    throw new Error(withEndpointIfGeneric('missing released flag', endpointLabel))
+  }
+  return { ...snapshot, released: snapshot.released }
 }

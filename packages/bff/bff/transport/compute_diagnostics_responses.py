@@ -61,6 +61,19 @@ class ComputeDiagnosticsAllowlistRequest(BaseModel):
     player_ids: list[int] = Field(alias="playerIds")
 
 
+class ComputeDiagnosticsSingleStepResponse(ComputeDiagnosticsSnapshotResponse):
+    """The snapshot after a single-step, and whether a step was released.
+
+    ``released`` is True when the target was dispatched, or, for a held pool
+    item, when its dequeue grant was armed (a worker takes it when one is
+    free). It is False when nothing was armed, or when another dispatch gate
+    (for example inference global pause) refused the target, so Run can tell a
+    step that did nothing from one that advanced or is waiting for a worker.
+    """
+
+    released: bool
+
+
 class ComputeDiagnosticsSingleStepRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

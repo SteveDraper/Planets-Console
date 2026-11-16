@@ -12,6 +12,7 @@ from bff.transport.compute_diagnostics_responses import (
     ComputeDiagnosticsFreezeStatusResponse,
     ComputeDiagnosticsShellContext,
     ComputeDiagnosticsSingleStepRequest,
+    ComputeDiagnosticsSingleStepResponse,
     ComputeDiagnosticsSnapshotResponse,
 )
 
@@ -109,13 +110,17 @@ def put_compute_diagnostics_allowlist(
     return ComputeDiagnosticsSnapshotResponse.model_validate(wire)
 
 
-@router.post("/compute/single-step", response_model=ComputeDiagnosticsSnapshotResponse)
+@router.post("/compute/single-step", response_model=ComputeDiagnosticsSingleStepResponse)
 def post_compute_diagnostics_single_step(
     body: ComputeDiagnosticsSingleStepRequest = Body(...),
-) -> ComputeDiagnosticsSnapshotResponse:
-    """Release one in-focus compute step, then re-freeze (allowlist is focus, not free-run)."""
+) -> ComputeDiagnosticsSingleStepResponse:
+    """Release one in-focus compute step, then re-freeze (allowlist is focus, not free-run).
+
+    The response is the snapshot after the step, plus ``released``: whether a step
+    was dispatched or, for a held item, had its dequeue grant armed.
+    """
     _require_compute_diagnostics_enabled()
-    compute_diagnostics.run_compute_diagnostics_single_step(
+    released = compute_diagnostics.run_compute_diagnostics_single_step(
         game_id=body.game_id,
         perspective=body.perspective,
         turn=body.turn,
@@ -125,4 +130,4 @@ def post_compute_diagnostics_single_step(
         perspective=body.perspective,
         turn=body.turn,
     )
-    return ComputeDiagnosticsSnapshotResponse.model_validate(wire)
+    return ComputeDiagnosticsSingleStepResponse.model_validate({**wire, "released": released})

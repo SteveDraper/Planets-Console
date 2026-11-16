@@ -300,3 +300,34 @@ def test_arming_and_disarming_freeze_leaves_inference_global_pause_alone(walk):
     controller.set_freeze_armed(shell, freeze_armed=False)
 
     assert before == while_frozen == scheduler.global_pause_status(scores_scope)
+
+
+# --- Single-step releases one hop for a focused player ---
+
+
+def test_single_step_releases_the_focused_players_frontier_hop_then_refreezes(walk):
+    controller, shell = _diagnose(walk)
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({walk.player_id}))
+    walk.submit_shell()
+
+    assert controller.single_step(shell) is True
+
+    assert walk.pick()[0] == walk.scope(BASELINE_TURN)
+    assert walk.pool.take_next_item_for_tests() is None
+    walk.complete_picked(walk.scope(BASELINE_TURN))
+    assert walk_node(walk, BASELINE_TURN + 1).state == "ready"
+    assert walk.pool.take_next_item_for_tests() is None
+
+
+def test_single_step_reports_nothing_released_when_another_gate_refuses_the_target(walk):
+    controller, shell = _diagnose(walk)
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    controller.set_allowlist(shell, frozenset({walk.player_id}))
+    walk.submit_shell()
+    walk.orchestrator.observers.register_dispatch_gate(lambda _node: False)
+
+    assert controller.single_step(shell) is False
+
+    assert walk_node(walk, BASELINE_TURN).state == "ready"
+    assert walk.pool.take_next_item_for_tests() is None

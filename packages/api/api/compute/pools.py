@@ -494,10 +494,11 @@ class ComputeWorkerPool:
     def _pop_runnable_item_locked(self) -> BandedWorkItem | None:
         """Pick, pop, and record one runnable item at its currently published band.
 
-        The dequeue predicate is evaluated for every queued item before the pick.
-        It must be side-effect free: grant or other mutable gate state belongs in
-        the ``on_item_dequeued`` hook, invoked here after the pop so concurrent
-        workers cannot both claim the same grant.
+        The dequeue predicate is evaluated for each live queued item before the
+        pick; it is skipped for an ended item, and not consulted at all when an
+        ended item is picked. It must be side-effect free: grant or other mutable
+        gate state belongs in the ``on_item_dequeued`` hook, invoked here after the
+        pop so concurrent workers cannot both claim the same grant.
 
         An item whose execution has ended is never held by the predicate: it is
         picked first, in queue order, and ``begin_pool_step`` drops it unrun, so

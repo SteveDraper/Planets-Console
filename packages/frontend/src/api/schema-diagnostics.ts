@@ -136,6 +136,9 @@ export interface paths {
         /**
          * Post Compute Diagnostics Single Step
          * @description Release one in-focus compute step, then re-freeze (allowlist is focus, not free-run).
+         *
+         *     The response is the snapshot after the step, plus ``released``: whether a step
+         *     was dispatched or, for a held item, had its dequeue grant armed.
          */
         post: operations["post_compute_diagnostics_single_step_diagnostics_compute_single_step_post"];
         delete?: never;
@@ -218,6 +221,73 @@ export interface components {
             perspective: number;
             /** Turn */
             turn: number;
+        };
+        /**
+         * ComputeDiagnosticsSingleStepResponse
+         * @description The snapshot after a single-step, and whether a step was released.
+         *
+         *     ``released`` is True when the target was dispatched, or, for a held pool
+         *     item, when its dequeue grant was armed (a worker takes it when one is
+         *     free). It is False when nothing was armed, or when another dispatch gate
+         *     (for example inference global pause) refused the target, so Run can tell a
+         *     step that did nothing from one that advanced or is waiting for a worker.
+         */
+        ComputeDiagnosticsSingleStepResponse: {
+            shell: components["schemas"]["ComputeDiagnosticsShellContext"];
+            /** Freezearmed */
+            freezeArmed: boolean;
+            /** Allowlistedplayerids */
+            allowlistedPlayerIds: number[];
+            /** Poolqueue */
+            poolQueue: {
+                [key: string]: unknown;
+            }[];
+            /** Inflight */
+            inFlight: {
+                [key: string]: unknown;
+            }[];
+            /** Dagnodes */
+            dagNodes: {
+                [key: string]: unknown;
+            }[];
+            /** Readyqueue */
+            readyQueue: {
+                [key: string]: unknown;
+            }[];
+            /** Nextsinglestep */
+            nextSingleStep: {
+                [key: string]: unknown;
+            };
+            /** Completionhistory */
+            completionHistory: {
+                [key: string]: unknown;
+            }[];
+            /** Recentfailures */
+            recentFailures: {
+                [key: string]: unknown;
+            }[];
+            /** Serverstreams */
+            serverStreams: {
+                [key: string]: unknown;
+            }[];
+            /** Remotepool */
+            remotePool: {
+                [key: string]: unknown;
+            };
+            /** Liveoccupancy */
+            liveOccupancy: {
+                [key: string]: unknown;
+            };
+            /** Concurrencytimeline */
+            concurrencyTimeline: {
+                [key: string]: unknown;
+            }[];
+            /** Concurrencyrollup */
+            concurrencyRollup: {
+                [key: string]: unknown;
+            };
+            /** Released */
+            released: boolean;
         };
         /** ComputeDiagnosticsSnapshotResponse */
         ComputeDiagnosticsSnapshotResponse: {
@@ -531,7 +601,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ComputeDiagnosticsSnapshotResponse"];
+                    "application/json": components["schemas"]["ComputeDiagnosticsSingleStepResponse"];
                 };
             };
             /** @description Validation Error */
