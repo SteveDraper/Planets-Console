@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -9,6 +9,15 @@ import { useComputeDiagnosticsStore } from '../../stores/computeDiagnostics'
 import {
   DiagnosticsComputeTab,
 } from './DiagnosticsComputeTab'
+
+const jsonBlockRenders = vi.hoisted(() => ({ count: 0 }))
+
+vi.mock('./DiagnosticsJsonBlock', () => ({
+  DiagnosticsJsonBlock: ({ value }: { value: unknown }) => {
+    jsonBlockRenders.count += 1
+    return <pre>{Array.isArray(value) ? `Array(${value.length})` : 'value'}</pre>
+  },
+}))
 
 vi.mock('../../api/bffComputeDiagnostics', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bffComputeDiagnostics')>()
@@ -150,6 +159,27 @@ describe('DiagnosticsComputeTab', () => {
     render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
 
     expect(screen.getAllByTitle('Freeze is not armed').length).toBeGreaterThan(0)
+  })
+
+  it('a client stream event re-renders only the client streams panel', async () => {
+    render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByText('DAG nodes')).toBeInTheDocument()
+    })
+    const rendersBefore = jsonBlockRenders.count
+
+    act(() => {
+      useComputeDiagnosticsStore.getState().upsertClientStream({
+        streamId: 'fleet',
+        connectionKey: 'fleet:628580:8:1:1',
+        generation: 1,
+        lastEventAt: new Date().toISOString(),
+        lastEventType: 'ledger_updated',
+        lastConnectResult: null,
+      })
+    })
+
+    expect(jsonBlockRenders.count - rendersBefore).toBe(1)
   })
 
   it('copies pool queue JSON without injecting _nextSingleStep', async () => {

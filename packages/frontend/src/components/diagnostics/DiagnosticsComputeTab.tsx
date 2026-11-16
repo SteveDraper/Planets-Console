@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
 import {
   fetchComputeDiagnosticsSnapshot,
@@ -10,15 +10,8 @@ import {
 } from '../../api/bffComputeDiagnostics'
 import { analyticScopeKey } from '../../lib/analyticScopeKey'
 import { cn } from '../../lib/utils'
-import {
-  type ClientStreamLifecycle,
-  useComputeDiagnosticsStore,
-} from '../../stores/computeDiagnostics'
+import { useComputeDiagnosticsStore } from '../../stores/computeDiagnostics'
 import { DiagnosticsJsonBlock } from './DiagnosticsJsonBlock'
-
-type ComputeDiagnosticsUiSnapshot = ComputeDiagnosticsSnapshotResponse & {
-  clientStreams: ClientStreamLifecycle[]
-}
 
 type DiagnosticsComputeTabProps = {
   scope: AnalyticShellScope | null
@@ -66,7 +59,8 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
-function SectionPanel({
+/** One copyable JSON panel. Memoized: a panel re-renders only when its value changes. */
+const SectionPanel = memo(function SectionPanel({
   title,
   value,
   onCopy,
@@ -93,6 +87,15 @@ function SectionPanel({
       <DiagnosticsJsonBlock value={value} />
     </section>
   )
+})
+
+/**
+ * The client stream lifecycle rows, read straight from the store, so a stream
+ * event re-renders this panel only and not the rest of the Compute tab.
+ */
+function ClientStreamsPanel({ onCopy }: { onCopy: (text: string) => void }) {
+  const clientStreams = useComputeDiagnosticsStore((state) => state.clientStreams)
+  return <SectionPanel title="Client streams" value={clientStreams} onCopy={onCopy} />
 }
 
 const BOTTLENECK_CLASS_GUIDE = [
@@ -238,11 +241,10 @@ function nextStepSummary(preview: NextSingleStepPreview | undefined): string {
 }
 
 export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabProps) {
-  const clientStreams = useComputeDiagnosticsStore((state) => state.clientStreams)
   const freezeStatus = useComputeDiagnosticsStore((state) => state.freezeStatus)
   const setSnapshot = useComputeDiagnosticsStore((state) => state.setSnapshot)
   const setFreezeStatus = useComputeDiagnosticsStore((state) => state.setFreezeStatus)
-  const [snapshot, setLocalSnapshot] = useState<ComputeDiagnosticsUiSnapshot | null>(null)
+  const [snapshot, setLocalSnapshot] = useState<ComputeDiagnosticsSnapshotResponse | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [running, setRunning] = useState(false)
@@ -262,12 +264,8 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
 
   const applySnapshot = useCallback(
     (next: ComputeDiagnosticsSnapshotResponse) => {
-      const merged: ComputeDiagnosticsUiSnapshot = {
-        ...next,
-        clientStreams: useComputeDiagnosticsStore.getState().clientStreams,
-      }
-      setLocalSnapshot(merged)
-      setSnapshot(merged)
+      setLocalSnapshot(next)
+      setSnapshot(next)
       setFreezeStatus({
         shell: next.shell,
         freezeArmed: next.freezeArmed,
@@ -310,16 +308,6 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
     }
     setAllowlistInput(freezeStatus.allowlistedPlayerIds.join(','))
   }, [freezeStatus, scope, snapshot])
-
-  useEffect(() => {
-    setLocalSnapshot((current) =>
-      current == null ? current : { ...current, clientStreams }
-    )
-    const existing = useComputeDiagnosticsStore.getState().snapshot
-    if (existing != null) {
-      setSnapshot({ ...existing, clientStreams })
-    }
-  }, [clientStreams, setSnapshot])
 
   const runMutation = useCallback(
     async (action: () => Promise<ComputeDiagnosticsSnapshotResponse>) => {
@@ -643,7 +631,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
           <SectionPanel title="Completion history" value={snapshot.completionHistory} onCopy={onCopy} />
           <SectionPanel title="Recent failures" value={snapshot.recentFailures} onCopy={onCopy} />
           <SectionPanel title="Server streams" value={snapshot.serverStreams} onCopy={onCopy} />
-          <SectionPanel title="Client streams" value={snapshot.clientStreams} onCopy={onCopy} />
+          <ClientStreamsPanel onCopy={onCopy} />
         </div>
       )}
     </div>
