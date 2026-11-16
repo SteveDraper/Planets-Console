@@ -31,6 +31,7 @@ from api.exceptions import DiscardedWorkRefused
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.registry import AnalyticComputeRegistration
+    from api.compute.scope import ComputeScope
 
 # The exit each step outcome takes first once the step has finished.
 _STEP_EXIT_BY_OUTCOME: Mapping[StepOutcome, StepExit] = MappingProxyType(
@@ -111,6 +112,27 @@ class OrchestratorLifecycleMixin:
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
+    def _demote_unless_dependency_failed(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        *,
+        excluding: frozenset[ComputeScope] = frozenset(),
+    ) -> bool:
+        """Settle a requeued demotion onto ``waiting_deps``. Caller holds the lock.
+
+        Counts the discarded step, then fails the node instead when a
+        dependency outside ``excluding`` failed while it ran and that failure
+        cascades. Never promotes: the analytic has just asked the node to
+        wait. Returns whether the node is now ``waiting_deps``.
+        """
+        self._metrics.epoch_discards += 1
+        if self._fail_on_failed_dependency(node, excluding=excluding):
+            return False
+        node.error = None
+        node.state = "waiting_deps"
+        self._dequeue_ready(node.scope)
+        return True
+
     def _demote_to_waiting_deps(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """Demote a running node to ``waiting_deps`` without grafting dependencies.
 
@@ -119,21 +141,12 @@ class OrchestratorLifecycleMixin:
         for another scope to reach ``complete``. Grafting ``node.scope`` onto
         ``dependency_scopes`` would make ``_deps_complete`` require self-complete
         while the node is non-terminal, so force_fresh attach could never promote.
-
-        A dependency that failed while the node ran, and whose failure
-        cascades, fails the node instead. The node is never promoted here: the
-        analytic has just asked it to wait.
         """
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             self._reset_for_requeue(node)
-            self._metrics.epoch_discards += 1
-            if self._fail_on_failed_dependency(node):
-                return
-            node.error = None
-            node.state = "waiting_deps"
-            self._dequeue_ready(node.scope)
+            self._demote_unless_dependency_failed(node)
 
     def _recover_after_persist_deferred(
         self: ComputeOrchestrator,
@@ -169,7 +182,7 @@ class OrchestratorLifecycleMixin:
         failure of the recreation reaches the node as a dependency-terminal
         refresh. The exclusion holds only for this lock hold: until the
         submit replaces it, the failed recovery dependency is still the node
-        a later refresh sees. The node is never promoted here.
+        a later refresh sees.
         """
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
@@ -181,13 +194,9 @@ class OrchestratorLifecycleMixin:
                     *node.dependency_scopes,
                     dependency_scope,
                 )
-            self._metrics.epoch_discards += 1
             recreating = frozenset({dependency_scope}) if recovery.force_fresh else frozenset()
-            if self._fail_on_failed_dependency(node, excluding=recreating):
+            if not self._demote_unless_dependency_failed(node, excluding=recreating):
                 return
-            node.error = None
-            node.state = "waiting_deps"
-            self._dequeue_ready(node.scope)
             self._observers.notify_lifecycle(
                 "persist_deferred",
                 node.scope,
