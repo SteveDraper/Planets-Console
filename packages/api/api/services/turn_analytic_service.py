@@ -19,6 +19,7 @@ from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.batch_compute import ensure_table_map_compute
+from api.compute.diagnostics import ShellContextKey, get_compute_diagnostics_controller
 from api.compute.runtime import peek_compute_orchestrator
 from api.diagnostics import NOOP_DIAGNOSTICS, Diagnostics
 from api.errors import LoginCredentialsRequiredError, NotFoundError, UpstreamPlanetsError
@@ -109,6 +110,34 @@ class TurnAnalyticService:
                 return None
 
         return load_scoreboard_turn
+
+    def _open_table_stream_query_context(
+        self,
+        game_id: int,
+        perspective: int,
+        turn_number: int,
+        *,
+        username: str,
+    ) -> tuple[TurnInfo, AnalyticQueryContext]:
+        """Build a table stream's query context and make its shell the operator shell.
+
+        Every table-stream open notifies, whoever the caller is (the BFF for the
+        SPA, or a direct Core stream request), so compute diagnostics scope
+        freeze to that shell before the stream submits anything. A turn that
+        cannot be loaded raises before the notify, so it moves nothing. Other
+        entry points (table and map batches, agents, exports) do not notify:
+        they must not move the operator shell.
+        """
+        turn, query_ctx = self._build_analytic_query_context(
+            game_id,
+            perspective,
+            turn_number,
+            username=username,
+        )
+        get_compute_diagnostics_controller().on_shell_context(
+            ShellContextKey(game_id=game_id, perspective=perspective, turn=turn_number)
+        )
+        return turn, query_ctx
 
     def _build_analytic_query_context(
         self,
@@ -366,7 +395,7 @@ class TurnAnalyticService:
         )
         from api.analytics.scores import iter_scores_table_inference_stream
 
-        turn, query_ctx = self._build_analytic_query_context(
+        turn, query_ctx = self._open_table_stream_query_context(
             game_id,
             perspective,
             turn_number,
@@ -436,7 +465,7 @@ class TurnAnalyticService:
             get_fleet_table_stream_scheduler,
         )
 
-        turn, query_ctx = self._build_analytic_query_context(
+        turn, query_ctx = self._open_table_stream_query_context(
             game_id,
             perspective,
             turn_number,

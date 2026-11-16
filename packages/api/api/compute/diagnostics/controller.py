@@ -244,9 +244,7 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
     def set_freeze_armed(self, shell: ShellContextKey, *, freeze_armed: bool) -> None:
         """Arm or disarm freeze for the shell's game; rerun the gate only when that changes."""
         self.on_shell_context(shell)
-        was_armed = self._freeze_state.freeze_armed_for_game(shell.game_id)
-        self._freeze_state.set_freeze_armed(shell.game_id, freeze_armed=freeze_armed)
-        if was_armed != freeze_armed:
+        if self._freeze_state.set_freeze_armed(shell.game_id, freeze_armed=freeze_armed):
             self._redispatch_after_gate_change(shell.game_id)
 
     def set_allowlist(self, shell: ShellContextKey, player_ids: frozenset[int]) -> None:
@@ -306,26 +304,15 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
     def freeze_status(self, shell: ShellContextKey) -> tuple[bool, frozenset[int]]:
         """Return ``(freeze_armed, allowlisted_player_ids)`` after shell-context notify.
 
-        Lightweight alternative to :meth:`snapshot` for clients that only need freeze
-        control (stream hold). Notifies shell context so game/turn/perspective sticky
-        rules match stream narrowing and the full snapshot path.
+        Lightweight alternative to :meth:`snapshot` for clients that only need the
+        freeze controls. Notifies shell context first, so the sticky game, turn and
+        perspective rules match the full snapshot path.
         """
         self.on_shell_context(shell)
         freeze_armed = self._freeze_state.freeze_armed_for_game(shell.game_id)
         if not freeze_armed:
             return False, frozenset()
         return True, self._freeze_state.allowlisted_player_ids(shell)
-
-    def stream_allowlisted_player_ids(self, shell: ShellContextKey) -> frozenset[int] | None:
-        """When freeze is armed, return allowlisted players for stream narrowing.
-
-        Notifies shell context first so a stream for a different game disarms the
-        previous game's freeze even when diagnostics endpoints are not hit.
-        """
-        freeze_armed, allowlisted = self.freeze_status(shell)
-        if not freeze_armed:
-            return None
-        return allowlisted
 
     def reset_for_tests(self) -> None:
         with self._lock:
@@ -511,7 +498,7 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         """Return whether automatic dispatch/dequeue is gated for the shell's game.
 
         While freeze is armed, every player in diagnostic scope stays frozen -- the
-        allowlist is a focus set for single-step and stream narrowing, not free-run.
+        allowlist is a focus set for single-step and Run, not free-run.
         """
         return self._freeze_state.freeze_armed_for_game(shell.game_id)
 

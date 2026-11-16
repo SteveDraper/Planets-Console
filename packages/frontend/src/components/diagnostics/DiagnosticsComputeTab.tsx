@@ -40,10 +40,6 @@ const RUN_STALL_LIMIT = 3
 
 const RUN_POLL_MS = 50
 
-/** After Apply allowlist, poll briefly for stream-scheduled focus work. */
-const ALLOWLIST_SETTLE_MS = 50
-const ALLOWLIST_SETTLE_ATTEMPTS = 8
-
 function nextStepFingerprint(snapshot: ComputeDiagnosticsSnapshotResponse): string | null {
   const target = snapshot.nextSingleStep.target
   if (target == null) {
@@ -319,9 +315,15 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
   const [allowlistInput, setAllowlistInput] = useState('')
   const runCancelRef = useRef(false)
 
+  const freezeStatusForScope =
+    freezeStatus != null &&
+    scope != null &&
+    analyticScopeKey(freezeStatus.shell) === analyticScopeKey(scope)
+      ? freezeStatus
+      : null
   const freezeArmed =
     snapshot?.freezeArmed === true ||
-    (snapshot == null && freezeStatus?.freezeArmed === true)
+    (snapshot == null && freezeStatusForScope?.freezeArmed === true)
   const controlsBusy = pending || running
 
   const applySnapshot = useCallback(
@@ -412,18 +414,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
       setPending(true)
       setLoadError(null)
       try {
-        let current = await putComputeDiagnosticsAllowlist(scope, playerIds)
-        applySnapshot(current)
-        // Allowlist narrows table streams; reconnect/scheduling often lands after the
-        // PUT snapshot. Refresh until focus work appears or settle attempts expire.
-        for (let attempt = 0; attempt < ALLOWLIST_SETTLE_ATTEMPTS; attempt++) {
-          if (snapshotHasNextStep(current) || snapshotHasPendingPoolWork(current)) {
-            break
-          }
-          await sleep(ALLOWLIST_SETTLE_MS)
-          current = await fetchComputeDiagnosticsSnapshot(scope)
-          applySnapshot(current)
-        }
+        applySnapshot(await putComputeDiagnosticsAllowlist(scope, playerIds))
       } catch (error: unknown) {
         setLoadError(error instanceof Error ? error.message : String(error))
       } finally {

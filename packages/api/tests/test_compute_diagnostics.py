@@ -2149,20 +2149,20 @@ def test_start_frozen_arms_on_orchestrator_bind(sample_turn):
     assert orchestrator.nodes[scope].state == "ready"
 
 
-def test_stream_allowlist_disarms_freeze_on_game_change_without_diagnostics_endpoint():
-    """Table-stream narrowing must disarm the previous game even if Compute tab is closed."""
+def test_a_shell_notify_disarms_freeze_on_game_change_without_diagnostics_endpoint():
+    """A table-stream open's notify disarms the previous game even if the Compute tab is closed."""
     controller = get_compute_diagnostics_controller()
     shell_a = ShellContextKey(game_id=1, perspective=1, turn=8)
     shell_b = ShellContextKey(game_id=2, perspective=1, turn=8)
     controller.set_freeze_armed(shell_a, freeze_armed=True)
     assert controller._freeze_state.freeze_armed_for_game(1) is True
 
-    assert controller.stream_allowlisted_player_ids(shell_b) is None
+    controller.on_shell_context(shell_b)
     assert controller._freeze_state.freeze_armed_for_game(1) is False
     assert controller._freeze_state.freeze_armed_for_game(2) is False
 
 
-def test_stream_allowlist_game_change_redispatches_ready_node(sample_turn):
+def test_a_shell_notify_game_change_redispatches_ready_node(sample_turn):
     controller, orchestrator, shell, scope, pool_submissions, ctx = _bound_pool_orchestrator(
         sample_turn
     )
@@ -2177,7 +2177,7 @@ def test_stream_allowlist_game_change_redispatches_ready_node(sample_turn):
         perspective=shell.perspective,
         turn=shell.turn,
     )
-    assert controller.stream_allowlisted_player_ids(other_shell) is None
+    controller.on_shell_context(other_shell)
     assert controller._freeze_state.freeze_armed_for_game(shell.game_id) is False
     assert pool_submissions == [scope]
     assert orchestrator.nodes[scope].state == "running"
@@ -2198,7 +2198,7 @@ def test_sticky_freeze_stays_armed_across_turn_change_and_resets_allowlist():
     snap_9 = controller.snapshot(shell_turn_9)
     assert snap_9.freeze_armed is True
     assert snap_9.allowlisted_player_ids == ()
-    assert controller.stream_allowlisted_player_ids(shell_turn_9) == frozenset()
+    assert controller.freeze_status(shell_turn_9) == (True, frozenset())
 
 
 def test_sticky_freeze_stays_armed_across_perspective_change_and_resets_allowlist():
@@ -2214,7 +2214,7 @@ def test_sticky_freeze_stays_armed_across_perspective_change_and_resets_allowlis
     snap_p2 = controller.snapshot(shell_p2)
     assert snap_p2.freeze_armed is True
     assert snap_p2.allowlisted_player_ids == ()
-    assert controller.stream_allowlisted_player_ids(shell_p2) == frozenset()
+    assert controller.freeze_status(shell_p2) == (True, frozenset())
 
 
 def test_freeze_allows_work_outside_diagnostic_scope(sample_turn):

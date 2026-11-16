@@ -26,8 +26,8 @@ class FreezeGameState:
 class FreezeShellState:
     """Per-shell focus player allowlist; resets on each context change.
 
-    The allowlist names which players are in play for single-step and stream
-    narrowing. It does not free-run those players while freeze is armed.
+    The allowlist names which players single-step and Run may release. It does
+    not free-run those players while freeze is armed.
     """
 
     allowlisted_player_ids: set[int] = field(default_factory=set)
@@ -45,14 +45,17 @@ class ComputeDiagnosticsFreezeState:
         with self._lock:
             return self._game_state.get(game_id, FreezeGameState()).freeze_armed
 
-    def set_freeze_armed(self, game_id: int, *, freeze_armed: bool) -> None:
+    def set_freeze_armed(self, game_id: int, *, freeze_armed: bool) -> bool:
+        """Set the game's freeze-armed flag. Return whether it changed, read under the same lock."""
         with self._lock:
             state = self._game_state.setdefault(game_id, FreezeGameState())
+            changed = state.freeze_armed != freeze_armed
             state.freeze_armed = freeze_armed
             if not freeze_armed:
                 self._shell_state = {
                     key: value for key, value in self._shell_state.items() if key.game_id != game_id
                 }
+            return changed
 
     def arm_start_frozen_if_needed(self, game_id: int) -> bool:
         """Arm freeze for a never-seen game. Return whether freeze was newly armed.

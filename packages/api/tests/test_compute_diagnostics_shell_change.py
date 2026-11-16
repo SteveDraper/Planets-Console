@@ -110,3 +110,11 @@ def test_disarming_redispatches_the_game(redispatched_games):
     controller.set_freeze_armed(SHELL, freeze_armed=False)
 
     assert redispatched_games == [GAME_ID]
+
+
+def test_the_freeze_state_reports_whether_arming_changed_it():
+    freeze_state = get_compute_diagnostics_controller()._freeze_state
+
+    assert freeze_state.set_freeze_armed(GAME_ID, freeze_armed=True) is True
+    assert freeze_state.set_freeze_armed(GAME_ID, freeze_armed=True) is False
+    assert freeze_state.set_freeze_armed(GAME_ID, freeze_armed=False) is True

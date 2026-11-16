@@ -129,6 +129,21 @@ describe('DiagnosticsComputeTab', () => {
     )
   })
 
+  it('does not treat a stale freeze status for another shell as armed', async () => {
+    useComputeDiagnosticsStore.setState({
+      freezeStatus: {
+        shell: { ...SCOPE, gameId: '999001' },
+        freezeArmed: true,
+        allowlistedPlayerIds: [],
+      },
+    })
+    vi.mocked(fetchComputeDiagnosticsSnapshot).mockImplementation(() => new Promise(() => {}))
+
+    render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
+
+    expect(screen.getAllByTitle('Freeze is not armed').length).toBeGreaterThan(0)
+  })
+
   it('copies pool queue JSON without injecting _nextSingleStep', async () => {
     const user = userEvent.setup()
     const onCopy = vi.fn()
@@ -400,15 +415,11 @@ describe('DiagnosticsComputeTab', () => {
     expect(fetchComputeDiagnosticsSnapshot).toHaveBeenCalledTimes(2)
   })
 
-  it('Apply allowlist refreshes until focus work appears after stream settle', async () => {
+  it('Apply allowlist shows the snapshot the PUT returns, without polling', async () => {
     const user = userEvent.setup()
-    const afterPut = idleSnapshot({ allowlistedPlayerIds: [3] })
-    const afterSettle = snapshotFixture({ allowlistedPlayerIds: [3] })
+    const afterPut = snapshotFixture({ allowlistedPlayerIds: [3] })
     vi.mocked(putComputeDiagnosticsAllowlist).mockResolvedValueOnce(afterPut)
-    vi.mocked(fetchComputeDiagnosticsSnapshot)
-      .mockResolvedValueOnce(idleSnapshot())
-      .mockResolvedValueOnce(afterPut)
-      .mockResolvedValueOnce(afterSettle)
+    vi.mocked(fetchComputeDiagnosticsSnapshot).mockResolvedValueOnce(idleSnapshot())
 
     render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
 
@@ -422,14 +433,12 @@ describe('DiagnosticsComputeTab', () => {
     await user.click(screen.getByText('Apply allowlist'))
 
     await waitFor(() => {
-      expect(putComputeDiagnosticsAllowlist).toHaveBeenCalledWith(SCOPE, [3])
-    })
-    await waitFor(() => {
       expect(screen.getByTestId('next-single-step-preview').textContent).toContain(
         NEXT_SCOPE_KEY
       )
     })
-    expect(vi.mocked(fetchComputeDiagnosticsSnapshot).mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(putComputeDiagnosticsAllowlist).toHaveBeenCalledWith(SCOPE, [3])
+    expect(fetchComputeDiagnosticsSnapshot).toHaveBeenCalledTimes(1)
   })
 })
 describe('snapshotHasPendingPoolWork', () => {

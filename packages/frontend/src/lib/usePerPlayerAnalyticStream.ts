@@ -2,12 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AnalyticShellScope } from '../api/bff'
 import { analyticScopeKey } from './analyticScopeKey'
 import type { AnalyticTableStreamConnectResult } from './analyticTableStreamConnect'
-import {
-  computeFreezeStreamHold,
-  freezeStreamHoldKey,
-  hasPendingPlayersForStream,
-  streamSubscriptionPlayerIds,
-} from './computeFreezeStreamHold'
 import { errorDetailFromUnknown } from './queryRetry'
 import { playerIdsFromStableKey } from './stablePlayerIdsKey'
 import {
@@ -106,24 +100,11 @@ export function usePerPlayerAnalyticStream<
 ): UsePerPlayerAnalyticStreamResult<TPublished> {
   const { streamId, scope, enabled, playerIdsKey, policy } = options
 
-  const diagnosticsEnabled = useComputeDiagnosticsStore((state) => state.enabled)
-  const freezeStatus = useComputeDiagnosticsStore((state) => state.freezeStatus)
-  const freezeHold =
-    scope != null
-      ? computeFreezeStreamHold(scope, {
-          enabled: diagnosticsEnabled,
-          freezeStatus,
-        })
-      : { holding: false, expectedPlayerIds: null }
-  const freezeHoldKey = freezeStreamHoldKey(freezeHold)
-
   const scopeKey = scope != null ? analyticScopeKey(scope) : null
   const effectivePlayerIdsKey = enabled && playerIdsKey.length > 0 ? playerIdsKey : ''
   const connectionKey =
     enabled && scopeKey != null && effectivePlayerIdsKey.length > 0
-      ? freezeHoldKey.length > 0
-        ? `${streamId}:${scopeKey}:${effectivePlayerIdsKey}:${freezeHoldKey}`
-        : `${streamId}:${scopeKey}:${effectivePlayerIdsKey}`
+      ? `${streamId}:${scopeKey}:${effectivePlayerIdsKey}`
       : null
 
   const [publishedByPlayerId, setPublishedByPlayerId] = useState<Map<number, TPublished>>(
@@ -134,8 +115,6 @@ export function usePerPlayerAnalyticStream<
   const streamGenerationRef = useRef(0)
   const scopeRef = useRef(scope)
   scopeRef.current = scope
-  const freezeHoldRef = useRef(freezeHold)
-  freezeHoldRef.current = freezeHold
   const streamAbortControllerRef = useRef<AbortController | null>(null)
   const policyRef = useRef(policy)
   policyRef.current = policy
@@ -212,8 +191,6 @@ export function usePerPlayerAnalyticStream<
     const isNewConnection = connectionKeyRef.current !== connectionKey
     connectionKeyRef.current = connectionKey
     const playerIds = playerIdsFromStableKey(effectivePlayerIdsKey)
-    const hold = freezeHoldRef.current
-    const subscribedPlayerIds = streamSubscriptionPlayerIds(playerIds, hold)
 
     if (isNewConnection) {
       streamGenerationRef.current += 1
@@ -256,25 +233,8 @@ export function usePerPlayerAnalyticStream<
       }
     }
 
-    // Freeze + empty allowlist: server narrows to no subscriptions; keep rows pending.
-    if (hold.holding && subscribedPlayerIds.length === 0) {
-      recordClientStreamLifecycle({
-        streamId,
-        connectionKey,
-        generation: streamGenerationRef.current,
-        lastEventAt: new Date().toISOString(),
-        lastEventType: null,
-        lastConnectResult: 'freeze_held',
-      })
-      return () => {
-        controller.abort()
-        streamAbortControllerRef.current = null
-        policyRef.current.onConnectionTeardown?.()
-      }
-    }
-
     void activePolicy
-      .connectUntilComplete(activeScope, subscribedPlayerIds, {
+      .connectUntilComplete(activeScope, playerIds, {
         signal: controller.signal,
         onEvent: (event) => {
           recordClientStreamLifecycle({
@@ -288,14 +248,10 @@ export function usePerPlayerAnalyticStream<
           handleStreamEventRef.current(event)
         },
         hasPending: () =>
-          hasPendingPlayersForStream(
-            playerIds,
-            (playerId) => {
-              const state = refStateByPlayerId.current.get(playerId)
-              return state != null && activePolicy.isRefStateComplete(state)
-            },
-            freezeHoldRef.current
-          ),
+          playerIds.some((playerId) => {
+            const state = refStateByPlayerId.current.get(playerId)
+            return state == null || !activePolicy.isRefStateComplete(state)
+          }),
       })
       .then((result) => {
         if (controller.signal.aborted) {
@@ -310,11 +266,7 @@ export function usePerPlayerAnalyticStream<
           lastConnectResult: result,
         })
         if (result === 'incomplete_exhausted') {
-          // Only subscribed players can fail; held-out rows stay pending.
-          markIncompleteFailed(
-            activePolicy.incompleteExhaustedMessage,
-            subscribedPlayerIds
-          )
+          markIncompleteFailed(activePolicy.incompleteExhaustedMessage, playerIds)
         }
       })
       .catch((error) => {
@@ -330,7 +282,7 @@ export function usePerPlayerAnalyticStream<
           lastEventType: 'error',
           lastConnectResult: summary,
         })
-        markIncompleteFailed(summary, subscribedPlayerIds)
+        markIncompleteFailed(summary, playerIds)
       })
 
     return () => {

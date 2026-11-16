@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from api.analytics.military_score_inference.inference_scheduler import get_inference_row_scheduler
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.compute.diagnostics import (
     ShellContextKey,
     get_compute_diagnostics_controller,
@@ -27,8 +29,10 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.compute_pool_test_helpers import QUEUED_ONLY_STEP_WORK
+from tests.off_mode_catch_up_helpers import context_at_turn, store_generation, write_evidence_mark
 from tests.on_walk_helpers import fleet_persistence
-from tests.walk_band_helpers import SHELL_TURN, Walk, end_shell, no_live_streams
+from tests.scores_exports_helpers import first_player_id
+from tests.walk_band_helpers import SHELL_TURN, WALK_TURNS, Walk, end_shell, no_live_streams
 from tests.walk_stop_helpers import assert_aborted, dropped_item_details, plant_node, walk_node
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
@@ -225,3 +229,74 @@ def test_a_hop_above_the_operator_shell_turn_runs_while_freeze_is_armed(walk):
     walk.complete_picked(walk.scope(frontier - 1))
 
     assert walk.pick()[0] == walk.scope(frontier)
+
+
+# --- A stale recompute is ordinary work under freeze ---
+
+
+def test_with_the_setting_on_the_walk_is_planned_and_held_ready(walk):
+    controller, shell = _diagnose(walk)
+    controller.set_freeze_armed(shell, freeze_armed=True)
+
+    walk.submit_shell()
+
+    assert {turn: walk_node(walk, turn).state for turn in WALK_TURNS} == {
+        BASELINE_TURN: "ready",
+        **dict.fromkeys(WALK_TURNS[1:], "waiting_deps"),
+    }
+    assert walk.pool.take_next_item_for_tests() is None
+    assert (
+        fleet_persistence(walk.ctx)
+        .evidence_mark(walk.ctx.game_id, walk.ctx.perspective, walk.player_id)
+        .applies_from_turn
+        == BASELINE_TURN
+    )
+
+
+def test_with_the_setting_off_the_stale_open_catch_up_is_planned_and_held_ready(sample_turn):
+    host, ctx = context_at_turn(sample_turn, SHELL_TURN + 2)
+    off_mode = Walk(ctx, first_player_id(host))
+    persistence = fleet_persistence(ctx)
+    keys = (ctx.game_id, ctx.perspective)
+    write_evidence_mark(
+        persistence, *keys, off_mode.player_id, generation=2, applies_from=SHELL_TURN - 2
+    )
+    store_generation(persistence, *keys, SHELL_TURN - 2, off_mode.player_id, 2, ship_id=1)
+    store_generation(persistence, *keys, SHELL_TURN - 1, off_mode.player_id, 1, ship_id=2)
+    controller, shell = _diagnose(off_mode)
+    controller.set_freeze_armed(shell, freeze_armed=True)
+
+    off_mode.submit_shell()
+
+    assert walk_node(off_mode, SHELL_TURN - 1).state == "ready"
+    assert walk_node(off_mode, SHELL_TURN).state == "waiting_deps"
+    assert off_mode.scope(SHELL_TURN - 2) not in off_mode.orchestrator.nodes
+    assert off_mode.pool.take_next_item_for_tests() is None
+
+
+def test_the_replacement_walk_after_a_bump_is_held_ready(walk):
+    controller, shell = _diagnose(walk)
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    walk.submit_shell()
+    aborted_hop = walk_node(walk, BASELINE_TURN)
+
+    _bump(walk, BASELINE_TURN + 1)
+    walk.submit_shell()
+
+    replacement_hop = walk_node(walk, BASELINE_TURN)
+    assert replacement_hop is not aborted_hop
+    assert replacement_hop.state == "ready"
+    assert walk.pool.take_next_item_for_tests() is None
+
+
+def test_arming_and_disarming_freeze_leaves_inference_global_pause_alone(walk):
+    controller, shell = _diagnose(walk)
+    scheduler = get_inference_row_scheduler()
+    scores_scope = InferenceStreamScope(walk.ctx.game_id, walk.ctx.perspective, SHELL_TURN)
+    before = scheduler.global_pause_status(scores_scope)
+
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    while_frozen = scheduler.global_pause_status(scores_scope)
+    controller.set_freeze_armed(shell, freeze_armed=False)
+
+    assert before == while_frozen == scheduler.global_pause_status(scores_scope)
