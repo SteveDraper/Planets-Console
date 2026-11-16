@@ -664,19 +664,37 @@ class ComputeOrchestrator(
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
 
-    def _fail_on_failed_dependency(self, node: ComputeNodeRun) -> bool:
+    def _fail_on_failed_dependency(
+        self,
+        node: ComputeNodeRun,
+        *,
+        excluding: frozenset[ComputeScope] = frozenset(),
+    ) -> bool:
         """Fail ``node`` with a dependency's error when that failure cascades.
 
-        Returns whether the node was failed. Caller holds the lock.
+        Dependencies in ``excluding`` are not checked. Returns whether the
+        node was failed. Caller holds the lock.
         """
-        failed_dependency_error = self._failed_dependency_error(node)
+        failed_dependency_error = self._failed_dependency_error(node, excluding=excluding)
         if failed_dependency_error is None:
             return False
         self._fail_node(node, failed_dependency_error)
         return True
 
-    def _failed_dependency_error(self, node: ComputeNodeRun) -> BaseException | None:
+    def _failed_dependency_error(
+        self,
+        node: ComputeNodeRun,
+        *,
+        excluding: frozenset[ComputeScope],
+    ) -> BaseException | None:
+        """The error of a failed dependency of ``node`` that cascades to it, if any.
+
+        An abort-failed dependency (``ComputeScopeAbortedError``) does not
+        cascade. Dependencies in ``excluding`` are skipped.
+        """
         for dependency_scope in node.dependency_scopes:
+            if dependency_scope in excluding:
+                continue
             dependency = self._nodes.get(dependency_scope)
             if dependency is None or dependency.state != "failed":
                 continue

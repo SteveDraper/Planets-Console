@@ -154,7 +154,7 @@ Every `run_step` result wire carries an explicit **step outcome** the orchestrat
 | **`continue`** | Increment `step_index`; re-queue the same `step_kind` for the same node |
 | **`persist`** | After epoch re-check, call analytic `PersistencePolicy.persist`; when `persist_then_continue` is set, increment `step_index` instead of completing (fleet observation → finalization). Otherwise mark node `complete`. |
 | **`complete`** | Mark node `complete` **without** calling `persist` |
-| **`waiting_deps`** | Demote node to `waiting_deps` until a dependency closes or `force_fresh` refresh (scores soft defer; same recovery shape as persist-deferred). Optional `result_wire` payload. |
+| **`waiting_deps`** | Demote node to `waiting_deps` until a dependency closes or `force_fresh` refresh (scores soft defer; same recovery shape as persist-deferred). A dependency that failed while the step ran, and whose failure cascades, fails the node instead (see [Readiness on re-entry](#node-lifecycle-and-singleflight)). Optional `result_wire` payload. |
 | **`park`** | (Generic orchestrator machinery; scores production path retired.) Demote node to `parked` until an explicit `force_fresh` wake. |
 
 Analytics own **what** `persist` writes and **how readers** gate on terminal quality. Examples:
@@ -233,10 +233,11 @@ Fleet ledger persist notifications must **not** use `id(AnalyticQueryContext)` a
 waiting_deps → ready → running → complete | failed
                     ↘ attach_inflight (waiter; no pool worker)
 running → ready | waiting_deps | failed   (requeue: epoch retry, continue)
+running → waiting_deps | failed          (soft defer, persist-deferred: never promoted)
 running → parked   (soft park; wake only on force_fresh → ready | waiting_deps | failed)
 ```
 
-**Readiness on re-entry.** A `running` or `parked` node takes no dependency-terminal refresh, so a dependency can fail without reaching it. Every path that returns such a node to dispatch (epoch retry, `continue`, parked wake) resolves its readiness (`_resolve_readiness`) instead of writing the next state: a dependency failure that cascades fails the node, exactly as it would a waiting node (an abort-failed dependency, `ComputeScopeAbortedError`, leaves it `waiting_deps`); otherwise it is `ready` when every dependency is complete, else `waiting_deps`. Dependency sweeps (`_refresh_node_readiness`) apply the same resolution to `waiting_deps` and `ready` nodes only. The dispatch pick refreshes a `ready` node whose dependencies are incomplete rather than demoting it by hand, as a backstop for that invariant.
+**Readiness on re-entry.** A `running` or `parked` node takes no dependency-terminal refresh, so a dependency can fail without reaching it. Every path that returns such a node to dispatch (epoch retry, `continue`, parked wake) resolves its readiness (`_resolve_readiness`) instead of writing the next state: a dependency failure that cascades fails the node, exactly as it would a waiting node (an abort-failed dependency, `ComputeScopeAbortedError`, leaves it `waiting_deps`); otherwise it is `ready` when every dependency is complete, else `waiting_deps`. Dependency sweeps (`_refresh_node_readiness`) apply the same resolution to `waiting_deps` and `ready` nodes only. The dispatch pick refreshes a `ready` node whose dependencies are incomplete rather than demoting it by hand, as a backstop for that invariant. The two demotions, soft defer and persist-deferred, apply only the cascade (`_fail_on_failed_dependency`) and otherwise write `waiting_deps`: they must not promote the node in the hold where the analytic asked it to wait. Persist-deferred grafts its recovery dependency before the check, and leaves that dependency out of the check when it force_freshes it, since the analytic asked for it to be recreated. That exclusion lasts only for the demotion's lock hold; until the post-lock submit replaces the dependency, a refresh that reaches the node (for example the plan refresh of an unrelated submission) still sees the old failure. A cascaded persist-deferred node records no `persist_deferred` event and queues no dependency submit.
 
 | State | Meaning |
 |-------|---------|
@@ -453,7 +454,7 @@ Same semantics as former gap-fill coordinator epoch abort ([#233](https://github
 
 | Owner | Responsibility |
 |-------|----------------|
-| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome; handle analytic-agnostic `PersistDeferredError` (demote to `waiting_deps` + optional dependency `force_fresh`; not soft `parked`) |
+| **Orchestrator** | When to compute; singleflight; epoch gates; invoke `persist` only on `persist` outcome; handle analytic-agnostic `PersistDeferredError` (demote to `waiting_deps` + optional dependency `force_fresh`, or fail on a cascading failed dependency; not soft `parked`) |
 | **Analytic** (`PersistencePolicy` on registration) | Record shape; write gates; merge (e.g. homeworld user-asserted); invalidation rules; terminal-quality metadata on stored artifacts; map write-gate refuses to `PersistDeferredError` + `PersistDependencyRecovery` when rematerialization must wait on a dependency |
 
 Storage paths remain per [ADR 0002](adr/0002-analytic-persistence.md). Orchestrator is cache **coordinator**, not cache **schema** owner.

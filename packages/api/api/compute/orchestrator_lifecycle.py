@@ -119,15 +119,21 @@ class OrchestratorLifecycleMixin:
         for another scope to reach ``complete``. Grafting ``node.scope`` onto
         ``dependency_scopes`` would make ``_deps_complete`` require self-complete
         while the node is non-terminal, so force_fresh attach could never promote.
+
+        A dependency that failed while the node ran, and whose failure
+        cascades, fails the node instead. The node is never promoted here: the
+        analytic has just asked it to wait.
         """
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             self._reset_for_requeue(node)
+            self._metrics.epoch_discards += 1
+            if self._fail_on_failed_dependency(node):
+                return
             node.error = None
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
-            self._metrics.epoch_discards += 1
 
     def _recover_after_persist_deferred(
         self: ComputeOrchestrator,
@@ -155,21 +161,33 @@ class OrchestratorLifecycleMixin:
         requester, so it plans nothing once that execution has ended (aborted
         or replaced) before the plan would be registered. The start-or-requeue
         gate runs first, so a node it ends queues no dependency submit.
+
+        After the graft, a failed dependency whose failure cascades fails the
+        node, with no ``persist_deferred`` record and no dependency submit.
+        The recovery dependency is left out of that check when it is
+        force_freshed, since the analytic asked for it to be recreated; a
+        failure of the recreation reaches the node as a dependency-terminal
+        refresh. The exclusion holds only for this lock hold: until the
+        submit replaces it, the failed recovery dependency is still the node
+        a later refresh sees. The node is never promoted here.
         """
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             prior_step_index = self._reset_for_requeue(node)
-            node.error = None
             dependency_scope = recovery.dependency_scope
             if dependency_scope != node.scope and dependency_scope not in node.dependency_scopes:
                 node.dependency_scopes = (
                     *node.dependency_scopes,
                     dependency_scope,
                 )
+            self._metrics.epoch_discards += 1
+            recreating = frozenset({dependency_scope}) if recovery.force_fresh else frozenset()
+            if self._fail_on_failed_dependency(node, excluding=recreating):
+                return
+            node.error = None
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
-            self._metrics.epoch_discards += 1
             self._observers.notify_lifecycle(
                 "persist_deferred",
                 node.scope,
