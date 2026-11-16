@@ -344,7 +344,7 @@ class OrchestratorObservers:
     ) -> None:
         """Schedule step-complete listeners with the finished ``step_index``.
 
-        ``step_index`` must be captured before ``_after_step_success`` continues the
+        ``step_index`` must be captured before ``_apply_step_result`` continues the
         node (which advances ``node.step_index`` before post-lock drain).
         """
         listeners = tuple(self._step_complete_listeners)

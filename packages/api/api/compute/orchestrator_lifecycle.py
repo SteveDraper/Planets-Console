@@ -17,9 +17,15 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.profile import StepSurface
 from api.compute.running_step import StepExit
 from api.compute.scope import format_compute_scope_key
-from api.compute.wire import StepOutcome, coerce_step_result
+from api.compute.wire import (
+    MalformedStepResultError,
+    StepOutcome,
+    StepResult,
+    coerce_step_result,
+)
 from api.exceptions import DiscardedWorkRefused
 
 if TYPE_CHECKING:
@@ -245,21 +251,50 @@ class OrchestratorLifecycleMixin:
         others = (scope for scope in self._nodes if scope != node.scope)
         return node.scope in needed_scopes(self._nodes, others)
 
-    def _after_step_success(
+    def _finish_step(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
+        step_kind: str,
+        *,
+        step_index: int,
+        surface: StepSurface,
         result_wire: object | None,
+        failure: BaseException | None,
     ) -> None:
-        """Apply a finished step's result. Caller holds the lock.
+        """Apply a finished pool or inline step to its running execution. Caller holds the lock.
 
-        An epoch-stale step is re-queued first, whatever it returned, through
-        the start-or-requeue gate. Otherwise the outcome names the exit the
-        step takes.
+        A step that raised fails the node. An epoch-stale step that returned is
+        re-queued, whatever it returned, through the start-or-requeue gate.
+        Otherwise its result wire is read, and a malformed one fails the node
+        with :class:`MalformedStepResultError` exactly as a raising step does.
         """
-        if self._is_epoch_stale(node):
+        step_result: StepResult | None = None
+        is_epoch_stale = failure is None and self._is_epoch_stale(node)
+        if failure is None and not is_epoch_stale:
+            try:
+                step_result = coerce_step_result(result_wire)
+            except MalformedStepResultError as exc:
+                failure = exc
+        self._observers.notify_step_complete(
+            node,
+            step_kind,
+            step_index=step_index,
+            surface=surface,
+            terminal_state="failed" if failure is not None else "success",
+        )
+        if failure is not None:
+            self._fail_node(node, failure)
+        elif step_result is None:
             self._retry_step_after_epoch_bump(node)
-            return
-        step_result = coerce_step_result(result_wire)
+        else:
+            self._apply_step_result(node, step_result)
+
+    def _apply_step_result(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        step_result: StepResult,
+    ) -> None:
+        """Take the exit a current step's outcome names. Caller holds the lock."""
         if self._refuse_step_exit(node, _STEP_EXIT_BY_OUTCOME[step_result.outcome]):
             return
 
@@ -480,7 +515,7 @@ class OrchestratorLifecycleMixin:
         Soft park does **not** complete the node (dependents stay blocked), but still
         publishes an immutable outcome snapshot so scores can reattach empty stream
         delivery without unlocking same-turn fleet. Its one caller,
-        ``_after_step_success``, has already put the ``park`` outcome's
+        ``_apply_step_result``, has already put the ``park`` outcome's
         ``REQUEUE`` exit through the start-or-requeue gate in this lock hold.
         """
         if node.state != "running":

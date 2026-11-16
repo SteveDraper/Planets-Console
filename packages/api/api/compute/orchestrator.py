@@ -383,29 +383,17 @@ class ComputeOrchestrator(
                 had_error=error is not None,
             )
             if node is not None:
-                finished_step_kind = self._current_step_spec(
+                self._finish_step(
                     node,
-                    self._compute_registry[node.scope.analytic_id],
-                ).step_kind
-                finished_step_index = node.step_index
-                if error is not None:
-                    self._observers.notify_step_complete(
+                    self._current_step_spec(
                         node,
-                        finished_step_kind,
-                        step_index=finished_step_index,
-                        surface="pool",
-                        terminal_state="failed",
-                    )
-                    self._fail_node(node, error)
-                else:
-                    self._observers.notify_step_complete(
-                        node,
-                        finished_step_kind,
-                        step_index=finished_step_index,
-                        surface="pool",
-                        terminal_state="success",
-                    )
-                    self._after_step_success(node, result_wire)
+                        self._compute_registry[node.scope.analytic_id],
+                    ).step_kind,
+                    step_index=node.step_index,
+                    surface="pool",
+                    result_wire=result_wire,
+                    failure=error,
+                )
         self._observers.drain_post_lock_callbacks()
 
     def _running_execution_or_record_ignored(

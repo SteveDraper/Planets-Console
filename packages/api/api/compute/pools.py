@@ -592,7 +592,9 @@ class ComputeWorkerPool:
         goes to the executor for ``work.backend`` and completes via a done
         callback, so a stuck remote future cannot pin a pool worker thread (and
         stall the rest of the queue under freeze single-step). The done callback
-        then owns the item's finish; every other path finishes it here.
+        then owns the item's finish; every other path finishes it here. A
+        failure to get the executor or to submit to it is reported as the
+        step's error, as a failed future's is (``_submit_remote_step``).
 
         Frozen processes and ``api.remap_interpreter_backend_to_thread`` remap
         ``interpreter`` to ``thread`` when the orchestrator builds the work:
@@ -613,9 +615,11 @@ class ComputeWorkerPool:
             if isinstance(work, ThreadStepWork):
                 self._run_thread_step(orchestrator, item, work)
                 return
-            with self._condition:
-                executor = self._remote_executor_locked(work.backend)
-            future = executor.submit(work.run_step, work.job_wire)
+            try:
+                future = self._submit_remote_step(work)
+            except BaseException as exc:
+                self._report_item_outcome(item, result_wire=None, error=exc)
+                return
             self._register_remote_future(picked, work.backend, future)
             future.add_done_callback(
                 lambda completed, pool_item=item: self._on_remote_future_done(
@@ -734,20 +738,71 @@ class ComputeWorkerPool:
             )
         return self._process_executor
 
+    def _submit_remote_step(self, work: RemoteStepWork) -> Future[object]:
+        """Submit ``work`` to the executor for its backend and return the future.
+
+        A ``RuntimeError`` from ``submit`` means the executor can take no more
+        work: it is broken (``BrokenExecutor``, e.g. after a worker died) or
+        shut down. That executor is dropped and shut down, so the next step on
+        the backend starts a new one. The error is re-raised for the caller to
+        report as this step's error.
+        """
+        with self._condition:
+            executor = self._remote_executor_locked(work.backend)
+        try:
+            return executor.submit(work.run_step, work.job_wire)
+        except RuntimeError:
+            self._discard_remote_executor(work.backend, executor)
+            raise
+
+    def _discard_remote_executor(
+        self,
+        backend: RemoteComputeBackend,
+        executor: InterpreterPoolExecutor | ProcessPoolExecutor,
+    ) -> None:
+        """Drop ``executor`` from the cache, if still cached, and shut it down outside the lock.
+
+        Another worker may already have replaced it, in which case the new
+        executor stays and this one is left to the worker that dropped it.
+        """
+        with self._condition:
+            if self._cached_remote_executor_locked(backend) is not executor:
+                return
+            self._take_remote_executor_locked(backend)
+        executor.shutdown(wait=False)
+
+    def _cached_remote_executor_locked(
+        self,
+        backend: RemoteComputeBackend,
+    ) -> InterpreterPoolExecutor | ProcessPoolExecutor | None:
+        if backend == "interpreter":
+            return self._interpreter_executor
+        return self._process_executor
+
+    def _take_remote_executor_locked(
+        self,
+        backend: RemoteComputeBackend,
+    ) -> InterpreterPoolExecutor | ProcessPoolExecutor | None:
+        """Remove and return the cached executor for ``backend``, or None."""
+        executor = self._cached_remote_executor_locked(backend)
+        if backend == "interpreter":
+            self._interpreter_executor = None
+        else:
+            self._process_executor = None
+        return executor
+
     def _shutdown_executors(self, *, wait: bool = False) -> None:
         # Drop executor refs under the pool lock, then shut down outside it.
         # Interpreter/process done-callbacks take ``self._condition`` (via
         # ``_notify_item_finished``); waiting on ``shutdown(wait=True)`` while
         # holding that lock deadlocks when in-flight remote work completes.
         with self._condition:
-            interpreter = self._interpreter_executor
-            process = self._process_executor
-            self._interpreter_executor = None
-            self._process_executor = None
-        if interpreter is not None:
-            interpreter.shutdown(wait=wait, cancel_futures=wait)
-        if process is not None:
-            process.shutdown(wait=wait, cancel_futures=wait)
+            executors = [
+                self._take_remote_executor_locked(backend) for backend in REMOTE_COMPUTE_BACKENDS
+            ]
+        for executor in executors:
+            if executor is not None:
+                executor.shutdown(wait=wait, cancel_futures=wait)
 
     def _complete_item(self, item: PoolWorkItem, get_result_wire: Callable[[], object]) -> None:
         """Report the step's result wire, or the error getting it, to the item's orchestrator.

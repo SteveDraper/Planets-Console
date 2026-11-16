@@ -34,21 +34,33 @@ class StepResult:
     wait_recovery: PersistDependencyRecovery | None = None
 
 
+class MalformedStepResultError(ValueError):
+    """A step returned a result wire that does not name a valid step outcome.
+
+    The orchestrator fails the step's node with it, as it fails a step that raises.
+    """
+
+
 def coerce_step_result(result_wire: object) -> StepResult:
-    """Normalize a leaf step return value into an explicit step outcome."""
+    """Normalize a leaf step return value into an explicit step outcome.
+
+    Raises :class:`MalformedStepResultError` when an outcome-tagged wire is invalid.
+    """
     if isinstance(result_wire, StepResult):
         return result_wire
     if isinstance(result_wire, dict) and "outcome" in result_wire:
         outcome = result_wire["outcome"]
         if outcome not in {"continue", "persist", "complete", "park", "waiting_deps"}:
-            raise ValueError(f"invalid step outcome {outcome!r}")
+            raise MalformedStepResultError(f"invalid step outcome {outcome!r}")
         park_reason = result_wire.get("parkReason")
         if park_reason is not None and not isinstance(park_reason, str):
-            raise ValueError("parkReason must be a string when provided")
+            raise MalformedStepResultError("parkReason must be a string when provided")
         persist_then_continue = bool(result_wire.get("persistThenContinue", False))
         wait_recovery = result_wire.get("waitRecovery")
         if wait_recovery is not None and not isinstance(wait_recovery, PersistDependencyRecovery):
-            raise ValueError("waitRecovery must be PersistDependencyRecovery when provided")
+            raise MalformedStepResultError(
+                "waitRecovery must be PersistDependencyRecovery when provided"
+            )
         return StepResult(
             outcome=outcome,
             payload=result_wire.get("payload"),

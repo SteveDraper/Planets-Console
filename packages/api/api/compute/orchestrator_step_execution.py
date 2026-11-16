@@ -39,7 +39,7 @@ class OrchestratorStepExecutionMixin:
     ``_published_executions``, ``_ready_queue``, ``_metrics``, ``_observers``,
     ``_compute_registry``, ``_pool_submitter``, ``_ctx_for_node``,
     ``_complete_node``, ``_fail_node``, ``_refuse_step_exit``,
-    ``_after_step_success``, ``_running_execution_or_record_ignored``,
+    ``_finish_step``, ``_running_execution_or_record_ignored``,
     ``_deps_complete``, ``_enqueue_ready``, ``_ready_depth``, and
     ``_notify_ready_queue_changed``.
     """
@@ -303,17 +303,14 @@ class OrchestratorStepExecutionMixin:
             )
             if running is None:
                 return
-            self._observers.notify_step_complete(
+            self._finish_step(
                 running,
                 pending.step.step_kind,
                 step_index=running.step_index,
                 surface="inline",
-                terminal_state="failed" if failure is not None else "success",
+                result_wire=result_wire,
+                failure=failure,
             )
-            if failure is not None:
-                self._fail_node(running, failure)
-            else:
-                self._after_step_success(running, result_wire)
 
     def _flush_pending_pool_submissions(
         self,
