@@ -9,9 +9,7 @@ public drain for a caller with no drain of its own.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from enum import Enum
-from types import MappingProxyType
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from api.compute.dag_reach import needed_scopes
@@ -24,7 +22,6 @@ from api.compute.in_flight_settle import (
     UnstartedDisposition,
 )
 from api.compute.running_step import RunningStepDisposition
-from api.exceptions import DiscardedWorkRefused
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -33,27 +30,6 @@ if TYPE_CHECKING:
 
 
 _AbortReason: TypeAlias = Literal["abort_scope", "settle"]
-
-
-class _Ending(Enum):
-    """How a settle ends a node it does not keep."""
-
-    DISCARD = "discard"
-    ABORT = "abort"
-
-
-_UNSTARTED_ENDING: Mapping[UnstartedDisposition, _Ending] = MappingProxyType(
-    {UnstartedDisposition.DISCARD: _Ending.DISCARD, UnstartedDisposition.ABORT: _Ending.ABORT}
-)
-_RUNNING_ENDING: Mapping[RunningDisposition, _Ending] = MappingProxyType(
-    {RunningDisposition.ABORT: _Ending.ABORT}
-)
-_RUNNING_STEP_RAISED_TO: Mapping[RunningDisposition, RunningStepDisposition] = MappingProxyType(
-    {
-        RunningDisposition.FINISH_WITHOUT_STAMP: RunningStepDisposition.FINISH_WITHOUT_STAMP,
-        RunningDisposition.END_AFTER_STEP: RunningStepDisposition.END_AFTER_STEP,
-    }
-)
 
 
 class OrchestratorSettleMixin:
@@ -69,12 +45,11 @@ class OrchestratorSettleMixin:
         """Apply ``policy`` to every non-terminal node ``work`` selects; return what it stopped.
 
         A running node takes ``policy.running``; any other non-terminal node
-        takes ``policy.unstarted``. ``FINISH_WITHOUT_STAMP`` and
-        ``END_AFTER_STEP`` raise the node's ``running_step``; the start-or-requeue
-        gate then re-derives "needed" for ``END_AFTER_STEP`` each time it asks.
-        ``DISCARD`` fails the node with ``DiscardedWorkRefused`` and ``ABORT``
-        aborts it with ``ComputeScopeAbortedError``, unless work this settle
-        leaves alive still needs it (``needed_scopes``): such a node is kept.
+        takes ``policy.unstarted``. ``END_AFTER_STEP`` raises the node's
+        ``running_step``; the start-or-requeue gate then re-derives "needed"
+        each time it asks. ``ABORT`` aborts the node with
+        ``ComputeScopeAbortedError``, unless work this settle leaves alive
+        still needs it (``needed_scopes``): such a node is kept.
 
         The returned scopes are the nodes this settle stopped: those it ended,
         and the running ones whose ``running_step`` it raised and that no
@@ -102,49 +77,41 @@ class OrchestratorSettleMixin:
         policy: InFlightSettlePolicy,
     ) -> frozenset[ComputeScope]:
         """The body of :meth:`settle_in_flight_work`. Caller holds the lock."""
-        endings: list[tuple[ComputeNodeRun, _Ending]] = []
+        aborts: list[ComputeNodeRun] = []
         limited: list[ComputeScope] = []
         for scope, node in self._nodes_in(work):
             if node.is_terminal:
                 continue
             candidate = InFlightCandidate(scope=scope, submission_open=node.submission_open)
-            if node.state == "running":
-                running = policy.running(candidate)
-                raised_to = _RUNNING_STEP_RAISED_TO.get(running)
-                if raised_to is not None:
-                    node.running_step = max(node.running_step, raised_to)
+            if node.state != "running":
+                if policy.unstarted(candidate) is UnstartedDisposition.ABORT:
+                    aborts.append(node)
+                continue
+            match policy.running(candidate):
+                case RunningDisposition.ABORT:
+                    aborts.append(node)
+                case RunningDisposition.END_AFTER_STEP:
+                    node.running_step = RunningStepDisposition.END_AFTER_STEP
                     limited.append(scope)
-                ending = _RUNNING_ENDING.get(running)
-            else:
-                ending = _UNSTARTED_ENDING.get(policy.unstarted(candidate))
-            if ending is not None:
-                endings.append((node, ending))
-        if not endings and not limited:
+                case RunningDisposition.KEEP:
+                    pass
+        if not aborts and not limited:
             return frozenset()
-        ending_scopes = {node.scope for node, _ending in endings}
+        aborting = {node.scope for node in aborts}
         needed = needed_scopes(
             self._nodes,
-            (scope for scope in self._nodes if scope not in ending_scopes),
+            (scope for scope in self._nodes if scope not in aborting),
         )
         stopped = {scope for scope in limited if scope not in needed}
-        for node, ending in endings:
+        for node in aborts:
             if node.scope in needed:
                 continue
             stopped.add(node.scope)
-            match ending:
-                case _Ending.DISCARD:
-                    self._fail_node(
-                        node,
-                        DiscardedWorkRefused(
-                            "in-flight work was discarded before it started executing"
-                        ),
-                    )
-                case _Ending.ABORT:
-                    self._abort_node_locked(
-                        node,
-                        ComputeScopeAbortedError("in-flight work was aborted by a settle"),
-                        reason="settle",
-                    )
+            self._abort_node_locked(
+                node,
+                ComputeScopeAbortedError("in-flight work was aborted by a settle"),
+                reason="settle",
+            )
         return frozenset(stopped)
 
     def drain_post_lock_callbacks(self: ComputeOrchestrator) -> None:

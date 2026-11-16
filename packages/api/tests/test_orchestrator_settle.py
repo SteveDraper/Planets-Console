@@ -19,20 +19,8 @@ from api.compute.orchestrator_state import NodeState
 from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
-from api.exceptions import DiscardedWorkRefused
 
 _WALK = frozenset({"alpha", "beta"})
-
-
-@dataclass(frozen=True)
-class _SettleEverything(InFlightSettlePolicy):
-    """Discards every unstarted candidate and finishes every running one without a stamp."""
-
-    def unstarted(self, candidate: InFlightCandidate) -> UnstartedDisposition:
-        return UnstartedDisposition.DISCARD
-
-    def running(self, candidate: InFlightCandidate) -> RunningDisposition:
-        return RunningDisposition.FINISH_WITHOUT_STAMP
 
 
 @dataclass(frozen=True)
@@ -55,6 +43,9 @@ class _StopEverything(InFlightSettlePolicy):
 
     def running(self, candidate: InFlightCandidate) -> RunningDisposition:
         return self.running_disposition
+
+
+_STOP_ALL = _StopEverything(running_disposition=RunningDisposition.END_AFTER_STEP)
 
 
 def _put(
@@ -91,7 +82,7 @@ def _player_work(**overrides: int) -> PlayerWork:
     return PlayerWork(analytic_ids=_WALK, **keys)
 
 
-def test_discard_fails_unstarted_work_and_finish_without_stamp_marks_running_work():
+def test_a_stop_aborts_unstarted_work_and_ends_running_work_after_its_step():
     orchestrator = ComputeOrchestrator(compute_registry={})
     ready = _put(orchestrator, "alpha", 39)
     waiting = _put(orchestrator, "beta", 39, state="waiting_deps")
@@ -99,14 +90,14 @@ def test_discard_fails_unstarted_work_and_finish_without_stamp_marks_running_wor
     running = _put(orchestrator, "alpha", 38, state="running")
     finished = _put(orchestrator, "beta", 38, state="complete")
 
-    orchestrator.settle_in_flight_work(_player_work(), _SettleEverything())
+    orchestrator.settle_in_flight_work(_player_work(), _STOP_ALL)
 
-    for discarded in (ready, waiting, parked):
-        assert orchestrator.nodes[discarded].state == "failed"
-        assert isinstance(orchestrator.nodes[discarded].error, DiscardedWorkRefused)
+    for aborted in (ready, waiting, parked):
+        assert orchestrator.nodes[aborted].state == "failed"
+        assert isinstance(orchestrator.nodes[aborted].error, ComputeScopeAbortedError)
     assert ready not in orchestrator._ready_queue
     assert orchestrator.nodes[running].state == "running"
-    assert orchestrator.nodes[running].running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
+    assert orchestrator.nodes[running].running_step is RunningStepDisposition.END_AFTER_STEP
     assert orchestrator.nodes[finished].state == "complete"
     assert orchestrator.nodes[finished].error is None
 
@@ -132,7 +123,7 @@ def test_player_work_selects_one_players_concrete_turns_of_its_analytics():
     other_game = _put(orchestrator, "alpha", 39, game_id=2)
     wildcard_turn = _put(orchestrator, "alpha", "*")
 
-    orchestrator.settle_in_flight_work(_player_work(), _SettleEverything())
+    orchestrator.settle_in_flight_work(_player_work(), _STOP_ALL)
 
     assert orchestrator.nodes[selected].state == "failed"
     for untouched in (other_analytic, other_player, other_perspective, other_game, wildcard_turn):
@@ -149,17 +140,17 @@ def test_game_work_spans_perspectives_and_players_of_one_game():
 
     orchestrator.settle_in_flight_work(
         GameWork(game_id=1, analytic_ids=_WALK),
-        _SettleEverything(),
+        _STOP_ALL,
     )
 
     assert orchestrator.nodes[first].state == "failed"
     assert orchestrator.nodes[other_perspective].state == "failed"
-    assert orchestrator.nodes[running].running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
+    assert orchestrator.nodes[running].running_step is RunningStepDisposition.END_AFTER_STEP
     assert orchestrator.nodes[other_analytic].state == "ready"
     assert orchestrator.nodes[other_game].state == "ready"
 
 
-def test_a_discard_that_kept_work_still_needs_is_kept():
+def test_an_abort_that_kept_work_still_needs_is_kept():
     orchestrator = ComputeOrchestrator(compute_registry={})
     needed_hop = _put(orchestrator, "alpha", 38)
     needed_root = _put(orchestrator, "alpha", 39, dependency_scopes=(needed_hop,))
@@ -172,23 +163,12 @@ def test_a_discard_that_kept_work_still_needs_is_kept():
     )
     unneeded = _put(orchestrator, "beta", 39)
 
-    orchestrator.settle_in_flight_work(_player_work(), _SettleEverything())
+    orchestrator.settle_in_flight_work(_player_work(), _STOP_ALL)
 
     assert orchestrator.nodes[needed_root].state == "ready"
     assert orchestrator.nodes[needed_hop].state == "ready"
     assert orchestrator.nodes[outside].state == "waiting_deps"
     assert orchestrator.nodes[unneeded].state == "failed"
-
-
-def test_a_discard_needed_only_by_other_discards_is_failed():
-    orchestrator = ComputeOrchestrator(compute_registry={})
-    hop = _put(orchestrator, "alpha", 38)
-    root = _put(orchestrator, "alpha", 39, state="waiting_deps", dependency_scopes=(hop,))
-
-    orchestrator.settle_in_flight_work(_player_work(), _SettleEverything())
-
-    assert isinstance(orchestrator.nodes[hop].error, DiscardedWorkRefused)
-    assert orchestrator.nodes[root].state == "failed"
 
 
 def test_settle_leaves_post_lock_work_for_the_caller_to_drain():
@@ -197,7 +177,7 @@ def test_settle_leaves_post_lock_work_for_the_caller_to_drain():
     outcomes: list[ScopeLifecycleSnapshot] = []
     orchestrator.observers.register_scope_outcome_listener(outcomes.append)
 
-    orchestrator.settle_in_flight_work(_player_work(), _SettleEverything())
+    orchestrator.settle_in_flight_work(_player_work(), _STOP_ALL)
 
     assert orchestrator.nodes[ready].state == "failed"
     assert outcomes == []
@@ -272,18 +252,6 @@ def test_end_after_step_is_raised_even_when_kept_work_needs_the_node():
     assert orchestrator.nodes[running].state == "running"
     assert orchestrator.nodes[running].running_step is RunningStepDisposition.END_AFTER_STEP
     assert orchestrator.nodes[outside].state == "waiting_deps"
-
-
-def test_end_after_step_never_lowers_finish_without_stamp():
-    orchestrator = ComputeOrchestrator(compute_registry={})
-    running = _put(orchestrator, "alpha", 38, state="running")
-
-    orchestrator.settle_in_flight_work(_player_work(), _SettleEverything())
-    orchestrator.settle_in_flight_work(
-        _player_work(), _StopEverything(RunningDisposition.END_AFTER_STEP)
-    )
-
-    assert orchestrator.nodes[running].running_step is RunningStepDisposition.FINISH_WITHOUT_STAMP
 
 
 def test_a_settle_returns_the_scopes_it_ended_but_not_those_kept_as_needed():

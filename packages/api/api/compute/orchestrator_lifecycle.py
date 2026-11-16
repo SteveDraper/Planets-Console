@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 from api.compute.dag_reach import needed_scopes
+from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
@@ -227,10 +228,17 @@ class OrchestratorLifecycleMixin:
     def _fail_refused_execution(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """End an execution its running-step disposition refused. Caller holds the lock.
 
-        It persists nothing further, stamps nothing further and is not
-        retried. It fails with its disposition's refusal error.
+        Only ``END_AFTER_STEP`` refuses, and only a start or requeue that no
+        work needs. The execution starts or requeues nothing further and fails
+        with ``ComputeScopeAbortedError``, which dependents do not inherit, so
+        a later submit replaces the node.
         """
-        self._fail_node(node, node.running_step.refusal_error())
+        self._fail_node(
+            node,
+            ComputeScopeAbortedError(
+                "a stopped execution that nothing needs does not start or requeue a step"
+            ),
+        )
 
     def _is_needed(self: ComputeOrchestrator, node: ComputeNodeRun) -> bool:
         """Whether other non-terminal work still needs ``node``. Caller holds the lock."""
@@ -244,14 +252,10 @@ class OrchestratorLifecycleMixin:
     ) -> None:
         """Apply a finished step's result. Caller holds the lock.
 
-        The result is read only when it can change the outcome: an execution
-        that may take no exit is refused first, and an epoch-stale step is
-        re-queued next, whatever it returned, through the start-or-requeue
-        gate. Otherwise the outcome names the exit the step takes.
+        An epoch-stale step is re-queued first, whatever it returned, through
+        the start-or-requeue gate. Otherwise the outcome names the exit the
+        step takes.
         """
-        if node.running_step.permits_no_exit:
-            self._fail_refused_execution(node)
-            return
         if self._is_epoch_stale(node):
             self._retry_step_after_epoch_bump(node)
             return
