@@ -232,8 +232,11 @@ Fleet ledger persist notifications must **not** use `id(AnalyticQueryContext)` a
 ```text
 waiting_deps → ready → running → complete | failed
                     ↘ attach_inflight (waiter; no pool worker)
-running → parked   (soft park; wake only on force_fresh → ready | waiting_deps)
+running → ready | waiting_deps | failed   (requeue: epoch retry, continue)
+running → parked   (soft park; wake only on force_fresh → ready | waiting_deps | failed)
 ```
+
+**Readiness on re-entry.** A `running` or `parked` node takes no dependency-terminal refresh, so a dependency can fail without reaching it. Every path that returns such a node to dispatch (epoch retry, `continue`, parked wake) resolves its readiness (`_resolve_readiness`) instead of writing the next state: a dependency failure that cascades fails the node, exactly as it would a waiting node (an abort-failed dependency, `ComputeScopeAbortedError`, leaves it `waiting_deps`); otherwise it is `ready` when every dependency is complete, else `waiting_deps`. Dependency sweeps (`_refresh_node_readiness`) apply the same resolution to `waiting_deps` and `ready` nodes only. The dispatch pick refreshes a `ready` node whose dependencies are incomplete rather than demoting it by hand, as a backstop for that invariant.
 
 | State | Meaning |
 |-------|---------|
@@ -271,7 +274,7 @@ Each watch is read once per pass, from lock-free registry snapshots. The pass wr
 | `False` (default) | `waiting_deps`, `ready`, `running` | Singleflight: attach as waiter (`attach_inflight`) or join the leader; no second worker. Raises the node's standing band (see [Band derivation](#band-derivation)). |
 | `False` (default) | `parked` | Attach / singleflight; node stays `parked` (no wake without `force_fresh`). |
 | `True` | `complete` or `failed` | **Supersede** the terminal node: remove it from the orchestrator map, clear any waiters, re-plan the DAG from the request's entry `step_kind`, and dispatch fresh work. |
-| `True` | `parked` | **Wake** the soft-parked node: re-ready if deps complete, else `waiting_deps`; then attach / dispatch. |
+| `True` | `parked` | **Wake** the soft-parked node: resolve its readiness (fail on a cascading dependency failure, else `ready` if deps complete, else `waiting_deps`); then attach / dispatch. |
 | `True` | `waiting_deps`, `ready` | Singleflight attach; in-flight work is never superseded. Refresh readiness. If the node stays `waiting_deps`, walk the `waiting_deps` chain and `force_fresh`-submit abort-failed dependencies (`ComputeScopeAbortedError`). Abort does not cascade-fail dependents and does not recreate on abort itself. |
 | `True` | `running` | Same as default -- singleflight preserved; in-flight work is never superseded. |
 

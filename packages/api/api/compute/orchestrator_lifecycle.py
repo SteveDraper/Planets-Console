@@ -83,16 +83,17 @@ class OrchestratorLifecycleMixin:
         return prior_step_index
 
     def _retry_step_after_epoch_bump(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Re-queue an epoch-stale step, unless the start-or-requeue gate ends the node."""
+        """Re-queue an epoch-stale step, unless the start-or-requeue gate ends the node.
+
+        The node resolves its readiness after the ``epoch_retry`` record, so a
+        dependency that failed while the step ran fails it here.
+        """
         if self._refuse_step_exit(node, StepExit.REQUEUE):
             return
         self._metrics.epoch_discards += 1
         prior_generation = node.generation_at_submit
         current_generation = self._current_invalidation_generation(node)
         prior_step_index = self._reset_for_requeue(node)
-        node.state = "ready"
-        self._enqueue_ready(node.scope)
-        self._observers.notify_ready(node)
         self._observers.notify_lifecycle(
             "epoch_retry",
             node.scope,
@@ -106,6 +107,7 @@ class OrchestratorLifecycleMixin:
                 "currentGeneration": current_generation,
             },
         )
+        self._resolve_readiness(node)
         # Never call pool.submit under the orchestrator lock (deadlocks with workers).
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
@@ -451,9 +453,7 @@ class OrchestratorLifecycleMixin:
                 # Advance profile; retain prior step claims until node terminal so
                 # peers cannot rematerialize while this node is still non-terminal.
                 node.profile_step_index = next_profile_index
-        node.state = "ready"
-        self._enqueue_ready(node.scope)
-        self._observers.notify_ready(node)
+        self._resolve_readiness(node)
         # Defer dispatch so pool submit is never nested under this lock.
         self._observers.schedule_post_lock(self.dispatch_ready_work)
 
@@ -536,16 +536,12 @@ class OrchestratorLifecycleMixin:
             },
         )
 
-    def _maybe_wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Re-ready a soft-parked node on explicit ``force_fresh`` attach."""
-        if node.state != "parked":
-            return
+    def _wake_parked_node(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
+        """Return parked ``node`` to dispatch on explicit ``force_fresh`` attach.
+
+        The node resolves its readiness, so it fails on a dependency that
+        failed while it was parked. Caller holds the lock.
+        """
         node.park_reason = None
         node.generation_at_submit = None
-        if self._deps_complete(node):
-            node.state = "ready"
-            self._enqueue_ready(node.scope)
-            self._observers.notify_ready(node)
-        else:
-            node.state = "waiting_deps"
-            self._dequeue_ready(node.scope)
+        self._resolve_readiness(node)

@@ -172,9 +172,12 @@ class OrchestratorStepExecutionMixin:
     ) -> tuple[ComputeScope | None, ComputeNodeRun | None]:
         """Remove and return the first dispatchable ready node by band, then FIFO.
 
-        Entries no longer ``ready`` leave the queue, and a ready node whose
-        dependencies are incomplete drops to ``waiting_deps``. A node a gate or
-        commit hook rejects keeps its queue position.
+        Entries no longer ``ready`` leave the queue. A ready node whose
+        dependencies are incomplete has its readiness refreshed: it fails on a
+        dependency failure that cascades, else drops to ``waiting_deps``. No
+        known path queues such a node (every return to dispatch resolves
+        readiness), so this backs up that invariant. A node a gate or commit
+        hook rejects keeps its queue position.
         """
         by_band = sorted(
             self._ready_queue,
@@ -186,8 +189,7 @@ class OrchestratorStepExecutionMixin:
                 self._ready_queue.remove(scope)
                 continue
             if not self._deps_complete(node):
-                self._ready_queue.remove(scope)
-                node.state = "waiting_deps"
+                self._refresh_node_readiness(node)
                 continue
             # Gates first (side-effect free), then commit hooks (may consume slots).
             # Evaluating commits inside ``all(gate)`` burned single-step slots when a
