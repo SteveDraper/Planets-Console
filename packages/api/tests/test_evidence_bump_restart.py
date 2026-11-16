@@ -42,16 +42,6 @@ from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.off_mode_catch_up_helpers import context_at_turn, write_evidence_mark
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_exports_helpers import inference_target_player_id
-from tests.test_backfill_walk_stop import (
-    _assert_aborted,
-    _begin,
-    _finish,
-    _node,
-    _non_terminal_walk_scopes,
-    _pick_baseline_hop,
-    _plant,
-    _take_queued_item,
-)
 from tests.test_scores_row_awaits_walk import (
     HOST_TURN,
     MARK_GENERATION,
@@ -60,6 +50,16 @@ from tests.test_scores_row_awaits_walk import (
     stored_complete_row,
 )
 from tests.walk_band_helpers import SHELL_TURN, Walk, end_shell, no_live_streams
+from tests.walk_stop_helpers import (
+    assert_aborted,
+    begin_pick,
+    finish_step,
+    non_terminal_walk_scopes,
+    pick_baseline_hop,
+    plant_node,
+    take_queued_item,
+    walk_node,
+)
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
@@ -97,7 +97,7 @@ def _ignored_finishes(walk: Walk) -> list[Mapping[str, object]]:
     """The detail of each ``pool_finish_ignored`` record from now on."""
     details: list[Mapping[str, object]] = []
 
-    def record(kind, _scope, _node, _generation, _step_kind, _step_index, detail) -> None:
+    def record(kind, _scope, walk_node, _generation, _step_kind, _step_index, detail) -> None:
         if kind == "pool_finish_ignored":
             details.append(detail)
 
@@ -115,8 +115,8 @@ def _mark_generation(walk: Walk) -> int:
 
 def test_with_the_setting_on_the_bump_aborts_the_walk_and_reschedules_the_live_rows(walk):
     shell = walk.open_shell()
-    item = _pick_baseline_hop(walk)
-    assert _non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id)
+    item = pick_baseline_hop(walk)
+    assert non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id)
     ignored = _ignored_finishes(walk)
     persistence = fleet_persistence(walk.ctx)
     keys = (walk.ctx.game_id, walk.ctx.perspective, walk.player_id)
@@ -125,14 +125,14 @@ def test_with_the_setting_on_the_bump_aborts_the_walk_and_reschedules_the_live_r
     _bump(walk, BASELINE_TURN + 1)
     walk.orchestrator.drain_post_lock_callbacks()
 
-    assert _non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id) == set()
-    _assert_aborted(_node(walk, BASELINE_TURN))
-    _assert_aborted(_node(walk, SHELL_TURN))
+    assert non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id) == set()
+    assert_aborted(walk_node(walk, BASELINE_TURN))
+    assert_aborted(walk_node(walk, SHELL_TURN))
     assert shell.fleet_stream.rescheduled_player_ids == [walk.player_id]
     assert shell.scores_stream.rescheduled_player_ids == [walk.player_id]
     assert _mark_generation(walk) == mark_before + 1
 
-    _finish(walk, item, StepResult(outcome="persist", payload={}))
+    finish_step(walk, item, StepResult(outcome="persist", payload={}))
 
     assert persistence.get_ledger(*keys[:2], BASELINE_TURN, keys[2]) is None
     assert [detail["reason"] for detail in ignored] == [StepItemIgnoredReason.NODE_NOT_RUNNING]
@@ -142,17 +142,17 @@ def test_with_the_setting_on_the_bump_aborts_the_walk_and_reschedules_the_live_r
 
 def test_the_rescheduled_rows_walk_replaces_the_aborted_nodes(walk):
     shell = walk.open_shell()
-    _pick_baseline_hop(walk)
-    aborted_root = _node(walk, SHELL_TURN)
+    pick_baseline_hop(walk)
+    aborted_root = walk_node(walk, SHELL_TURN)
     _bump(walk, BASELINE_TURN + 1)
 
     walk.submit_shell()
 
-    replacement = _node(walk, SHELL_TURN)
+    replacement = walk_node(walk, SHELL_TURN)
     assert replacement is not aborted_root
     assert not replacement.is_terminal
     assert replacement.execution_generation > aborted_root.execution_generation
-    assert _non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id)
+    assert non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id)
     end_shell(shell)
 
 
@@ -163,7 +163,7 @@ def test_a_live_row_below_the_host_turn_wakes_only_when_the_bump_stopped_its_own
     shell_row = walk.open_shell()
     stopped_row = walk.open_shell(turn=BASELINE_TURN)
     idle_row = walk.open_shell(turn=BASELINE_TURN - 1)
-    _pick_baseline_hop(walk)
+    pick_baseline_hop(walk)
 
     _bump(walk, BASELINE_TURN + 1)
 
@@ -189,14 +189,14 @@ def test_with_no_live_row_the_bump_aborts_the_walk_and_wakes_nothing(walk, monke
     _bump(walk, BASELINE_TURN + 1)
 
     assert submits == []
-    assert _non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id) == set()
+    assert non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id) == set()
     monkeypatch.setattr(walk.orchestrator, "submit", original_submit)
-    aborted_root = _node(walk, SHELL_TURN)
+    aborted_root = walk_node(walk, SHELL_TURN)
 
     walk.submit_shell()
 
-    assert _node(walk, SHELL_TURN) is not aborted_root
-    assert not _node(walk, SHELL_TURN).is_terminal
+    assert walk_node(walk, SHELL_TURN) is not aborted_root
+    assert not walk_node(walk, SHELL_TURN).is_terminal
 
 
 # --- T6: setting off ---
@@ -205,9 +205,9 @@ def test_with_no_live_row_the_bump_aborts_the_walk_and_wakes_nothing(walk, monke
 def test_with_the_setting_off_running_off_walk_work_on_a_live_row_turn_is_kept(walk):
     live_turn = BASELINE_TURN
     row = walk.open_shell(turn=live_turn)
-    kept = _plant(walk, turn=live_turn, on_walk=False, state="running")
-    on_walk_running = _plant(walk, turn=live_turn + 1, on_walk=True, state="running")
-    off_screen_root = _plant(walk, turn=live_turn - 1, on_walk=False, state="waiting_deps")
+    kept = plant_node(walk, turn=live_turn, on_walk=False, state="running")
+    on_walk_running = plant_node(walk, turn=live_turn + 1, on_walk=True, state="running")
+    off_screen_root = plant_node(walk, turn=live_turn - 1, on_walk=False, state="waiting_deps")
     other_row = walk.open_shell(turn=live_turn + 1)
 
     _bump(walk, SHELL_TURN, backfill_enabled=False)
@@ -216,20 +216,20 @@ def test_with_the_setting_off_running_off_walk_work_on_a_live_row_turn_is_kept(w
     assert node.state == "running"
     assert node.running_step is RunningStepDisposition.CONTINUE
     assert row.fleet_stream.rescheduled_player_ids == []
-    _assert_aborted(walk.orchestrator.nodes[on_walk_running])
+    assert_aborted(walk.orchestrator.nodes[on_walk_running])
     assert other_row.fleet_stream.rescheduled_player_ids == [walk.player_id]
-    _assert_aborted(walk.orchestrator.nodes[off_screen_root])
+    assert_aborted(walk.orchestrator.nodes[off_screen_root])
     for shell in (row, other_row):
         end_shell(shell)
 
 
 def test_with_the_setting_on_running_off_walk_work_on_a_live_row_turn_is_aborted(walk):
     row = walk.open_shell(turn=BASELINE_TURN)
-    running = _plant(walk, turn=BASELINE_TURN, on_walk=False, state="running")
+    running = plant_node(walk, turn=BASELINE_TURN, on_walk=False, state="running")
 
     _bump(walk, SHELL_TURN, backfill_enabled=True)
 
-    _assert_aborted(walk.orchestrator.nodes[running])
+    assert_aborted(walk.orchestrator.nodes[running])
     assert row.fleet_stream.rescheduled_player_ids == [walk.player_id]
     end_shell(row)
 
@@ -242,7 +242,7 @@ def test_another_players_walk_and_rows_are_untouched(walk):
     other_player_walk.orchestrator = walk.orchestrator
     other_shell = other_player_walk.open_shell()
     other_player_walk.submit_shell()
-    other_root = _node(other_player_walk, SHELL_TURN)
+    other_root = walk_node(other_player_walk, SHELL_TURN)
     walk.submit_shell()
 
     _bump(walk, BASELINE_TURN + 1)
@@ -257,16 +257,16 @@ def test_another_players_walk_and_rows_are_untouched(walk):
 
 
 def test_a_fleet_step_a_stop_left_running_is_aborted_by_the_bump_and_never_stamps(walk):
-    item = _pick_baseline_hop(walk)
+    item = pick_baseline_hop(walk)
     stop_backfill_walks(walk.orchestrator, walk.ctx.game_id)()
-    hop = _node(walk, BASELINE_TURN)
+    hop = walk_node(walk, BASELINE_TURN)
     assert hop.state == "running"
     assert hop.running_step is RunningStepDisposition.END_AFTER_STEP
 
     _bump(walk, BASELINE_TURN + 1)
 
-    _assert_aborted(hop)
-    _finish(walk, item, StepResult(outcome="persist", payload={}))
+    assert_aborted(hop)
+    finish_step(walk, item, StepResult(outcome="persist", payload={}))
     keys = (walk.ctx.game_id, walk.ctx.perspective)
     assert fleet_persistence(walk.ctx).get_ledger(*keys, BASELINE_TURN, walk.player_id) is None
 
@@ -276,12 +276,12 @@ def test_a_fleet_step_a_stop_left_running_is_aborted_by_the_bump_and_never_stamp
 
 def test_a_hop_queued_before_the_bump_is_dropped_at_its_pick(walk):
     walk.submit_shell()
-    queued = _node(walk, BASELINE_TURN)
+    queued = walk_node(walk, BASELINE_TURN)
 
     _bump(walk, BASELINE_TURN + 1)
 
-    _assert_aborted(queued)
-    assert not _begin(walk, _take_queued_item(walk))
+    assert_aborted(queued)
+    assert not begin_pick(walk, take_queued_item(walk))
     assert not any(
         scope.analytic_id == SCORES_ANALYTIC_ID and not node.is_terminal
         for scope, node in walk.orchestrator.nodes.items()
@@ -393,6 +393,6 @@ def test_a_failed_mark_write_still_reschedules_the_rows_the_settle_stopped(walk,
     with pytest.raises(OSError, match="mark write failed"):
         _bump(walk, BASELINE_TURN + 1)
 
-    _assert_aborted(_node(walk, SHELL_TURN))
+    assert_aborted(walk_node(walk, SHELL_TURN))
     assert shell.fleet_stream.rescheduled_player_ids == [walk.player_id]
     end_shell(shell)

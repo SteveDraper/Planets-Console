@@ -14,18 +14,18 @@ import pytest
 from api.compute import ComputeRequest
 from api.compute.errors import ComputeScopeAbortedError
 
-from tests.test_compute_stale_pool_item import _StaleItemHarness
+from tests.stale_pool_item_helpers import StaleItemHarness
 
 
 @pytest.fixture
-def harness(sample_turn) -> Iterator[_StaleItemHarness]:
+def harness(sample_turn) -> Iterator[StaleItemHarness]:
     """One thread-backed scope on a worker-less pool, with its ignore records."""
-    harness = _StaleItemHarness(sample_turn, "thread")
+    harness = StaleItemHarness(sample_turn, "thread")
     yield harness
     harness.pool.shutdown()
 
 
-def _hold_everything(harness: _StaleItemHarness) -> None:
+def _hold_everything(harness: StaleItemHarness) -> None:
     """Set a predicate that holds every item, as freeze does for in-scope work."""
     harness.pool.set_dequeue_predicate(lambda _item: False)
 
@@ -95,3 +95,23 @@ def test_an_ended_item_ranks_background_not_at_the_newer_executions_band(harness
 
     assert stale.item.execution_generation != fresh.item.execution_generation
     assert (stale.priority_band, fresh.priority_band) == ("background", "interactive_ensure")
+
+
+def test_an_ended_item_is_picked_ahead_of_higher_band_live_work(harness):
+    harness.submit()
+    assert harness.orchestrator.abort_scope(harness.scope, ComputeScopeAbortedError("cancelled"))
+    harness.orchestrator.submit(
+        ComputeRequest(
+            ctx=harness.ctx,
+            scope=harness.scope,
+            force_fresh=True,
+            priority_band="interactive_ensure",
+        )
+    )
+
+    picked = harness.pool.take_next_item_for_tests()
+
+    assert picked is not None and picked.priority_band == "background"
+    assert harness.orchestrator.published_execution(harness.scope).execution_generation != (
+        picked.item.execution_generation
+    )

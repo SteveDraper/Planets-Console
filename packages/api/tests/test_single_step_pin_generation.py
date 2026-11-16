@@ -37,8 +37,8 @@ from api.compute.runtime import reset_orchestrators_for_tests
 from api.config import ApiConfig, set_config
 
 from tests.fixtures.export_framework.harness import make_fixture_query_context
+from tests.stale_pool_item_helpers import generation_echo_registration
 from tests.test_compute_pools import _POOL_EXPORT_REGISTRY, _scope_for_player
-from tests.test_compute_stale_pool_item import _generation_echo_registration
 
 # How long the newer item runs before the stale item is picked, so a duration
 # measured from the stale item's start is visibly shorter.
@@ -93,7 +93,7 @@ def _aborted_with_held_item(sample_turn) -> _AbortedScope:
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry(
-            (_generation_echo_registration("thread", thread_runs),)
+            (generation_echo_registration("thread", thread_runs),)
         ),
         worker_pool=pool,
     )

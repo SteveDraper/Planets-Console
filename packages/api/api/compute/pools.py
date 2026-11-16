@@ -171,6 +171,14 @@ class _QueuedItemState:
     has_ended: bool
 
 
+@dataclass(frozen=True)
+class QueuedWorkItem:
+    """One queued item with whether the dequeue predicate holds it, from one locked read."""
+
+    banded: BandedWorkItem
+    is_held: bool
+
+
 def work_pick_key(priority_band: ComputePriorityBand, step_index: int) -> tuple[int, int]:
     """Return the pick order key: higher band first, then initial steps before continuations."""
     return (PRIORITY_BAND_RANK[priority_band], 0 if step_index == 0 else 1)
@@ -317,6 +325,19 @@ class ComputeWorkerPool:
         """
         with self._condition:
             self._on_item_finished = callback
+
+    def snapshot_work_queue_holds(self) -> tuple[QueuedWorkItem, ...]:
+        """Return queued items in queue order, each with whether the pick would hold it now.
+
+        One locked pass, applying the pick's own rule, so a diagnostics view of
+        what freeze holds never disagrees with the queue it is shown beside.
+        """
+        with self._condition:
+            states = [self._queued_item_state_locked(item) for item in self._work_queue]
+            return tuple(
+                QueuedWorkItem(banded=state.banded, is_held=self._is_held_locked(state))
+                for state in states
+            )
 
     def snapshot_work_queue(self) -> tuple[BandedWorkItem, ...]:
         """Return queued items in queue order with the band each would be picked at now."""
@@ -479,11 +500,13 @@ class ComputeWorkerPool:
         workers cannot both claim the same grant.
 
         An item whose execution has ended is never held by the predicate: it is
-        a candidate regardless, and ``begin_pool_step`` drops it unrun.
+        picked first, in queue order, and ``begin_pool_step`` drops it unrun, so
+        dead work does not wait behind live work of a higher band.
         """
         on_dequeued = self._on_item_dequeued
         queued = [self._queued_item_state_locked(item) for item in self._work_queue]
-        picked = pick_next_work_item(
+        ended = next((state.banded for state in queued if state.has_ended), None)
+        picked = ended or pick_next_work_item(
             state.banded for state in queued if not self._is_held_locked(state)
         )
         if picked is None:
@@ -520,11 +543,14 @@ class ComputeWorkerPool:
         item ranks as ``background``: a newer execution's band is not its band.
         """
         published = self._published_execution_locked(item)
-        has_ended = published is None or published.execution_generation != item.execution_generation
-        band = "background" if has_ended or published is None else published.band
+        if published is None or published.execution_generation != item.execution_generation:
+            return _QueuedItemState(
+                banded=BandedWorkItem(item=item, priority_band="background"),
+                has_ended=True,
+            )
         return _QueuedItemState(
-            banded=BandedWorkItem(item=item, priority_band=band),
-            has_ended=has_ended,
+            banded=BandedWorkItem(item=item, priority_band=published.band),
+            has_ended=False,
         )
 
     def _is_held_locked(self, state: _QueuedItemState) -> bool:
@@ -533,15 +559,6 @@ class ComputeWorkerPool:
         if predicate is None or state.has_ended:
             return False
         return not predicate(state.banded.item)
-
-    def is_item_held(self, item: PoolWorkItem) -> bool:
-        """Whether a worker would leave ``item`` queued now: the pick's own rule.
-
-        Diagnostics label queued items with this, so the snapshot and the pick
-        never disagree about what freeze holds.
-        """
-        with self._condition:
-            return self._is_held_locked(self._queued_item_state_locked(item))
 
     def _with_published_band_locked(self, item: PoolWorkItem) -> BandedWorkItem:
         """Pair ``item`` with the band it would be picked at now."""

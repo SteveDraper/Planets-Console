@@ -38,6 +38,7 @@ from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
+from tests.stale_pool_item_helpers import ManualRemoteExecutor, generation_echo_registration
 from tests.test_compute_foundation import _StubPersistencePolicy
 from tests.test_compute_orchestrator import (
     _compute_scope,
@@ -50,7 +51,6 @@ from tests.test_compute_pools import (
     _multi_step_thread_registration,
     _scope_for_player,
 )
-from tests.test_compute_stale_pool_item import _generation_echo_registration, _ManualRemoteExecutor
 
 
 @pytest.fixture(autouse=True)
@@ -297,7 +297,7 @@ class _PoolStepUnderShell:
 
     def __init__(self, sample_turn, registration: TurnAnalyticRegistration) -> None:
         self.pool = reset_compute_worker_pool_for_tests(worker_count=0)
-        self.executor = _ManualRemoteExecutor()
+        self.executor = ManualRemoteExecutor()
         self.pool._interpreter_executor = self.executor  # type: ignore[assignment]
         self.orchestrator = ComputeOrchestrator(
             compute_registry=build_compute_registry((registration,)),
@@ -352,7 +352,7 @@ def make_pool_step(
 
 
 def _remote_step(make_pool_step) -> _PoolStepUnderShell:
-    return make_pool_step(_generation_echo_registration("interpreter", []))
+    return make_pool_step(generation_echo_registration("interpreter", []))
 
 
 # Each finish runs ``after_start`` between the step's start and its finish.

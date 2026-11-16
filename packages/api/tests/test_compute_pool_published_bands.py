@@ -195,7 +195,7 @@ def test_queued_item_is_picked_at_its_node_band_raised_after_enqueue(sample_turn
     assert picked.priority_band == "interactive_ensure"
 
 
-def test_item_without_a_published_band_ranks_as_background(sample_turn):
+def test_item_without_a_published_band_ranks_as_background_and_is_picked_first(sample_turn):
     pool, orchestrator, ctx = _pool_orchestrator(sample_turn)
     # Queue-only scopes: these items are never planned, so any player ids do.
     unknown_orchestrator_scope, no_node_scope, terminal_scope, interactive_scope = (
@@ -222,10 +222,10 @@ def test_item_without_a_published_band_ranks_as_background(sample_turn):
     ]
     picks = [pool.take_next_item_for_tests() for _ in range(4)]
     assert [(picked.item.scope, picked.priority_band) for picked in picks if picked] == [
-        (interactive_scope, "interactive_ensure"),
         (unknown_orchestrator_scope, "background"),
         (no_node_scope, "background"),
         (terminal_scope, "background"),
+        (interactive_scope, "interactive_ensure"),
     ]
 
 
