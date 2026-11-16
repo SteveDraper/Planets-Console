@@ -647,7 +647,7 @@ def test_single_step_inline_ready_clears_orphan_pool_grant(sample_turn):
         step_index=0,
         work=QUEUED_ONLY_STEP_WORK,
     )
-    pool.enqueue_for_tests(later_held)
+    enqueue_held_item(pool, later_held)
     assert controller._pool_item_is_runnable(later_held) is False
     assert _take_queued_item(pool) is None
 

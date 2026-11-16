@@ -32,7 +32,7 @@ from api.compute.runtime import reset_orchestrators_for_tests
 from api.config import ApiConfig, set_config
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
-from tests.compute_published_band_helpers import publish_queued_node_band
+from tests.compute_published_band_helpers import publish_queued_node_band, published_band
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.test_compute_pools import (
     _ANALYTIC_ID,
@@ -206,7 +206,7 @@ def test_item_without_a_published_band_ranks_as_background(sample_turn):
     publish_queued_node_band(orchestrator, terminal_scope, "interactive_ensure")
     orchestrator.nodes[terminal_scope].state = "complete"
     publish_queued_node_band(orchestrator, interactive_scope, "interactive_ensure")
-    assert orchestrator.published_band(terminal_scope) is None
+    assert published_band(orchestrator, terminal_scope) is None
     pool.enqueue_for_tests(
         _work_item(scope=unknown_orchestrator_scope, orchestrator_id=registration_id + 1)
     )
@@ -239,7 +239,7 @@ def test_picked_band_stays_fixed_when_the_published_band_changes(sample_turn):
     assert picked is not None
     assert picked.priority_band == "background"
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, priority_band="interactive_ensure"))
-    assert orchestrator.published_band(scope) == "interactive_ensure"
+    assert published_band(orchestrator, scope) == "interactive_ensure"
 
     (in_flight,) = controller._in_flight_snapshot()
     assert in_flight.priority_band == "background"

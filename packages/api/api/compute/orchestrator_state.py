@@ -156,6 +156,21 @@ class ComputeHandle:
             return self
 
 
+@dataclass(frozen=True)
+class PublishedExecution:
+    """What a dispatch pass publishes for one non-terminal node, for lock-free readers.
+
+    ``band`` is the node's derived priority band. ``execution_generation`` is
+    the execution the node was at that pass. An item whose generation differs,
+    or whose scope has no entry, belongs to an execution that has ended: that
+    is a sufficient condition of staleness, not the definition, which stays
+    :meth:`NodeExecutionBinding.is_running_execution`.
+    """
+
+    band: ComputePriorityBand
+    execution_generation: int
+
+
 class NodeExecutionBinding:
     """The rule binding a pool item to the execution of its scope that dispatched it.
 

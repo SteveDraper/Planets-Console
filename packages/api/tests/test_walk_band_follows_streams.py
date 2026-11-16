@@ -39,6 +39,7 @@ from api.streaming.table_stream.registry_catalog import (
 )
 from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 
+from tests.compute_published_band_helpers import published_band
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.on_walk_live_helpers import LiveStream, attach_stream
 from tests.test_compute_pool_published_bands import _player_scopes
@@ -261,7 +262,7 @@ def test_a_persist_deferred_hop_takes_its_dependents_band(walk):
 
     hop = walk.orchestrator.nodes[hop_scope]
     assert hop.standing_band == "background"
-    assert walk.orchestrator.published_band(hop_scope) == "stream_attached"
+    assert published_band(walk.orchestrator, hop_scope) == "stream_attached"
 
 
 def test_a_recreated_aborted_dependency_takes_its_dependents_band(walk):

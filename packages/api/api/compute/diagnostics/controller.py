@@ -170,7 +170,7 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
             allowlisted_player_ids=allowlisted,
             bound_orchestrators=self._bound_orchestrators_snapshot(),
             pool_queue_items=pool_queue_items,
-            pool_item_is_runnable=self._pool_item_is_runnable,
+            pool_item_is_runnable=self._pool_item_is_picked_now,
             in_flight=self._live_in_flight_snapshot(),
             next_single_step=preview,
             single_step_disabled_reason=disabled_reason,
@@ -549,6 +549,12 @@ class ComputeDiagnosticsController(DiagnosticsOrchestratorBindMixin):
         if not self._scope_matches_single_step_shell(scope):
             return False
         return self._scope_in_focus(scope, shell)
+
+    def _pool_item_is_picked_now(self, item: PoolWorkItem) -> bool:
+        """Whether a worker would dequeue ``item`` now, by the pool's own pick rule."""
+        if self._pool is None:
+            return True
+        return not self._pool.is_item_held(item)
 
     def _pool_item_is_runnable(self, item: PoolWorkItem) -> bool:
         """Return whether ``item`` may dequeue; never consumes single-step grants."""

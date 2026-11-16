@@ -24,6 +24,7 @@ from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.row_run_admission import RowRunPhase
 
+from tests.compute_published_band_helpers import published_band
 from tests.scores_ladder_helpers import durable_row_complete
 from tests.walk_band_helpers import (
     SHELL_TURN,
@@ -107,7 +108,7 @@ def test_the_walk_left_behind_persists_its_executing_step_and_reaches_the_baseli
 ):
     walk = start_walk_held_at_the_baseline_persist(sample_turn)
     baseline_hop = walk.baseline_hop()
-    assert get_compute_orchestrator().published_band(baseline_hop) == "stream_attached"
+    assert published_band(get_compute_orchestrator(), baseline_hop) == "stream_attached"
 
     perspective, turn = switch.target(walk.ctx.perspective, walk.shell.scores_scope.turn_number)
     open_shell(walk.ctx, walk.player_id, perspective=perspective, turn=turn)

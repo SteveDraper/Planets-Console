@@ -1,11 +1,11 @@
 """Single-step targets the live execution of its scope.
 
-Under diagnostics freeze, a pool item left by an aborted execution can wait in
-the queue next to the item its ``force_fresh`` replacement dispatched, with the
-same scope and step index. The pin names the execution it releases, so a grant
-armed for the newer execution's item releases that item, not the stale one.
-The preview never offers the stale item, so one step advances the scope. The
-stale item is still dropped when a worker picks it.
+A pool item left by an aborted execution can sit in the queue next to the item
+its ``force_fresh`` replacement dispatched, with the same scope and step index.
+Diagnostics freeze never holds the stale item: the pool picks it ahead of the
+live one and the orchestrator drops it unrun. The pin names the execution it
+releases, so that pick does not use up a grant armed for the newer execution's
+item, and the preview never offers the stale item.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from api.compute.diagnostics import (
 from api.compute.diagnostics.controller import ComputeDiagnosticsController
 from api.compute.diagnostics.single_step_preview import preview_from_held_pool_item
 from api.compute.errors import ComputeScopeAbortedError
+from api.compute.pools import PoolWorkItem
 from api.compute.runtime import reset_orchestrators_for_tests
 from api.config import ApiConfig, set_config
 
@@ -79,6 +80,14 @@ class _AbortedScope:
         return self.orchestrator.nodes[self.scope].execution_generation
 
 
+def _drop_next_stale_item(aborted: _AbortedScope, stale_item: PoolWorkItem) -> None:
+    """Pick the stale item as a worker would, under freeze, and confirm it is dropped unrun."""
+    picked = aborted.pool.take_next_item_for_tests()
+    assert picked is not None and picked.item is stale_item
+    aborted.pool._execute_item(picked)
+    assert aborted.thread_runs == []
+
+
 def _aborted_with_held_item(sample_turn) -> _AbortedScope:
     thread_runs: list[int] = []
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
@@ -123,19 +132,16 @@ def test_pin_for_the_newer_execution_is_not_used_up_by_a_stale_item(sample_turn)
             aborted.shell, preview_from_held_pool_item(fresh_held)
         )
 
+    _drop_next_stale_item(aborted, stale_held.item)
+
+    assert controller._single_step.grants_remaining == 1
+    assert orchestrator.nodes[aborted.scope].state == "running"
+
     released = pool.take_next_item_for_tests()
 
     assert released is not None and released.item is fresh_held.item
     assert controller._single_step.grants_remaining == 0
     assert pool.take_next_item_for_tests() is None
-
-    controller.set_freeze_armed(aborted.shell, freeze_armed=False)
-    stale_picked = pool.take_next_item_for_tests()
-    assert stale_picked is not None and stale_picked.item is stale_held.item
-    pool._execute_item(stale_picked)
-
-    assert aborted.thread_runs == []
-    assert orchestrator.nodes[aborted.scope].state == "running"
 
     pool._execute_item(released)
 
@@ -143,7 +149,7 @@ def test_pin_for_the_newer_execution_is_not_used_up_by_a_stale_item(sample_turn)
     assert orchestrator.nodes[aborted.scope].state == "complete"
 
 
-def test_stale_item_dropped_after_the_newer_started_leaves_the_newer_records(sample_turn):
+def test_stale_item_dropped_while_the_newer_is_in_flight_leaves_the_newer_records(sample_turn):
     aborted = _aborted_with_held_item(sample_turn)
     pool, controller = aborted.pool, aborted.controller
     aborted.submit_force_fresh()
@@ -153,12 +159,11 @@ def test_stale_item_dropped_after_the_newer_started_leaves_the_newer_records(sam
         controller._single_step.arm_from_preview(
             aborted.shell, preview_from_held_pool_item(fresh_held)
         )
+    stale_picked = pool.take_next_item_for_tests()
+    assert stale_picked is not None and stale_picked.item is stale_held.item
     fresh_picked = pool.take_next_item_for_tests()
     assert fresh_picked is not None and fresh_picked.item is fresh_held.item
     time.sleep(_FRESH_HEAD_START_SECONDS)
-    controller.set_freeze_armed(aborted.shell, freeze_armed=False)
-    stale_picked = pool.take_next_item_for_tests()
-    assert stale_picked is not None and stale_picked.item is stale_held.item
 
     pool._execute_item(stale_picked)
 
@@ -168,7 +173,7 @@ def test_stale_item_dropped_after_the_newer_started_leaves_the_newer_records(sam
     pool._execute_item(fresh_picked)
 
     timeline = snapshot_to_wire(controller.snapshot(aborted.shell))["concurrencyTimeline"]
-    fresh_start, stale_start = (event for event in timeline if event["kind"] == "start")
+    stale_start, fresh_start = (event for event in timeline if event["kind"] == "start")
     (stale_dropped,) = (event for event in timeline if event["kind"] == "pool_item_dropped")
     (fresh_complete,) = (event for event in timeline if event["kind"] == "complete")
     assert not any(event["kind"] == "pool_finish_ignored" for event in timeline)
@@ -184,7 +189,7 @@ def test_preview_offers_the_newer_held_item_and_one_step_completes_it(sample_tur
     aborted = _aborted_with_held_item(sample_turn)
     pool, controller = aborted.pool, aborted.controller
     fresh_generation = aborted.submit_force_fresh()
-    _stale_held, fresh_held = pool.snapshot_work_queue()
+    stale_held, fresh_held = pool.snapshot_work_queue()
     aborted.focus()
 
     preview, disabled_reason = controller.preview_single_step(aborted.shell)
@@ -194,6 +199,7 @@ def test_preview_offers_the_newer_held_item_and_one_step_completes_it(sample_tur
     assert (preview.source, preview.execution_generation) == ("held", fresh_generation)
 
     assert controller.single_step(aborted.shell)
+    _drop_next_stale_item(aborted, stale_held.item)
     released = pool.take_next_item_for_tests()
     assert released is not None and released.item is fresh_held.item
     pool._execute_item(released)
@@ -221,6 +227,7 @@ def test_preview_offers_the_newer_ready_node_over_a_stale_held_item(sample_turn)
     )
 
     assert controller.single_step(aborted.shell)
+    _drop_next_stale_item(aborted, stale_held.item)
     released = pool.take_next_item_for_tests()
     assert released is not None
     assert released.item.execution_generation == fresh_generation

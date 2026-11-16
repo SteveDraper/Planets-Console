@@ -2,7 +2,7 @@
 
 ``Walk`` plans one player's fleet or scoreboard walk on an orchestrator whose
 pool has no workers, so queued steps wait until the test picks them. A step's
-band is the one the pool would pick it at now (``published_band``), or the
+band is the one the pool would pick it at now (``published_execution``), or the
 band a pick returned. ``start_walk_held_at_the_baseline_persist`` instead runs
 a whole walk on the process orchestrator and pool, with real steps and
 persists.
@@ -49,6 +49,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
+from tests.compute_published_band_helpers import published_band
 from tests.export_chain_test_fixtures import (
     enable_backfill_earlier_turns,
     export_chain_query_context,
@@ -189,7 +190,7 @@ class Walk:
         self, turns: tuple[int, ...] = WALK_TURNS, analytic_id: str = FLEET_ANALYTIC_ID
     ) -> dict[int, ComputePriorityBand | None]:
         return {
-            turn: self.orchestrator.published_band(self.scope(turn, analytic_id)) for turn in turns
+            turn: published_band(self.orchestrator, self.scope(turn, analytic_id)) for turn in turns
         }
 
     def pick(self) -> tuple[ComputeScope, ComputePriorityBand]:
@@ -292,7 +293,7 @@ def start_walk_held_at_the_baseline_persist(
     shell = open_shell(ctx, player_id, perspective=ctx.perspective, turn=BASELINE_WALK_SHELL_TURN)
 
     handle = orchestrator.submit(ComputeRequest(scope=shell_root, force_fresh=True, ctx=ctx))
-    assert orchestrator.published_band(shell_root) == "stream_attached"
+    assert published_band(orchestrator, shell_root) == "stream_attached"
     assert baseline_hop_persisting.wait(timeout=WALK_TIMEOUT_SECONDS)
     return BaselineWalk(
         ctx=ctx,

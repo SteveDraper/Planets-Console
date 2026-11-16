@@ -46,6 +46,7 @@ from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_fo
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 
+from tests.compute_published_band_helpers import published_band
 from tests.off_mode_catch_up_helpers import context_at_turn
 from tests.on_walk_live_helpers import attach_stream
 from tests.scores_exports_helpers import first_player_id
@@ -299,12 +300,12 @@ def test_band_derivation_under_the_orchestrator_lock_reads_the_stream_registries
             pass_finished = finished.wait(timeout=2)
         worker.join(timeout=2)
         assert pass_finished, "band derivation waited on a stream registry lock"
-        assert orchestrator.published_band(scope) == "stream_attached"
+        assert published_band(orchestrator, scope) == "stream_attached"
 
         with orchestrator._condition:
             detach_fleet_table_stream(stream.stream_token)
-            assert orchestrator.published_band(scope) == "stream_attached"
+            assert published_band(orchestrator, scope) == "stream_attached"
         orchestrator.dispatch_ready_work()
-        assert orchestrator.published_band(scope) == "background"
+        assert published_band(orchestrator, scope) == "background"
     finally:
         reset_fleet_table_stream_registry_for_tests()
