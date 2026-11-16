@@ -846,7 +846,7 @@ def test_worker_survives_on_dequeued_exception(sample_turn) -> None:
             second_finished.set()
 
     class OkOrch:
-        def published_band(self, scope):
+        def published_execution(self, scope):
             return None
 
         def begin_pool_step(self, *args, **kwargs):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -28,7 +27,7 @@ from api.compute.diagnostics.single_step_preview import (
 )
 from api.compute.diagnostics.timeline import ComputeConcurrencyEvent
 from api.compute.orchestrator import OrchestratorNodeSnapshot
-from api.compute.pools import BandedWorkItem, PoolWorkItem
+from api.compute.pools import BandedWorkItem, QueuedWorkItem
 from api.compute.remote_futures import (
     RemotePoolFutureRecord,
     classify_future_state,
@@ -159,8 +158,7 @@ def build_compute_diagnostics_snapshot(
     freeze_armed: bool,
     allowlisted_player_ids: frozenset[int],
     bound_orchestrators: tuple[BoundOrchestrator, ...],
-    pool_queue_items: tuple[BandedWorkItem, ...],
-    pool_item_is_runnable: Callable[[PoolWorkItem], bool] | None,
+    pool_queue: tuple[QueuedWorkItem, ...],
     in_flight: tuple[InFlightPoolExecution, ...],
     next_single_step: SingleStepPreview | None,
     single_step_disabled_reason: SingleStepDisabledReason | None,
@@ -209,15 +207,14 @@ def build_compute_diagnostics_snapshot(
                 )
             )
 
-    pool_queue: list[dict[str, Any]] = []
-    shell_queue_items = tuple(
+    pool_queue_wire: list[dict[str, Any]] = []
+    shell_queue = tuple(
         queued
-        for queued in pool_queue_items
-        if _scope_in_shell(queued.item.scope, shell=shell, ancestor_turns=ancestor_turns)
+        for queued in pool_queue
+        if _scope_in_shell(queued.banded.item.scope, shell=shell, ancestor_turns=ancestor_turns)
     )
-    for queued in shell_queue_items:
-        runnable = pool_item_is_runnable(queued.item) if pool_item_is_runnable is not None else True
-        pool_queue.append(_pool_item_wire(queued, runnable=runnable))
+    for queued in shell_queue:
+        pool_queue_wire.append(_pool_item_wire(queued.banded, runnable=not queued.is_held))
 
     scoped_remote_futures = tuple(
         record
@@ -263,15 +260,15 @@ def build_compute_diagnostics_snapshot(
     backend_mix: dict[str, int] = {}
     for record in in_flight:
         backend_mix[record.backend] = backend_mix.get(record.backend, 0) + 1
-    for queued in shell_queue_items:
-        backend_mix[queued.item.backend] = backend_mix.get(queued.item.backend, 0) + 1
+    for queued in shell_queue:
+        backend_mix[queued.banded.item.backend] = backend_mix.get(queued.banded.item.backend, 0) + 1
 
     live_occupancy = live_occupancy_to_wire(
         configured_workers=configured_workers,
         scoped_ready_depth=len(ready_queue),
         scoped_in_flight_count=len(in_flight_rows),
         global_in_flight_count=global_in_flight_count,
-        global_queue_depth=len(pool_queue_items),
+        global_queue_depth=len(pool_queue),
         backend_mix=dict(sorted(backend_mix.items())),
     )
     timeline_wire = tuple(event_to_wire(event) for event in concurrency_timeline)
@@ -281,7 +278,7 @@ def build_compute_diagnostics_snapshot(
         shell=shell,
         freeze_armed=freeze_armed,
         allowlisted_player_ids=tuple(sorted(allowlisted_player_ids)),
-        pool_queue=tuple(pool_queue),
+        pool_queue=tuple(pool_queue_wire),
         in_flight=tuple(in_flight_rows),
         dag_nodes=tuple(dag_nodes),
         ready_queue=tuple(ready_queue),

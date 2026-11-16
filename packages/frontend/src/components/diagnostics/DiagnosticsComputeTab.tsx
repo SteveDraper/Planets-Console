@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnalyticShellScope } from '../../api/bff'
 import {
   fetchComputeDiagnosticsSnapshot,
@@ -10,15 +10,8 @@ import {
 } from '../../api/bffComputeDiagnostics'
 import { analyticScopeKey } from '../../lib/analyticScopeKey'
 import { cn } from '../../lib/utils'
-import {
-  type ClientStreamLifecycle,
-  useComputeDiagnosticsStore,
-} from '../../stores/computeDiagnostics'
+import { useComputeDiagnosticsStore } from '../../stores/computeDiagnostics'
 import { DiagnosticsJsonBlock } from './DiagnosticsJsonBlock'
-
-type ComputeDiagnosticsUiSnapshot = ComputeDiagnosticsSnapshotResponse & {
-  clientStreams: ClientStreamLifecycle[]
-}
 
 type DiagnosticsComputeTabProps = {
   scope: AnalyticShellScope | null
@@ -35,14 +28,10 @@ const DISABLED_REASON_LABELS: Record<string, string> = {
 /** Cap runaway Run loops (deep gap-fill chains under freeze). */
 const RUN_MAX_STEPS = 10_000
 
-/** Stop Run when single-step returns the same focus target with no pool progress. */
-const RUN_STALL_LIMIT = 3
+/** Stop Run after this many consecutive single-steps that released nothing on the same target. */
+const RUN_UNRELEASED_LIMIT = 3
 
 const RUN_POLL_MS = 50
-
-/** After Apply allowlist, poll briefly for stream-scheduled focus work. */
-const ALLOWLIST_SETTLE_MS = 50
-const ALLOWLIST_SETTLE_ATTEMPTS = 8
 
 function nextStepFingerprint(snapshot: ComputeDiagnosticsSnapshotResponse): string | null {
   const target = snapshot.nextSingleStep.target
@@ -58,72 +47,6 @@ function nextStepFingerprint(snapshot: ComputeDiagnosticsSnapshotResponse): stri
   ].join('\0')
 }
 
-export function snapshotHasNextStep(snapshot: ComputeDiagnosticsSnapshotResponse): boolean {
-  const target = snapshot.nextSingleStep.target
-  if (target == null) {
-    return false
-  }
-  // Held preview must still be present in the pool queue; otherwise the snapshot
-  // raced (item already dequeued) and arming another held grant would stall Run.
-  if (target.source === 'held') {
-    const scopeKey = String(target.scopeKey ?? '')
-    const stepKind = String(target.stepKind ?? '')
-    const stepIndex = Number(target.stepIndex ?? 0)
-    return snapshot.poolQueue.some((item) => {
-      if (String(item.scopeKey ?? '') !== scopeKey) {
-        return false
-      }
-      if (String(item.stepKind ?? '') !== stepKind) {
-        return false
-      }
-      return Number(item.stepIndex ?? 0) === stepIndex
-    })
-  }
-  return true
-}
-
-function runningDagStepKeys(
-  snapshot: ComputeDiagnosticsSnapshotResponse
-): Set<string> {
-  return new Set(
-    snapshot.dagNodes
-      .filter((node) => node.state === 'running')
-      .map(
-        (node) =>
-          `${String(node.scopeKey ?? '')}\0${String(node.stepKind ?? '')}\0${String(node.stepIndex ?? '')}`
-      )
-  )
-}
-
-/**
- * True when the pool still has queued work, focus work is marked in progress, or a
- * live in-flight execution still appears as ``running`` on a bound DAG node.
- * Orphaned in-flight rows (no matching running node) do not block Run -- those are
- * cleared by the backend finish hook, but the client must not spin if a ghost remains.
- */
-export function snapshotHasPendingPoolWork(
-  snapshot: ComputeDiagnosticsSnapshotResponse
-): boolean {
-  if (snapshot.poolQueue.length > 0) {
-    return true
-  }
-  if (snapshot.nextSingleStep.disabledReason === 'work_in_progress') {
-    return true
-  }
-  if (snapshot.dagNodes.some((node) => node.state === 'running')) {
-    return true
-  }
-  if (snapshot.inFlight.length === 0) {
-    return false
-  }
-  const running = runningDagStepKeys(snapshot)
-  return snapshot.inFlight.some((item) =>
-    running.has(
-      `${String(item.scopeKey ?? '')}\0${String(item.stepKind ?? '')}\0${String(item.stepIndex ?? '')}`
-    )
-  )
-}
-
 function yieldForDiagnosticsPaint(): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, 0)
@@ -136,7 +59,8 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
-function SectionPanel({
+/** One copyable JSON panel. Memoized: a panel re-renders only when its value changes. */
+const SectionPanel = memo(function SectionPanel({
   title,
   value,
   onCopy,
@@ -163,6 +87,15 @@ function SectionPanel({
       <DiagnosticsJsonBlock value={value} />
     </section>
   )
+})
+
+/**
+ * The client stream lifecycle rows, read straight from the store, so a stream
+ * event re-renders this panel only and not the rest of the Compute tab.
+ */
+function ClientStreamsPanel({ onCopy }: { onCopy: (text: string) => void }) {
+  const clientStreams = useComputeDiagnosticsStore((state) => state.clientStreams)
+  return <SectionPanel title="Client streams" value={clientStreams} onCopy={onCopy} />
 }
 
 const BOTTLENECK_CLASS_GUIDE = [
@@ -308,30 +241,31 @@ function nextStepSummary(preview: NextSingleStepPreview | undefined): string {
 }
 
 export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabProps) {
-  const clientStreams = useComputeDiagnosticsStore((state) => state.clientStreams)
   const freezeStatus = useComputeDiagnosticsStore((state) => state.freezeStatus)
   const setSnapshot = useComputeDiagnosticsStore((state) => state.setSnapshot)
   const setFreezeStatus = useComputeDiagnosticsStore((state) => state.setFreezeStatus)
-  const [snapshot, setLocalSnapshot] = useState<ComputeDiagnosticsUiSnapshot | null>(null)
+  const [snapshot, setLocalSnapshot] = useState<ComputeDiagnosticsSnapshotResponse | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [running, setRunning] = useState(false)
   const [allowlistInput, setAllowlistInput] = useState('')
   const runCancelRef = useRef(false)
 
+  const freezeStatusForScope =
+    freezeStatus != null &&
+    scope != null &&
+    analyticScopeKey(freezeStatus.shell) === analyticScopeKey(scope)
+      ? freezeStatus
+      : null
   const freezeArmed =
     snapshot?.freezeArmed === true ||
-    (snapshot == null && freezeStatus?.freezeArmed === true)
+    (snapshot == null && freezeStatusForScope?.freezeArmed === true)
   const controlsBusy = pending || running
 
   const applySnapshot = useCallback(
     (next: ComputeDiagnosticsSnapshotResponse) => {
-      const merged: ComputeDiagnosticsUiSnapshot = {
-        ...next,
-        clientStreams: useComputeDiagnosticsStore.getState().clientStreams,
-      }
-      setLocalSnapshot(merged)
-      setSnapshot(merged)
+      setLocalSnapshot(next)
+      setSnapshot(next)
       setFreezeStatus({
         shell: next.shell,
         freezeArmed: next.freezeArmed,
@@ -375,16 +309,6 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
     setAllowlistInput(freezeStatus.allowlistedPlayerIds.join(','))
   }, [freezeStatus, scope, snapshot])
 
-  useEffect(() => {
-    setLocalSnapshot((current) =>
-      current == null ? current : { ...current, clientStreams }
-    )
-    const existing = useComputeDiagnosticsStore.getState().snapshot
-    if (existing != null) {
-      setSnapshot({ ...existing, clientStreams })
-    }
-  }, [clientStreams, setSnapshot])
-
   const runMutation = useCallback(
     async (action: () => Promise<ComputeDiagnosticsSnapshotResponse>) => {
       if (scope == null) {
@@ -412,18 +336,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
       setPending(true)
       setLoadError(null)
       try {
-        let current = await putComputeDiagnosticsAllowlist(scope, playerIds)
-        applySnapshot(current)
-        // Allowlist narrows table streams; reconnect/scheduling often lands after the
-        // PUT snapshot. Refresh until focus work appears or settle attempts expire.
-        for (let attempt = 0; attempt < ALLOWLIST_SETTLE_ATTEMPTS; attempt++) {
-          if (snapshotHasNextStep(current) || snapshotHasPendingPoolWork(current)) {
-            break
-          }
-          await sleep(ALLOWLIST_SETTLE_MS)
-          current = await fetchComputeDiagnosticsSnapshot(scope)
-          applySnapshot(current)
-        }
+        applySnapshot(await putComputeDiagnosticsAllowlist(scope, playerIds))
       } catch (error: unknown) {
         setLoadError(error instanceof Error ? error.message : String(error))
       } finally {
@@ -451,55 +364,58 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
           applySnapshot(next)
           return next
         }))
+      // Follow the server preview: step while it names a target, poll while focus
+      // work is in progress, and stop once nothing is steppable on a confirming poll
+      // (dependents are promoted just after a completion, so one idle read can be early).
       let steps = 0
-      let stallCount = 0
+      let unreleasedOnTarget = 0
+      let idleConfirmed = false
       while (!runCancelRef.current) {
-        if (snapshotHasNextStep(current)) {
+        const { target, disabledReason } = current.nextSingleStep
+        if (target != null) {
           if (steps >= RUN_MAX_STEPS) {
             setLoadError(`Run stopped after ${RUN_MAX_STEPS} steps (safety limit).`)
             break
           }
           const beforeFingerprint = nextStepFingerprint(current)
-          current = await postComputeDiagnosticsSingleStep(scope)
-          applySnapshot(current)
+          const stepped = await postComputeDiagnosticsSingleStep(scope)
+          applySnapshot(stepped)
           steps += 1
-          const afterFingerprint = nextStepFingerprint(current)
-          const sameTarget =
-            beforeFingerprint != null &&
-            afterFingerprint != null &&
-            beforeFingerprint === afterFingerprint
-          if (sameTarget && !snapshotHasPendingPoolWork(current)) {
-            stallCount += 1
-            if (stallCount >= RUN_STALL_LIMIT) {
-              setLoadError(
-                `Run stalled: single-step did not advance ${beforeFingerprint.split('\0')[0] || 'focus target'}.`
-              )
-              break
-            }
-          } else {
-            stallCount = 0
-          }
-          await yieldForDiagnosticsPaint()
-          continue
-        }
-        if (snapshotHasPendingPoolWork(current)) {
-          stallCount = 0
-          await sleep(RUN_POLL_MS)
-          if (runCancelRef.current) {
+          idleConfirmed = false
+          const sameTarget = nextStepFingerprint(stepped) === beforeFingerprint
+          unreleasedOnTarget = !stepped.released && sameTarget ? unreleasedOnTarget + 1 : 0
+          if (unreleasedOnTarget >= RUN_UNRELEASED_LIMIT) {
+            setLoadError(
+              `Run stopped: single-step did not release ${beforeFingerprint?.split('\0')[0] || 'the focus target'}.`
+            )
             break
           }
-          current = await fetchComputeDiagnosticsSnapshot(scope)
-          applySnapshot(current)
+          current = stepped
+          if (stepped.released && sameTarget) {
+            // A held item's grant is armed but no worker has taken it yet: wait for
+            // the pool instead of re-posting the same target at once.
+            await sleep(RUN_POLL_MS)
+            if (runCancelRef.current) {
+              break
+            }
+            current = await fetchComputeDiagnosticsSnapshot(scope)
+            applySnapshot(current)
+          }
           await yieldForDiagnosticsPaint()
           continue
         }
-        break
-      }
-      // Final refresh after focus goes idle so preview/Run match post-completion DAG state
-      // (new ready work can appear after the last poll that saw an empty focus set).
-      if (!runCancelRef.current) {
+        const isWorkInProgress = disabledReason === 'work_in_progress'
+        if (!isWorkInProgress && idleConfirmed) {
+          break
+        }
+        idleConfirmed = !isWorkInProgress
+        await sleep(RUN_POLL_MS)
+        if (runCancelRef.current) {
+          break
+        }
         current = await fetchComputeDiagnosticsSnapshot(scope)
         applySnapshot(current)
+        await yieldForDiagnosticsPaint()
       }
     } catch (error: unknown) {
       setLoadError(error instanceof Error ? error.message : String(error))
@@ -534,15 +450,14 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
       return DISABLED_REASON_LABELS.empty_allowlist
     }
     if (
-      nextStep?.target == null &&
-      nextStep?.disabledReason === 'nothing_steppable' &&
-      snapshot != null &&
-      !snapshotHasPendingPoolWork(snapshot)
+      nextStep != null &&
+      nextStep.target == null &&
+      nextStep.disabledReason !== 'work_in_progress'
     ) {
       return DISABLED_REASON_LABELS.nothing_steppable
     }
     return null
-  }, [freezeArmed, nextStep, running, snapshot])
+  }, [freezeArmed, nextStep, running])
 
   if (scope == null) {
     return (
@@ -716,7 +631,7 @@ export function DiagnosticsComputeTab({ scope, onCopy }: DiagnosticsComputeTabPr
           <SectionPanel title="Completion history" value={snapshot.completionHistory} onCopy={onCopy} />
           <SectionPanel title="Recent failures" value={snapshot.recentFailures} onCopy={onCopy} />
           <SectionPanel title="Server streams" value={snapshot.serverStreams} onCopy={onCopy} />
-          <SectionPanel title="Client streams" value={snapshot.clientStreams} onCopy={onCopy} />
+          <ClientStreamsPanel onCopy={onCopy} />
         </div>
       )}
     </div>

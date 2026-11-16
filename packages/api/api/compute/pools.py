@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
-    from api.compute.orchestrator_state import ComputeNodeRun
+    from api.compute.orchestrator_state import ComputeNodeRun, PublishedExecution
 
 # Wider than historical 4: scores ``tier_solve`` is single-threaded CP-SAT, so
 # parallelism is across per-player DAG nodes on this pool (not inside one Solve).
@@ -163,6 +163,22 @@ class PoolMetrics:
     process_executions: int = 0
 
 
+@dataclass(frozen=True)
+class _QueuedItemState:
+    """One queued item as a pick sees it: its band now, and whether its execution ended."""
+
+    banded: BandedWorkItem
+    has_ended: bool
+
+
+@dataclass(frozen=True)
+class QueuedWorkItem:
+    """One queued item with whether the dequeue predicate holds it, from one locked read."""
+
+    banded: BandedWorkItem
+    is_held: bool
+
+
 def work_pick_key(priority_band: ComputePriorityBand, step_index: int) -> tuple[int, int]:
     """Return the pick order key: higher band first, then initial steps before continuations."""
     return (PRIORITY_BAND_RANK[priority_band], 0 if step_index == 0 else 1)
@@ -262,7 +278,12 @@ class ComputeWorkerPool:
         self,
         predicate: Callable[[PoolWorkItem], bool] | None,
     ) -> None:
-        """Set a side-effect-free predicate that must return True for dequeue eligibility."""
+        """Set a side-effect-free predicate that must return True for dequeue eligibility.
+
+        The predicate holds live work only. An item whose execution has ended
+        is picked whatever the predicate says, so the orchestrator can drop it
+        (see :meth:`_pop_runnable_item_locked`).
+        """
         with self._condition:
             self._dequeue_predicate = predicate
 
@@ -304,6 +325,19 @@ class ComputeWorkerPool:
         """
         with self._condition:
             self._on_item_finished = callback
+
+    def snapshot_work_queue_holds(self) -> tuple[QueuedWorkItem, ...]:
+        """Return queued items in queue order, each with whether the pick would hold it now.
+
+        One locked pass, applying the pick's own rule, so a diagnostics view of
+        what freeze holds never disagrees with the queue it is shown beside.
+        """
+        with self._condition:
+            states = [self._queued_item_state_locked(item) for item in self._work_queue]
+            return tuple(
+                QueuedWorkItem(banded=state.banded, is_held=self._is_held_locked(state))
+                for state in states
+            )
 
     def snapshot_work_queue(self) -> tuple[BandedWorkItem, ...]:
         """Return queued items in queue order with the band each would be picked at now."""
@@ -460,19 +494,21 @@ class ComputeWorkerPool:
     def _pop_runnable_item_locked(self) -> BandedWorkItem | None:
         """Pick, pop, and record one runnable item at its currently published band.
 
-        The dequeue predicate is evaluated for every queued item before the pick.
-        It must be side-effect free: grant or other mutable gate state belongs in
-        the ``on_item_dequeued`` hook, invoked here after the pop so concurrent
-        workers cannot both claim the same grant.
+        The dequeue predicate is evaluated for each live queued item before the
+        pick; it is skipped for an ended item, and not consulted at all when an
+        ended item is picked. It must be side-effect free: grant or other mutable
+        gate state belongs in the ``on_item_dequeued`` hook, invoked here after the
+        pop so concurrent workers cannot both claim the same grant.
+
+        An item whose execution has ended is never held by the predicate: it is
+        picked first, in queue order, and ``begin_pool_step`` drops it unrun, so
+        dead work does not wait behind live work of a higher band.
         """
-        predicate = self._dequeue_predicate
         on_dequeued = self._on_item_dequeued
-        picked = pick_next_work_item(
-            [
-                self._with_published_band_locked(item)
-                for item in self._work_queue
-                if predicate is None or predicate(item)
-            ]
+        queued = [self._queued_item_state_locked(item) for item in self._work_queue]
+        ended = next((state.banded for state in queued if state.has_ended), None)
+        picked = ended or pick_next_work_item(
+            state.banded for state in queued if not self._is_held_locked(state)
         )
         if picked is None:
             return None
@@ -488,16 +524,46 @@ class ComputeWorkerPool:
             on_dequeued(picked, len(self._work_queue))
         return picked
 
-    def _with_published_band_locked(self, item: PoolWorkItem) -> BandedWorkItem:
-        """Pair ``item`` with the band its orchestrator publishes for its scope.
+    def _published_execution_locked(self, item: PoolWorkItem) -> PublishedExecution | None:
+        """Return what ``item``'s orchestrator publishes for its scope, or None.
 
-        Reads the orchestrator's immutable band map and never takes the
-        orchestrator lock. An item whose orchestrator is gone, or whose scope
-        has no published band, ranks as ``background``.
+        Reads the orchestrator's immutable published map and never takes the
+        orchestrator lock. None when the orchestrator is gone or the scope has
+        no non-terminal node.
         """
         orchestrator = self._orchestrators.get(item.orchestrator_id)
-        band = None if orchestrator is None else orchestrator.published_band(item.scope)
-        return BandedWorkItem(item=item, priority_band="background" if band is None else band)
+        return None if orchestrator is None else orchestrator.published_execution(item.scope)
+
+    def _queued_item_state_locked(self, item: PoolWorkItem) -> _QueuedItemState:
+        """Read ``item``'s published execution once: its band now, and whether it has ended.
+
+        An item has ended when its execution is no longer the one published for
+        its scope. That is conservative for live work: an item's generation is
+        published by the pass that dispatched it, before the item is queued, and
+        stays published until its node goes terminal or is replaced. An ended
+        item ranks as ``background``: a newer execution's band is not its band.
+        """
+        published = self._published_execution_locked(item)
+        if published is None or published.execution_generation != item.execution_generation:
+            return _QueuedItemState(
+                banded=BandedWorkItem(item=item, priority_band="background"),
+                has_ended=True,
+            )
+        return _QueuedItemState(
+            banded=BandedWorkItem(item=item, priority_band=published.band),
+            has_ended=False,
+        )
+
+    def _is_held_locked(self, state: _QueuedItemState) -> bool:
+        """Whether the dequeue predicate holds a queued item. It never holds an ended one."""
+        predicate = self._dequeue_predicate
+        if predicate is None or state.has_ended:
+            return False
+        return not predicate(state.banded.item)
+
+    def _with_published_band_locked(self, item: PoolWorkItem) -> BandedWorkItem:
+        """Pair ``item`` with the band it would be picked at now."""
+        return self._queued_item_state_locked(item).banded
 
     def _record_backend_execution_locked(self, backend: ComputeBackend) -> None:
         if backend == "thread":

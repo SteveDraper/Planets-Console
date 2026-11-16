@@ -94,21 +94,9 @@ describe('recordClientStreamLifecycle', () => {
   })
 })
 
-describe('usePerPlayerAnalyticStream freeze hold', () => {
+describe('usePerPlayerAnalyticStream under compute diagnostics freeze', () => {
   beforeEach(() => {
     useComputeDiagnosticsStore.setState({
-      enabled: false,
-      freezeStatus: null,
-      snapshot: null,
-      clientStreams: [],
-    })
-  })
-
-  it('enabled + freeze armed with no snapshot still holds (empty allowlist)', async () => {
-    const connectUntilComplete = vi.fn(async () => 'incomplete_exhausted' as const)
-    const policy = makePolicy(connectUntilComplete)
-
-    useComputeDiagnosticsStore.setState({
       enabled: true,
       freezeStatus: {
         shell: scope,
@@ -118,6 +106,14 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
       snapshot: null,
       clientStreams: [],
     })
+  })
+
+  it('subscribes every player even with an empty focus allowlist', async () => {
+    const connectUntilComplete = vi.fn(
+      (_scope: AnalyticShellScope, _playerIds: number[]) =>
+        new Promise<'ok'>(() => {})
+    )
+    const policy = makePolicy(connectUntilComplete)
 
     const { result } = renderHook(() =>
       usePerPlayerAnalyticStream({
@@ -130,10 +126,9 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
     )
 
     await waitFor(() => {
-      expect(result.current.publishedByPlayerId.size).toBe(3)
+      expect(connectUntilComplete).toHaveBeenCalledTimes(1)
     })
-
-    expect(connectUntilComplete).not.toHaveBeenCalled()
+    expect(connectUntilComplete.mock.calls[0][1]).toEqual([3, 7, 11])
     for (const playerId of [3, 7, 11]) {
       expect(result.current.publishedByPlayerId.get(playerId)).toEqual({
         status: 'pending',
@@ -142,50 +137,38 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
     }
   })
 
-  it('freeze + empty allowlist does not mark rows failed', async () => {
-    const connectUntilComplete = vi.fn(async () => 'incomplete_exhausted' as const)
+  it('does not reconnect when the freeze status changes', async () => {
+    const connectUntilComplete = vi.fn(
+      (_scope: AnalyticShellScope, _playerIds: number[]) =>
+        new Promise<'ok'>(() => {})
+    )
     const policy = makePolicy(connectUntilComplete)
 
-    useComputeDiagnosticsStore.setState({
-      enabled: true,
-      freezeStatus: {
-        shell: scope,
-        freezeArmed: true,
-        allowlistedPlayerIds: [],
-      },
-      snapshot: null,
-      clientStreams: [],
-    })
-
-    const { result } = renderHook(() =>
+    renderHook(() =>
       usePerPlayerAnalyticStream({
         streamId: 'test',
         scope,
         enabled: true,
-        playerIdsKey: '3,7,11',
+        playerIdsKey: '3,7',
         policy,
       })
     )
-
     await waitFor(() => {
-      expect(result.current.publishedByPlayerId.size).toBe(3)
+      expect(connectUntilComplete).toHaveBeenCalledTimes(1)
     })
 
-    expect(connectUntilComplete).not.toHaveBeenCalled()
-    for (const playerId of [3, 7, 11]) {
-      expect(result.current.publishedByPlayerId.get(playerId)).toEqual({
-        status: 'pending',
-        detail: null,
+    act(() => {
+      useComputeDiagnosticsStore.getState().setFreezeStatus({
+        shell: scope,
+        freezeArmed: true,
+        allowlistedPlayerIds: [3],
       })
-    }
-    expect(
-      useComputeDiagnosticsStore
-        .getState()
-        .clientStreams.some((entry) => entry.lastConnectResult === 'freeze_held')
-    ).toBe(true)
+    })
+
+    expect(connectUntilComplete).toHaveBeenCalledTimes(1)
   })
 
-  it('without freeze, incomplete_exhausted still marks rows failed', async () => {
+  it('marks rows failed when the stream ends incomplete', async () => {
     const connectUntilComplete = vi.fn(async () => 'incomplete_exhausted' as const)
     const policy = makePolicy(connectUntilComplete)
 
@@ -203,125 +186,22 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
       expect(result.current.publishedByPlayerId.get(3)?.status).toBe('failed')
     })
     expect(result.current.publishedByPlayerId.get(7)?.status).toBe('failed')
-    expect(connectUntilComplete).toHaveBeenCalled()
   })
+})
 
-  it('disarming freeze reconnects and can complete rows', async () => {
-    const connectUntilComplete = vi.fn(
-      async (
-        _scope: AnalyticShellScope,
-        playerIds: number[],
-        handlers: {
-          signal: AbortSignal
-          onEvent: (event: TestEvent) => void
-          hasPending: () => boolean
-        }
-      ) => {
-        for (const playerId of playerIds) {
-          handlers.onEvent({ type: 'complete', playerId })
-        }
-        return 'ok' as const
-      }
-    )
-    const policy = makePolicy(connectUntilComplete)
-
+describe('usePerPlayerAnalyticStream client stream rows', () => {
+  beforeEach(() => {
     useComputeDiagnosticsStore.setState({
       enabled: true,
-      freezeStatus: {
-        shell: scope,
-        freezeArmed: true,
-        allowlistedPlayerIds: [],
-      },
+      freezeStatus: null,
       snapshot: null,
       clientStreams: [],
     })
-
-    const { result } = renderHook(() =>
-      usePerPlayerAnalyticStream({
-        streamId: 'test',
-        scope,
-        enabled: true,
-        playerIdsKey: '3',
-        policy,
-      })
-    )
-
-    await waitFor(() => {
-      expect(result.current.publishedByPlayerId.get(3)?.status).toBe('pending')
-    })
-    expect(connectUntilComplete).not.toHaveBeenCalled()
-
-    await act(async () => {
-      useComputeDiagnosticsStore.getState().setFreezeStatus({
-        shell: scope,
-        freezeArmed: false,
-        allowlistedPlayerIds: [],
-      })
-    })
-
-    await waitFor(() => {
-      expect(result.current.publishedByPlayerId.get(3)?.status).toBe('ok')
-    })
-    expect(connectUntilComplete).toHaveBeenCalled()
-  })
-
-  it('sticky freeze across turn change holds without connecting (stale freezeStatus shell)', async () => {
-    const connectUntilComplete = vi.fn(async () => 'incomplete_exhausted' as const)
-    const policy = makePolicy(connectUntilComplete)
-    const nextTurnScope: AnalyticShellScope = {
-      gameId: '628580',
-      turn: 9,
-      perspective: 1,
-    }
-
-    useComputeDiagnosticsStore.setState({
-      enabled: true,
-      freezeStatus: {
-        shell: scope,
-        freezeArmed: true,
-        allowlistedPlayerIds: [3, 7],
-      },
-      snapshot: null,
-      clientStreams: [],
-    })
-
-    const { result } = renderHook(() =>
-      usePerPlayerAnalyticStream({
-        streamId: 'test',
-        scope: nextTurnScope,
-        enabled: true,
-        playerIdsKey: '3,7,11',
-        policy,
-      })
-    )
-
-    await waitFor(() => {
-      expect(result.current.publishedByPlayerId.size).toBe(3)
-    })
-
-    expect(connectUntilComplete).not.toHaveBeenCalled()
-    for (const playerId of [3, 7, 11]) {
-      expect(result.current.publishedByPlayerId.get(playerId)).toEqual({
-        status: 'pending',
-        detail: null,
-      })
-    }
   })
 
   it('keeps separate clientStreams rows for different streamIds', async () => {
     const connectUntilComplete = vi.fn(async () => 'ok' as const)
     const policy = makePolicy(connectUntilComplete)
-
-    useComputeDiagnosticsStore.setState({
-      enabled: true,
-      freezeStatus: {
-        shell: scope,
-        freezeArmed: true,
-        allowlistedPlayerIds: [],
-      },
-      snapshot: null,
-      clientStreams: [],
-    })
 
     renderHook(() => {
       usePerPlayerAnalyticStream({
@@ -349,7 +229,5 @@ describe('usePerPlayerAnalyticStream freeze hold', () => {
     const byStreamId = Object.fromEntries(streams.map((entry) => [entry.streamId, entry]))
     expect(byStreamId.fleet?.connectionKey.startsWith('fleet:')).toBe(true)
     expect(byStreamId.scores?.connectionKey.startsWith('scores:')).toBe(true)
-    expect(byStreamId.fleet?.lastConnectResult).toBe('freeze_held')
-    expect(byStreamId.scores?.lastConnectResult).toBe('freeze_held')
   })
 })

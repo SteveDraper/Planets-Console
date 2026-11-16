@@ -4,9 +4,18 @@ from __future__ import annotations
 
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.pools import ComputeWorkerPool, PoolWorkItem
-from api.compute.priority_band import ComputeRequestBand
+from api.compute.priority_band import ComputePriorityBand, ComputeRequestBand
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
+
+
+def published_band(
+    orchestrator: ComputeOrchestrator,
+    scope: ComputeScope,
+) -> ComputePriorityBand | None:
+    """Return the band the last dispatch pass published for ``scope``, or None."""
+    published = orchestrator.published_execution(scope)
+    return None if published is None else published.band
 
 
 def publish_queued_node_band(

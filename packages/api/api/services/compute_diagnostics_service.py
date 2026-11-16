@@ -20,7 +20,6 @@ __all__ = [
     "compute_diagnostics_enabled",
     "get_compute_diagnostics_freeze_status",
     "get_compute_diagnostics_snapshot_wire",
-    "get_compute_diagnostics_stream_allowlist",
     "reset_compute_diagnostics_for_tests",
     "run_compute_diagnostics_single_step",
     "set_compute_diagnostics_allowlist",
@@ -88,14 +87,3 @@ def run_compute_diagnostics_single_step(
     """Release exactly one in-focus compute step for the shell; return whether armed."""
     shell = _shell(game_id=game_id, perspective=perspective, turn=turn)
     return get_compute_diagnostics_controller().single_step(shell)
-
-
-def get_compute_diagnostics_stream_allowlist(
-    *,
-    game_id: int,
-    perspective: int,
-    turn: int,
-) -> frozenset[int] | None:
-    """When freeze is armed, return allowlisted players for stream narrowing."""
-    shell = _shell(game_id=game_id, perspective=perspective, turn=turn)
-    return get_compute_diagnostics_controller().stream_allowlisted_player_ids(shell)

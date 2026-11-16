@@ -1,13 +1,23 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ComputeDiagnosticsSnapshotResponse } from '../../api/bffComputeDiagnostics'
+import type {
+  ComputeDiagnosticsSingleStepResponse,
+  ComputeDiagnosticsSnapshotResponse,
+} from '../../api/bffComputeDiagnostics'
 import { useComputeDiagnosticsStore } from '../../stores/computeDiagnostics'
 import {
   DiagnosticsComputeTab,
-  snapshotHasNextStep,
-  snapshotHasPendingPoolWork,
 } from './DiagnosticsComputeTab'
+
+const jsonBlockRenders = vi.hoisted(() => ({ count: 0 }))
+
+vi.mock('./DiagnosticsJsonBlock', () => ({
+  DiagnosticsJsonBlock: ({ value }: { value: unknown }) => {
+    jsonBlockRenders.count += 1
+    return <pre>{Array.isArray(value) ? `Array(${value.length})` : 'value'}</pre>
+  },
+}))
 
 vi.mock('../../api/bffComputeDiagnostics', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/bffComputeDiagnostics')>()
@@ -100,6 +110,13 @@ function snapshotFixture(
   }
 }
 
+function stepped(
+  snapshot: ComputeDiagnosticsSnapshotResponse,
+  released = true
+): ComputeDiagnosticsSingleStepResponse {
+  return { ...snapshot, released }
+}
+
 function idleSnapshot(
   overrides: Partial<ComputeDiagnosticsSnapshotResponse> = {}
 ): ComputeDiagnosticsSnapshotResponse {
@@ -127,6 +144,42 @@ describe('DiagnosticsComputeTab', () => {
     vi.mocked(putComputeDiagnosticsAllowlist).mockImplementation(async (_scope, playerIds) =>
       idleSnapshot({ allowlistedPlayerIds: [...playerIds] })
     )
+  })
+
+  it('does not treat a stale freeze status for another shell as armed', async () => {
+    useComputeDiagnosticsStore.setState({
+      freezeStatus: {
+        shell: { ...SCOPE, gameId: '999001' },
+        freezeArmed: true,
+        allowlistedPlayerIds: [],
+      },
+    })
+    vi.mocked(fetchComputeDiagnosticsSnapshot).mockImplementation(() => new Promise(() => {}))
+
+    render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
+
+    expect(screen.getAllByTitle('Freeze is not armed').length).toBeGreaterThan(0)
+  })
+
+  it('a client stream event re-renders only the client streams panel', async () => {
+    render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByText('DAG nodes')).toBeInTheDocument()
+    })
+    const rendersBefore = jsonBlockRenders.count
+
+    act(() => {
+      useComputeDiagnosticsStore.getState().upsertClientStream({
+        streamId: 'fleet',
+        connectionKey: 'fleet:628580:8:1:1',
+        generation: 1,
+        lastEventAt: new Date().toISOString(),
+        lastEventType: 'ledger_updated',
+        lastConnectResult: null,
+      })
+    })
+
+    expect(jsonBlockRenders.count - rendersBefore).toBe(1)
   })
 
   it('copies pool queue JSON without injecting _nextSingleStep', async () => {
@@ -223,8 +276,8 @@ describe('DiagnosticsComputeTab', () => {
       },
     })
     vi.mocked(postComputeDiagnosticsSingleStep)
-      .mockResolvedValueOnce(afterFirst)
-      .mockResolvedValueOnce(idleSnapshot())
+      .mockResolvedValueOnce(stepped(afterFirst))
+      .mockResolvedValueOnce(stepped(idleSnapshot()))
     vi.mocked(fetchComputeDiagnosticsSnapshot)
       .mockResolvedValueOnce(snapshotFixture())
       .mockResolvedValueOnce(idleSnapshot())
@@ -241,44 +294,26 @@ describe('DiagnosticsComputeTab', () => {
       expect(postComputeDiagnosticsSingleStep).toHaveBeenCalledTimes(2)
     })
     await waitFor(() => {
-      expect(screen.getByTestId('next-single-step-preview').textContent).toContain(
-        'Nothing in the focus set is ready to step'
-      )
+      expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
     })
-    expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
+    expect(screen.getByTestId('next-single-step-preview').textContent).toContain(
+      'Nothing in the focus set is ready to step'
+    )
+    // Initial load + one confirming poll after the focus set went idle.
+    expect(fetchComputeDiagnosticsSnapshot).toHaveBeenCalledTimes(2)
   })
 
-  it('Run waits for in-flight pool work before stopping', async () => {
+  it('Run polls while focus work is in progress, then stops after a confirming idle poll', async () => {
     const user = userEvent.setup()
-    const afterStep = snapshotFixture({
+    const inProgress = snapshotFixture({
       poolQueue: [],
       readyQueue: [],
-      inFlight: [
-        {
-          scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          stepKind: 'materialize',
-          stepIndex: 0,
-        },
-      ],
-      dagNodes: [
-        {
-          scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          state: 'running',
-          stepKind: 'materialize',
-          stepIndex: 0,
-        },
-      ],
-      nextSingleStep: {
-        target: null,
-        disabledReason: 'nothing_steppable',
-      },
+      nextSingleStep: { target: null, disabledReason: 'work_in_progress' },
     })
-    vi.mocked(postComputeDiagnosticsSingleStep).mockResolvedValueOnce(afterStep)
+    vi.mocked(postComputeDiagnosticsSingleStep).mockResolvedValueOnce(stepped(inProgress))
     vi.mocked(fetchComputeDiagnosticsSnapshot)
       .mockResolvedValueOnce(snapshotFixture())
-      .mockResolvedValueOnce(afterStep)
+      .mockResolvedValueOnce(inProgress)
       .mockResolvedValueOnce(idleSnapshot())
       .mockResolvedValueOnce(idleSnapshot())
 
@@ -291,35 +326,29 @@ describe('DiagnosticsComputeTab', () => {
     await user.click(screen.getByTestId('compute-diagnostics-run'))
 
     await waitFor(() => {
-      expect(postComputeDiagnosticsSingleStep).toHaveBeenCalledTimes(1)
-    })
-    await waitFor(() => {
-      expect(vi.mocked(fetchComputeDiagnosticsSnapshot).mock.calls.length).toBeGreaterThanOrEqual(
-        4
-      )
-    })
-    await waitFor(() => {
       expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
     })
+    expect(postComputeDiagnosticsSingleStep).toHaveBeenCalledTimes(1)
+    expect(fetchComputeDiagnosticsSnapshot).toHaveBeenCalledTimes(4)
   })
 
-  it('Run stops with an error when single-step keeps returning the same would_dispatch target', async () => {
+  it('Run stops with an error after repeated single-steps that release nothing', async () => {
     const user = userEvent.setup()
-    const stuck = snapshotFixture({
+    const refused = snapshotFixture({
       poolQueue: [],
       readyQueue: [
         {
           scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          stepKind: 'materialization_leg',
+          analyticId: 'scores',
+          stepKind: 'tier_solve',
           state: 'ready',
         },
       ],
       nextSingleStep: {
         target: {
           scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          stepKind: 'materialization_leg',
+          analyticId: 'scores',
+          stepKind: 'tier_solve',
           stepIndex: 0,
           priorityBand: 'stream_attached',
           backend: 'interpreter',
@@ -329,7 +358,8 @@ describe('DiagnosticsComputeTab', () => {
         disabledReason: null,
       },
     })
-    vi.mocked(postComputeDiagnosticsSingleStep).mockResolvedValue(stuck)
+    vi.mocked(fetchComputeDiagnosticsSnapshot).mockResolvedValue(refused)
+    vi.mocked(postComputeDiagnosticsSingleStep).mockResolvedValue(stepped(refused, false))
 
     render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
 
@@ -340,47 +370,22 @@ describe('DiagnosticsComputeTab', () => {
     await user.click(screen.getByTestId('compute-diagnostics-run'))
 
     await waitFor(() => {
-      expect(vi.mocked(postComputeDiagnosticsSingleStep).mock.calls.length).toBeGreaterThanOrEqual(
-        3
-      )
+      expect(screen.getByRole('alert').textContent).toMatch(/did not release/)
     })
-    await waitFor(() => {
-      expect(screen.getByRole('alert').textContent).toMatch(/Run stalled/)
-    })
+    expect(postComputeDiagnosticsSingleStep).toHaveBeenCalledTimes(3)
     expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
   })
 
-  it('Run does not wait forever on orphaned in-flight with no running dag node', async () => {
+  it('Run waits for a worker when a released held target is still queued', async () => {
     const user = userEvent.setup()
-    const afterStep = snapshotFixture({
-      poolQueue: [],
-      readyQueue: [],
-      inFlight: [
-        {
-          scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          stepKind: 'materialize',
-          stepIndex: 0,
-        },
-      ],
-      dagNodes: [
-        {
-          scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          state: 'complete',
-          stepKind: 'materialize',
-          stepIndex: 0,
-        },
-      ],
-      nextSingleStep: {
-        target: null,
-        disabledReason: 'nothing_steppable',
-      },
-    })
-    vi.mocked(postComputeDiagnosticsSingleStep).mockResolvedValueOnce(afterStep)
+    const heldStillQueued = snapshotFixture()
+    vi.mocked(postComputeDiagnosticsSingleStep)
+      .mockResolvedValueOnce(stepped(heldStillQueued))
+      .mockResolvedValueOnce(stepped(idleSnapshot()))
     vi.mocked(fetchComputeDiagnosticsSnapshot)
       .mockResolvedValueOnce(snapshotFixture())
-      .mockResolvedValueOnce(afterStep)
+      .mockResolvedValueOnce(heldStillQueued)
+      .mockResolvedValue(idleSnapshot())
 
     render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
 
@@ -391,24 +396,60 @@ describe('DiagnosticsComputeTab', () => {
     await user.click(screen.getByTestId('compute-diagnostics-run'))
 
     await waitFor(() => {
-      expect(postComputeDiagnosticsSingleStep).toHaveBeenCalledTimes(1)
+      expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
     })
+    const [firstStep, secondStep] = vi.mocked(postComputeDiagnosticsSingleStep).mock
+      .invocationCallOrder
+    const pollsBetween = vi
+      .mocked(fetchComputeDiagnosticsSnapshot)
+      .mock.invocationCallOrder.filter((order) => order > firstStep && order < secondStep)
+    expect(pollsBetween).toHaveLength(1)
+  })
+
+  it('Run is enabled while freeze is armed before the first snapshot loads', async () => {
+    useComputeDiagnosticsStore.setState({
+      freezeStatus: { shell: SCOPE, freezeArmed: true, allowlistedPlayerIds: [1] },
+    })
+    vi.mocked(fetchComputeDiagnosticsSnapshot).mockRejectedValueOnce(new Error('offline'))
+
+    render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toMatch(/offline/)
+    })
+    expect(screen.getByTestId('compute-diagnostics-run')).toBeEnabled()
+  })
+
+  it('Run stops when only non-focus held work remains in the pool queue', async () => {
+    const user = userEvent.setup()
+    const nonFocusHeld = idleSnapshot({
+      poolQueue: [{ scopeKey: 'fleet@t4,p2', analyticId: 'fleet', stepKind: 'materialize' }],
+    })
+    vi.mocked(postComputeDiagnosticsSingleStep).mockResolvedValueOnce(stepped(nonFocusHeld))
+    vi.mocked(fetchComputeDiagnosticsSnapshot)
+      .mockResolvedValueOnce(snapshotFixture())
+      .mockResolvedValue(nonFocusHeld)
+
+    render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('compute-diagnostics-run')).toBeEnabled()
+    })
+
+    await user.click(screen.getByTestId('compute-diagnostics-run'))
+
     await waitFor(() => {
       expect(screen.getByTestId('compute-diagnostics-run').textContent).toBe('Run')
     })
-    // Initial load + final settle refresh; no poll loop for the ghost in-flight row.
+    expect(postComputeDiagnosticsSingleStep).toHaveBeenCalledTimes(1)
     expect(fetchComputeDiagnosticsSnapshot).toHaveBeenCalledTimes(2)
   })
 
-  it('Apply allowlist refreshes until focus work appears after stream settle', async () => {
+  it('Apply allowlist shows the snapshot the PUT returns, without polling', async () => {
     const user = userEvent.setup()
-    const afterPut = idleSnapshot({ allowlistedPlayerIds: [3] })
-    const afterSettle = snapshotFixture({ allowlistedPlayerIds: [3] })
+    const afterPut = snapshotFixture({ allowlistedPlayerIds: [3] })
     vi.mocked(putComputeDiagnosticsAllowlist).mockResolvedValueOnce(afterPut)
-    vi.mocked(fetchComputeDiagnosticsSnapshot)
-      .mockResolvedValueOnce(idleSnapshot())
-      .mockResolvedValueOnce(afterPut)
-      .mockResolvedValueOnce(afterSettle)
+    vi.mocked(fetchComputeDiagnosticsSnapshot).mockResolvedValueOnce(idleSnapshot())
 
     render(<DiagnosticsComputeTab scope={SCOPE} onCopy={vi.fn()} />)
 
@@ -422,155 +463,11 @@ describe('DiagnosticsComputeTab', () => {
     await user.click(screen.getByText('Apply allowlist'))
 
     await waitFor(() => {
-      expect(putComputeDiagnosticsAllowlist).toHaveBeenCalledWith(SCOPE, [3])
-    })
-    await waitFor(() => {
       expect(screen.getByTestId('next-single-step-preview').textContent).toContain(
         NEXT_SCOPE_KEY
       )
     })
-    expect(vi.mocked(fetchComputeDiagnosticsSnapshot).mock.calls.length).toBeGreaterThanOrEqual(3)
-  })
-})
-describe('snapshotHasPendingPoolWork', () => {
-  it('treats work_in_progress disabled reason as pending', () => {
-    const snapshot = snapshotFixture({
-      poolQueue: [],
-      inFlight: [],
-      dagNodes: [
-        {
-          scopeKey: 'scores@g42@p1@t8@pl2',
-          analyticId: 'scores',
-          state: 'running',
-          stepKind: 'tier_solve',
-          stepIndex: 0,
-          priorityBand: 'stream_attached',
-          profileStepIndex: 1,
-        },
-      ],
-      nextSingleStep: {
-        target: null,
-        disabledReason: 'work_in_progress',
-      },
-    })
-    expect(snapshotHasPendingPoolWork(snapshot)).toBe(true)
-  })
-
-  it('treats orphaned in-flight (no running dag node) as not pending', () => {
-    const snapshot = snapshotFixture({
-      poolQueue: [],
-      inFlight: [
-        {
-          scopeKey: 'fleet@g42@p1@t7@pl1',
-          analyticId: 'fleet',
-          stepKind: 'materialization_leg',
-          stepIndex: 0,
-          priorityBand: 'stream_attached',
-          backend: 'interpreter',
-          orchestratorId: 1,
-          startedAt: '2026-07-12T13:46:45.796588+00:00',
-        },
-      ],
-      dagNodes: [
-        {
-          scopeKey: 'fleet@g42@p1@t7@pl1',
-          analyticId: 'fleet',
-          state: 'complete',
-          stepKind: 'materialization_leg',
-          stepIndex: 0,
-          priorityBand: 'stream_attached',
-          profileStepIndex: 0,
-        },
-      ],
-      nextSingleStep: {
-        target: {
-          scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          stepKind: 'materialize',
-          stepIndex: 0,
-          priorityBand: 'stream_attached',
-          backend: 'interpreter',
-          source: 'would_dispatch',
-        },
-        disabledReason: null,
-      },
-    })
-    expect(snapshotHasPendingPoolWork(snapshot)).toBe(false)
-  })
-
-  it('treats in-flight with a matching running dag node as pending', () => {
-    const snapshot = snapshotFixture({
-      poolQueue: [],
-      inFlight: [
-        {
-          scopeKey: 'fleet@g42@p1@t7@pl1',
-          analyticId: 'fleet',
-          stepKind: 'materialization_leg',
-          stepIndex: 0,
-          priorityBand: 'stream_attached',
-          backend: 'interpreter',
-          orchestratorId: 1,
-          startedAt: '2026-07-12T13:46:45.796588+00:00',
-        },
-      ],
-      dagNodes: [
-        {
-          scopeKey: 'fleet@g42@p1@t7@pl1',
-          analyticId: 'fleet',
-          state: 'running',
-          stepKind: 'materialization_leg',
-          stepIndex: 0,
-          priorityBand: 'stream_attached',
-          profileStepIndex: 0,
-        },
-      ],
-    })
-    expect(snapshotHasPendingPoolWork(snapshot)).toBe(true)
-  })
-
-  it('treats held next-step with empty pool queue as not steppable', () => {
-    const snapshot = snapshotFixture({
-      poolQueue: [],
-      nextSingleStep: {
-        target: {
-          scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          stepKind: 'materialization_leg',
-          stepIndex: 0,
-          priorityBand: 'stream_attached',
-          backend: 'interpreter',
-          source: 'held',
-        },
-        disabledReason: null,
-      },
-    })
-    expect(snapshotHasNextStep(snapshot)).toBe(false)
-  })
-
-  it('treats held next-step as steppable when the pool queue still has the item', () => {
-    const snapshot = snapshotFixture({
-      poolQueue: [
-        {
-          scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          stepKind: 'materialization_leg',
-          stepIndex: 0,
-          state: 'held',
-        },
-      ],
-      nextSingleStep: {
-        target: {
-          scopeKey: NEXT_SCOPE_KEY,
-          analyticId: 'fleet',
-          stepKind: 'materialization_leg',
-          stepIndex: 0,
-          priorityBand: 'stream_attached',
-          backend: 'interpreter',
-          source: 'held',
-        },
-        disabledReason: null,
-      },
-    })
-    expect(snapshotHasNextStep(snapshot)).toBe(true)
+    expect(putComputeDiagnosticsAllowlist).toHaveBeenCalledWith(SCOPE, [3])
+    expect(fetchComputeDiagnosticsSnapshot).toHaveBeenCalledTimes(1)
   })
 })

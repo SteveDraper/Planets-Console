@@ -1,7 +1,7 @@
-"""Freeze stream narrowing must not drop the AC, and empty allowlist must narrow to ().
+"""Table streams subscribe every requested player, whatever compute diagnostics freeze says.
 
-Client completion semantics (stay pending, do not mark failed) are covered on the
-frontend via computeFreezeStreamHold. This test locks the BFF narrowing contract.
+Freeze holds dispatch in Core; it never narrows which rows a stream opens. With
+freeze armed and an empty focus allowlist, the BFF still forwards every player.
 """
 
 from __future__ import annotations
@@ -12,10 +12,7 @@ import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
 from api.services.compute_diagnostics_service import (
-    get_compute_diagnostics_freeze_status,
-    get_compute_diagnostics_stream_allowlist,
     reset_compute_diagnostics_for_tests,
-    set_compute_diagnostics_allowlist,
     set_compute_diagnostics_freeze_armed,
 )
 from api.storage_factory import clear_backend_cache
@@ -50,25 +47,17 @@ def _reset():
     reset_compute_diagnostics_for_tests()
 
 
-def test_fleet_table_stream_narrows_to_empty_when_freeze_allowlist_empty():
-    """Freeze + empty allowlist narrows subscriptions to no players (AC)."""
+def _arm_freeze_with_an_empty_allowlist() -> None:
     set_compute_diagnostics_freeze_armed(
         game_id=628580,
         perspective=1,
         turn=8,
         freeze_armed=True,
     )
-    freeze_armed, allowlisted = get_compute_diagnostics_freeze_status(
-        game_id=628580,
-        perspective=1,
-        turn=8,
-    )
-    assert freeze_armed is True
-    assert allowlisted == frozenset()
 
-    captured: list[tuple[int, ...]] = []
 
-    def _iter_fleet_table_stream(
+def _capturing_stream(captured: list[tuple[int, ...]]):
+    def _iter_table_stream(
         game_id: int,
         perspective: int,
         turn_number: int,
@@ -80,8 +69,14 @@ def test_fleet_table_stream_narrows_to_empty_when_freeze_allowlist_empty():
         captured.append(player_ids)
         yield from ()
 
+    return _iter_table_stream
+
+
+def test_fleet_table_stream_forwards_every_player_while_freeze_is_armed():
+    _arm_freeze_with_an_empty_allowlist()
+    captured: list[tuple[int, ...]] = []
     mock_core = MagicMock()
-    mock_core.iter_fleet_table_stream = _iter_fleet_table_stream
+    mock_core.iter_fleet_table_stream = _capturing_stream(captured)
 
     with patch("bff.routers.fleet_table_stream.get_core_client", return_value=mock_core):
         response = client.get(
@@ -89,99 +84,23 @@ def test_fleet_table_stream_narrows_to_empty_when_freeze_allowlist_empty():
         )
 
     assert response.status_code == 200
-    assert captured == [()]
+    assert captured == [(3, 7, 11)]
 
 
-def test_fleet_table_stream_narrows_to_allowlisted_players():
-    set_compute_diagnostics_freeze_armed(
-        game_id=628580,
-        perspective=1,
-        turn=8,
-        freeze_armed=True,
-    )
-    set_compute_diagnostics_allowlist(
-        game_id=628580,
-        perspective=1,
-        turn=8,
-        player_ids=frozenset({7, 11}),
-    )
-
+def test_scores_inference_table_stream_forwards_every_player_while_freeze_is_armed():
+    _arm_freeze_with_an_empty_allowlist()
     captured: list[tuple[int, ...]] = []
-
-    def _iter_fleet_table_stream(
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-        player_ids: tuple[int, ...],
-        *,
-        username: str = "",
-    ):
-        del game_id, perspective, turn_number, username
-        captured.append(player_ids)
-        yield from ()
-
     mock_core = MagicMock()
-    mock_core.iter_fleet_table_stream = _iter_fleet_table_stream
+    mock_core.iter_scores_table_inference_stream = _capturing_stream(captured)
 
-    with patch("bff.routers.fleet_table_stream.get_core_client", return_value=mock_core):
+    with patch("bff.routers.scores_inference.get_core_client", return_value=mock_core):
         response = client.get(
-            "/analytics/fleet/table-stream?gameId=628580&perspective=1&turn=8&playerIds=3,7,11"
+            "/analytics/scores/inference/table-stream"
+            "?gameId=628580&perspective=1&turn=8&playerIds=3,7,11"
         )
 
     assert response.status_code == 200
-    assert captured == [(7, 11)]
-
-
-def test_fleet_table_stream_disarms_previous_game_freeze_on_context_change():
-    """Opening a stream for game B must disarm freeze left armed on game A."""
-    set_compute_diagnostics_freeze_armed(
-        game_id=628580,
-        perspective=1,
-        turn=8,
-        freeze_armed=True,
-    )
-    assert (
-        get_compute_diagnostics_stream_allowlist(
-            game_id=628580,
-            perspective=1,
-            turn=8,
-        )
-        == frozenset()
-    )
-
-    captured: list[tuple[int, ...]] = []
-
-    def _iter_fleet_table_stream(
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-        player_ids: tuple[int, ...],
-        *,
-        username: str = "",
-    ):
-        del game_id, perspective, turn_number, username
-        captured.append(player_ids)
-        yield from ()
-
-    mock_core = MagicMock()
-    mock_core.iter_fleet_table_stream = _iter_fleet_table_stream
-
-    with patch("bff.routers.fleet_table_stream.get_core_client", return_value=mock_core):
-        response = client.get(
-            "/analytics/fleet/table-stream?gameId=999001&perspective=1&turn=8&playerIds=3,7"
-        )
-
-    assert response.status_code == 200
-    assert captured == [(3, 7)]
-    # Game A freeze must be cleared; stream narrowing returns None when unarmed.
-    assert (
-        get_compute_diagnostics_stream_allowlist(
-            game_id=628580,
-            perspective=1,
-            turn=8,
-        )
-        is None
-    )
+    assert captured == [(3, 7, 11)]
 
 
 def test_fleet_table_stream_forwards_username_to_core():

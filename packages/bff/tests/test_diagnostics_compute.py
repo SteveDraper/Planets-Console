@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from api.config import ApiConfig
 from api.config import set_config as set_api_config
+from api.services import compute_diagnostics_service
 from api.services.compute_diagnostics_service import reset_compute_diagnostics_for_tests
 from api.storage_factory import clear_backend_cache
 from bff.app import app
@@ -141,6 +142,8 @@ def test_compute_diagnostics_enabled_snapshot_and_freeze():
         json={"gameId": 628580, "perspective": 1, "turn": 8},
     )
     assert single_step.status_code == 200
+    assert single_step.json()["released"] is False
+    assert single_step.json()["freezeArmed"] is True
 
     bootstrap = client.get("/shell/bootstrap")
     assert bootstrap.status_code == 200
@@ -198,3 +201,25 @@ def test_sticky_freeze_across_turn_and_perspective_resets_allowlist():
     prior_game = client.get("/diagnostics/compute/snapshot?gameId=628580&perspective=2&turn=9")
     assert prior_game.status_code == 200
     assert prior_game.json()["freezeArmed"] is False
+
+
+def test_single_step_reports_a_released_step(monkeypatch):
+    set_api_config(
+        ApiConfig(
+            storage_backend="ephemeral",
+            storage_asset_path=None,
+            include_dummy_data=False,
+            compute_diagnostics=True,
+        )
+    )
+    monkeypatch.setattr(
+        compute_diagnostics_service, "run_compute_diagnostics_single_step", lambda **_: True
+    )
+
+    single_step = client.post(
+        "/diagnostics/compute/single-step",
+        json={"gameId": 628580, "perspective": 1, "turn": 8},
+    )
+
+    assert single_step.status_code == 200
+    assert single_step.json()["released"] is True

@@ -169,7 +169,8 @@ export function DiagnosticsModal({
       return
     }
     if (activeTab === 'compute' && computeSnapshot != null) {
-      runClipboardCopy(JSON.stringify(computeSnapshot, null, 2))
+      const { clientStreams } = useComputeDiagnosticsStore.getState()
+      runClipboardCopy(JSON.stringify({ ...computeSnapshot, clientStreams }, null, 2))
     }
   }
 

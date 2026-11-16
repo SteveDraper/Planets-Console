@@ -32,7 +32,28 @@ export type ComputeDiagnosticsSnapshot = {
   }
   completionHistory: Record<string, unknown>[]
   serverStreams: Record<string, unknown>[]
-  clientStreams: ClientStreamLifecycle[]
+}
+
+/**
+ * A stream row refreshed with the same event type within this window keeps its
+ * previous timestamp. Busy streams emit many same-type events (scoreboard
+ * solutions, ledger writes); recording each one re-renders every subscriber.
+ */
+export const CLIENT_STREAM_REFRESH_THROTTLE_MS = 250
+
+/** Whether ``entry`` only refreshes ``existing``'s timestamp within the throttle window. */
+function isThrottledRefresh(existing: ClientStreamLifecycle, entry: ClientStreamLifecycle): boolean {
+  if (
+    existing.generation !== entry.generation ||
+    existing.lastEventType !== entry.lastEventType ||
+    existing.lastConnectResult !== entry.lastConnectResult ||
+    existing.lastEventAt == null ||
+    entry.lastEventAt == null
+  ) {
+    return false
+  }
+  const elapsedMs = Date.parse(entry.lastEventAt) - Date.parse(existing.lastEventAt)
+  return elapsedMs >= 0 && elapsedMs < CLIENT_STREAM_REFRESH_THROTTLE_MS
 }
 
 type ComputeDiagnosticsState = {
@@ -67,6 +88,12 @@ export const useComputeDiagnosticsStore = create<ComputeDiagnosticsState>()((set
   setSnapshot: (snapshot) => set({ snapshot }),
   upsertClientStream: (entry) =>
     set((state) => {
+      const existing = state.clientStreams.find(
+        (candidate) => candidate.connectionKey === entry.connectionKey
+      )
+      if (existing != null && isThrottledRefresh(existing, entry)) {
+        return state
+      }
       const next = state.clientStreams.filter(
         (existing) => existing.connectionKey !== entry.connectionKey
       )

@@ -8,6 +8,7 @@ import {
   bumpScoresInferenceRevision,
   useScoresInferenceRevisionStore,
 } from '../../stores/scoresInferenceRevision'
+import { useComputeDiagnosticsStore } from '../../stores/computeDiagnostics'
 import { useFleetPlayerVisibilityStore } from '../../stores/fleetPlayerVisibility'
 import { useShellStore } from '../../stores/shell'
 import { FleetAnalyticTableTile } from './FleetAnalyticTableTile'
@@ -205,6 +206,54 @@ describe('FleetAnalyticTableTile stream integration', () => {
     const bobTile = screen.getByRole('region', { name: 'Bob fleet table' })
     expect(within(bobTile).queryByText('Turn load')).not.toBeInTheDocument()
     expect(within(bobTile).queryByText('Fleet materialization in progress')).not.toBeInTheDocument()
+  })
+
+  it('under compute diagnostics freeze, subscribes every player and drops Turn load on accept', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    useComputeDiagnosticsStore.setState({
+      enabled: true,
+      freezeStatus: { shell: scope, freezeArmed: true, allowlistedPlayerIds: [] },
+    })
+    const sightingsFor = (playerId: number, playerName: string) => ({
+      type: 'roster_paint' as const,
+      playerId,
+      paint: 'sightings' as const,
+      ledger: { playerId, playerName, records: [placeholderRecord] },
+    })
+    let acceptAll: () => void = () => {}
+    vi.mocked(bff.fetchFleetTableStream).mockImplementation(
+      async (_scope, playerIds, handlers) => {
+        handlers.onEvent(sightingsFor(8, 'Alice'))
+        handlers.onEvent(sightingsFor(9, 'Bob'))
+        acceptAll = () => {
+          for (const playerId of playerIds) {
+            handlers.onEvent({ type: 'work_accepted', playerId })
+          }
+        }
+        await new Promise(() => {})
+      }
+    )
+
+    try {
+      render(<FleetTileWithOwnedStream analyticScope={scope} fetchEnabled />, {
+        wrapper: createWrapper(client),
+      })
+
+      const aliceTile = await screen.findByRole('region', { name: 'Alice fleet table' })
+      await waitFor(() => {
+        expect(within(aliceTile).getByText('Turn load')).toBeInTheDocument()
+      })
+      const [, subscribedPlayerIds] = vi.mocked(bff.fetchFleetTableStream).mock.calls[0]
+      expect(subscribedPlayerIds).toEqual([8, 9])
+
+      act(() => acceptAll())
+
+      await waitFor(() => {
+        expect(screen.queryByText('Turn load')).not.toBeInTheDocument()
+      })
+    } finally {
+      useComputeDiagnosticsStore.setState({ enabled: false, freezeStatus: null })
+    }
   })
 
   it('shows error on one tile without hiding others', async () => {

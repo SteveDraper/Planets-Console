@@ -27,6 +27,7 @@ from api.compute.orchestrator_state import (
     ComputeRequest,
     NodeExecutionBinding,
     NodeState,
+    PublishedExecution,
 )
 from api.compute.orchestrator_step_execution import OrchestratorStepExecutionMixin
 from api.compute.orchestrator_submission import OrchestratorSubmissionMixin
@@ -138,9 +139,12 @@ class ComputeOrchestrator(
     transitive dependents, or ``stream_attached`` when a live shell stream
     watches any of them (``priority_band.derive_priority_bands``). The pass
     picks ready nodes by that band, FIFO within a band, and publishes the
-    derivation as an immutable ``{scope: band}`` map. The worker pool reads
-    that map through :meth:`published_band`, without the orchestrator lock,
-    each time it picks queued work. A step keeps the band it was picked at.
+    derivation as an immutable ``{scope: PublishedExecution}`` map: each
+    non-terminal node's band and execution generation. The worker pool reads
+    that map through :meth:`published_execution`, without the orchestrator
+    lock, each time it picks queued work. A step keeps the band it was picked
+    at. An item whose execution is not published has ended, so the pool picks
+    it whatever its dequeue predicate says, and :meth:`begin_pool_step` drops it.
 
     There is no process-wide scope lease: singleflight here plus durable
     satisfaction short-circuit (``PersistencePolicy.is_satisfied``) is enough
@@ -170,7 +174,7 @@ class ComputeOrchestrator(
         self._pool_submitter = pool_submitter
         self._worker_pool = worker_pool
         self._nodes: dict[ComputeScope, ComputeNodeRun] = {}
-        self._published_bands: Mapping[ComputeScope, ComputePriorityBand] = MappingProxyType({})
+        self._published_executions: Mapping[ComputeScope, PublishedExecution] = MappingProxyType({})
         self._ready_queue: deque[ComputeScope] = deque()
         self._metrics = OrchestratorMetrics()
         self._next_execution_generation = 1
@@ -220,14 +224,15 @@ class ComputeOrchestrator(
         """Live node map for tests and diagnostics. Adapters must use peek APIs."""
         return self._nodes
 
-    def published_band(self, scope: ComputeScope) -> ComputePriorityBand | None:
-        """Return the band the last dispatch pass published for ``scope``.
+    def published_execution(self, scope: ComputeScope) -> PublishedExecution | None:
+        """Return the band and execution the last dispatch pass published for ``scope``.
 
         Takes no lock: the map is immutable and replaced whole, so the worker
         pool reads it while holding only its own lock. None when ``scope`` had
-        no non-terminal node at that pass.
+        no non-terminal node at that pass. A pass always follows a terminal
+        transition, so an ended execution leaves the map promptly.
         """
-        return self._published_bands.get(scope)
+        return self._published_executions.get(scope)
 
     def peek_node_state(self, scope: ComputeScope) -> str | None:
         """Return ``node.state`` under the orchestrator lock, or None if absent."""

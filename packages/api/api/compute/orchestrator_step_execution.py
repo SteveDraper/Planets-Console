@@ -10,10 +10,12 @@ focused on readiness, singleflight, and terminal lifecycle.
 from __future__ import annotations
 
 from functools import partial
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from api.compute.backend_runtime import effective_compute_backend
 from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
+from api.compute.orchestrator_state import PublishedExecution
 from api.compute.pools import PoolStepWork, RemoteStepWork, ThreadStepWork
 from api.compute.priority_band import (
     PRIORITY_BAND_RANK,
@@ -34,7 +36,7 @@ class OrchestratorStepExecutionMixin:
     """Short-circuit, dispatch, and post-lock step execution for the orchestrator.
 
     Expects the concrete orchestrator to provide ``_condition``, ``_nodes``,
-    ``_published_bands``, ``_ready_queue``, ``_metrics``, ``_observers``,
+    ``_published_executions``, ``_ready_queue``, ``_metrics``, ``_observers``,
     ``_compute_registry``, ``_pool_submitter``, ``_ctx_for_node``,
     ``_complete_node``, ``_fail_node``, ``_refuse_step_exit``,
     ``_after_step_success``, ``_running_execution_or_record_ignored``,
@@ -112,17 +114,26 @@ class OrchestratorStepExecutionMixin:
         Caller holds the orchestrator lock. Each watch is read once, from
         lock-free snapshots. Running nodes are written too: a pool step is not
         picked until a worker takes it, and a picked step's band lives on its
-        execution records. Readers of the published map take no lock, so it is
-        swapped in one assignment.
+        execution records. Each entry also carries the node's execution
+        generation, so the pool can tell an item of an ended execution without
+        the orchestrator lock. Readers of the published map take no lock, so it
+        is swapped in one assignment. This is the only place the map is
+        published.
         """
         bands = derive_priority_bands(
             self._nodes,
             snapshot_watched_keys(self._compute_registry),
             self._compute_registry,
         )
+        published: dict[ComputeScope, PublishedExecution] = {}
         for scope, band in bands.items():
-            self._nodes[scope].priority_band = band
-        self._published_bands = bands
+            node = self._nodes[scope]
+            node.priority_band = band
+            published[scope] = PublishedExecution(
+                band=band,
+                execution_generation=node.execution_generation,
+            )
+        self._published_executions = MappingProxyType(published)
 
     def _snapshot_job_wire_kwargs(self, node: ComputeNodeRun) -> BuildStepJobWireKwargs:
         """Snapshot the job-wire builder kwargs for ``node``'s current step.
