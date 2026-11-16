@@ -296,16 +296,24 @@ def test_fleet_compute_profile_uses_interpreter_backend():
     assert FLEET_COMPUTE_PROFILE.route_table_map is True
 
 
-def test_fleet_materialization_leg_import_does_not_load_transport_stack():
-    """Compute-plane materialization leg must not pull FastAPI or Pydantic."""
+@pytest.mark.parametrize(
+    "compute_plane_module",
+    [
+        "api.analytics.fleet.compute_plane.observation_leg",
+        "api.compute.wire",
+    ],
+)
+def test_compute_plane_import_does_not_load_transport_stack(compute_plane_module):
+    """Compute-plane modules load in subinterpreters, so must not pull FastAPI or Pydantic."""
     import subprocess
     import sys
     from pathlib import Path
 
     api_root = Path(__file__).resolve().parent.parent
-    script = """
+    script = f"""
+import importlib
 import sys
-from api.analytics.fleet.compute_plane.observation_leg import run_fleet_observation_leg
+importlib.import_module({compute_plane_module!r})
 blocked = [
     name
     for name in sys.modules
@@ -317,9 +325,7 @@ blocked = [
     or name.startswith("pydantic_core.")
 ]
 if blocked:
-    raise SystemExit(f"unexpected transport modules: {blocked}")
-if run_fleet_observation_leg is None:
-    raise SystemExit("run_fleet_observation_leg import failed")
+    raise SystemExit(f"unexpected transport modules: {{blocked}}")
 """
     result = subprocess.run(
         [sys.executable, "-c", script],
