@@ -22,11 +22,13 @@ from api.analytics.military_score_inference.inference_api_payload import (
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
+    TierJobContinue,
     run_inference_tier_job,
     stream_row_search_effort_allowance,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     HeldSolutionsUpdated,
+    RowComplete,
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
     InferenceStreamOrchestration,
@@ -40,8 +42,8 @@ from api.analytics.military_score_inference.models import (
     InferenceSolution,
     InferenceSolutionAction,
 )
-from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.scores.tier_row_run_registry import new_tier_row_run
 from api.transport.inference_stream_wire import (
     domain_event_to_wire_events,
     row_complete_to_complete_wire_event,
@@ -302,7 +304,7 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     run.orchestration = orchestration
     run.ladder_state = new_ladder_state()
 
@@ -366,7 +368,7 @@ def test_segment_continuation_keeps_the_ladder_state_mask(
         turn_number=sample_turn.settings.turn,
         resolved_mask=ladder_mask,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     run.orchestration = orchestration
     run.ladder_state = new_ladder_state(session)
 
@@ -388,10 +390,8 @@ def test_segment_continuation_keeps_the_ladder_state_mask(
         ),
     )
 
-    assert outcome.enqueue_continuation is True
-    assert outcome.next_ladder_state is not None
-    assert outcome.next_ladder_state.resolved_mask is ladder_mask
-    assert run.ladder_state is outcome.next_ladder_state
+    assert isinstance(outcome, TierJobContinue)
+    assert run.ladder_state.resolved_mask is ladder_mask
 
 
 def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_turn) -> None:
@@ -410,3 +410,21 @@ def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_
     assert complete.wire_payload.diagnostics is None
     event = row_complete_to_complete_wire_event(complete)
     assert "diagnostics" not in event
+
+
+def test_finish_ladder_segment_returns_the_row_complete_only_on_the_last_segment(
+    sample_turn,
+) -> None:
+    orchestration = _accelerated_split_orchestration(sample_turn)
+
+    first = orchestration.finish_ladder_segment(
+        new_ladder_state(), orchestration.current_observation(), sample_turn
+    )
+    assert first is None
+    assert orchestration.current_segment().segment_id == REPORTED_HOST_TURN_SEGMENT_ID
+
+    last = orchestration.finish_ladder_segment(
+        new_ladder_state(), orchestration.current_observation(), sample_turn
+    )
+    assert isinstance(last, RowComplete)
+    assert orchestration.current_segment() is None

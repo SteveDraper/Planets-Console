@@ -18,7 +18,10 @@ from unittest.mock import patch
 import pytest
 from api.analytics.export_types import ExportScope
 from api.analytics.military_score_inference.actions import ActionCatalog
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+    TierJobRowComplete,
+)
 from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
@@ -70,7 +73,7 @@ from tests.scores_exports_helpers import GAME_ID
 from tests.scores_ladder_helpers import ShellLadder, durable_row_complete
 from tests.submission_open_helpers import explicit_submission_open, live_execution
 
-CONTINUE = TierJobOutcome(enqueue_continuation=True)
+CONTINUE = TierJobContinue()
 ABSENT = PersistDecision.refuse(should_retire=False)
 HELD_SOLUTION = InferenceSolution(
     objective_value=20,
@@ -231,7 +234,7 @@ def test_a_reopen_after_a_soft_defer_starts_a_fresh_ladder(ladder):
     ladder.submit()
     stamped_id = ladder.session.run_id
     ladder.run_tier(CONTINUE)
-    pending = TierJobOutcome(
+    pending = TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status="pending", solutions=(), diagnostics={}),
             summary="soft deferred",

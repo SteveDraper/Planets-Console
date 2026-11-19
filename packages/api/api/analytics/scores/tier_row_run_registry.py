@@ -64,6 +64,9 @@ from api.analytics.military_score_inference.inference_stream_orchestration impor
     new_ladder_state,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceRowScope
+from api.analytics.military_score_inference.inference_stream_session import (
+    InferenceRowStreamSession,
+)
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.persist_decision import (
     PersistDecision,
@@ -210,15 +213,17 @@ def _record_cancelled_locked(run_id: str, scope_key: InferenceRowScope) -> None:
     _cancelled_run_by_scope[scope_key] = run_id
 
 
-def initialize_tier_ladder_state(
-    run: RowRun,
+def new_tier_row_run(
+    session: InferenceRowStreamSession,
     *,
     orchestration: InferenceStreamOrchestration | None = None,
-) -> None:
-    """Initialize ladder state for one registered scores tier row run."""
-    session = run.session
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state(
+) -> RowRun:
+    """Build one scores tier row run with a fresh ladder seeded from ``session``.
+
+    The ladder's counterparty loader reads donor fleet ledgers through the
+    session's query context when it has one.
+    """
+    ladder_state = new_ladder_state(
         session,
         load_counterparty_fleet=counterparty_fleet_loader(
             session.query_context,
@@ -227,15 +232,10 @@ def initialize_tier_ladder_state(
             turn_number=session.turn_number,
         ),
     )
+    return RowRun(session, ladder_state=ladder_state, orchestration=orchestration)
 
 
-def register_row_run(
-    run: RowRun,
-    *,
-    scope_index: ScopeIndexPolicy,
-    orchestration: InferenceStreamOrchestration | None = None,
-    initialize_ladder: bool = True,
-) -> None:
+def register_row_run(run: RowRun, *, scope_index: ScopeIndexPolicy) -> None:
     """Register one RowRun for orchestrator tier_solve wire build and execution.
 
     ``scope_index`` says whether the run becomes the scope's indexed run, the
@@ -244,8 +244,6 @@ def register_row_run(
     write share one lock hold. A run that does not take the index stays
     registered and is retired at the scope's next claim.
     """
-    if initialize_ladder and run.ladder_state is None:
-        initialize_tier_ladder_state(run, orchestration=orchestration)
     run.phase = RowRunPhase.REGISTERED
     scope_key = InferenceRowScope.from_session(run.session)
     with _lock:
@@ -376,7 +374,7 @@ def claim_tier_ladder(
 def _hand_over_unfinished_ladder_locked(holder: RowRun, winner: RowRun) -> bool:
     """Move ``holder``'s ladder to ``winner`` unless it is finished. Caller holds ``_lock``."""
     ladder_state = holder.ladder_state
-    if ladder_state is None or ladder_state.ladder_complete:
+    if ladder_state.ladder_complete:
         return False
     winner.ladder_state = ladder_state
     winner.orchestration = holder.orchestration

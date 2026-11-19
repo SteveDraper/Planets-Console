@@ -126,14 +126,6 @@ def _assemble_ladder_state(
     return state
 
 
-@dataclass(frozen=True)
-class LadderSegmentAdvance:
-    """Scheduler action after one accelerated segment's policy ladder finishes."""
-
-    continue_next_segment: bool = False
-    row_complete: RowComplete | None = None
-
-
 @dataclass
 class InferenceStreamOrchestration:
     """Mutable accelerated-segment state for one scheduled inference row."""
@@ -275,19 +267,24 @@ class InferenceStreamOrchestration:
         ladder_state: PolicyLadderState,
         observation: InferenceObservation,
         turn: TurnInfo,
-    ) -> LadderSegmentAdvance:
+    ) -> RowComplete | None:
+        """Record one segment's finished ladder; return the row's terminal on the last one.
+
+        None means more segments remain, and the caller starts the next
+        segment's ladder.
+        """
         self.record_ladder_segment_complete(ladder_state, observation, turn)
         if self.has_more_segments():
-            return LadderSegmentAdvance(continue_next_segment=True)
-        return LadderSegmentAdvance(row_complete=self._accelerated_stream_row_complete())
+            return None
+        return self._accelerated_stream_row_complete()
 
     def build_stopped_row_complete(
         self,
-        ladder_state: PolicyLadderState | None,
+        ladder_state: PolicyLadderState,
         observation: InferenceObservation,
         turn: TurnInfo,
     ) -> RowComplete:
-        if ladder_state is not None and ladder_state.catalog is not None:
+        if ladder_state.catalog is not None:
             self.record_ladder_segment_complete(ladder_state, observation, turn)
         if self.segment_solves:
             return row_complete_stopped(base=self._accelerated_stream_row_complete())

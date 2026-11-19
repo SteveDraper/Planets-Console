@@ -29,7 +29,9 @@ from api.analytics.fleet.compute_orchestration import (
 )
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+)
 from api.analytics.scores.tier_row_run_registry import get_persist_admission, get_row_run
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
@@ -303,7 +305,7 @@ def test_a_running_scoreboard_tier_aborts_its_stamped_run_and_persists_nothing(l
             open_turn=ladder.scope.turn + 1, backfill_earlier_turns=True, on_walk=True
         )
     )
-    ladder.run_tier(TierJobOutcome(enqueue_continuation=True))
+    ladder.run_tier(TierJobContinue())
     stamped = ladder.session
     work = ladder.submitted_work[-1]
     job_wire = work.job_wire_for(ladder.scope)

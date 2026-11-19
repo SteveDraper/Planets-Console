@@ -636,7 +636,7 @@ def _tier_emissions_from_resolved(
         return tier_emissions_from_wire_complete(wire_event)
 
     scheduler_run = resolved.snapshot.scheduler_run
-    if scheduler_run is None or scheduler_run.ladder_state is None:
+    if scheduler_run is None:
         return None
     step_diagnostics = scheduler_run.ladder_state.step_diagnostics
     if not step_diagnostics:

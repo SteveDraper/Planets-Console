@@ -31,6 +31,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.tier_row_run_registry import new_tier_row_run
 
 from tests.fixtures.military_score_inference import _observation, without_player_minefields
 
@@ -802,13 +803,11 @@ def test_exact_persist_clears_n_window_in_hopeless_context(sample_turn) -> None:
     assert decision.status == STATUS_MINE_SCORE_RESIDUAL
 
 
-def test_initialize_tier_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> None:
+def test_new_tier_row_run_builds_hopeless_facts_from_session(sample_turn) -> None:
     from api.analytics.military_score_inference.analytic import build_inference_observation
     from api.analytics.military_score_inference.inference_stream_session import (
         InferenceRowStreamSession,
     )
-    from api.analytics.military_score_inference.row_run import RowRun
-    from api.analytics.scores.tier_row_run_registry import initialize_tier_ladder_state
 
     score = sample_turn.scores[0]
     session = InferenceRowStreamSession(
@@ -819,9 +818,7 @@ def test_initialize_tier_ladder_state_builds_hopeless_facts_from_session(sample_
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    run = RowRun(session)
-    initialize_tier_ladder_state(run)
-    assert run.ladder_state is not None
+    run = new_tier_row_run(session)
     assert run.ladder_state.hopeless_context is not None
     assert run.ladder_state.hopeless_context.planet_delta == score.planetchange
     assert run.ladder_state.hopeless_context.starbase_delta == score.starbasechange

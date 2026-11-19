@@ -23,12 +23,23 @@ class RowRun:
 
     Shell phase (``RowRunPhase``) is the generic table-stream retained-shell
     vocabulary from :mod:`api.streaming.table_stream.row_run_admission`.
+
+    A run always has a ladder. Production builds runs through
+    :func:`api.analytics.scores.tier_row_run_registry.new_tier_row_run`, which
+    seeds the ladder from the session. ``orchestration`` is None for a row that
+    solves one segment (no accelerated split or backfill).
     """
 
-    def __init__(self, session: InferenceRowStreamSession) -> None:
+    def __init__(
+        self,
+        session: InferenceRowStreamSession,
+        *,
+        ladder_state: PolicyLadderState,
+        orchestration: InferenceStreamOrchestration | None = None,
+    ) -> None:
         self.session = session
-        self.ladder_state: PolicyLadderState | None = None
-        self.orchestration: InferenceStreamOrchestration | None = None
+        self.ladder_state = ladder_state
+        self.orchestration = orchestration
         self.tier_lock = threading.RLock()
         self.phase: RowRunPhase = RowRunPhase.REGISTERED
 

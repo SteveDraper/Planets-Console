@@ -21,7 +21,11 @@ from unittest.mock import patch
 import pytest
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.military_score_inference.analytic import build_inference_observation
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+    TierJobOutcome,
+    TierJobRowComplete,
+)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -70,7 +74,7 @@ def ladder_scope(sample_turn, player_id: int) -> ComputeScope:
 
 
 def durable_row_complete(summary: str) -> TierJobOutcome:
-    return TierJobOutcome(
+    return TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary=summary,
@@ -172,7 +176,7 @@ class ShellLadder:
             self.tier_steps.append((run.run_id, ladder_state.next_step_index))
             if isinstance(outcome, BaseException):
                 raise outcome
-            if outcome.enqueue_continuation:
+            if isinstance(outcome, TierJobContinue):
                 ladder_state.next_step_index += 1
             else:
                 ladder_state.ladder_complete = True

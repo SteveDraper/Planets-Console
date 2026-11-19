@@ -22,13 +22,13 @@ from api.analytics.military_score_inference.inference_table_stream_controller im
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
-from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
     _retire_row_run,
     get_row_run,
+    new_tier_row_run,
     register_row_run,
 )
 from api.streaming.table_stream import stream_drain
@@ -66,7 +66,7 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
     sibling is live; the last peer must still deliver a terminal domain event.
     """
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
 
@@ -122,7 +122,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
     not stay on ``progress``.
     """
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -200,7 +200,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
 def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(sample_turn) -> None:
     """After a successful peer delivery+finalize, a late empty peer must not RowFailed."""
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -276,7 +276,7 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(sample_tur
     assert ensure_session.run_id != stream_session.run_id
     assert ensure_session.player_id == stream_session.player_id
 
-    run = RowRun(ensure_session)
+    run = new_tier_row_run(ensure_session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(ensure_session)
     stream_scope = InferenceStreamScope(
@@ -398,7 +398,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
     )
 
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -529,7 +529,7 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
     )
 
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -672,7 +672,7 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
     controller.attach()
     stream_drain.seal_canceled(ui_session.run_id)
 
-    solved_run = RowRun(solved_session)
+    solved_run = new_tier_row_run(solved_session)
     register_row_run(solved_run, scope_index=ScopeIndexPolicy.TAKE)
     scheduler._runs[solved_run.run_id] = scope
     row_complete = row_complete_with_summary(

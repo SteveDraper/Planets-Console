@@ -442,7 +442,11 @@ class InferenceRowScheduler(
         at its own scope, so that admit has none and registers ``BACKGROUND``,
         and the stream's own admission then takes the index.
         """
-        from api.analytics.scores.tier_row_run_registry import ScopeIndexPolicy, register_row_run
+        from api.analytics.scores.tier_row_run_registry import (
+            ScopeIndexPolicy,
+            new_tier_row_run,
+            register_row_run,
+        )
 
         with self._lock:
             owning_token = (
@@ -451,7 +455,7 @@ class InferenceRowScheduler(
                 and self._scope_guard.owns_table_stream_locked(stream_token)
                 else None
             )
-            row_run = RowRun(session)
+            row_run = new_tier_row_run(session, orchestration=orchestration)
             register_row_run(
                 row_run,
                 scope_index=(
@@ -459,7 +463,6 @@ class InferenceRowScheduler(
                     if owning_token is not None
                     else ScopeIndexPolicy.TAKE_IF_VACANT
                 ),
-                orchestration=orchestration,
             )
             self._register_tier_callbacks_for_run(row_run)
             root_scope = scores_root_scope_for_session(session)
@@ -548,7 +551,7 @@ class InferenceRowScheduler(
         if row_run is None:
             return False
         state = row_run.ladder_state
-        if state is None or state.catalog is None or not state.merged_solutions:
+        if state.catalog is None or not state.merged_solutions:
             return False
         orchestration = row_run.orchestration
         segment_id: str | None = None
@@ -580,7 +583,7 @@ class InferenceRowScheduler(
         if row_run is None:
             return
         state = row_run.ladder_state
-        if state is None or state.catalog is None:
+        if state.catalog is None:
             return
         session.event_queue.put(
             TierProgress(
@@ -596,7 +599,7 @@ class InferenceRowScheduler(
         if row_run is None:
             return
         state = row_run.ladder_state
-        if state is None or state.next_step_index >= len(state.policy_steps):
+        if state.next_step_index >= len(state.policy_steps):
             return
         step = state.policy_steps[state.next_step_index]
         session.event_queue.put(

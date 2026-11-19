@@ -26,6 +26,7 @@ from api.analytics.military_score_inference.inference_api_payload import (
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
+    TierJobRowComplete,
     run_inference_tier_job,
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
@@ -57,7 +58,6 @@ from api.analytics.military_score_inference.public_scoreboard_pairing import (
     public_scoreboard_row_from_observation,
     transfer_budget_for_row,
 )
-from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT, STATUS_NO_EXACT_SOLUTION
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.military_score_inference.uncharacterized_roster import (
@@ -66,6 +66,7 @@ from api.analytics.military_score_inference.uncharacterized_roster import (
 from api.analytics.military_score_inference.uncharacterized_roster_types import (
     UnknownLossBoundLeftover,
 )
+from api.analytics.scores.tier_row_run_registry import new_tier_row_run
 
 from tests.fixtures.military_score_inference import _observation, without_player_minefields
 from tests.fixtures.pp_gap_transfer import (
@@ -758,11 +759,10 @@ def test_stream_tier_job_surfaces_military_sat_refused_without_sat(sample_turn, 
         turn_number=turn.settings.turn,
         prior_fleet_records=(_singleton_unknown_hull_warship(),),
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     run.ladder_state = new_ladder_state(session)
     outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
-    assert outcome.enqueue_continuation is False
-    assert outcome.row_complete is not None
+    assert isinstance(outcome, TierJobRowComplete)
     assert outcome.row_complete.result.status == STATUS_UNCHARACTERIZED_ROSTER
     assert outcome.row_complete.result is run.ladder_state.refused_result
     assert outcome.row_complete.result.leftover is not None
@@ -812,13 +812,11 @@ def test_stream_sat_refuse_does_not_continue_accelerated_segments(sample_turn, m
         turn_number=turn.settings.turn,
         prior_fleet_records=(_singleton_unknown_hull_warship(),),
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     run.orchestration = orchestration
     run.ladder_state = new_ladder_state(session)
     outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
-    assert outcome.enqueue_continuation is False
-    assert outcome.next_ladder_state is None
-    assert outcome.row_complete is not None
+    assert isinstance(outcome, TierJobRowComplete)
     assert outcome.row_complete.result.status == STATUS_UNCHARACTERIZED_ROSTER
     assert outcome.row_complete.result is run.ladder_state.refused_result
     assert outcome.row_complete.result.leftover is not None

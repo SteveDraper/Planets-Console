@@ -6,7 +6,7 @@ import threading
 import time
 
 from api.analytics.military_score_inference.inference_row_runner import (
-    TierJobOutcome,
+    TierJobRowComplete,
     run_inference_tier_job,
 )
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -22,7 +22,7 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
 )
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
-from api.analytics.scores.tier_row_run_registry import get_row_run
+from api.analytics.scores.tier_row_run_registry import get_row_run, new_tier_row_run
 from api.compute.pools import reset_compute_worker_pool_for_tests
 from api.compute.submission_open import SubmissionOpen
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -78,7 +78,7 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
 
         def gated_run_inference_tier_job(run, callbacks):
             real_run_inference_tier_job(run, callbacks)
-            outcome = TierJobOutcome(
+            outcome = TierJobRowComplete(
                 row_complete=row_complete_with_summary(
                     InferenceResult(
                         status=STATUS_NO_EXACT_SOLUTION,
@@ -133,7 +133,6 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
     Detach must not set these. Compact CANCEL_DENY admission is the durable persist
     refuse; stream ``CANCELED`` only silences delivery.
     """
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
         get_persist_admission,
@@ -165,7 +164,7 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
             )
         )
         session = _session_for_player(sample_turn, player_id=player_id)
-        register_row_run(RowRun(session), scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(new_tier_row_run(session), scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(
                 analytic_id=SCORES_ANALYTIC_ID,
@@ -201,7 +200,6 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
     persist must still see compact CANCEL_DENY admission and refuse the write.
     """
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -233,7 +231,7 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
             )
         )
         session = _session_for_player(sample_turn, player_id=player_id)
-        row_run = RowRun(session)
+        row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(
@@ -284,7 +282,6 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
 def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
     """CANCEL_DENY admission must still block late persist when other runs also churn."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores import tier_row_run_registry as reg
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
@@ -315,12 +312,12 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
         for _index in range(20):
             other = _session_for_player(sample_turn, player_id=player_id)
             # Distinct run_ids via fresh sessions; mark cancelled then leave retained.
-            other_run = RowRun(other)
+            other_run = new_tier_row_run(other)
             reg.register_row_run(other_run, scope_index=reg.ScopeIndexPolicy.TAKE)
             reg._mark_row_run_cancelled(other_run.run_id)
 
         session = _session_for_player(sample_turn, player_id=player_id)
-        row_run = RowRun(session)
+        row_run = new_tier_row_run(session)
         reg.register_row_run(row_run, scope_index=reg.ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(

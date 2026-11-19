@@ -18,7 +18,9 @@ import threading
 from unittest.mock import patch
 
 import pytest
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+)
 from api.analytics.military_score_inference.inference_stream_scope import InferenceRowScope
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.row_run import RowRun
@@ -34,6 +36,7 @@ from api.analytics.scores.tier_row_run_registry import (
     get_persist_admission,
     get_row_run,
     get_row_run_phase,
+    new_tier_row_run,
     register_row_run,
 )
 from api.compute import ComputeScope
@@ -57,7 +60,7 @@ from tests.submission_open_helpers import live_execution
 
 GENERATION = 7
 EPOCH = 0
-CONTINUE = TierJobOutcome(enqueue_continuation=True)
+CONTINUE = TierJobContinue()
 
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
@@ -77,8 +80,8 @@ def _ended() -> bool:
 @pytest.fixture
 def registry_run(sample_turn) -> tuple[RowRun, ComputeScope]:
     player_id = inference_target_player_id(sample_turn)
-    run = RowRun(ladder_session(sample_turn, player_id))
-    register_row_run(run, initialize_ladder=False, scope_index=ScopeIndexPolicy.TAKE)
+    run = new_tier_row_run(ladder_session(sample_turn, player_id))
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     return run, ladder_scope(sample_turn, player_id)
 
 
@@ -130,8 +133,8 @@ def test_a_claim_for_an_ended_execution_changes_nothing(
     apply_scores_row_lifecycle(RowLifecycleOp.DETACH, detached.run_id)
     others = [detached]
     if reopened:
-        others.append(RowRun(ladder_session(sample_turn, scope.player_id)))
-        register_row_run(others[-1], initialize_ladder=False, scope_index=ScopeIndexPolicy.TAKE)
+        others.append(new_tier_row_run(ladder_session(sample_turn, scope.player_id)))
+        register_row_run(others[-1], scope_index=ScopeIndexPolicy.TAKE)
     stamp_before = _stamp(scope)
 
     with pytest.raises(ComputeExecutionEndedError):

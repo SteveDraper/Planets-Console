@@ -198,7 +198,7 @@ def test_paused_when_globally_paused_on_active_stream(sample_turn):
     assert tree["meta"]["searchStatus"] == "paused"
 
 
-def test_in_progress_when_scheduler_pre_ladder(sample_turn):
+def test_in_progress_on_a_fresh_ladder(sample_turn):
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     player_id = inference_target_player_id(sample_turn)
@@ -213,7 +213,6 @@ def test_in_progress_when_scheduler_pre_ladder(sample_turn):
     )
     run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
     assert run is not None
-    run.ladder_state = None
 
     ctx = scores_query_context(sample_turn, scheduler=scheduler)
     tree, _scope = materialize_scores_tree(ctx, player_id)

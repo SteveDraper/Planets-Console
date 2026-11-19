@@ -22,10 +22,10 @@ from api.analytics.military_score_inference.inference_table_stream_controller im
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
-from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.soft_stream_policy import SoftTerminalReason
 from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
+    new_tier_row_run,
     register_row_run,
 )
 from api.streaming.table_stream import stream_drain
@@ -56,7 +56,7 @@ def _reset_registries():
 def test_soft_row_defer_delivers_stream_terminal_without_completing_node(sample_turn) -> None:
     """Non-durable rowComplete defer soft-delivers without DAG complete (fleet blocked)."""
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -122,7 +122,7 @@ def test_soft_row_defer_delivers_stream_terminal_without_completing_node(sample_
 def test_empty_park_schedule_row_stays_silent_for_wake(sample_turn) -> None:
     """Empty park with schedule-only row stays silent; wake owns progress (no RowFailed)."""
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -170,7 +170,7 @@ def test_soft_defer_revert_preserves_hard_terminal_claimed_during_admission(
 ) -> None:
     """Revert miss must not pop HARD_TERMINAL that landed between claim and pop."""
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
@@ -223,7 +223,7 @@ def test_empty_tier_park_cheap_admits_when_admission_available(sample_turn, monk
     )
 
     session = _session(sample_turn)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(

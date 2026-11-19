@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
 from api.analytics.military_score_inference.inference_stream_orchestration import (
+    InferenceStreamOrchestration,
     continue_ladder_state,
 )
 from api.analytics.military_score_inference.models import InferenceObservation, InferenceSolution
@@ -34,12 +35,19 @@ def stream_row_search_effort_allowance() -> float:
 
 
 @dataclass(frozen=True)
-class TierJobOutcome:
-    """Scheduler action after one tier job finishes."""
+class TierJobContinue:
+    """The row needs another tier job on its ladder (already advanced by the runner)."""
 
-    enqueue_continuation: bool = False
-    next_ladder_state: PolicyLadderState | None = None
-    row_complete: RowComplete | None = None
+
+@dataclass(frozen=True)
+class TierJobRowComplete:
+    """The row's ladder finished with this terminal payload."""
+
+    row_complete: RowComplete
+
+
+# One tier job ends in exactly one of these; there is no empty outcome.
+type TierJobOutcome = TierJobContinue | TierJobRowComplete
 
 
 @dataclass(frozen=True)
@@ -81,16 +89,16 @@ def build_stopped_row_complete(run: RowRun) -> RowComplete:
     return row_complete_stopped(ladder_state=state, observation=observation, turn=turn)
 
 
-def _outcome_when_accelerated_segments_exhausted(run: RowRun) -> TierJobOutcome:
+def _outcome_when_accelerated_segments_exhausted(
+    run: RowRun,
+    orchestration: InferenceStreamOrchestration,
+) -> TierJobRowComplete:
     """Idempotent terminal outcome for a duplicate/late tier after segments finish."""
-    orchestration = run.orchestration
-    if orchestration is None:
-        return TierJobOutcome()
     exhausted = orchestration.exhausted_segments_row_complete()
     if exhausted is not None:
-        return TierJobOutcome(row_complete=exhausted)
+        return TierJobRowComplete(row_complete=exhausted)
     observation, turn = _session_solve_context(run)
-    return TierJobOutcome(
+    return TierJobRowComplete(
         row_complete=row_complete_stopped(
             ladder_state=run.ladder_state,
             observation=observation,
@@ -107,24 +115,20 @@ def _outcome_after_ladder_complete(
 ) -> TierJobOutcome:
     if state.refused_result is not None:
         result, *_ = finalize_policy_ladder_result(state, observation, turn)
-        return TierJobOutcome(row_complete=row_complete_with_summary(result))
+        return TierJobRowComplete(row_complete=row_complete_with_summary(result))
 
     orchestration = run.orchestration
     if orchestration is not None:
-        advance = orchestration.finish_ladder_segment(state, observation, turn)
-        if advance.continue_next_segment:
-            return TierJobOutcome(
-                enqueue_continuation=True,
-                next_ladder_state=continue_ladder_state(state, run.session),
-            )
-        if advance.row_complete is not None:
-            return TierJobOutcome(row_complete=advance.row_complete)
-        return TierJobOutcome()
+        segment_row_complete = orchestration.finish_ladder_segment(state, observation, turn)
+        if segment_row_complete is None:
+            run.ladder_state = continue_ladder_state(state, run.session)
+            return TierJobContinue()
+        return TierJobRowComplete(row_complete=segment_row_complete)
 
     result, catalog, problem, policy_steps_attempted, step_diagnostics = (
         finalize_policy_ladder_result(state, observation, turn)
     )
-    return TierJobOutcome(
+    return TierJobRowComplete(
         row_complete=row_complete_from_ladder_finalize(
             result,
             catalog,
@@ -148,9 +152,11 @@ def run_inference_tier_job(
     """Run one policy-ladder tier step and return the scheduler's next action.
 
     Holds ``run.tier_lock`` for the whole job so duplicate concurrent dispatches
-    serialize on shared orchestration / ladder state. When accelerated segments
-    are already exhausted, returns an idempotent terminal outcome instead of
-    raising.
+    serialize on shared orchestration / ladder state. The runner is the only
+    code that advances ``run.ladder_state`` to the next accelerated segment, and
+    it does so under that lock before returning :class:`TierJobContinue`. When
+    accelerated segments are already exhausted, returns an idempotent terminal
+    outcome instead of raising.
     """
     with run.tier_lock:
         return _run_inference_tier_job_locked(run, callbacks)
@@ -162,15 +168,12 @@ def _run_inference_tier_job_locked(
 ) -> TierJobOutcome:
     session = run.session
     if session.cancel_token.is_cancelled():
-        return TierJobOutcome(row_complete=build_stopped_row_complete(run))
+        return TierJobRowComplete(row_complete=build_stopped_row_complete(run))
 
     state = run.ladder_state
-    if state is None:
-        return TierJobOutcome()
-
     orchestration = run.orchestration
     if orchestration is not None and orchestration.current_segment() is None:
-        return _outcome_when_accelerated_segments_exhausted(run)
+        return _outcome_when_accelerated_segments_exhausted(run, orchestration)
 
     observation, turn = solve_context(run)
 
@@ -190,12 +193,9 @@ def _run_inference_tier_job_locked(
     callbacks.emit_progress()
 
     if session.cancel_token.is_cancelled() or state.cancelled:
-        return TierJobOutcome(row_complete=build_stopped_row_complete(run))
+        return TierJobRowComplete(row_complete=build_stopped_row_complete(run))
 
     if not state.ladder_complete:
-        return TierJobOutcome(enqueue_continuation=True)
+        return TierJobContinue()
 
-    outcome = _outcome_after_ladder_complete(run, state, observation, turn)
-    if outcome.next_ladder_state is not None:
-        run.ladder_state = outcome.next_ladder_state
-    return outcome
+    return _outcome_after_ladder_complete(run, state, observation, turn)

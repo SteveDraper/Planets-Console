@@ -26,7 +26,10 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.analytics.military_score_inference.analytic import build_inference_observation
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+    TierJobRowComplete,
+)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     _query_context_for_session,
@@ -57,6 +60,7 @@ from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
     _retire_row_run,
     get_row_run_for_scope,
+    new_tier_row_run,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
@@ -125,7 +129,7 @@ def _scores_scope(sample_turn, player_id: int) -> ComputeScope:
 
 def _register_run(sample_turn, *, player_id: int | None = None) -> RowRun:
     session = _session_for_player(sample_turn, player_id=player_id)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     return run
 
@@ -152,14 +156,12 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
     run = _register_run(sample_turn)
     job_wire = {"runId": run.run_id, "onWalk": True}
 
-    continue_result = tier_job_outcome_to_step_result(
-        run, TierJobOutcome(enqueue_continuation=True), job_wire
-    )
+    continue_result = tier_job_outcome_to_step_result(run, TierJobContinue(), job_wire)
     assert continue_result.outcome == "continue"
 
     persist_result = tier_job_outcome_to_step_result(
         run,
-        TierJobOutcome(
+        TierJobRowComplete(
             row_complete=row_complete_with_summary(
                 InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
                 summary="exact",
@@ -173,7 +175,7 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
 
     stopped_result = tier_job_outcome_to_step_result(
         run,
-        TierJobOutcome(
+        TierJobRowComplete(
             row_complete=row_complete_with_summary(
                 InferenceResult(status=STATUS_STOPPED, solutions=(), diagnostics={}),
                 summary="stopped",
@@ -183,11 +185,6 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
     )
     # Stopped closes turn evidence when durable -- persist, do not soft-complete.
     assert stopped_result.outcome == "persist"
-
-    empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome(), job_wire)
-    # Empty terminals must not DAG-complete (unlocks fleet with open evidence).
-    assert empty_result.outcome == "waiting_deps"
-    assert empty_result.wait_recovery is None
 
 
 def test_run_scores_materialize_continues_to_tier_solve() -> None:
@@ -1046,7 +1043,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
     )
     assert tier_wire.get("runId") is not None
 
-    outcome = TierJobOutcome(
+    outcome = TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary="historical persist via orchestrator",
@@ -1288,7 +1285,7 @@ def test_scores_persistence_policy_persist_delegates_to_inference_service(
 
 def test_run_scores_tier_solve_returns_orchestrator_outcome(sample_turn) -> None:
     run = _register_run(sample_turn)
-    outcome = TierJobOutcome(
+    outcome = TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
             summary="terminal",
@@ -1362,7 +1359,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         turn=sample_turn.settings.turn,
         player_id=run.session.player_id,
     )
-    terminal = TierJobOutcome(
+    terminal = TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary="done",
@@ -1384,7 +1381,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
     assert handle.result_wire is not None
 
 
-def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) -> None:
+def test_orchestrator_waits_non_durable_soft_terminal_without_redispatch(sample_turn) -> None:
     """Empty tier soft-defers to waiting_deps; force_fresh wake re-queues work.
 
     Soft defer must not graft the scores scope onto its own dependency_scopes --
@@ -1459,7 +1456,12 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
 
     with patch(
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
-        return_value=TierJobOutcome(),
+        return_value=TierJobRowComplete(
+            row_complete=row_complete_with_summary(
+                InferenceResult(status="pending", solutions=(), diagnostics={}),
+                summary="non-durable",
+            ),
+        ),
     ):
         handle = orchestrator.submit(
             ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE),
@@ -1506,7 +1508,7 @@ def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) 
     submits_before_wake = len(submitted_scopes)
     with patch(
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
-        return_value=TierJobOutcome(
+        return_value=TierJobRowComplete(
             row_complete=row_complete_with_summary(
                 InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
                 summary="done",

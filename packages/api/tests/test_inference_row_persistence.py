@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.scores.tier_row_run_registry import new_tier_row_run
 from api.errors import NotFoundError
 from api.serialization.inference_row_persistence import (
     INFERENCE_ROW_PERSISTENCE_VERSION,
@@ -662,7 +663,6 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
     from api.analytics.military_score_inference.row_complete_factory import (
         row_complete_with_summary,
     )
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -683,7 +683,7 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     persistence = InferenceRowPersistenceService(memory_backend)
     ctx = make_analytic_query_context(
@@ -722,7 +722,9 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
     """Stopped closes turnEvidenceAtN when durable -- must persist, not soft-complete."""
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.military_score_inference.analytic import build_inference_observation
-    from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+    from api.analytics.military_score_inference.inference_row_runner import (
+        TierJobRowComplete,
+    )
     from api.analytics.military_score_inference.inference_stream_session import (
         InferenceRowStreamSession,
     )
@@ -730,7 +732,6 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
     from api.analytics.military_score_inference.row_complete_factory import (
         row_complete_with_summary,
     )
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.military_score_inference.solver import STATUS_STOPPED
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import (
@@ -755,11 +756,11 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     step_result = tier_job_outcome_to_step_result(
         run,
-        TierJobOutcome(
+        TierJobRowComplete(
             row_complete=row_complete_with_summary(
                 InferenceResult(status=STATUS_STOPPED, solutions=(), diagnostics={}),
                 summary="stopped",
@@ -809,7 +810,6 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     from api.analytics.military_score_inference.row_complete_factory import (
         row_complete_with_summary,
     )
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
@@ -838,7 +838,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     run_id = run.run_id
     _detach_row_run(run_id)

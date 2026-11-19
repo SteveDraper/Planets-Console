@@ -11,7 +11,9 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+)
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.compute_orchestration import build_scores_tier_solve_job_wire
@@ -23,6 +25,7 @@ from api.analytics.scores.tier_row_run_registry import (
     claim_tier_ladder,
     clear_row_runs,
     get_row_run,
+    new_tier_row_run,
     register_row_run,
     release_tier_ladder_for_scope,
 )
@@ -48,8 +51,8 @@ pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 @pytest.fixture
 def registry_run(sample_turn) -> tuple[RowRun, ComputeScope]:
     player_id = inference_target_player_id(sample_turn)
-    run = RowRun(ladder_session(sample_turn, player_id))
-    register_row_run(run, initialize_ladder=False, scope_index=ScopeIndexPolicy.TAKE)
+    run = new_tier_row_run(ladder_session(sample_turn, player_id))
+    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     return run, ladder_scope(sample_turn, player_id)
 
 
@@ -104,8 +107,8 @@ def test_a_mismatched_resume_retires_the_detached_shell(registry_run, generation
 def test_a_registered_run_wins_over_the_detached_one(sample_turn, registry_run, generation):
     detached, scope = registry_run
     _claim_and_detach(detached, scope)
-    reopened = RowRun(ladder_session(sample_turn, scope.player_id))
-    register_row_run(reopened, initialize_ladder=False, scope_index=ScopeIndexPolicy.TAKE)
+    reopened = new_tier_row_run(ladder_session(sample_turn, scope.player_id))
+    register_row_run(reopened, scope_index=ScopeIndexPolicy.TAKE)
 
     claim = claim_tier_ladder(
         scope,
@@ -177,11 +180,11 @@ def test_the_scope_outcome_listener_retires_the_entry_on_terminal(registry_run, 
 def test_closing_the_stream_mid_ladder_resumes_the_same_run_to_a_durable_persist(ladder):
     ladder.submit()
     stream_run_id = ladder.session.run_id
-    ladder.run_tier(TierJobOutcome(enqueue_continuation=True))
+    ladder.run_tier(TierJobContinue())
 
     ladder.close_stream()
     with patch("api.analytics.scores.exports.admit_scores_export_work") as admit:
-        ladder.run_tier(TierJobOutcome(enqueue_continuation=True))
+        ladder.run_tier(TierJobContinue())
         ladder.run_tier(durable_row_complete("resumed after close"))
         admit.assert_not_called()
 
@@ -196,7 +199,7 @@ def test_closing_the_stream_mid_ladder_resumes_the_same_run_to_a_durable_persist
 @pytest.mark.parametrize("stream_closed", [False, True], ids=["streams-open", "streams-closed"])
 def test_a_failing_tier_fails_the_same_way_with_the_stream_open_or_closed(ladder, stream_closed):
     ladder.submit()
-    ladder.run_tier(TierJobOutcome(enqueue_continuation=True))
+    ladder.run_tier(TierJobContinue())
     if stream_closed:
         ladder.close_stream()
 
@@ -212,7 +215,7 @@ def test_a_failing_tier_fails_the_same_way_with_the_stream_open_or_closed(ladder
 def test_a_fleet_epoch_change_while_detached_takes_the_admit_path(ladder):
     ladder.submit()
     stream_run_id = ladder.session.run_id
-    ladder.run_tier(TierJobOutcome(enqueue_continuation=True))
+    ladder.run_tier(TierJobContinue())
     ladder.close_stream()
 
     ladder.ctx.export_services["fleet"].persistence.invalidate_player_ledgers_from_turn(
@@ -234,7 +237,7 @@ def test_a_fleet_epoch_change_while_detached_takes_the_admit_path(ladder):
 def test_a_replaced_node_does_not_resume_the_old_run(ladder):
     ladder.submit()
     stream_run_id = ladder.session.run_id
-    ladder.run_tier(TierJobOutcome(enqueue_continuation=True))
+    ladder.run_tier(TierJobContinue())
     ladder.close_stream()
     old_generation = ladder.orchestrator.nodes[ladder.scope].execution_generation
 

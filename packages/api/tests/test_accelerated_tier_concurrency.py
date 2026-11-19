@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.analytic import build_inference_obse
 from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
+    TierJobRowComplete,
     run_inference_tier_job,
     solve_context,
 )
@@ -25,8 +26,8 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.models import InferenceResult
-from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.scores.tier_row_run_registry import new_tier_row_run
 
 
 def _two_segment_orchestration(sample_turn) -> InferenceStreamOrchestration:
@@ -99,7 +100,7 @@ def test_concurrent_shared_rowrun_accelerated_completes_without_raise(
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     run.orchestration = orchestration
     run.ladder_state = new_ladder_state()
 
@@ -119,13 +120,9 @@ def test_concurrent_shared_rowrun_accelerated_completes_without_raise(
             barrier.wait()
             for _ in range(30):
                 outcome = run_inference_tier_job(run, callbacks)
-                if outcome.next_ladder_state is not None:
-                    run.ladder_state = outcome.next_ladder_state
-                if outcome.row_complete is not None:
+                if isinstance(outcome, TierJobRowComplete):
                     with lock:
                         terminals += 1
-                    break
-                if not outcome.enqueue_continuation:
                     break
         except Exception as exc:
             errors.append(f"{type(exc).__name__}: {exc}")
@@ -153,7 +150,7 @@ def test_solve_context_raises_when_segments_exhausted(sample_turn) -> None:
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     run.orchestration = orchestration
     run.ladder_state = new_ladder_state()
 
@@ -181,7 +178,7 @@ def test_run_inference_tier_job_idempotent_when_segments_exhausted(
         perspective=1,
         turn_number=sample_turn.settings.turn,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     run.orchestration = orchestration
     run.ladder_state = new_ladder_state()
     callbacks = InferenceTierJobCallbacks(
@@ -191,5 +188,4 @@ def test_run_inference_tier_job_idempotent_when_segments_exhausted(
     )
 
     outcome = run_inference_tier_job(run, callbacks)
-    assert outcome.row_complete is not None
-    assert outcome.enqueue_continuation is False
+    assert isinstance(outcome, TierJobRowComplete)

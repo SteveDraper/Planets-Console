@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
@@ -14,7 +14,9 @@ from api.analytics.military_score_inference.durable_turn_evidence import (
 )
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
+    TierJobContinue,
     TierJobOutcome,
+    TierJobRowComplete,
     run_inference_tier_job,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
@@ -82,10 +84,9 @@ def _apply_fleet_resolution_to_row_run(
     session.prior_fleet_max_tech_by_axis = resolution.prior_fleet_max_tech_for_admission()
     session.prior_fleet_records = resolution.records
     ladder_state = run.ladder_state
-    if ladder_state is not None:
-        ladder_state.fleet_torp_overlay = resolution.overlay
-        ladder_state.prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
-        ladder_state.prior_fleet_records = resolution.records
+    ladder_state.fleet_torp_overlay = resolution.overlay
+    ladder_state.prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
+    ladder_state.prior_fleet_records = resolution.records
 
 
 def build_scores_materialize_job_wire(
@@ -354,32 +355,26 @@ def tier_job_outcome_to_step_result(
 ) -> StepResult:
     """Map one inference tier job outcome to an orchestrator step result.
 
-    Non-durable or empty outcomes demote the node to ``waiting_deps`` and emit
-    soft stream rows from the row path (not orchestrator park). Durable terminals
-    persist and complete the scores node. A row payload copies the submission
-    open fields ``job_wire`` carries.
+    A continuation re-queues ``tier_solve``; the runner has already advanced the
+    ladder. Durable terminals persist and complete the scores node. A
+    non-durable terminal demotes the node to ``waiting_deps`` and emits a soft
+    stream row from the row path (not orchestrator park). A row payload copies
+    the submission open fields ``job_wire`` carries.
     """
-    if outcome.enqueue_continuation:
-        if outcome.next_ladder_state is not None:
-            run.ladder_state = outcome.next_ladder_state
-        return StepResult(outcome="continue")
-
-    if outcome.row_complete is not None:
-        payload = _tier_persist_payload(run, outcome.row_complete, job_wire)
-        status = outcome.row_complete.wire_payload.status
-        if is_durable_turn_evidence_row_status(status):
-            return StepResult(outcome="persist", payload=payload)
-        return _emit_soft_defer_and_wait(
-            run,
-            soft_reason=SoftTerminalReason.NON_DURABLE_ROW_COMPLETE,
-            row_complete=outcome.row_complete,
-            payload=payload,
-        )
-
-    return _emit_soft_defer_and_wait(
-        run,
-        soft_reason=SoftTerminalReason.EMPTY_TIER_OUTCOME,
-    )
+    match outcome:
+        case TierJobContinue():
+            return StepResult(outcome="continue")
+        case TierJobRowComplete(row_complete=row_complete):
+            payload = _tier_persist_payload(run, row_complete, job_wire)
+            if is_durable_turn_evidence_row_status(row_complete.wire_payload.status):
+                return StepResult(outcome="persist", payload=payload)
+            return _emit_soft_defer_and_wait(
+                run,
+                soft_reason=SoftTerminalReason.NON_DURABLE_ROW_COMPLETE,
+                row_complete=row_complete,
+                payload=payload,
+            )
+    assert_never(outcome)
 
 
 def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
