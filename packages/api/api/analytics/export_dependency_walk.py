@@ -92,6 +92,11 @@ def walk_dependency_tree(
     when its own dependency walk scheduled work. A satisfied scope walks its
     dependencies only while Backfill earlier turns is on and its catalog sets
     ``backfill_rewalks_satisfied_scope``.
+
+    Whether a scope needs ensure work depends on that scope alone. Dependency
+    scopes below the ensure floor are skipped, so they never elide an
+    unsatisfied scope: homeworld (and fleet) at turn 1 still need
+    baseline/materialize even when ``turn_delta=-1`` points at turn 0.
     """
     result = DependencyWalkResult()
     seen_pending: set[tuple[str, ExportScope]] = set()
@@ -108,7 +113,9 @@ def walk_dependency_tree(
         catalog = walkable_export_catalog(ctx, analytic_id)
         if catalog is None:
             return result
-        needs_scope = force_root or _dependency_needs_processing(ctx, analytic_id, scope, catalog)
+        needs_scope = force_root or not is_export_scope_ensure_satisfied(
+            ctx, analytic_id, scope, catalog
+        )
         walks_dependencies = needs_scope or (
             backfill_earlier_turns and catalog.backfill_rewalks_satisfied_scope
         )
@@ -264,34 +271,14 @@ def dependency_scopes_for(
     )
 
 
-def _dependency_needs_processing(
-    ctx: AnalyticQueryContext,
-    analytic_id: str,
-    scope: ExportScope,
-    catalog: AnalyticExportCatalog | None,
-) -> bool:
-    """Whether ``scope`` still needs ensure work (and thus belongs in a DAG plan).
-
-    Prior-turn edges that fall below the ensure floor are skipped when walking
-    dependencies; they must not elide an unsatisfied root. Homeworld (and fleet)
-    at turn 1 still need baseline/materialize even when ``turn_delta=-1`` points
-    at turn 0.
-    """
-    if catalog is None or catalog.is_empty:
-        return False
-    if is_export_scope_ensure_satisfied(ctx, analytic_id, scope, catalog):
-        return False
-    return True
-
-
 def is_ensure_dependency_satisfied(
     ctx: AnalyticQueryContext,
     dependency: EnsureDependency,
     scope: ExportScope,
 ) -> bool:
     """Cheap probe: whether one declared ensure edge is already satisfied."""
-    catalog = ctx.export_registry.get(dependency.analytic_id)
-    if catalog is None or catalog.is_empty:
+    catalog = walkable_export_catalog(ctx, dependency.analytic_id)
+    if catalog is None:
         return True
     return all(
         is_export_scope_ensure_satisfied(
