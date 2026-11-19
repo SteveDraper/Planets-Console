@@ -197,7 +197,8 @@ class OrchestratorLifecycleMixin:
         registers cascades its failure or promotes on its completion; the
         node settles on the recreation's outcome. A failed dependency whose
         failure still cascades fails the node, with no ``persist_deferred``
-        record and no dependency submit.
+        record and no dependency submit. A recovery submit that raises is
+        settled by :meth:`_submit_recovery_dependency`.
         """
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
@@ -247,8 +248,12 @@ class OrchestratorLifecycleMixin:
                 submission_open=node.submission_open,
                 requester=node.execution_ref,
             )
+            generation = node.execution_generation
+            superseded = node.superseded_dependency
             self._observers.schedule_post_lock(
-                lambda: self._submit_dependencies((dependency_request,))
+                lambda: self._submit_recovery_dependency(
+                    node, generation, superseded, dependency_request
+                )
             )
 
     def _can_recreate(

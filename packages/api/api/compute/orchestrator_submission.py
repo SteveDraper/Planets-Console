@@ -31,6 +31,7 @@ from api.compute.scope import (
     compute_scope_to_export_scope,
     format_compute_scope_key,
 )
+from api.compute.step_execution_key import ExecutionRef
 from api.compute.submission_open import SubmissionOpen
 
 if TYPE_CHECKING:
@@ -313,13 +314,71 @@ class OrchestratorSubmissionMixin:
 
         Every request names that execution as its ``requester``. Once one is
         refused because the execution ended, the rest would be refused too, so
-        they are not submitted. A refusal is the requester's end, not a failure.
+        they are not submitted. A refusal is the requester's end, not a failure,
+        and is the one ``ComputeRequesterEndedError`` handling for every
+        dependency submit. Any other error propagates to the caller.
         """
         try:
             for request in requests:
                 self.submit(request)
         except ComputeRequesterEndedError:
             return
+
+    def _submit_recovery_dependency(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        generation: int,
+        superseded: ExecutionRef | None,
+        request: ComputeRequest,
+    ) -> None:
+        """Submit ``node``'s persist-deferred recovery ``request``, queued post-lock.
+
+        ``generation`` is the execution that demoted ``node`` and ``superseded``
+        the ``superseded_dependency`` it set. A submit that registers needs
+        nothing more: the replacement makes the marker inert. A refusal is
+        handled as for every dependency submit (:meth:`_submit_dependencies`).
+        Any other error settles ``node`` by
+        :meth:`_settle_failed_recovery_submit` and is re-raised, so the
+        post-lock drain logs it.
+        """
+        try:
+            self._submit_dependencies((request,))
+        except Exception as error:
+            self._settle_failed_recovery_submit(node, generation, request.scope, superseded, error)
+            raise
+
+    def _settle_failed_recovery_submit(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        generation: int,
+        dependency_scope: ComputeScope,
+        superseded: ExecutionRef | None,
+        error: BaseException,
+    ) -> None:
+        """Fail ``node`` with ``error`` when its raised recovery submit registered no replacement.
+
+        Takes the orchestrator lock. The DAG decides, not where ``error`` came
+        from, since a submit can raise after it registered. ``node`` fails only
+        while it is still the scope's node, live as ``generation``, in
+        ``waiting_deps`` with ``superseded`` still its marker, and
+        ``dependency_scope`` holds no node its readiness counts
+        (:meth:`_readiness_dependency`): none at all, or still the
+        ``superseded`` execution. Otherwise ``node`` is left alone: it settles
+        on the replacement or on the live dependency it waits on, or it has
+        moved on. A failed node's marker is never read again, so it needs no
+        clear. ``_fail_node`` releases the node's waiters with ``error``,
+        publishes its outcome, and cascades ``error`` to waiting dependents,
+        whose dispatch pass it schedules.
+        """
+        with self._condition:
+            if (
+                self._nodes.get(node.scope) is node
+                and node.is_live_execution(generation)
+                and node.state == "waiting_deps"
+                and node.superseded_dependency == superseded
+                and self._readiness_dependency(node, dependency_scope) is None
+            ):
+                self._fail_node(node, error)
 
     def _plan_submission_locked(
         self: ComputeOrchestrator,
