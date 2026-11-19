@@ -4,9 +4,15 @@ Registrations here are minimal single-step analytics keyed by row scope
 (perspective, turn, player). Pair them with the diamond export fixture
 (``tests.fixtures.export_framework``) for dependency edges, and with
 ``tests.compute_pool_test_helpers`` to drive pool steps by hand.
+:class:`ArmableRootPlanHook` lands test actions inside one later submission.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from api.analytics.catalog import TurnAnalyticCatalogEntry
 from api.analytics.export_types import ExportScope
@@ -20,12 +26,18 @@ from api.compute import (
     normalize_export_scope_to_compute_scope,
 )
 from api.compute.profile import ComputeBackend
+from api.compute.root_plan import RootPlan, open_ignored_root_plan
+from api.compute.submission_open import SubmissionOpen
 
 from tests.compute_pool_test_helpers import (
     run_interpreter_materialize,
     run_process_materialize,
 )
 from tests.fixtures.export_framework.harness import first_player_id
+
+if TYPE_CHECKING:
+    from api.analytics.export_context import AnalyticQueryContext
+    from api.compute.dag import PlannedComputeNode
 
 ROW_SCOPE_KEY = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
@@ -168,3 +180,84 @@ def make_compute_scope(analytic_id: str, export_scope: ExportScope) -> ComputeSc
         analytic_id=analytic_id,
         scope_key_spec=ROW_SCOPE_KEY,
     )
+
+
+RootPlanAction = Callable[[], None]
+
+
+def _no_root_plan_action() -> None:
+    return None
+
+
+@dataclass(frozen=True)
+class _ArmedRootPlanActions:
+    on_enter: RootPlanAction
+    on_registered: RootPlanAction
+    on_exit: RootPlanAction
+
+
+@dataclass(frozen=True)
+class _ActingRootPlan:
+    """The ignored root plan, running ``on_registered`` when its plan registers."""
+
+    inner: RootPlan
+    on_registered: RootPlanAction
+
+    @property
+    def submission_open(self) -> SubmissionOpen:
+        return self.inner.submission_open
+
+    def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
+        self.inner.plan_registered(planned)
+        self.on_registered()
+
+
+class ArmableRootPlanHook:
+    """An ``open_root_plan`` hook that runs armed actions around the next root plan it opens.
+
+    Install it as a registration's ``open_root_plan``. Unarmed, it behaves as
+    :func:`open_ignored_root_plan`. :meth:`arm` sets actions for the next
+    submission rooted at that analytic; the hook disarms as it opens that
+    plan, so a submission an action makes opens an unarmed plan.
+
+    ``on_enter`` runs as the plan opens, outside the orchestrator lock and
+    before the dependency chain is prepared, so it may submit or abort.
+    ``on_registered`` runs under the lock in the hold that registers the
+    plan, so it must not call back into the orchestrator. ``on_exit`` runs as
+    the plan closes after a clean submission. Any of them may raise.
+    """
+
+    def __init__(self) -> None:
+        self._armed: _ArmedRootPlanActions | None = None
+
+    def arm(
+        self,
+        *,
+        on_enter: RootPlanAction = _no_root_plan_action,
+        on_registered: RootPlanAction = _no_root_plan_action,
+        on_exit: RootPlanAction = _no_root_plan_action,
+    ) -> None:
+        self._armed = _ArmedRootPlanActions(on_enter, on_registered, on_exit)
+
+    def __call__(
+        self,
+        scope: ComputeScope,
+        submission_open: SubmissionOpen,
+        ctx: AnalyticQueryContext,
+    ) -> AbstractContextManager[RootPlan]:
+        actions, self._armed = self._armed, None
+        ignored = open_ignored_root_plan(scope, submission_open, ctx)
+        if actions is None:
+            return ignored
+        return _acting_root_plan(ignored, actions)
+
+
+@contextmanager
+def _acting_root_plan(
+    ignored: AbstractContextManager[RootPlan],
+    actions: _ArmedRootPlanActions,
+) -> Iterator[RootPlan]:
+    with ignored as inner:
+        actions.on_enter()
+        yield _ActingRootPlan(inner, actions.on_registered)
+        actions.on_exit()

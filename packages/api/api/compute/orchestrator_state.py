@@ -233,6 +233,10 @@ class ComputeNodeRun(NodeExecutionBinding):
     # (``RunningStepDisposition.permits``). Written under the orchestrator
     # lock; a settle only raises it.
     running_step: RunningStepDisposition = RunningStepDisposition.CONTINUE
+    # The terminal dependency execution this node's last persist-deferred
+    # recovery asked to be recreated. Readiness treats that execution as not
+    # there (``ComputeOrchestrator._readiness_dependency``).
+    superseded_dependency: ExecutionRef | None = None
     _: KW_ONLY
     # Root turn and backfill choice of the submission that planned this node.
     # A later submission that roots at this scope replaces the open turn and

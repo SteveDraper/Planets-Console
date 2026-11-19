@@ -664,38 +664,26 @@ class ComputeOrchestrator(
             node.state = "waiting_deps"
             self._dequeue_ready(node.scope)
 
-    def _fail_on_failed_dependency(
-        self,
-        node: ComputeNodeRun,
-        *,
-        excluding: frozenset[ComputeScope] = frozenset(),
-    ) -> bool:
+    def _fail_on_failed_dependency(self, node: ComputeNodeRun) -> bool:
         """Fail ``node`` with a dependency's error when that failure cascades.
 
-        Dependencies in ``excluding`` are not checked. Returns whether the
-        node was failed. Caller holds the lock.
+        Returns whether the node was failed. Caller holds the lock.
         """
-        failed_dependency_error = self._failed_dependency_error(node, excluding=excluding)
+        failed_dependency_error = self._failed_dependency_error(node)
         if failed_dependency_error is None:
             return False
         self._fail_node(node, failed_dependency_error)
         return True
 
-    def _failed_dependency_error(
-        self,
-        node: ComputeNodeRun,
-        *,
-        excluding: frozenset[ComputeScope],
-    ) -> BaseException | None:
+    def _failed_dependency_error(self, node: ComputeNodeRun) -> BaseException | None:
         """The error of a failed dependency of ``node`` that cascades to it, if any.
 
-        An abort-failed dependency (``ComputeScopeAbortedError``) does not
-        cascade. Dependencies in ``excluding`` are skipped.
+        Dependencies are read through :meth:`_readiness_dependency`, so a
+        dependency execution ``node`` superseded does not cascade. An
+        abort-failed dependency (``ComputeScopeAbortedError``) does not either.
         """
         for dependency_scope in node.dependency_scopes:
-            if dependency_scope in excluding:
-                continue
-            dependency = self._nodes.get(dependency_scope)
+            dependency = self._readiness_dependency(node, dependency_scope)
             if dependency is None or dependency.state != "failed":
                 continue
             # Intentional cancel aborts must not poison dependents on the singleton DAG
@@ -706,11 +694,34 @@ class ComputeOrchestrator(
         return None
 
     def _deps_complete(self, node: ComputeNodeRun) -> bool:
+        """Whether each dependency ``_readiness_dependency`` reads for ``node`` is complete."""
         for dependency_scope in node.dependency_scopes:
-            dependency = self._nodes.get(dependency_scope)
+            dependency = self._readiness_dependency(node, dependency_scope)
             if dependency is None or dependency.state != "complete":
                 return False
         return True
+
+    def _readiness_dependency(
+        self,
+        node: ComputeNodeRun,
+        dependency_scope: ComputeScope,
+    ) -> ComputeNodeRun | None:
+        """The node at ``dependency_scope`` that ``node``'s readiness counts, if any.
+
+        None when the scope has no node, or when its node is the execution
+        ``node.superseded_dependency`` names: a terminal dependency execution
+        the node's persist-deferred recovery asked to be recreated counts as
+        not there, so it neither cascades its failure nor completes the node.
+
+        The marker goes inert once the recreation registers: execution
+        generations are unique, so a replaced execution matches no later
+        node. Nothing clears it on success or on requeue; a later
+        persist-deferred overwrites it.
+        """
+        dependency = self._nodes.get(dependency_scope)
+        if dependency is None or dependency.execution_ref == node.superseded_dependency:
+            return None
+        return dependency
 
     def _enqueue_ready(self, scope: ComputeScope) -> None:
         if scope not in self._ready_queue:

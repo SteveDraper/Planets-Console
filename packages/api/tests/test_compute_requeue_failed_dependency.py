@@ -22,6 +22,7 @@ from api.analytics.registration import (
 )
 from api.compute import (
     ComputeHandle,
+    ComputeNodeRun,
     ComputeOrchestrator,
     ComputeRequest,
     ComputeScope,
@@ -38,6 +39,7 @@ from api.compute.wire import StepResult
 
 from tests.compute_lifecycle_records import record_lifecycle
 from tests.compute_orchestrator_fixtures import (
+    ArmableRootPlanHook,
     RecordingPersistencePolicy,
     inline_compute_registration,
     make_compute_scope,
@@ -55,6 +57,7 @@ from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
+from tests.fixtures.export_framework.state import FIXTURE_EXPORT_STATE
 
 
 class DeferringPersistencePolicy(RecordingPersistencePolicy):
@@ -72,7 +75,11 @@ class DeferringPersistencePolicy(RecordingPersistencePolicy):
 
 @dataclass(frozen=True)
 class RunningBranch:
-    """BRANCH_B running on a complete SHARED, with ROOT waiting on it."""
+    """BRANCH_B running on a complete SHARED, with ROOT waiting on it.
+
+    ``shared_root_plan`` is SHARED's root plan hook; arm it to act inside the
+    next SHARED-rooted submission.
+    """
 
     orchestrator: ComputeOrchestrator
     ctx: AnalyticQueryContext
@@ -81,6 +88,7 @@ class RunningBranch:
     root: ComputeScope
     branch_policy: DeferringPersistencePolicy
     branch_waiter: ComputeHandle
+    shared_root_plan: ArmableRootPlanHook
 
 
 def _hold_pool_steps(node, step, **_kwargs) -> None:
@@ -101,10 +109,14 @@ def _running_branch(
     ctx = make_fixture_query_context(sample_turn, registry=export_registry)
     export_scope = make_export_scope(sample_turn)
     branch_policy = DeferringPersistencePolicy()
+    shared_root_plan = ArmableRootPlanHook()
     registry = build_compute_registry(
         (
-            pool_compute_registration(
-                SHARED_ID, backend="thread", persistence_policy=RecordingPersistencePolicy()
+            replace(
+                pool_compute_registration(
+                    SHARED_ID, backend="thread", persistence_policy=RecordingPersistencePolicy()
+                ),
+                open_root_plan=shared_root_plan,
             ),
             pool_compute_registration(
                 BRANCH_B_ID, backend="thread", persistence_policy=branch_policy
@@ -136,6 +148,7 @@ def _running_branch(
         root=root,
         branch_policy=branch_policy,
         branch_waiter=branch_waiter,
+        shared_root_plan=shared_root_plan,
     )
 
 
@@ -277,7 +290,7 @@ def test_soft_defer_cascades_a_dependency_that_failed_while_the_node_ran(sample_
 
 
 def test_persist_deferred_cascades_a_failed_dependency_it_is_not_recreating(sample_turn):
-    """Only the recovery dependency is excluded; another failed dependency still cascades."""
+    """Only the recovery dependency is superseded; another failed dependency still cascades."""
     setup = _running_branch(sample_turn)
     other_shared = _complete_other_player_shared(setup, sample_turn)
     other_shared_node = setup.orchestrator.nodes[other_shared]
@@ -320,6 +333,7 @@ def test_persist_deferred_recreates_a_failed_recovery_dependency(sample_turn):
                 "relatedScopeKey": format_compute_scope_key(setup.shared),
                 "dependencyStepKind": "materialize",
                 "priorityBand": branch_node.priority_band,
+                "supersededExecutionGeneration": failed_shared.execution_generation,
             },
         )
     ]
@@ -395,3 +409,145 @@ def test_persist_deferred_fails_a_recovery_of_an_analytic_with_no_export_catalog
     _assert_branch_fails_without_recovery(
         setup, PersistDependencyRecovery(dependency_scope=uncataloged, step_kind="materialize")
     )
+
+
+def _defer_branch_step_by_wait_recovery(
+    setup: RunningBranch, recovery: PersistDependencyRecovery
+) -> None:
+    complete_running_pool_step(
+        setup.orchestrator,
+        setup.branch,
+        result_wire=StepResult(outcome="waiting_deps", wait_recovery=recovery),
+    )
+
+
+# The two ways a step asks for a dependency recovery.
+_RECOVERY_DEFERRALS = {
+    "persist-deferred": _persist_branch_step_deferred,
+    "wait-recovery": _defer_branch_step_by_wait_recovery,
+}
+
+
+def _shared_recovery(setup: RunningBranch) -> PersistDependencyRecovery:
+    return PersistDependencyRecovery(dependency_scope=setup.shared, step_kind="materialize")
+
+
+def _arm_unrelated_submit_before_the_recreate(setup: RunningBranch, sample_turn) -> ComputeScope:
+    """Submit the second player's SHARED as the recovery's SHARED submit opens.
+
+    That fresh plan refreshes readiness across the DAG after BRANCH_B's
+    demotion and before the recreated SHARED registers.
+    """
+    other_shared = _other_player_shared_scope(setup, sample_turn)
+
+    def submit_other_shared() -> None:
+        setup.orchestrator.submit(ComputeRequest(ctx=setup.ctx, scope=other_shared))
+
+    setup.shared_root_plan.arm(on_enter=submit_other_shared)
+    return other_shared
+
+
+def _assert_branch_waits_on_a_recreated_shared(
+    setup: RunningBranch, superseded_shared: ComputeNodeRun, other_shared: ComputeScope
+) -> None:
+    """The window submit ran, and BRANCH_B waits on a running recreation of SHARED."""
+    assert setup.orchestrator.nodes[other_shared].state == "running"
+    branch_node = setup.orchestrator.nodes[setup.branch]
+    assert branch_node.state == "waiting_deps"
+    assert branch_node.superseded_dependency == superseded_shared.execution_ref
+    recreated_shared = setup.orchestrator.nodes[setup.shared]
+    assert recreated_shared is not superseded_shared
+    assert recreated_shared.state == "running"
+
+
+@pytest.mark.parametrize("defer", _RECOVERY_DEFERRALS.values(), ids=_RECOVERY_DEFERRALS.keys())
+def test_a_refresh_before_the_recreate_registers_does_not_cascade_the_superseded_failure(
+    sample_turn, defer
+):
+    setup = _running_branch(sample_turn)
+    _fail_shared_while_branch_runs(setup, RuntimeError("superseded shared failed"))
+    failed_shared = setup.orchestrator.nodes[setup.shared]
+    other_shared = _arm_unrelated_submit_before_the_recreate(setup, sample_turn)
+
+    defer(setup, _shared_recovery(setup))
+
+    _assert_branch_waits_on_a_recreated_shared(setup, failed_shared, other_shared)
+    complete_running_pool_step(setup.orchestrator, setup.shared, result_wire={"result": SHARED_ID})
+    assert setup.orchestrator.nodes[setup.branch].state == "running"
+
+
+def test_a_failed_recreate_cascades_its_own_error_not_the_superseded_one(sample_turn):
+    setup = _running_branch(sample_turn)
+    _fail_shared_while_branch_runs(setup, RuntimeError("superseded shared failed"))
+    _arm_unrelated_submit_before_the_recreate(setup, sample_turn)
+    _persist_branch_step_deferred(setup, _shared_recovery(setup))
+    recreate_failure = RuntimeError("recreated shared failed")
+
+    complete_running_pool_step(setup.orchestrator, setup.shared, error=recreate_failure)
+
+    branch_node = setup.orchestrator.nodes[setup.branch]
+    assert branch_node.state == "failed"
+    assert branch_node.error is recreate_failure
+
+
+def test_a_refresh_before_the_recreate_registers_does_not_promote_on_the_superseded_complete(
+    sample_turn,
+):
+    """A complete SHARED already persisted is re-run, and BRANCH_B waits for that run."""
+    setup = _running_branch(sample_turn)
+    complete_shared = setup.orchestrator.nodes[setup.shared]
+    assert complete_shared.state == "complete"
+    FIXTURE_EXPORT_STATE.mark_persisted(SHARED_ID, make_export_scope(sample_turn))
+    other_shared = _arm_unrelated_submit_before_the_recreate(setup, sample_turn)
+
+    _persist_branch_step_deferred(setup, _shared_recovery(setup))
+
+    _assert_branch_waits_on_a_recreated_shared(setup, complete_shared, other_shared)
+    complete_running_pool_step(setup.orchestrator, setup.shared, result_wire={"result": SHARED_ID})
+    assert setup.orchestrator.nodes[setup.branch].state == "running"
+
+
+def test_a_recovery_of_a_running_dependency_waits_on_that_execution(sample_turn):
+    setup = _running_branch(sample_turn)
+    _replace_shared_under_running_branch(setup)
+    running_shared = setup.orchestrator.nodes[setup.shared]
+    persist_deferred = record_lifecycle(setup.orchestrator, ("persist_deferred",))
+
+    _persist_branch_step_deferred(setup, _shared_recovery(setup))
+
+    branch_node = setup.orchestrator.nodes[setup.branch]
+    assert branch_node.state == "waiting_deps"
+    assert branch_node.superseded_dependency is None
+    assert [record.detail["supersededExecutionGeneration"] for record in persist_deferred] == [None]
+    assert setup.orchestrator.nodes[setup.shared] is running_shared
+    complete_running_pool_step(setup.orchestrator, setup.shared, result_wire={"result": SHARED_ID})
+    assert setup.orchestrator.nodes[setup.branch].state == "running"
+
+
+def test_a_force_fresh_attach_before_the_recreate_does_not_recreate_the_superseded_abort(
+    sample_turn,
+):
+    """The recreate-aborted walk leaves the superseded SHARED to the recovery submit."""
+    setup = _running_branch(sample_turn)
+    _abort_shared_while_branch_runs(setup)
+    aborted_shared = setup.orchestrator.nodes[setup.shared]
+
+    def attach_branch_force_fresh() -> None:
+        setup.orchestrator.submit(
+            ComputeRequest(ctx=setup.ctx, scope=setup.branch, force_fresh=True)
+        )
+
+    setup.shared_root_plan.arm(on_enter=attach_branch_force_fresh)
+    force_fresh_submits = record_lifecycle(
+        setup.orchestrator, ("force_fresh_replace", "force_fresh_attach")
+    )
+
+    _persist_branch_step_deferred(setup, _shared_recovery(setup))
+
+    assert [record.kind for record in force_fresh_submits if record.scope == setup.shared] == [
+        "force_fresh_replace"
+    ]
+    assert setup.orchestrator.nodes[setup.branch].state == "waiting_deps"
+    recreated_shared = setup.orchestrator.nodes[setup.shared]
+    assert recreated_shared is not aborted_shared
+    assert recreated_shared.state == "running"

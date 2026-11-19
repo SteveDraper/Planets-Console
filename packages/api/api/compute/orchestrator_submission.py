@@ -367,6 +367,8 @@ class OrchestratorSubmissionMixin:
         later-turn fleet attach can restart aborted prior-turn scores.
         Do not recreate on abort itself -- that would fight an in-flight cancel.
         A recreated dependency takes its band from the waiting dependents.
+        Dependencies are read through :meth:`_readiness_dependency`, so one a
+        waiter superseded is left to that waiter's own recovery submit.
         Caller holds the orchestrator lock; submits run after release, with
         ``node``'s execution as their requester, so none is planned once that
         execution has ended.
@@ -380,7 +382,7 @@ class OrchestratorSubmissionMixin:
                 continue
             seen.add(current.scope)
             for dependency_scope in current.dependency_scopes:
-                dependency = self._nodes.get(dependency_scope)
+                dependency = self._readiness_dependency(current, dependency_scope)
                 if dependency is None:
                     continue
                 if dependency.state == "failed" and isinstance(

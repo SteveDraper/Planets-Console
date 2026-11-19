@@ -36,7 +36,6 @@ from api.exceptions import DiscardedWorkRefused
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.registry import AnalyticComputeRegistration
-    from api.compute.scope import ComputeScope
 
 # The exit each step outcome takes first once the step has finished.
 _STEP_EXIT_BY_OUTCOME: Mapping[StepOutcome, StepExit] = MappingProxyType(
@@ -121,18 +120,18 @@ class OrchestratorLifecycleMixin:
     def _demote_unless_dependency_failed(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
-        *,
-        excluding: frozenset[ComputeScope] = frozenset(),
     ) -> bool:
         """Settle a requeued demotion onto ``waiting_deps``. Caller holds the lock.
 
         Counts the discarded step, then fails the node instead when a
-        dependency outside ``excluding`` failed while it ran and that failure
-        cascades. Never promotes: the analytic has just asked the node to
-        wait. Returns whether the node is now ``waiting_deps``.
+        dependency failed while it ran and that failure cascades (a
+        dependency the node superseded does not; see
+        :meth:`_readiness_dependency`). Never promotes: the analytic has just
+        asked the node to wait. Returns whether the node is now
+        ``waiting_deps``.
         """
         self._metrics.epoch_discards += 1
-        if self._fail_on_failed_dependency(node, excluding=excluding):
+        if self._fail_on_failed_dependency(node):
             return False
         node.error = None
         node.state = "waiting_deps"
@@ -190,13 +189,15 @@ class OrchestratorLifecycleMixin:
         execution as its requester, so it plans nothing once that execution
         has ended (aborted or replaced) before the plan would be registered.
 
-        After the graft, a failed dependency whose failure cascades fails the
-        node, with no ``persist_deferred`` record and no dependency submit.
-        The recovery dependency is left out of that check, since the analytic
-        asked for it to be recreated; a failure of the recreation reaches the
-        node as a dependency-terminal refresh. The exclusion holds only for
-        this lock hold: until the submit replaces it, the failed recovery
-        dependency is still the node a later refresh sees.
+        After the graft, the node records the recovery dependency's execution
+        as ``superseded_dependency`` when that execution is terminal (None
+        when the scope has no node, or its node is still live and the submit
+        attaches to it). Readiness reads a superseded execution as not there
+        (:meth:`_readiness_dependency`), so no refresh before the recreation
+        registers cascades its failure or promotes on its completion; the
+        node settles on the recreation's outcome. A failed dependency whose
+        failure still cascades fails the node, with no ``persist_deferred``
+        record and no dependency submit.
         """
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
@@ -211,9 +212,13 @@ class OrchestratorLifecycleMixin:
                     *node.dependency_scopes,
                     dependency_scope,
                 )
-            if not self._demote_unless_dependency_failed(
-                node, excluding=frozenset({dependency_scope})
-            ):
+            dependency = self._nodes.get(dependency_scope)
+            node.superseded_dependency = (
+                dependency.execution_ref
+                if dependency is not None and dependency.is_terminal
+                else None
+            )
+            if not self._demote_unless_dependency_failed(node):
                 return
             self._observers.notify_lifecycle(
                 "persist_deferred",
@@ -227,6 +232,11 @@ class OrchestratorLifecycleMixin:
                     "relatedScopeKey": format_compute_scope_key(dependency_scope),
                     "dependencyStepKind": recovery.step_kind,
                     "priorityBand": node.priority_band,
+                    "supersededExecutionGeneration": (
+                        None
+                        if node.superseded_dependency is None
+                        else node.superseded_dependency.execution_generation
+                    ),
                 },
             )
             dependency_request = ComputeRequest(
