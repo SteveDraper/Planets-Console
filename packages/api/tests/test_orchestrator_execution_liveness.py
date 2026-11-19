@@ -90,7 +90,6 @@ class _PersistDeferredHarness:
         self.persistence = _DeferredOncePersistence(
             PersistDependencyRecovery(
                 dependency_scope=self.shared_scope,
-                force_fresh=True,
                 step_kind="materialize",
             )
         )

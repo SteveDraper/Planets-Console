@@ -287,7 +287,6 @@ def test_opening_a_catch_up_hop_adopts_it_as_the_open(sample_turn):
         player_id=player_id,
     )
     assert recovery.step_kind == "tier_solve"
-    assert recovery.force_fresh is True
     _assert_scoreboard_stamps(orchestrator, ctx, persistence, player_id, 40)
 
 

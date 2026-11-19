@@ -358,7 +358,6 @@ def test_turn_before_elimination_keeps_prior_fleet_and_scores_gate(sample_turn, 
         )
     assert raised.value.recovery is not None
     assert raised.value.recovery.step_kind == "tier_solve"
-    assert raised.value.recovery.force_fresh is True
 
 
 @pytest.mark.parametrize(

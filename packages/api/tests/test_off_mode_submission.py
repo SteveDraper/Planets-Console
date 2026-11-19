@@ -171,7 +171,6 @@ def test_open_at_40_stays_the_open_when_41_has_a_live_stream(sample_turn):
             player_id=player_id,
         )
         assert recovery.step_kind == "tier_solve"
-        assert recovery.force_fresh is True
     finally:
         reset_fleet_table_stream_registry_for_tests()
 
