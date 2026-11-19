@@ -38,3 +38,12 @@ class AnalyticComputeProfile:
     # the orchestrator. Scores uses this: the REST table is a TurnInfo projection
     # and inference lives on the table stream, not batch compute.
     route_table_map: bool = True
+
+    @property
+    def step_kinds(self) -> tuple[str, ...]:
+        """The declared step kinds, in profile order."""
+        return tuple(step.step_kind for step in self.steps)
+
+    def has_step_kind(self, step_kind: str) -> bool:
+        """Whether ``step_kind`` names a step of this profile."""
+        return step_kind in self.step_kinds

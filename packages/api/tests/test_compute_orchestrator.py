@@ -1616,7 +1616,6 @@ def test_persist_deferred_demotes_waiting_deps_and_force_freshes_dependency(samp
     branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
-        force_fresh=True,
         step_kind="materialize",
     )
 
@@ -1730,7 +1729,6 @@ def test_persist_deferred_grafts_recovery_dependency_when_ensure_edge_missing(
     branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
-        force_fresh=True,
         step_kind="materialize",
     )
 
@@ -1827,7 +1825,6 @@ def test_force_fresh_waiting_deps_recreates_aborted_dependency(sample_turn):
     branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
-        force_fresh=True,
         step_kind="materialize",
     )
 
@@ -2003,7 +2000,6 @@ def test_force_fresh_diamond_recreates_shared_abort_failed_dep_once(sample_turn)
     root_scope = make_compute_scope(ROOT_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
-        force_fresh=True,
         step_kind="materialize",
     )
 
@@ -2110,7 +2106,6 @@ def test_force_fresh_waiting_deps_chain_recreates_abort_failed_leaf(sample_turn)
     root_scope = make_compute_scope(ROOT_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
-        force_fresh=True,
         step_kind="materialize",
     )
 
@@ -2229,7 +2224,6 @@ def test_force_fresh_waiting_deps_does_not_recreate_non_abort_failed_dep(sample_
     branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
-        force_fresh=True,
         step_kind="materialize",
     )
 

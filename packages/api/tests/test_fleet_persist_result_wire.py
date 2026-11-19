@@ -623,7 +623,6 @@ def test_persist_refuses_when_scores_turn_evidence_open(sample_turn):
             turn=turn.settings.turn,
             player_id=player_id,
         ),
-        force_fresh=True,
         step_kind="tier_solve",
     )
     assert (

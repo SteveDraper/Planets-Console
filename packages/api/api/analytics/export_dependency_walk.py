@@ -36,6 +36,21 @@ def _settings_for_ensure_scope(
     return turn.settings if turn is not None else None
 
 
+def walkable_export_catalog(
+    ctx: AnalyticQueryContext,
+    analytic_id: str,
+) -> AnalyticExportCatalog | None:
+    """The export catalog a dependency walk of ``analytic_id`` follows, if it has one.
+
+    None when the analytic has no catalog or an empty one: the walk plans
+    nothing for it.
+    """
+    catalog = ctx.export_registry.get(analytic_id)
+    if catalog is None or catalog.is_empty:
+        return None
+    return catalog
+
+
 def ensure_dependency_turn_floor(
     ctx: AnalyticQueryContext,
     scope: ExportScope,
@@ -90,8 +105,8 @@ def walk_dependency_tree(
 
     visiting.add(visit_key)
     try:
-        catalog = ctx.export_registry.get(analytic_id)
-        if catalog is None or catalog.is_empty:
+        catalog = walkable_export_catalog(ctx, analytic_id)
+        if catalog is None:
             return result
         needs_scope = force_root or _dependency_needs_processing(ctx, analytic_id, scope, catalog)
         walks_dependencies = needs_scope or (

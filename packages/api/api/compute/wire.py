@@ -29,8 +29,8 @@ class StepResult:
     park_reason: str | None = None
     # When true, ``persist`` runs but the node advances to the next profile step.
     persist_then_continue: bool = False
-    # Optional cross-scope recovery (graft + optional force_fresh). Soft defer
-    # omits this so demotion does not self-graft the waiting node.
+    # Optional cross-scope recovery (graft + recreate the dependency). Soft
+    # defer omits this so demotion does not self-graft the waiting node.
     wait_recovery: PersistDependencyRecovery | None = None
 
 

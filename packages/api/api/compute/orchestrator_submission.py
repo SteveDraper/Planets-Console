@@ -545,12 +545,12 @@ class OrchestratorSubmissionMixin:
         registration: AnalyticComputeRegistration,
         entry_step_kind: str | None,
     ) -> int:
-        steps = registration.compute_profile.steps
         if entry_step_kind is None:
             return 0
-        for index, step in enumerate(steps):
-            if step.step_kind == entry_step_kind:
-                return index
-        raise ValueError(
-            f"unknown entry step_kind {entry_step_kind!r} for analytic {registration.analytic_id!r}"
-        )
+        profile = registration.compute_profile
+        if not profile.has_step_kind(entry_step_kind):
+            raise ValueError(
+                f"unknown entry step_kind {entry_step_kind!r} "
+                f"for analytic {registration.analytic_id!r}"
+            )
+        return profile.step_kinds.index(entry_step_kind)

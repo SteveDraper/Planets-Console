@@ -144,7 +144,7 @@ class FleetScoresEvidenceOpenError(PersistDeferredError, CoreAPIError):
 
     Completing the fleet node would unlock dependents and leave a non-final ledger
     with no automatic rematerialization. Carries a :class:`PersistDependencyRecovery`
-    that force_freshes same-turn scores; the orchestrator handles the base
+    that recreates same-turn scores from ``tier_solve``; the orchestrator handles the base
     :class:`PersistDeferredError` generically (demote to ``waiting_deps`` + dep submit).
     """
 

@@ -196,9 +196,9 @@ def build_fleet_finalization_leg_job_wire(
 def scores_evidence_recovery(scope: ComputeScope) -> PersistDependencyRecovery:
     """The dependency a fleet persist defers on while same-turn scores evidence is open.
 
-    It force_freshes the scores solve of the same game, perspective, turn,
-    player and parameters as the fleet ``scope``; the orchestrator grafts
-    that scope onto the fleet node.
+    It recreates the scores solve of the same game, perspective, turn,
+    player and parameters as the fleet ``scope`` from its ``tier_solve``
+    step; the orchestrator grafts that scope onto the fleet node.
     """
     return PersistDependencyRecovery(
         dependency_scope=ComputeScope(
@@ -209,7 +209,6 @@ def scores_evidence_recovery(scope: ComputeScope) -> PersistDependencyRecovery:
             player_id=scope.player_id,
             parameters=scope.parameters,
         ),
-        force_fresh=True,
         step_kind="tier_solve",
     )
 
@@ -468,11 +467,12 @@ class FleetPersistencePolicy:
             # Same-turn scores evidence is still open. Persisting and completing the
             # fleet node would unlock dependents and leave a non-final ledger with no
             # automatic rematerialization (empty scores complete hang fingerprint).
-            # PersistDependencyRecovery.force_fresh is the sole reopen mechanism here:
-            # the orchestrator's persist-deferred recovery submits the scores scope
-            # with force_fresh=True, which refreshes waiting_deps / absent / terminal
-            # nodes alike. Do not also call wake_scores_scope for this path -- that
-            # would be a second encoding of the same reopen policy.
+            # PersistDependencyRecovery is the sole reopen mechanism here: the
+            # orchestrator's persist-deferred recovery always recreates the scores
+            # scope with a force_fresh submit from tier_solve, which refreshes
+            # waiting_deps / absent / terminal nodes alike. Do not also call
+            # wake_scores_scope for this path -- that would be a second encoding
+            # of the same reopen policy.
             from api.errors import FleetScoresEvidenceOpenError
 
             raise FleetScoresEvidenceOpenError(

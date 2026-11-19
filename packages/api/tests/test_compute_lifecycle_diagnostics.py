@@ -147,7 +147,6 @@ def test_persist_deferred_lifecycle_event_includes_related_scope(sample_turn):
     branch_b_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     recovery = PersistDependencyRecovery(
         dependency_scope=shared_scope,
-        force_fresh=True,
         step_kind="materialize",
     )
 

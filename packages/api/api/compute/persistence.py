@@ -14,18 +14,41 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PersistDependencyRecovery:
-    """Demote the persisting node to ``waiting_deps`` and optionally re-submit a dependency.
+    """Demote the persisting node to ``waiting_deps`` and recreate a dependency.
 
     Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
     carrying this when a durable write cannot complete until another scope is
-    re-run (typically ``force_fresh``). The orchestrator handles the signal
-    generically -- no analytic ids or feature exceptions in the shared path.
-    This is a real dependency wait, not soft ``parked`` / outcome ``park``.
+    re-run. The orchestrator handles the signal generically -- no analytic ids
+    or feature exceptions in the shared path. This is a real dependency wait,
+    not soft ``parked`` / outcome ``park``.
+
+    Every recovery recreates ``dependency_scope`` with a ``force_fresh`` submit
+    that enters at ``step_kind`` (name the first step for a full re-run) and
+    forces its root, so a dependency already satisfied on disk is re-run
+    rather than registered as satisfied. ``step_kind`` must name a step of the
+    dependency's compute profile, and the dependency analytic must have a
+    walkable (non-empty) export catalog; otherwise the orchestrator fails the
+    node with :class:`InvalidPersistDependencyRecoveryError`.
     """
 
     dependency_scope: ComputeScope
-    force_fresh: bool = True
-    step_kind: str | None = None
+    step_kind: str
+
+
+class InvalidPersistDependencyRecoveryError(ValueError):
+    """A :class:`PersistDependencyRecovery` names a dependency the orchestrator cannot recreate.
+
+    The dependency analytic is not registered with ``step_kind`` in its
+    compute profile, or has no walkable export catalog. The orchestrator
+    fails the deferring node with it, before any dependency submit.
+    """
+
+    def __init__(self, recovery: PersistDependencyRecovery) -> None:
+        super().__init__(
+            f"persist-deferred recovery cannot recreate {recovery.dependency_scope!r} "
+            f"from step_kind {recovery.step_kind!r}"
+        )
+        self.recovery = recovery
 
 
 class PersistDeferredError(Exception):
@@ -33,8 +56,8 @@ class PersistDeferredError(Exception):
 
     The orchestrator demotes the node to ``waiting_deps`` (not ``failed``, not
     soft ``parked``), grafts ``recovery.dependency_scope`` onto the node's
-    dependency edges when missing, and, when ``recovery.force_fresh`` is true,
-    submits that scope so a durable dependency close can wake rematerialization.
+    dependency edges when missing, and submits that scope ``force_fresh`` so
+    the recreated dependency's close can wake rematerialization.
     """
 
     def __init__(self, message: str, *, recovery: PersistDependencyRecovery) -> None:
@@ -79,7 +102,7 @@ class PersistencePolicy(Protocol):
         is released again.
 
         May raise :class:`PersistDeferredError` when the durable write cannot
-        complete until a dependency is force-freshed; the orchestrator demotes
+        complete until a dependency is recreated; the orchestrator demotes
         the node to ``waiting_deps`` and applies ``recovery`` generically.
         """
         ...

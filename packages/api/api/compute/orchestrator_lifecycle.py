@@ -12,11 +12,16 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
+from api.analytics.export_dependency_walk import walkable_export_catalog
 from api.compute.dag_reach import needed_scopes
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator_observers import LifecycleEventKind
 from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
-from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.persistence import (
+    InvalidPersistDependencyRecoveryError,
+    PersistDeferredError,
+    PersistDependencyRecovery,
+)
 from api.compute.profile import StepSurface
 from api.compute.running_step import StepExit
 from api.compute.scope import format_compute_scope_key
@@ -75,9 +80,10 @@ class OrchestratorLifecycleMixin:
     def _reset_for_requeue(self: ComputeOrchestrator, node: ComputeNodeRun) -> int:
         """Clear the submit generation so the node can re-enter the dispatch loop.
 
-        Shared by epoch-retry, persist-deferred recovery, and soft park -- the three
-        paths that leave an in-flight step and must reopen the node for later work.
-        Returns the step index at reset time for lifecycle notifications.
+        Shared by every path that leaves an in-flight step and reopens the node
+        for later work: epoch-retry, soft defer, persist-deferred recovery, and
+        a soft ``park`` outcome. Returns the step index at reset time for
+        lifecycle notifications.
         """
         prior_step_index = node.step_index
         node.generation_at_submit = None
@@ -153,14 +159,21 @@ class OrchestratorLifecycleMixin:
         node: ComputeNodeRun,
         recovery: PersistDependencyRecovery,
     ) -> None:
-        """Recover onto ``waiting_deps`` and optionally force_fresh a dependency.
+        """Recover onto ``waiting_deps`` and recreate the recovery's dependency.
 
         Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
-        when a durable write cannot complete until a dependency re-closes.
-        Failing the node left dependents waiting with no wake for background DAG
-        nodes (no table-stream controller). Force-freshing the declared dependency
-        reopens the ENSURE edge; when it completes, readiness promotes this node.
+        (or a step returns ``waiting_deps`` with ``wait_recovery``) when a durable
+        write cannot complete until a dependency re-closes. Failing the node
+        left dependents waiting with no wake for background DAG nodes (no
+        table-stream controller). Recreating the declared dependency reopens
+        the ENSURE edge; when it completes, readiness promotes this node.
         Persist-deferred is a real dependency wait -- not soft ``parked``.
+
+        The start-or-requeue gate runs first, so a node it ends queues no
+        dependency submit. A recovery the orchestrator cannot recreate (see
+        :meth:`_can_recreate`) then fails the node with
+        :class:`InvalidPersistDependencyRecoveryError`, with no
+        ``persist_deferred`` record and no dependency submit.
 
         Graft ``recovery.dependency_scope`` onto ``node.dependency_scopes`` when the
         plan-time ENSURE walk omitted it (e.g. dependency already satisfied when the
@@ -168,34 +181,39 @@ class OrchestratorLifecycleMixin:
         never refreshes this node and ``force_fresh_attach`` alone leaves it stuck
         in ``waiting_deps`` (0% CPU hang). Never graft the node's own scope -- that
         self-edge can never become ``complete`` while this node is ``waiting_deps``.
-        The force_fresh dependency submit asks for no band of its own: the
-        grafted edge gives it this node's band at the next dispatch pass. It
-        runs after the lock is released and names this node's execution as its
-        requester, so it plans nothing once that execution has ended (aborted
-        or replaced) before the plan would be registered. The start-or-requeue
-        gate runs first, so a node it ends queues no dependency submit.
+
+        Every recovery queues a ``force_fresh`` submit of the dependency entering
+        at ``recovery.step_kind``, which also forces its root, so a dependency
+        already satisfied on disk is re-run. The submit asks for no band of its
+        own: the grafted edge gives it this node's band at the next dispatch
+        pass. It runs after the lock is released and names this node's
+        execution as its requester, so it plans nothing once that execution
+        has ended (aborted or replaced) before the plan would be registered.
 
         After the graft, a failed dependency whose failure cascades fails the
         node, with no ``persist_deferred`` record and no dependency submit.
-        The recovery dependency is left out of that check when it is
-        force_freshed, since the analytic asked for it to be recreated; a
-        failure of the recreation reaches the node as a dependency-terminal
-        refresh. The exclusion holds only for this lock hold: until the
-        submit replaces it, the failed recovery dependency is still the node
-        a later refresh sees.
+        The recovery dependency is left out of that check, since the analytic
+        asked for it to be recreated; a failure of the recreation reaches the
+        node as a dependency-terminal refresh. The exclusion holds only for
+        this lock hold: until the submit replaces it, the failed recovery
+        dependency is still the node a later refresh sees.
         """
         with self._condition:
             if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
                 return
             prior_step_index = self._reset_for_requeue(node)
+            if not self._can_recreate(node, recovery):
+                self._fail_node(node, InvalidPersistDependencyRecoveryError(recovery))
+                return
             dependency_scope = recovery.dependency_scope
             if dependency_scope != node.scope and dependency_scope not in node.dependency_scopes:
                 node.dependency_scopes = (
                     *node.dependency_scopes,
                     dependency_scope,
                 )
-            recreating = frozenset({dependency_scope}) if recovery.force_fresh else frozenset()
-            if not self._demote_unless_dependency_failed(node, excluding=recreating):
+            if not self._demote_unless_dependency_failed(
+                node, excluding=frozenset({dependency_scope})
+            ):
                 return
             self._observers.notify_lifecycle(
                 "persist_deferred",
@@ -207,14 +225,10 @@ class OrchestratorLifecycleMixin:
                     "reason": "persist_deferred",
                     "priorProfileStepIndex": node.profile_step_index,
                     "relatedScopeKey": format_compute_scope_key(dependency_scope),
-                    "forceFresh": recovery.force_fresh,
                     "dependencyStepKind": recovery.step_kind,
                     "priorityBand": node.priority_band,
                 },
             )
-
-            if not recovery.force_fresh:
-                return
             dependency_request = ComputeRequest(
                 scope=dependency_scope,
                 force_fresh=True,
@@ -226,6 +240,26 @@ class OrchestratorLifecycleMixin:
             self._observers.schedule_post_lock(
                 lambda: self._submit_dependencies((dependency_request,))
             )
+
+    def _can_recreate(
+        self: ComputeOrchestrator,
+        node: ComputeNodeRun,
+        recovery: PersistDependencyRecovery,
+    ) -> bool:
+        """Whether ``node``'s recovery submit can recreate its dependency. Caller holds the lock.
+
+        The dependency analytic must be registered with ``recovery.step_kind``
+        in its compute profile, and must have a walkable export catalog in
+        ``node``'s query context: a walk of an empty catalog plans nothing, so
+        the submit would register a satisfied stub instead of a re-run.
+        """
+        analytic_id = recovery.dependency_scope.analytic_id
+        registration = self._compute_registry.get(analytic_id)
+        return (
+            registration is not None
+            and registration.compute_profile.has_step_kind(recovery.step_kind)
+            and walkable_export_catalog(self._ctx_for_node(node), analytic_id) is not None
+        )
 
     def _abandon_persist_if_not_running_or_stale(
         self: ComputeOrchestrator,

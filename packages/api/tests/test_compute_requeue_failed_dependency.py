@@ -16,6 +16,10 @@ from dataclasses import dataclass, replace
 
 import pytest
 from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.registration import (
+    TurnAnalyticRegistration,
+    resolve_registration_export_catalog,
+)
 from api.compute import (
     ComputeHandle,
     ComputeOrchestrator,
@@ -24,7 +28,12 @@ from api.compute import (
     build_compute_registry,
 )
 from api.compute.errors import ComputeScopeAbortedError
-from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.persistence import (
+    InvalidPersistDependencyRecoveryError,
+    PersistDeferredError,
+    PersistDependencyRecovery,
+)
+from api.compute.scope import format_compute_scope_key
 from api.compute.wire import StepResult
 
 from tests.compute_lifecycle_records import record_lifecycle
@@ -78,8 +87,18 @@ def _hold_pool_steps(node, step, **_kwargs) -> None:
     del node, step
 
 
-def _running_branch(sample_turn) -> RunningBranch:
-    ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+def _running_branch(
+    sample_turn, *, extra_registrations: tuple[TurnAnalyticRegistration, ...] = ()
+) -> RunningBranch:
+    """Set up the diamond, plus ``extra_registrations`` in both registries."""
+    export_registry = {
+        **DIAMOND_FIXTURE_EXPORT_REGISTRY,
+        **{
+            registration.catalog_entry.id: resolve_registration_export_catalog(registration)
+            for registration in extra_registrations
+        },
+    }
+    ctx = make_fixture_query_context(sample_turn, registry=export_registry)
     export_scope = make_export_scope(sample_turn)
     branch_policy = DeferringPersistencePolicy()
     registry = build_compute_registry(
@@ -94,6 +113,7 @@ def _running_branch(sample_turn) -> RunningBranch:
             pool_compute_registration(
                 ROOT_ID, backend="thread", persistence_policy=RecordingPersistencePolicy()
             ),
+            *extra_registrations,
         )
     )
     orchestrator = ComputeOrchestrator(compute_registry=registry, pool_submitter=_hold_pool_steps)
@@ -267,9 +287,7 @@ def test_persist_deferred_cascades_a_failed_dependency_it_is_not_recreating(samp
 
     _persist_branch_step_deferred(
         setup,
-        PersistDependencyRecovery(
-            dependency_scope=other_shared, force_fresh=True, step_kind="materialize"
-        ),
+        PersistDependencyRecovery(dependency_scope=other_shared, step_kind="materialize"),
     )
 
     branch_node = setup.orchestrator.nodes[setup.branch]
@@ -288,34 +306,92 @@ def test_persist_deferred_recreates_a_failed_recovery_dependency(sample_turn):
 
     _persist_branch_step_deferred(
         setup,
-        PersistDependencyRecovery(
-            dependency_scope=setup.shared, force_fresh=True, step_kind="materialize"
-        ),
+        PersistDependencyRecovery(dependency_scope=setup.shared, step_kind="materialize"),
     )
 
-    assert setup.orchestrator.nodes[setup.branch].state == "waiting_deps"
-    assert [record.scope for record in persist_deferred] == [setup.branch]
+    branch_node = setup.orchestrator.nodes[setup.branch]
+    assert branch_node.state == "waiting_deps"
+    assert [(record.scope, record.detail) for record in persist_deferred] == [
+        (
+            setup.branch,
+            {
+                "reason": "persist_deferred",
+                "priorProfileStepIndex": branch_node.profile_step_index,
+                "relatedScopeKey": format_compute_scope_key(setup.shared),
+                "dependencyStepKind": "materialize",
+                "priorityBand": branch_node.priority_band,
+            },
+        )
+    ]
     recreated_shared = setup.orchestrator.nodes[setup.shared]
     assert recreated_shared is not failed_shared
     assert recreated_shared.state == "running"
 
 
-def test_persist_deferred_cascades_a_failed_recovery_dependency_it_grafts(sample_turn):
-    """Without force_fresh, a failed recovery dependency outside the node's edges cascades."""
+def test_persist_deferred_recreates_a_failed_recovery_dependency_it_grafts(sample_turn):
+    """A failed recovery dependency outside the node's edges is grafted and recreated."""
     setup = _running_branch(sample_turn)
     other_shared = _other_player_shared_scope(setup, sample_turn)
     setup.orchestrator.submit(ComputeRequest(ctx=setup.ctx, scope=other_shared))
-    other_failure = RuntimeError("other shared failed")
-    complete_running_pool_step(setup.orchestrator, other_shared, error=other_failure)
+    complete_running_pool_step(
+        setup.orchestrator, other_shared, error=RuntimeError("other shared failed")
+    )
+    failed_other_shared = setup.orchestrator.nodes[other_shared]
     assert other_shared not in setup.orchestrator.nodes[setup.branch].dependency_scopes
 
     _persist_branch_step_deferred(
-        setup,
-        PersistDependencyRecovery(
-            dependency_scope=other_shared, force_fresh=False, step_kind="materialize"
-        ),
+        setup, PersistDependencyRecovery(dependency_scope=other_shared, step_kind="materialize")
     )
 
     branch_node = setup.orchestrator.nodes[setup.branch]
+    assert branch_node.state == "waiting_deps"
+    assert other_shared in branch_node.dependency_scopes
+    recreated_other_shared = setup.orchestrator.nodes[other_shared]
+    assert recreated_other_shared is not failed_other_shared
+    assert recreated_other_shared.state == "running"
+
+
+# An inline fixture analytic; its registration's export catalog is empty.
+UNCATALOGED_ID = "export-test-uncataloged"
+
+
+def _assert_branch_fails_without_recovery(
+    setup: RunningBranch, recovery: PersistDependencyRecovery
+) -> None:
+    """The deferral fails BRANCH_B at demotion: no record, no dependency node change."""
+    nodes_before = dict(setup.orchestrator.nodes)
+    persist_deferred = record_lifecycle(setup.orchestrator, ("persist_deferred",))
+
+    _persist_branch_step_deferred(setup, recovery)
+
+    branch_node = setup.orchestrator.nodes[setup.branch]
     assert branch_node.state == "failed"
-    assert branch_node.error is other_failure
+    assert isinstance(branch_node.error, InvalidPersistDependencyRecoveryError)
+    assert branch_node.error.recovery == recovery
+    assert setup.branch_waiter.error is branch_node.error
+    assert setup.orchestrator.nodes.get(recovery.dependency_scope) is nodes_before.get(
+        recovery.dependency_scope
+    )
+    assert persist_deferred == []
+
+
+def test_persist_deferred_fails_a_recovery_naming_an_unknown_step_kind(sample_turn):
+    setup = _running_branch(sample_turn)
+    shared_node = setup.orchestrator.nodes[setup.shared]
+
+    _assert_branch_fails_without_recovery(
+        setup, PersistDependencyRecovery(dependency_scope=setup.shared, step_kind="tier_solve")
+    )
+
+    assert shared_node.state == "complete"
+
+
+def test_persist_deferred_fails_a_recovery_of_an_analytic_with_no_export_catalog(sample_turn):
+    setup = _running_branch(
+        sample_turn, extra_registrations=(inline_compute_registration(UNCATALOGED_ID),)
+    )
+    uncataloged = replace(setup.shared, analytic_id=UNCATALOGED_ID)
+
+    _assert_branch_fails_without_recovery(
+        setup, PersistDependencyRecovery(dependency_scope=uncataloged, step_kind="materialize")
+    )
