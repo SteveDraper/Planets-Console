@@ -11,7 +11,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.orchestrator_state import ComputeNodeRun, NodeState
-from api.compute.pools import PoolWorkItem
+from api.compute.pools import PoolWorkItem, ThreadStepWork
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 
@@ -89,6 +89,13 @@ def finish_step(walk: Walk, item: PoolWorkItem, result_wire: object) -> None:
     walk.orchestrator.complete_pool_step(
         item.scope, item.execution_generation, result_wire=result_wire
     )
+
+
+def run_step(walk: Walk, item: PoolWorkItem) -> None:
+    """Build and run a picked item's real step on this thread, then hand its result back."""
+    work = item.work
+    job_wire = work.job_wire_for(item.scope) if isinstance(work, ThreadStepWork) else work.job_wire
+    finish_step(walk, item, work.run_step(job_wire))
 
 
 def non_terminal_walk_scopes(orchestrator: ComputeOrchestrator, game_id: int) -> set:

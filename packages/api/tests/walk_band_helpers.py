@@ -130,6 +130,15 @@ def end_shell(shell: Shell) -> None:
     detach_fleet_table_stream(shell.fleet_stream.stream_token)
 
 
+def _backfill_context_past_the_shell(
+    sample_turn, *, persistence: InferenceRowPersistenceService | None
+):
+    """Backfill-on context two turns past the shell, and its host turn."""
+    host, ctx = context_at_turn(sample_turn, SHELL_TURN + 2, persistence=persistence)
+    enable_backfill_earlier_turns(ctx)
+    return host, ctx
+
+
 class Walk:
     """One player's walks on an orchestrator whose pool never runs a step."""
 
@@ -144,9 +153,20 @@ class Walk:
 
     @classmethod
     def at_shell_turn(cls, sample_turn) -> Walk:
-        host, ctx = context_at_turn(sample_turn, SHELL_TURN + 2)
-        enable_backfill_earlier_turns(ctx)
+        """The viewpoint owner's walk, whose scores rows are admission skips."""
+        host, ctx = _backfill_context_past_the_shell(sample_turn, persistence=None)
         return cls(ctx, first_player_id(host))
+
+    @classmethod
+    def solving_at_shell_turn(
+        cls, sample_turn, *, persistence: InferenceRowPersistenceService | None
+    ) -> Walk:
+        """The inference target's walk, whose scores rows solve.
+
+        Scores rows go to ``persistence``; with None, a scores persist writes nothing.
+        """
+        host, ctx = _backfill_context_past_the_shell(sample_turn, persistence=persistence)
+        return cls(ctx, inference_target_player_id(host))
 
     def scope(self, turn: int, analytic_id: str = FLEET_ANALYTIC_ID) -> ComputeScope:
         return shell_scope(self.ctx, analytic_id, turn, self.player_id)
