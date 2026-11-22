@@ -22,6 +22,7 @@ from api.compute import (
     build_compute_registry,
 )
 from api.compute.persistence import PersistDeferredError, PersistDependencyRecovery
+from api.compute.step_execution_key import ExecutionRef
 from api.compute.wire import StepResult
 
 from tests.compute_orchestrator_fixtures import (
@@ -148,3 +149,10 @@ def persist_branch_step_deferred(setup: RunningBranch, recovery: PersistDependen
 
 def shared_recovery(setup: RunningBranch) -> PersistDependencyRecovery:
     return PersistDependencyRecovery(dependency_scope=setup.shared, step_kind="materialize")
+
+
+def branch_superseded_execution(setup: RunningBranch) -> ExecutionRef | None:
+    """The ``superseded`` execution of the branch's recorded persist deferral."""
+    deferral = setup.orchestrator.nodes[setup.branch].last_persist_deferral
+    assert deferral is not None
+    return deferral.superseded

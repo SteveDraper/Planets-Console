@@ -109,6 +109,7 @@ def _outcome_when_accelerated_segments_exhausted(
 
 def _outcome_after_ladder_complete(
     run: RowRun,
+    orchestration: InferenceStreamOrchestration | None,
     state: PolicyLadderState,
     observation: InferenceObservation,
     turn: TurnInfo,
@@ -117,7 +118,6 @@ def _outcome_after_ladder_complete(
         result, *_ = finalize_policy_ladder_result(state, observation, turn)
         return TierJobRowComplete(row_complete=row_complete_with_summary(result))
 
-    orchestration = run.orchestration
     if orchestration is not None:
         segment_row_complete = orchestration.finish_ladder_segment(state, observation, turn)
         if segment_row_complete is None:
@@ -198,4 +198,4 @@ def _run_inference_tier_job_locked(
     if not state.ladder_complete:
         return TierJobContinue()
 
-    return _outcome_after_ladder_complete(run, state, observation, turn)
+    return _outcome_after_ladder_complete(run, orchestration, state, observation, turn)

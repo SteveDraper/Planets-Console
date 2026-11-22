@@ -37,6 +37,7 @@ from tests.compute_orchestrator_fixtures import (
 )
 from tests.compute_persist_deferred_helpers import (
     RunningBranch,
+    branch_superseded_execution,
     persist_branch_step_deferred,
     running_branch,
     shared_recovery,
@@ -304,7 +305,7 @@ def _assert_branch_waits_on_a_recreated_shared(
     assert setup.orchestrator.nodes[other_shared].state == "running"
     branch_node = setup.orchestrator.nodes[setup.branch]
     assert branch_node.state == "waiting_deps"
-    assert branch_node.superseded_dependency == superseded_shared.execution_ref
+    assert branch_superseded_execution(setup) == superseded_shared.execution_ref
     recreated_shared = setup.orchestrator.nodes[setup.shared]
     assert recreated_shared is not superseded_shared
     assert recreated_shared.state == "running"
@@ -366,7 +367,7 @@ def test_a_recovery_of_a_running_dependency_waits_on_that_execution(sample_turn)
 
     branch_node = setup.orchestrator.nodes[setup.branch]
     assert branch_node.state == "waiting_deps"
-    assert branch_node.superseded_dependency is None
+    assert branch_superseded_execution(setup) is None
     assert [record.detail["supersededExecutionGeneration"] for record in persist_deferred] == [None]
     assert setup.orchestrator.nodes[setup.shared] is running_shared
     complete_running_pool_step(setup.orchestrator, setup.shared, result_wire={"result": SHARED_ID})
@@ -505,7 +506,7 @@ def test_a_recovery_submit_raising_leaves_the_node_waiting_on_a_running_dependen
 
     _defer_with_a_raising_recovery_submit(setup, caplog, submit_failure)
 
-    assert setup.orchestrator.nodes[setup.branch].superseded_dependency is None
+    assert branch_superseded_execution(setup) is None
     _assert_branch_waits_then_settles_on(setup, running_shared)
 
 

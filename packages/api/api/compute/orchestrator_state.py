@@ -269,12 +269,6 @@ class ComputeNodeRun(NodeExecutionBinding):
         self.standing_band = highest_band(self.standing_band, band)
 
     @property
-    def superseded_dependency(self) -> ExecutionRef | None:
-        """The terminal dependency execution the last persist-deferred recovery replaces."""
-        deferral = self.last_persist_deferral
-        return None if deferral is None else deferral.superseded
-
-    @property
     def execution_ref(self) -> ExecutionRef:
         """This node's execution, as a dependency submit it queues names its requester."""
         return ExecutionRef(scope=self.scope, execution_generation=self.execution_generation)

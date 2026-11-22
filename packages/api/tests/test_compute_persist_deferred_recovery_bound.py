@@ -20,6 +20,7 @@ from api.compute.errors import ComputeScopeAbortedError, PersistDependencyRecove
 from tests.compute_lifecycle_records import record_lifecycle
 from tests.compute_persist_deferred_helpers import (
     RunningBranch,
+    branch_superseded_execution,
     persist_branch_step_deferred,
     running_branch,
     shared_recovery,
@@ -90,7 +91,7 @@ def test_a_recovery_onto_a_live_dependency_counts_as_the_one_retry(sample_turn):
     recovery = shared_recovery(setup)
     persist_branch_step_deferred(setup, recovery)
     _assert_recovering(setup)
-    assert setup.orchestrator.nodes[setup.branch].superseded_dependency is None
+    assert branch_superseded_execution(setup) is None
     _complete_the_recreated_shared(setup)
 
     persist_branch_step_deferred(setup, recovery)
