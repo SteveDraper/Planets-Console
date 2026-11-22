@@ -20,9 +20,6 @@ from api.analytics.military_score_inference.inference_row_runner import (
     run_inference_tier_job,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import RowComplete
-from api.analytics.military_score_inference.inference_stream_scope import (
-    scores_root_scope_for_session,
-)
 from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import (
     PriorTurnFleetTorpResolution,
 )
@@ -42,12 +39,12 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_tier_callbacks,
 )
-from api.analytics.scores_defer_wake import ScoresWakeReason, SoftTerminalReason
+from api.analytics.scores_defer_wake import ScoresWakeReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs, StepResult
-from api.exceptions import ValidationError
+from api.exceptions import ScoresTierOutcomeError, ValidationError
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 if TYPE_CHECKING:
@@ -315,37 +312,12 @@ def wake_scores_scope(
 
 
 def _waiting_deps_without_submit() -> StepResult:
-    """Soft-defer demotion: ``waiting_deps`` with no dependency graft or force_fresh.
+    """Missing-RowRun demotion: ``waiting_deps`` with no dependency graft or force_fresh.
 
     Omits ``wait_recovery`` so the orchestrator demotes without treating this scope
     as its own ENSURE dependency (self-graft leaves ``_deps_complete`` false forever).
     """
     return StepResult(outcome="waiting_deps")
-
-
-def _emit_soft_defer_and_wait(
-    run: RowRun,
-    *,
-    soft_reason: SoftTerminalReason,
-    row_complete: RowComplete | None = None,
-    payload: dict[str, object] | None = None,
-) -> StepResult:
-    from api.analytics.military_score_inference.inference_scheduler import (
-        inference_row_scheduler_if_initialized,
-    )
-
-    scope = scores_root_scope_for_session(run.session)
-    scheduler = inference_row_scheduler_if_initialized()
-    if scheduler is not None:
-        scheduler.deliver_scores_row_defer_terminal(
-            scope,
-            soft_reason=soft_reason,
-            event=row_complete,
-        )
-    result = _waiting_deps_without_submit()
-    if payload is not None:
-        return StepResult(outcome=result.outcome, payload=payload)
-    return result
 
 
 def tier_job_outcome_to_step_result(
@@ -356,23 +328,21 @@ def tier_job_outcome_to_step_result(
     """Map one inference tier job outcome to an orchestrator step result.
 
     A continuation re-queues ``tier_solve``; the runner has already advanced the
-    ladder. Durable terminals persist and complete the scores node. A
-    non-durable terminal demotes the node to ``waiting_deps`` and emits a soft
-    stream row from the row path (not orchestrator park). A row payload copies
+    ladder. A terminal persists and completes the scores node. A terminal whose
+    status does not close turn evidence breaks the tier job contract and raises
+    :class:`ScoresTierOutcomeError`, which fails the node. A row payload copies
     the submission open fields ``job_wire`` carries.
     """
     match outcome:
         case TierJobContinue():
             return StepResult(outcome="continue")
         case TierJobRowComplete(row_complete=row_complete):
-            payload = _tier_persist_payload(run, row_complete, job_wire)
-            if is_durable_turn_evidence_row_status(row_complete.wire_payload.status):
-                return StepResult(outcome="persist", payload=payload)
-            return _emit_soft_defer_and_wait(
-                run,
-                soft_reason=SoftTerminalReason.NON_DURABLE_ROW_COMPLETE,
-                row_complete=row_complete,
-                payload=payload,
+            status = row_complete.wire_payload.status
+            if not is_durable_turn_evidence_row_status(status):
+                raise ScoresTierOutcomeError(run_id=run.run_id, status=status)
+            return StepResult(
+                outcome="persist",
+                payload=_tier_persist_payload(run, row_complete, job_wire),
             )
     assert_never(outcome)
 

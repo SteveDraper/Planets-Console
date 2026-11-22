@@ -116,19 +116,6 @@ def _clear_multiplex_closed_if_soft(run_id: str) -> bool:
         return True
 
 
-def discard_stream_resolution_if_state(
-    run_id: str,
-    state: RowStreamResolutionState,
-) -> bool:
-    """Compare-and-pop: remove only when still in ``state``. Returns True if removed."""
-    with _lock:
-        resolution = _resolutions.get(run_id)
-        if resolution is None or resolution.state is not state:
-            return False
-        del _resolutions[run_id]
-        return True
-
-
 def clear_stream_resolutions() -> None:
     with _lock:
         _resolutions.clear()

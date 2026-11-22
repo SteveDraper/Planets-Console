@@ -23,7 +23,6 @@ from api.streaming.table_stream.row_stream_resolution import (
 )
 from api.streaming.table_stream.row_stream_resolution_registry import (
     clear_stream_resolutions,
-    discard_stream_resolution_if_state,
     get_stream_resolution,
     reset_stream_resolution_registry_for_tests,
     transition_stream_resolution,
@@ -44,7 +43,6 @@ __all__ = [
     "TableStreamScopeGuard",
     "TerminalRoute",
     "clear_stream_resolutions",
-    "discard_stream_resolution_if_state",
     "drain_available_multiplex_events",
     "get_stream_resolution",
     "iter_multiplexed_stream_events",

@@ -251,7 +251,7 @@ class InferenceTableStreamController(
         """Cancel and re-admit one row without holding ``stream_lock`` across schedule.
 
         ``dispatch_admission`` may ``enqueue_tier_ladder`` / ``orchestrator.submit``, and
-        fleet ledger persist (or soft-defer delivery) can re-enter ``reschedule_player`` or
+        fleet ledger persist can re-enter ``reschedule_player`` or
         ``deliver_domain_event``. Holding ``stream_lock`` across that path self-deadlocks
         on the non-reentrant lock, as it would for the fleet controller.
 

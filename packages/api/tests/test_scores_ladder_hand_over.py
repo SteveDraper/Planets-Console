@@ -28,6 +28,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     HeldSolutionsUpdated,
     RowComplete,
+    RowFailed,
 )
 from api.analytics.military_score_inference.inference_stream_rows import ScheduledInferenceRow
 from api.analytics.military_score_inference.inference_stream_session import (
@@ -66,6 +67,7 @@ from api.analytics.scores.tier_row_run_registry import (
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import reset_orchestrators_for_tests
 from api.compute.wire import DependencyOutputs
+from api.exceptions import ScoresTierOutcomeError
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
 from tests.on_walk_helpers import fleet_persistence
@@ -230,27 +232,42 @@ def test_a_reopen_during_the_last_tier_gets_the_terminal_through_orphan_delivery
     assert reopened.run_id not in ladder.scheduler._runs
 
 
-def test_a_reopen_after_a_soft_defer_starts_a_fresh_ladder(ladder):
+def test_a_reopen_after_a_non_durable_terminal_starts_a_fresh_ladder(ladder):
     ladder.submit()
     stamped_id = ladder.session.run_id
     ladder.run_tier(CONTINUE)
-    pending = TierJobRowComplete(
+    non_durable = TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status="pending", solutions=(), diagnostics={}),
-            summary="soft deferred",
+            summary="not durable",
         )
     )
-    ladder.run_tier(pending)
+    ladder.run_tier(non_durable)
     node = ladder.orchestrator.nodes[ladder.scope]
-    assert node.state == "waiting_deps"
+    assert node.state == "failed"
+    assert isinstance(node.error, ScoresTierOutcomeError)
     generation = node.execution_generation
-    assert get_row_run(stamped_id).ladder_state.ladder_complete
+    failed_session = ladder.session
+    submitted_before_outcome = len(ladder.submitted_work)
+    ladder.scheduler._on_orchestrator_scope_outcome(
+        ScopeLifecycleSnapshot(
+            scope=ladder.scope,
+            state="failed",
+            execution_generation=generation,
+            result_wire=None,
+            error=node.error,
+        )
+    )
+    failures = [event for event in _queued_events(failed_session) if isinstance(event, RowFailed)]
+    assert [failure.detail for failure in failures] == [str(node.error)]
+    assert get_row_run(stamped_id) is None
+    assert len(ladder.submitted_work) == submitted_before_outcome
 
     ladder.close_stream()
     winner_id = ladder.open_stream().run_id
     fresh_ladder = get_row_run(winner_id).ladder_state
     ladder.submit(force_fresh=True)
-    assert ladder.orchestrator.nodes[ladder.scope].execution_generation == generation
+    assert ladder.orchestrator.nodes[ladder.scope].execution_generation > generation
     ladder.run_tier(CONTINUE)
 
     assert ladder.tier_steps == [(stamped_id, 0), (stamped_id, 1), (winner_id, 0)]

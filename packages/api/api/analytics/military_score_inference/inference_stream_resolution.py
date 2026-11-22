@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, assert_never
 
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     RowComplete,
@@ -15,11 +15,10 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     deliver_inference_domain_event_to_open_stream,
 )
-from api.analytics.military_score_inference.soft_stream_policy import (
-    SoftStreamDispatch,
-    SoftTerminalReason,
+from api.analytics.military_score_inference.stream_terminal_policy import (
+    StreamTerminalDispatch,
     TerminalSource,
-    resolve_soft_stream_dispatch,
+    resolve_stream_terminal_dispatch,
 )
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
@@ -30,7 +29,6 @@ from api.streaming.table_stream.row_stream_resolution import (
     RowStreamResolutionTrigger,
 )
 from api.streaming.table_stream.row_stream_resolution_registry import (
-    discard_stream_resolution_if_state,
     get_stream_resolution,
     transition_stream_resolution,
 )
@@ -56,13 +54,12 @@ class InferenceStreamResolutionMixin:
         snapshot: ScopeLifecycleSnapshot | None = None,
         session: InferenceRowStreamSession | None = None,
         event: RowComplete | RowFailed | None = None,
-        soft_terminal_reason: SoftTerminalReason | str | None = None,
     ) -> bool:
-        """Deliver one stream-row terminal for park / durable / orphan sources.
+        """Deliver one stream-row terminal for a durable or orphan source.
 
         Returns True when admission or a domain terminal finished the row for this call.
         Orphan deliveries also finalize the matching row run; node-complete callers
-        finalize themselves (sibling-active races). Soft park never finalizes.
+        finalize themselves (sibling-active races).
         """
         resolved = session or self._open_stream_session_for_scope(scope)
         if resolved is None:
@@ -74,56 +71,31 @@ class InferenceStreamResolutionMixin:
         if resolved_event is None and snapshot is not None:
             resolved_event = self._row_complete_from_result_wire(snapshot.result_wire)
 
-        dispatch = resolve_soft_stream_dispatch(
+        dispatch = resolve_stream_terminal_dispatch(
             source=source,
-            soft_terminal_reason=soft_terminal_reason,
             has_event=resolved_event is not None,
         )
 
         match dispatch:
-            case SoftStreamDispatch.SILENCE:
-                return False
-            case (
-                SoftStreamDispatch.EMIT_SOFT_PROVISIONAL
-                | SoftStreamDispatch.EMIT_DURABLE
-                | SoftStreamDispatch.EMIT_DURABLE_FINALIZE
-            ):
+            case StreamTerminalDispatch.EMIT_DURABLE | StreamTerminalDispatch.EMIT_DURABLE_FINALIZE:
                 if resolved_event is None:
                     return False
-                if dispatch is SoftStreamDispatch.EMIT_SOFT_PROVISIONAL:
-                    trigger = RowStreamResolutionTrigger.SOFT_PROVISIONAL
-                elif isinstance(resolved_event, RowComplete):
-                    trigger = RowStreamResolutionTrigger.DURABLE_COMPLETE
-                else:
-                    trigger = RowStreamResolutionTrigger.DURABLE_FAILURE
+                trigger = (
+                    RowStreamResolutionTrigger.DURABLE_COMPLETE
+                    if isinstance(resolved_event, RowComplete)
+                    else RowStreamResolutionTrigger.DURABLE_FAILURE
+                )
                 return self._emit_domain_terminal(
                     resolved,
                     resolved_event,
                     trigger,
-                    finalize=dispatch is SoftStreamDispatch.EMIT_DURABLE_FINALIZE,
+                    finalize=dispatch is StreamTerminalDispatch.EMIT_DURABLE_FINALIZE,
                 )
-            case SoftStreamDispatch.ADMIT_REVERT:
-                return self._admit_after_soft_provisional(scope, resolved, on_miss="revert")
-            case SoftStreamDispatch.ADMIT_FAIL:
-                return self._admit_after_soft_provisional(scope, resolved, on_miss="fail")
-            case SoftStreamDispatch.ORPHAN_EMPTY:
+            case StreamTerminalDispatch.ADMIT_FAIL:
+                return self._admit_after_soft_provisional(scope, resolved)
+            case StreamTerminalDispatch.ORPHAN_EMPTY:
                 return self._deliver_orphan_empty(scope, resolved, snapshot)
-        return False
-
-    def deliver_scores_row_defer_terminal(
-        self: InferenceRowScheduler,
-        scope: ComputeScope,
-        *,
-        soft_reason: SoftTerminalReason,
-        event: RowComplete | RowFailed | None = None,
-    ) -> bool:
-        """Emit soft-stream policy for one tier defer without completing the DAG node."""
-        return self._deliver_row_terminal(
-            source=TerminalSource.ROW_DEFER,
-            scope=scope,
-            event=event,
-            soft_terminal_reason=soft_reason,
-        )
+        assert_never(dispatch)
 
     def _emit_domain_terminal(
         self: InferenceRowScheduler,
@@ -165,7 +137,7 @@ class InferenceStreamResolutionMixin:
                 finalize=True,
             )
             return delivered
-        if self._admit_after_soft_provisional(scope, session, on_miss="fail"):
+        if self._admit_after_soft_provisional(scope, session):
             self._finalize_row_run(session)
             return True
         return False
@@ -174,10 +146,8 @@ class InferenceStreamResolutionMixin:
         self: InferenceRowScheduler,
         scope: ComputeScope,
         session: InferenceRowStreamSession,
-        *,
-        on_miss: Literal["revert", "fail"],
     ) -> bool:
-        """Claim soft-provisional, then admission wire or source-specific miss handling."""
+        """Claim soft-provisional, then the admission wire, else fail the row."""
         with self._lock:
             delivery = self._transition_stream_resolution_locked(
                 session.run_id,
@@ -188,16 +158,6 @@ class InferenceStreamResolutionMixin:
         controller = self._controller_for_compute_scope(scope)
         if controller is not None and controller.push_admission_wire_terminal(session):
             return True
-        if on_miss == "revert":
-            # Empty soft defer: drop the provisional claim so wake can rebuild.
-            # Compare-and-pop: a peer may have advanced to HARD_TERMINAL /
-            # CANCELED between claim and this miss; that marker must survive.
-            with self._lock:
-                discard_stream_resolution_if_state(
-                    session.run_id,
-                    RowStreamResolutionState.SOFT_PROVISIONAL,
-                )
-            return False
         with self._lock:
             delivery = self._transition_stream_resolution_locked(
                 session.run_id,

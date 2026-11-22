@@ -1,19 +1,12 @@
-"""Scores soft-defer / wake reason enums (leaf -- no orchestrator or scheduler imports)."""
+"""Scores wake reason enum (leaf -- no orchestrator or scheduler imports)."""
 
 from __future__ import annotations
 
 from enum import StrEnum
 
 
-class SoftTerminalReason(StrEnum):
-    """Why scores tier solving deferred without completing the DAG node."""
-
-    NON_DURABLE_ROW_COMPLETE = "scores_non_durable_row_complete"
-    EMPTY_TIER_OUTCOME = "scores_empty_tier_outcome"
-
-
 class ScoresWakeReason(StrEnum):
-    """Publishers allowed to resume scores tier solving after a soft defer."""
+    """Publishers allowed to resume a scores tier_solve node that is waiting for its RowRun."""
 
     ROW_RUN_ADOPTED = "scores_row_run_adopted"
     EVIDENCE_CLOSED = "scores_evidence_closed"

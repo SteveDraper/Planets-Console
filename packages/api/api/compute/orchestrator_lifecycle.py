@@ -141,9 +141,9 @@ class OrchestratorLifecycleMixin:
     def _demote_to_waiting_deps(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
         """Demote a running node to ``waiting_deps`` without grafting dependencies.
 
-        Soft defer (scores empty tier / non-durable rowComplete, missing RowRun)
-        waits for an external ``force_fresh`` / ``wake_scores_scope`` wake -- not
-        for another scope to reach ``complete``. Grafting ``node.scope`` onto
+        A wait with no recovery (the scores missing-RowRun wait) waits for an
+        external ``force_fresh`` / ``wake_scores_scope`` wake -- not for another
+        scope to reach ``complete``. Grafting ``node.scope`` onto
         ``dependency_scopes`` would make ``_deps_complete`` require self-complete
         while the node is non-terminal, so force_fresh attach could never promote.
         """

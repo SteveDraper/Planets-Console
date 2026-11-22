@@ -3,8 +3,7 @@
 Owns the scores ``register_scope_outcome_listener`` decision tree: the
 cancel-abort stamped cancel (and no stream terminal), peer-binding races,
 durable complete/fail with a ladder stamp release, orphan fallback, and
-row-run finalize. Soft defer delivery is row-path owned (``ROW_DEFER``), not
-scope-outcome park notify. Stream terminal *delivery* stays in
+row-run finalize. Stream terminal *delivery* stays in
 ``inference_stream_resolution``.
 """
 
@@ -19,7 +18,7 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.soft_stream_policy import TerminalSource
+from api.analytics.military_score_inference.stream_terminal_policy import TerminalSource
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.scope import ComputeScope
