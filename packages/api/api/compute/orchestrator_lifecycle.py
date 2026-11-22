@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING, Literal
 
 from api.analytics.export_dependency_walk import walkable_export_catalog
 from api.compute.dag_reach import needed_scopes
-from api.compute.errors import ComputeScopeAbortedError
+from api.compute.errors import ComputeScopeAbortedError, PersistDependencyRecoveryExhaustedError
 from api.compute.orchestrator_observers import LifecycleEventKind
-from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
+from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest, PersistDeferral
 from api.compute.persistence import (
     InvalidPersistDependencyRecoveryError,
     PersistDeferredError,
@@ -173,12 +173,24 @@ class OrchestratorLifecycleMixin:
         execution as its requester, so it plans nothing once that execution
         has ended (aborted or replaced) before the plan would be registered.
 
-        After the graft, the node records the recovery dependency's execution
-        as ``superseded_dependency`` when that execution is terminal (None
-        when the scope has no node, or its node is still live and the submit
-        attaches to it). Readiness reads a superseded execution as not there
-        (:meth:`_readiness_dependency`), so no refresh before the recreation
-        registers cascades its failure or promotes on its completion; the
+        A recovery that changed nothing is not retried: when the node's last
+        deferral (``last_persist_deferral``) named the same dependency scope at
+        the same invalidation generation of the node, the recreation it asked
+        for completed (a ``waiting_deps`` node only runs again once its
+        dependencies are complete) and the persist still could not land. The
+        node then fails with :class:`PersistDependencyRecoveryExhaustedError`
+        and a ``persist_recovery_exhausted`` record, before the graft, with no
+        ``persist_deferred`` record and no dependency submit. A moved generation
+        is a new reason to wait, so the node recovers again.
+
+        After the graft, the node records this deferral as
+        ``last_persist_deferral``: the dependency scope, its invalidation
+        generation, and the recovery dependency's execution as ``superseded``
+        when that execution is terminal (None when the scope has no node, or
+        its node is still live and the submit attaches to it). Readiness reads
+        a superseded execution as not there (:meth:`_readiness_dependency`), so
+        no refresh before the recreation registers cascades its failure or
+        promotes on its completion; the
         node settles on the recreation's outcome. A failed dependency whose
         failure still cascades fails the node, with no ``persist_deferred``
         record and no dependency submit. A recovery submit that raises is
@@ -192,17 +204,42 @@ class OrchestratorLifecycleMixin:
                 self._fail_node(node, InvalidPersistDependencyRecoveryError(recovery))
                 return
             dependency_scope = recovery.dependency_scope
+            invalidation_generation = self._current_invalidation_generation(node)
+            previous = node.last_persist_deferral
+            if (
+                previous is not None
+                and previous.dependency_scope == dependency_scope
+                and previous.invalidation_generation == invalidation_generation
+            ):
+                self._observers.notify_lifecycle(
+                    "persist_recovery_exhausted",
+                    node.scope,
+                    execution_generation=node.execution_generation,
+                    node=node,
+                    step_index=prior_step_index,
+                    detail={
+                        "relatedScopeKey": format_compute_scope_key(dependency_scope),
+                        "invalidationGeneration": invalidation_generation,
+                    },
+                )
+                self._fail_node(node, PersistDependencyRecoveryExhaustedError(dependency_scope))
+                return
             if dependency_scope != node.scope and dependency_scope not in node.dependency_scopes:
                 node.dependency_scopes = (
                     *node.dependency_scopes,
                     dependency_scope,
                 )
             dependency = self._nodes.get(dependency_scope)
-            node.superseded_dependency = (
-                dependency.execution_ref
-                if dependency is not None and dependency.is_terminal
-                else None
+            deferral = PersistDeferral(
+                dependency_scope=dependency_scope,
+                superseded=(
+                    dependency.execution_ref
+                    if dependency is not None and dependency.is_terminal
+                    else None
+                ),
+                invalidation_generation=invalidation_generation,
             )
+            node.last_persist_deferral = deferral
             if not self._demote_unless_dependency_failed(node):
                 return
             self._observers.notify_lifecycle(
@@ -219,8 +256,8 @@ class OrchestratorLifecycleMixin:
                     "priorityBand": node.priority_band,
                     "supersededExecutionGeneration": (
                         None
-                        if node.superseded_dependency is None
-                        else node.superseded_dependency.execution_generation
+                        if deferral.superseded is None
+                        else deferral.superseded.execution_generation
                     ),
                 },
             )
@@ -233,10 +270,9 @@ class OrchestratorLifecycleMixin:
                 requester=node.execution_ref,
             )
             generation = node.execution_generation
-            superseded = node.superseded_dependency
             self._observers.schedule_post_lock(
                 lambda: self._submit_recovery_dependency(
-                    node, generation, superseded, dependency_request
+                    node, generation, deferral, dependency_request
                 )
             )
 

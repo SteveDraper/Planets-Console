@@ -20,6 +20,7 @@ from api.analytics.military_score_inference.inference_row_runner import (
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute.errors import PersistDependencyRecoveryExhaustedError
 from api.compute.wire import StepResult
 from api.exceptions import FleetScoresEvidenceOpenError, ScoresTierOutcomeError
 
@@ -95,4 +96,36 @@ def test_a_fleet_node_deferred_onto_scores_fails_with_the_scores_error(sample_tu
     assert scores.error is error
     assert fleet.state == "failed"
     assert fleet.error is error
+    assert walk.pool.snapshot_work_queue() == ()
+
+
+def test_fleet_re_deferring_after_scores_completes_without_a_row_fails_once(
+    sample_turn, monkeypatch
+):
+    """The fleet -> scores loop: scores completes without writing its row, fleet defers again."""
+    walk = Walk.at_shell_turn(sample_turn)
+    fleet_item = pick_baseline_hop(walk)
+
+    def defer(_policy, _ctx, scope, _result_wire):
+        raise FleetScoresEvidenceOpenError(
+            "scores evidence open", recovery=scores_evidence_recovery(scope)
+        )
+
+    monkeypatch.setattr(FleetPersistencePolicy, "persist", defer)
+    finish_step(walk, fleet_item, StepResult(outcome="persist", payload={}))
+    scores_item = take_queued_item(walk)
+    assert scores_item.scope == walk.scope(3, SCORES_ANALYTIC_ID)
+    assert begin_pick(walk, scores_item)
+    finish_step(walk, scores_item, StepResult(outcome="complete"))
+    assert walk_node(walk, 3, SCORES_ANALYTIC_ID).state == "complete"
+    fleet_retry = take_queued_item(walk)
+    assert fleet_retry.scope == walk.scope(3)
+    assert begin_pick(walk, fleet_retry)
+
+    finish_step(walk, fleet_retry, StepResult(outcome="persist", payload={}))
+
+    fleet = walk_node(walk, 3)
+    assert fleet.state == "failed"
+    assert isinstance(fleet.error, PersistDependencyRecoveryExhaustedError)
+    assert fleet.error.recovery_scope == walk.scope(3, SCORES_ANALYTIC_ID)
     assert walk.pool.snapshot_work_queue() == ()

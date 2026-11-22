@@ -94,7 +94,10 @@ below.
   Orchestrator persist-deferred recovery then ``submit``s that scope with
   ``force_fresh=True``, which recreates absent or terminal nodes and attaches to
   a live one. Fleet must **not** also submit scores for the same reopen -- that
-  would be a second encoding of one policy. Details:
+  would be a second encoding of one policy. If fleet defers again at the same
+  invalidation generation after that recreation completed, the orchestrator
+  fails fleet with ``PersistDependencyRecoveryExhaustedError`` instead of
+  recreating scores again. Details:
   [design-compute-orchestrator.md](../design-compute-orchestrator.md).
 
 Generic orchestrator ``park`` / ``wake_if_parked`` machinery may remain for

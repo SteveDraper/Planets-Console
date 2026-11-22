@@ -101,6 +101,7 @@ LifecycleEventKind = (
         "abort",
         "epoch_retry",
         "persist_deferred",
+        "persist_recovery_exhausted",
         "step_parked",
         "dependency_submit_refused",
     ]
