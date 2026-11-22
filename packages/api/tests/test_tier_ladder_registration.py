@@ -57,17 +57,18 @@ def _stream_scope(sample_turn, *, perspective: int = PERSPECTIVE) -> InferenceSt
     )
 
 
-def _record_background_wakes(
+def _record_background_generations(
     monkeypatch: pytest.MonkeyPatch,
     scheduler: InferenceRowScheduler,
 ) -> list[ComputeScope]:
-    woken: list[ComputeScope] = []
+    """Scopes whose node execution a background registration remembers for ``cancel_run``."""
+    remembered: list[ComputeScope] = []
     monkeypatch.setattr(
         scheduler,
-        "_wake_deferred_scores_after_row_run_adopt",
-        lambda root_scope, _session: woken.append(root_scope),
+        "_remember_execution_generation_for_scope",
+        lambda root_scope, **_kwargs: remembered.append(root_scope),
     )
-    return woken
+    return remembered
 
 
 def _record_tier_submits(
@@ -100,7 +101,7 @@ def _switch_scope_before_enqueue(
 
 def test_an_owning_stream_token_binds_the_run(sample_turn, monkeypatch):
     scheduler = InferenceRowScheduler()
-    woken = _record_background_wakes(monkeypatch, scheduler)
+    remembered = _record_background_generations(monkeypatch, scheduler)
     submitted = _record_tier_submits(monkeypatch, scheduler)
     token = scheduler.begin_scope(_stream_scope(sample_turn))
     session = _session_for_player(sample_turn, player_id=sample_turn.scores[1].ownerid)
@@ -109,19 +110,19 @@ def test_an_owning_stream_token_binds_the_run(sample_turn, monkeypatch):
     scheduler.accept_pending_run(session.run_id)
 
     assert registration is TierLadderRegistration.STREAM_BOUND
-    assert woken == []
+    assert remembered == []
     assert submitted == [scheduler._runs[session.run_id]]
 
 
-def test_no_stream_registers_a_background_run_and_wakes_its_scope(sample_turn, monkeypatch):
+def test_no_stream_registers_a_background_run_and_remembers_its_scope(sample_turn, monkeypatch):
     scheduler = InferenceRowScheduler()
-    woken = _record_background_wakes(monkeypatch, scheduler)
+    remembered = _record_background_generations(monkeypatch, scheduler)
     session = _session_for_player(sample_turn, player_id=sample_turn.scores[1].ownerid)
 
     registration = scheduler.enqueue_tier_ladder(session)
 
     assert registration is TierLadderRegistration.BACKGROUND
-    assert woken == [scheduler._runs[session.run_id]]
+    assert remembered == [scheduler._runs[session.run_id]]
 
 
 @pytest.mark.parametrize("is_stream_paused", [False, True], ids=["running", "paused"])
@@ -129,7 +130,7 @@ def test_no_token_registers_a_background_run_while_a_stream_at_another_turn_is_a
     sample_turn, monkeypatch, is_stream_paused
 ):
     scheduler = InferenceRowScheduler()
-    woken = _record_background_wakes(monkeypatch, scheduler)
+    remembered = _record_background_generations(monkeypatch, scheduler)
     submitted = _record_tier_submits(monkeypatch, scheduler)
     other_turn = replace(_stream_scope(sample_turn), turn_number=sample_turn.settings.turn + 1)
     scheduler.begin_scope(other_turn)
@@ -141,7 +142,7 @@ def test_no_token_registers_a_background_run_while_a_stream_at_another_turn_is_a
     scheduler.accept_pending_run(session.run_id)
 
     assert registration is TierLadderRegistration.BACKGROUND
-    assert woken == [scheduler._runs[session.run_id]]
+    assert remembered == [scheduler._runs[session.run_id]]
     assert scheduler._stream_bindings == {}
     assert scheduler._held_initial_submissions == []
     assert submitted == []
@@ -149,7 +150,7 @@ def test_no_token_registers_a_background_run_while_a_stream_at_another_turn_is_a
 
 def test_a_paused_stream_holds_the_submission(sample_turn, monkeypatch):
     scheduler = InferenceRowScheduler()
-    woken = _record_background_wakes(monkeypatch, scheduler)
+    remembered = _record_background_generations(monkeypatch, scheduler)
     scope = _stream_scope(sample_turn)
     token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
@@ -158,7 +159,7 @@ def test_a_paused_stream_holds_the_submission(sample_turn, monkeypatch):
     registration = scheduler.enqueue_tier_ladder(session, stream_token=token)
 
     assert registration is TierLadderRegistration.HELD
-    assert woken == []
+    assert remembered == []
     assert [held.root_scope for held in scheduler._held_initial_submissions] == [
         scheduler._runs[session.run_id]
     ]
@@ -169,7 +170,7 @@ def test_the_owning_streams_run_holds_the_scope_index_whatever_registers_first(
     sample_turn, monkeypatch, is_stream_first
 ):
     scheduler = InferenceRowScheduler()
-    _record_background_wakes(monkeypatch, scheduler)
+    _record_background_generations(monkeypatch, scheduler)
     scope = _stream_scope(sample_turn)
     token = scheduler.begin_scope(scope)
     player_id = sample_turn.scores[1].ownerid
@@ -189,14 +190,14 @@ def test_the_owning_streams_run_holds_the_scope_index_whatever_registers_first(
 
 def test_a_submit_deferred_scheduler_only_registers_the_run(sample_turn, monkeypatch):
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
-    woken = _record_background_wakes(monkeypatch, scheduler)
+    remembered = _record_background_generations(monkeypatch, scheduler)
     token = scheduler.begin_scope(_stream_scope(sample_turn))
     session = _session_for_player(sample_turn, player_id=sample_turn.scores[1].ownerid)
 
     registration = scheduler.enqueue_tier_ladder(session, stream_token=token)
 
     assert registration is TierLadderRegistration.SUBMIT_DEFERRED
-    assert woken == []
+    assert remembered == []
     assert scheduler.row_run_for_player(_stream_scope(sample_turn), session.player_id) is not None
 
 
@@ -205,7 +206,7 @@ def test_connect_admission_that_loses_the_scope_registers_one_background_run(
     monkeypatch,
 ):
     scheduler = InferenceRowScheduler()
-    woken = _record_background_wakes(monkeypatch, scheduler)
+    remembered = _record_background_generations(monkeypatch, scheduler)
     submitted = _record_tier_submits(monkeypatch, scheduler)
     player_id = inference_target_player_id(sample_turn)
     scope = _stream_scope(sample_turn)
@@ -235,7 +236,7 @@ def test_connect_admission_that_loses_the_scope_registers_one_background_run(
     assert run.phase is RowRunPhase.REGISTERED
     assert list(scheduler._runs) == [run.run_id]
     assert controller.scheduled_rows == {}
-    assert woken == [scheduler._runs[run.run_id]]
+    assert remembered == [scheduler._runs[run.run_id]]
     scheduler.accept_pending_run(run.run_id)
     assert submitted == []
 
@@ -246,7 +247,7 @@ def test_admit_whose_stream_token_loses_the_scope_still_runs_the_hop(
     monkeypatch,
 ):
     scheduler = InferenceRowScheduler()
-    woken = _record_background_wakes(monkeypatch, scheduler)
+    remembered = _record_background_generations(monkeypatch, scheduler)
     player_id = inference_target_player_id(sample_turn)
     ctx = export_chain_query_context(
         sample_turn,
@@ -294,7 +295,7 @@ def test_admit_whose_stream_token_loses_the_scope_still_runs_the_hop(
     run = scheduler.row_run_for_player(stream_scope, player_id)
     assert run is not None
     assert run.phase is RowRunPhase.REGISTERED
-    assert woken == [scope]
+    assert remembered == [scope]
 
     wire = build_scores_tier_solve_job_wire(
         scope,

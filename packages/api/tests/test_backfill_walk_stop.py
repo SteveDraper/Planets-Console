@@ -193,12 +193,6 @@ def _outcome(outcome: StepOutcome) -> Callable[[Walk], object]:
 _ENDINGS = {
     "continue": _StepEnding(_outcome("continue")),
     "park": _StepEnding(_outcome("park")),
-    "soft-defer": _StepEnding(_outcome("waiting_deps")),
-    "recovery-outcome": _StepEnding(
-        lambda walk: StepResult(
-            outcome="waiting_deps", wait_recovery=scores_evidence_recovery(walk.scope(3))
-        )
-    ),
     "persist-defer": _StepEnding(_outcome("persist"), before_finish=_defer_the_persist_on_scores),
     "epoch-retry": _StepEnding(_outcome("complete"), before_finish=_bump_player_epoch),
 }

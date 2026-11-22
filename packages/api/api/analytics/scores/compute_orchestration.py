@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from functools import partial
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import Any, assert_never
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
@@ -39,7 +40,6 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_tier_callbacks,
 )
-from api.analytics.scores_defer_wake import ScoresWakeReason
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
@@ -47,12 +47,11 @@ from api.compute.wire import DependencyOutputs, StepResult
 from api.exceptions import ScoresTierOutcomeError, ValidationError
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
-if TYPE_CHECKING:
-    from api.compute.orchestrator import ComputeOrchestrator
-
 SCORES_MATERIALIZE = "materialize"
 SCORES_TIER_SOLVE = "tier_solve"
 SCORES_TIER_SOLVE_PROFILE_INDEX = 1
+
+logger = logging.getLogger(__name__)
 
 SCORES_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
@@ -279,47 +278,6 @@ def run_scores_materialize(job_wire: dict[str, Any]) -> StepResult:
     return StepResult(outcome="continue", payload=export_tree)
 
 
-def wake_scores_scope(
-    scope: ComputeScope,
-    *,
-    ctx: AnalyticQueryContext,
-    reason: ScoresWakeReason,
-    orchestrator: ComputeOrchestrator | None = None,
-) -> bool:
-    """Submit an encoded scores wake publisher through one coordinator.
-
-    All wake reasons use ``force_fresh`` submit so ``waiting_deps`` nodes refresh
-    readiness without the retired soft-park path.
-    """
-    from api.compute.orchestrator import ComputeRequest
-    from api.compute.runtime import get_compute_orchestrator
-
-    resolved_orchestrator = orchestrator or get_compute_orchestrator()
-    request = ComputeRequest(
-        scope=scope,
-        step_kind=SCORES_TIER_SOLVE,
-        force_fresh=True,
-        ctx=ctx,
-    )
-    if reason is ScoresWakeReason.STREAM_RESCHEDULED:
-        resolved_orchestrator.submit(request)
-        return True
-    node = resolved_orchestrator.nodes.get(scope)
-    if node is None or node.is_terminal or node.state == "running":
-        return False
-    resolved_orchestrator.submit(request)
-    return True
-
-
-def _waiting_deps_without_submit() -> StepResult:
-    """Missing-RowRun demotion: ``waiting_deps`` with no dependency graft or force_fresh.
-
-    Omits ``wait_recovery`` so the orchestrator demotes without treating this scope
-    as its own ENSURE dependency (self-graft leaves ``_deps_complete`` false forever).
-    """
-    return StepResult(outcome="waiting_deps")
-
-
 def tier_job_outcome_to_step_result(
     run: RowRun,
     outcome: TierJobOutcome,
@@ -363,9 +321,12 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
         raise TypeError("scores tier_solve job wire requires string runId")
     run = get_row_run(run_id)
     if run is None:
-        # Missing RowRun: soft-wait for force_fresh wake to rebuild wire / reschedule.
-        # Do not self-graft via PersistDependencyRecovery -- that blocks readiness.
-        return _waiting_deps_without_submit()
+        # The claimed run was retired between wire build and this step (a peer
+        # claim, a cancel before its abort, a scheduler clear). Continuing runs
+        # wire build again, which re-claims, admits, skips on closed evidence or
+        # raises, so the node moves on without anything having to wake it.
+        logger.info("scores tier_solve missing_row_run %s: continuing to rebuild the wire", run_id)
+        return StepResult(outcome="continue")
 
     callbacks = get_tier_callbacks(run_id)
     if callbacks is None:

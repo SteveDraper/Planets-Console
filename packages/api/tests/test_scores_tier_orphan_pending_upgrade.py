@@ -164,7 +164,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
     assert session.player_id in controller.scheduled_rows
     assert not stream_drain.is_closed(session.run_id)
 
-    # Missing RowRun parks until force_fresh wake can rebuild wire / reschedule.
+    # Missing RowRun continues so the orchestrator rebuilds the wire.
     assert (
         run_scores_tier_solve(
             {
@@ -175,7 +175,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
                 "playerId": scope.player_id,
             }
         ).outcome
-        == "waiting_deps"
+        == "continue"
     )
 
     scheduler._on_orchestrator_scope_outcome(

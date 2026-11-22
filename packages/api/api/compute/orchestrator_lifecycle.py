@@ -44,7 +44,6 @@ _STEP_EXIT_BY_OUTCOME: Mapping[StepOutcome, StepExit] = MappingProxyType(
         "complete": StepExit.COMPLETE,
         "continue": StepExit.START,
         "park": StepExit.REQUEUE,
-        "waiting_deps": StepExit.REQUEUE,
     }
 )
 
@@ -80,8 +79,8 @@ class OrchestratorLifecycleMixin:
         """Clear the submit generation so the node can re-enter the dispatch loop.
 
         Shared by every path that leaves an in-flight step and reopens the node
-        for later work: epoch-retry, soft defer, persist-deferred recovery, and
-        a soft ``park`` outcome. Returns the step index at reset time for
+        for later work: epoch-retry, persist-deferred recovery, and a ``park``
+        outcome. Returns the step index at reset time for
         lifecycle notifications.
         """
         prior_step_index = node.step_index
@@ -138,21 +137,6 @@ class OrchestratorLifecycleMixin:
         self._dequeue_ready(node.scope)
         return True
 
-    def _demote_to_waiting_deps(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Demote a running node to ``waiting_deps`` without grafting dependencies.
-
-        A wait with no recovery (the scores missing-RowRun wait) waits for an
-        external ``force_fresh`` / ``wake_scores_scope`` wake -- not for another
-        scope to reach ``complete``. Grafting ``node.scope`` onto
-        ``dependency_scopes`` would make ``_deps_complete`` require self-complete
-        while the node is non-terminal, so force_fresh attach could never promote.
-        """
-        with self._condition:
-            if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
-                return
-            self._reset_for_requeue(node)
-            self._demote_unless_dependency_failed(node)
-
     def _recover_after_persist_deferred(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
@@ -161,8 +145,8 @@ class OrchestratorLifecycleMixin:
         """Recover onto ``waiting_deps`` and recreate the recovery's dependency.
 
         Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
-        (or a step returns ``waiting_deps`` with ``wait_recovery``) when a durable
-        write cannot complete until a dependency re-closes. Failing the node
+        when a durable write cannot complete until a dependency re-closes. It is
+        the only way a node defers onto a dependency. Failing the node
         left dependents waiting with no wake for background DAG nodes (no
         table-stream controller). Recreating the declared dependency reopens
         the ENSURE edge; when it completes, readiness promotes this node.
@@ -302,7 +286,7 @@ class OrchestratorLifecycleMixin:
         Asked for ``START`` or ``REQUEUE``, this is the start-or-requeue gate:
         at the pool pick and the thread re-check (``begin_pool_step``), the
         inline post-wire-build re-check, ``_begin_step_execution``, and before
-        epoch retry, persist-deferred recovery, soft demotion and park.
+        epoch retry, persist-deferred recovery and park.
         """
         if node.running_step.permits(step_exit, is_needed=lambda: self._is_needed(node)):
             return False
@@ -394,29 +378,6 @@ class OrchestratorLifecycleMixin:
             self._park_node_step(node, reason=step_result.park_reason)
             return
 
-        if step_result.outcome == "waiting_deps":
-            if step_result.payload is not None:
-                node.result_wire = step_result.payload
-            recovery = step_result.wait_recovery
-            if recovery is None:
-                # Soft defer: demote without PersistDependencyRecovery self-graft.
-                def _soft_waiting_deps(
-                    deferred_node: ComputeNodeRun = node,
-                ) -> None:
-                    self._demote_to_waiting_deps(deferred_node)
-
-                self._observers.schedule_post_lock(_soft_waiting_deps)
-                return
-
-            def _defer_waiting_deps(
-                deferred_node: ComputeNodeRun = node,
-                deferred_recovery: PersistDependencyRecovery = recovery,
-            ) -> None:
-                self._recover_after_persist_deferred(deferred_node, deferred_recovery)
-
-            self._observers.schedule_post_lock(_defer_waiting_deps)
-            return
-
         if step_result.outcome == "persist":
             if step_result.payload is not None:
                 node.result_wire = step_result.payload
@@ -464,7 +425,7 @@ class OrchestratorLifecycleMixin:
                     # Do not re-raise: pool workers call complete_pool_step on this thread
                     # and an escaping exception would kill the worker loop.
                     if isinstance(exc, PersistDeferredError):
-                        # Analytic-owned recovery: demote to waiting_deps and optionally
+                        # Analytic-owned recovery: demote to waiting_deps and
                         # force_fresh the declared dependency (e.g. open scores evidence).
                         self._recover_after_persist_deferred(
                             completed_node,

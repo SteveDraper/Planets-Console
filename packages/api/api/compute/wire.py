@@ -7,14 +7,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack
 
 from api.analytics.exports.jsonpath import resolve_jsonpath
-from api.compute.persistence import PersistDependencyRecovery
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
-StepOutcome = Literal["continue", "persist", "complete", "park", "waiting_deps"]
+StepOutcome = Literal["continue", "persist", "complete", "park"]
 
 # Compute plane: job payload -> serializable result payload.
 RunStepFn = Callable[[Any], Any]
@@ -29,9 +28,6 @@ class StepResult:
     park_reason: str | None = None
     # When true, ``persist`` runs but the node advances to the next profile step.
     persist_then_continue: bool = False
-    # Optional cross-scope recovery (graft + recreate the dependency). Soft
-    # defer omits this so demotion does not self-graft the waiting node.
-    wait_recovery: PersistDependencyRecovery | None = None
 
 
 class MalformedStepResultError(ValueError):
@@ -50,23 +46,17 @@ def coerce_step_result(result_wire: object) -> StepResult:
         return result_wire
     if isinstance(result_wire, dict) and "outcome" in result_wire:
         outcome = result_wire["outcome"]
-        if outcome not in {"continue", "persist", "complete", "park", "waiting_deps"}:
+        if outcome not in {"continue", "persist", "complete", "park"}:
             raise MalformedStepResultError(f"invalid step outcome {outcome!r}")
         park_reason = result_wire.get("parkReason")
         if park_reason is not None and not isinstance(park_reason, str):
             raise MalformedStepResultError("parkReason must be a string when provided")
         persist_then_continue = bool(result_wire.get("persistThenContinue", False))
-        wait_recovery = result_wire.get("waitRecovery")
-        if wait_recovery is not None and not isinstance(wait_recovery, PersistDependencyRecovery):
-            raise MalformedStepResultError(
-                "waitRecovery must be PersistDependencyRecovery when provided"
-            )
         return StepResult(
             outcome=outcome,
             payload=result_wire.get("payload"),
             park_reason=park_reason,
             persist_then_continue=persist_then_continue,
-            wait_recovery=wait_recovery,
         )
     return StepResult(outcome="persist", payload=result_wire)
 

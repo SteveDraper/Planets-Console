@@ -277,20 +277,6 @@ def _persist_branch_step_deferred(
     )
 
 
-def test_soft_defer_cascades_a_dependency_that_failed_while_the_node_ran(sample_turn):
-    setup = _running_branch(sample_turn)
-    shared_failure = RuntimeError("shared replacement failed")
-    _fail_shared_while_branch_runs(setup, shared_failure)
-
-    complete_running_pool_step(
-        setup.orchestrator, setup.branch, result_wire=StepResult(outcome="waiting_deps")
-    )
-
-    branch_node = setup.orchestrator.nodes[setup.branch]
-    assert branch_node.state == "failed"
-    assert branch_node.error is shared_failure
-
-
 def test_persist_deferred_cascades_a_failed_dependency_it_is_not_recreating(sample_turn):
     """Only the recovery dependency is superseded; another failed dependency still cascades."""
     setup = _running_branch(sample_turn)
@@ -413,23 +399,6 @@ def test_persist_deferred_fails_a_recovery_of_an_analytic_with_no_export_catalog
     )
 
 
-def _defer_branch_step_by_wait_recovery(
-    setup: RunningBranch, recovery: PersistDependencyRecovery
-) -> None:
-    complete_running_pool_step(
-        setup.orchestrator,
-        setup.branch,
-        result_wire=StepResult(outcome="waiting_deps", wait_recovery=recovery),
-    )
-
-
-# The two ways a step asks for a dependency recovery.
-_RECOVERY_DEFERRALS = {
-    "persist-deferred": _persist_branch_step_deferred,
-    "wait-recovery": _defer_branch_step_by_wait_recovery,
-}
-
-
 def _shared_recovery(setup: RunningBranch) -> PersistDependencyRecovery:
     return PersistDependencyRecovery(dependency_scope=setup.shared, step_kind="materialize")
 
@@ -462,16 +431,15 @@ def _assert_branch_waits_on_a_recreated_shared(
     assert recreated_shared.state == "running"
 
 
-@pytest.mark.parametrize("defer", _RECOVERY_DEFERRALS.values(), ids=_RECOVERY_DEFERRALS.keys())
 def test_a_refresh_before_the_recreate_registers_does_not_cascade_the_superseded_failure(
-    sample_turn, defer
+    sample_turn,
 ):
     setup = _running_branch(sample_turn)
     _fail_shared_while_branch_runs(setup, RuntimeError("superseded shared failed"))
     failed_shared = setup.orchestrator.nodes[setup.shared]
     other_shared = _arm_unrelated_submit_before_the_recreate(setup, sample_turn)
 
-    defer(setup, _shared_recovery(setup))
+    _persist_branch_step_deferred(setup, _shared_recovery(setup))
 
     _assert_branch_waits_on_a_recreated_shared(setup, failed_shared, other_shared)
     complete_running_pool_step(setup.orchestrator, setup.shared, result_wire={"result": SHARED_ID})

@@ -470,9 +470,9 @@ class FleetPersistencePolicy:
             # PersistDependencyRecovery is the sole reopen mechanism here: the
             # orchestrator's persist-deferred recovery always recreates the scores
             # scope with a force_fresh submit from tier_solve, which refreshes
-            # waiting_deps / absent / terminal nodes alike. Do not also call
-            # wake_scores_scope for this path -- that would be a second encoding
-            # of the same reopen policy.
+            # waiting_deps / absent / terminal nodes alike. Do not also submit
+            # scores from here -- that would be a second encoding of the same
+            # reopen policy.
             from api.errors import FleetScoresEvidenceOpenError
 
             raise FleetScoresEvidenceOpenError(

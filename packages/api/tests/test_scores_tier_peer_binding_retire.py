@@ -35,7 +35,7 @@ def _reset_registries():
 
 
 def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> None:
-    """Missing RowRun must park (rebuild wire on wake), not empty-complete and unlock fleet."""
+    """A missing RowRun continues so wire build runs again; it neither completes nor waits."""
     session = _session(sample_turn)
     run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
@@ -52,7 +52,8 @@ def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> Non
         }
     )
 
-    assert result.outcome == "waiting_deps"
+    assert result.outcome == "continue"
+    assert result.payload is None
 
 
 def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -> None:
