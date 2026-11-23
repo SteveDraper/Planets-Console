@@ -44,7 +44,7 @@ from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
 from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
-from api.compute.pools import ThreadStepWork
+from api.compute.pools import PoolStepWork
 from api.compute.submission_open import SubmissionOpen
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
@@ -144,7 +144,7 @@ class ShellLadder:
             seed_fleet_prerequisites_for=self.player_id,
         )
         self.scope = ladder_scope(sample_turn, self.player_id)
-        self.submitted_work: list[ThreadStepWork] = []
+        self.submitted_work: list[PoolStepWork] = []
         self.orchestrator = ComputeOrchestrator(
             compute_registry=build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION)),
             pool_submitter=lambda _node, _step, *, work: self.submitted_work.append(work),

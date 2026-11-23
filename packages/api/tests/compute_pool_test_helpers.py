@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NoReturn
 
-from api.compute.pools import RemoteStepWork, ThreadStepWork
+from api.compute.pools import PoolStepWork
+from api.compute.profile import PoolComputeBackend
 from api.compute.submission_open import SubmissionOpen
-from api.compute.wire import BuildStepJobWireKwargs, DependencyOutputs
+from api.compute.wire import BuildStepJobWireKwargs, DependencyOutputs, RunStepFn
 
 from tests.submission_open_helpers import live_execution
 
@@ -28,22 +29,42 @@ def _never_run(*_args: object, **_kwargs: object) -> NoReturn:
     raise AssertionError("this test's pool work must not run")
 
 
+def _job_wire_kwargs(ctx: AnalyticQueryContext | None) -> BuildStepJobWireKwargs:
+    return BuildStepJobWireKwargs(
+        dependency_outputs=DependencyOutputs(),
+        # A test builder that ignores its inputs is given no context.
+        ctx=ctx,  # type: ignore[typeddict-item]
+        node_result_wire=None,
+        submission_open=SubmissionOpen(),
+        execution_generation=0,
+        is_execution_live=live_execution,
+    )
+
+
+def prebuilt_wire_step_work(
+    backend: PoolComputeBackend,
+    job_wire: object,
+    run_step: RunStepFn,
+) -> PoolStepWork:
+    """Pool work on ``backend`` whose builder returns ``job_wire`` whatever its inputs."""
+    return PoolStepWork(
+        backend=backend,
+        build_job_wire=lambda _scope, **_kwargs: job_wire,
+        job_wire_kwargs=_job_wire_kwargs(None),
+        run_step=run_step,
+    )
+
+
 # Pool work for a test item that is queued, inspected or picked, but never run.
-QUEUED_ONLY_STEP_WORK = RemoteStepWork(backend="process", job_wire=None, run_step=_never_run)
+QUEUED_ONLY_STEP_WORK = prebuilt_wire_step_work("process", None, _never_run)
 
 
-def ok_thread_step_work(ctx: AnalyticQueryContext) -> ThreadStepWork:
+def ok_thread_step_work(ctx: AnalyticQueryContext) -> PoolStepWork:
     """Thread-step work that builds an empty job wire and returns ``{"ok": True}``."""
-    return ThreadStepWork(
+    return PoolStepWork(
+        backend="thread",
         build_job_wire=lambda _scope, **_kwargs: {},
-        job_wire_kwargs=BuildStepJobWireKwargs(
-            dependency_outputs=DependencyOutputs(),
-            ctx=ctx,
-            node_result_wire=None,
-            submission_open=SubmissionOpen(),
-            execution_generation=0,
-            is_execution_live=live_execution,
-        ),
+        job_wire_kwargs=_job_wire_kwargs(ctx),
         run_step=lambda _job: {"ok": True},
     )
 

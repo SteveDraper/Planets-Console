@@ -15,10 +15,11 @@ from unittest.mock import MagicMock
 
 import pytest
 from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
-from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem, RemoteStepWork
+from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem
 from api.compute.profile import REMOTE_COMPUTE_BACKENDS, RemoteComputeBackend
 from api.compute.wire import StepResult
 
+from tests.compute_pool_test_helpers import prebuilt_wire_step_work
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.test_compute_pools import (
     _FLEET_ANALYTIC_ID,
@@ -72,10 +73,10 @@ def _remote_item(orchestrator_id: int, backend: RemoteComputeBackend) -> PoolWor
         step_kind="materialization_leg",
         backend=backend,
         step_index=0,
-        work=RemoteStepWork(
-            backend=backend,
-            job_wire={},
-            run_step=lambda _job: StepResult(outcome="complete"),
+        work=prebuilt_wire_step_work(
+            backend,
+            {},
+            lambda _job: StepResult(outcome="complete"),
         ),
     )
 

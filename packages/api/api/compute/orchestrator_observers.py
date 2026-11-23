@@ -83,7 +83,7 @@ class StepItemIgnoredReason(StrEnum):
 
     The first three say the item's execution is no longer running.
     ``START_REFUSED`` says it was running, and the start-or-requeue gate
-    ended it at the pick or the thread re-check (``pool_item_dropped`` only).
+    ended it at the pick or the post-build re-check (``pool_item_dropped`` only).
     """
 
     MISSING_NODE = "missing_node"

@@ -12,7 +12,7 @@ from api.compute.diagnostics.snapshot import (
     build_compute_diagnostics_snapshot,
     snapshot_to_wire,
 )
-from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem, RemoteStepWork
+from api.compute.pools import BandedWorkItem, ComputeWorkerPool, PoolWorkItem
 from api.compute.profile import REMOTE_COMPUTE_BACKENDS
 from api.compute.remote_futures import (
     classify_future_state,
@@ -22,6 +22,8 @@ from api.compute.remote_futures import (
 from api.compute.scope import ComputeScope
 from api.compute.step_execution_key import StepExecutionKey
 from api.compute.wire import StepResult
+
+from tests.compute_pool_test_helpers import prebuilt_wire_step_work
 
 
 def _scope() -> ComputeScope:
@@ -127,10 +129,10 @@ def test_pool_submits_remote_work_to_its_backend_executor_and_clears_after_done(
             step_kind="materialization_leg",
             backend=backend,
             step_index=0,
-            work=RemoteStepWork(
-                backend=backend,
-                job_wire={"x": 1},
-                run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            work=prebuilt_wire_step_work(
+                backend,
+                {"x": 1},
+                lambda _job: StepResult(outcome="complete", payload={"ok": True}),
             ),
         )
         pool._interpreter_executor = executors["interpreter"]  # type: ignore[assignment]
@@ -179,10 +181,10 @@ def test_remote_future_unregister_does_not_take_pool_condition_under_controller(
             step_kind="materialization_leg",
             backend="interpreter",
             step_index=0,
-            work=RemoteStepWork(
-                backend="interpreter",
-                job_wire={"x": 1},
-                run_step=lambda _job: StepResult(outcome="complete", payload={"ok": True}),
+            work=prebuilt_wire_step_work(
+                "interpreter",
+                {"x": 1},
+                lambda _job: StepResult(outcome="complete", payload={"ok": True}),
             ),
         )
         future: Future[object] = Future()

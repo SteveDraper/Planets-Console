@@ -59,7 +59,10 @@ class PendingInlineExecution(PendingStep):
 
 @dataclass(eq=False)
 class PendingPoolSubmission(PendingStep):
-    """Pool work committed under the orchestrator lock; built and submitted after release."""
+    """Pool work committed under the orchestrator lock; submitted after release.
+
+    Its job wire is built later, on the pool worker that picks it.
+    """
 
 
 @dataclass

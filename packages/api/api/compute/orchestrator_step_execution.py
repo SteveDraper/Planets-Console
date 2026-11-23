@@ -14,7 +14,7 @@ from functools import partial
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from api.compute.backend_runtime import effective_compute_backend
+from api.compute.backend_runtime import effective_pool_backend
 from api.compute.orchestrator_pending import (
     DispatchedWork,
     PendingInlineExecution,
@@ -22,7 +22,7 @@ from api.compute.orchestrator_pending import (
     PendingStep,
 )
 from api.compute.orchestrator_state import PublishedExecution
-from api.compute.pools import PoolStepWork, RemoteStepWork, ThreadStepWork
+from api.compute.pools import PoolStepWork
 from api.compute.priority_band import (
     PRIORITY_BAND_RANK,
     derive_priority_bands,
@@ -401,12 +401,13 @@ class OrchestratorStepExecutionMixin:
     ) -> None:
         """Turn each submission's dispatch-time builder inputs into pool work and submit it.
 
-        Interpreter and process steps get their job wire built here. A thread
-        step, including a declared ``interpreter`` step remapped to ``thread``,
-        carries the builder inputs to the pool worker, which builds the wire there.
-        Either way the wire is built from the one snapshot taken at dispatch.
+        No job wire is built here: the pool worker builds it from the one
+        snapshot taken at dispatch, whatever the step's backend, so the thread
+        that runs a dispatch pass (often a request thread) builds none. The
+        backend the step runs on is resolved here, once
+        (:func:`effective_pool_backend`).
 
-        Never raises. A submission whose build or submit raises fails its own
+        Never raises. A submission whose work or submit raises fails its own
         attempt (:meth:`_fail_running_step`); the rest are still submitted.
         A submitter that returns has accepted the item, which then belongs to
         the pool, so the submission is marked handed on in the next hold.
@@ -417,22 +418,12 @@ class OrchestratorStepExecutionMixin:
             node = submission.node
             step = submission.step
             try:
-                build_job_wire = submission.registration.build_step_job_wire[step.step_kind]
-                run_step = submission.registration.run_step[step.step_kind]
-                backend = effective_compute_backend(step.backend)
-                work: PoolStepWork
-                if backend == "thread":
-                    work = ThreadStepWork(
-                        build_job_wire=build_job_wire,
-                        job_wire_kwargs=submission.job_wire_kwargs,
-                        run_step=run_step,
-                    )
-                else:
-                    work = RemoteStepWork(
-                        backend=backend,
-                        job_wire=build_job_wire(node.scope, **submission.job_wire_kwargs),
-                        run_step=run_step,
-                    )
+                work = PoolStepWork(
+                    backend=effective_pool_backend(step.backend),
+                    build_job_wire=submission.registration.build_step_job_wire[step.step_kind],
+                    job_wire_kwargs=submission.job_wire_kwargs,
+                    run_step=submission.registration.run_step[step.step_kind],
+                )
                 with self._condition:
                     if node.state != "running":
                         continue

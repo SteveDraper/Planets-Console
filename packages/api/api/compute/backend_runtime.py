@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from api.compute.profile import ComputeBackend
+from api.compute.profile import ComputeBackend, PoolComputeBackend
 from api.config import get_config
 
 
@@ -46,3 +46,16 @@ def effective_compute_backend(backend: ComputeBackend) -> ComputeBackend:
     if backend == "interpreter" and interpreter_remap_reason() is not None:
         return "thread"
     return backend
+
+
+def effective_pool_backend(backend: ComputeBackend) -> PoolComputeBackend:
+    """Return the pool backend a dispatched pool step runs on.
+
+    Applies :func:`effective_compute_backend`, the one remap rule. A step that
+    runs ``inline`` never becomes a pool item, so asking for its pool backend is
+    a dispatch bug and raises ``RuntimeError``.
+    """
+    effective = effective_compute_backend(backend)
+    if effective == "inline":
+        raise RuntimeError("an inline step has no compute worker pool backend")
+    return effective

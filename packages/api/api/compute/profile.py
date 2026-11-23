@@ -8,6 +8,8 @@ from typing import Literal, get_args
 # Backends whose steps run on an executor outside the pool worker thread.
 RemoteComputeBackend = Literal["interpreter", "process"]
 ComputeBackend = Literal["inline", "thread", RemoteComputeBackend]
+# Backends whose steps run as compute worker pool items.
+PoolComputeBackend = Literal["thread", RemoteComputeBackend]
 
 REMOTE_COMPUTE_BACKENDS: tuple[RemoteComputeBackend, ...] = get_args(RemoteComputeBackend)
 VALID_COMPUTE_BACKENDS: frozenset[ComputeBackend] = frozenset(get_args(ComputeBackend))

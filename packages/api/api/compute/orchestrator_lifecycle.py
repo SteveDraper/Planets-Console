@@ -320,7 +320,7 @@ class OrchestratorLifecycleMixin:
         disposition's answer depends on it. Caller holds the lock.
 
         Asked for ``START`` or ``REQUEUE``, this is the start-or-requeue gate:
-        at the pool pick and the thread re-check (``begin_pool_step``), the
+        at the pool pick and the post-build re-check (``begin_pool_step``), the
         inline post-wire-build re-check, dispatch (``_dispatch``), and before
         epoch retry, persist-deferred recovery and park.
         """
