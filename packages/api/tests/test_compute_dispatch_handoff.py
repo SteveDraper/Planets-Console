@@ -15,6 +15,7 @@ import pytest
 from api.compute import ComputeOrchestrator, ComputeRequest, build_compute_registry
 from api.compute.orchestrator_pending import DispatchedWork
 from api.compute.pools import ComputeWorkerPool
+from api.compute.running_step import RunningStepDisposition
 
 from tests.compute_orchestrator_fixtures import (
     RecordingPersistencePolicy,
@@ -354,3 +355,44 @@ def test_a_gate_that_raises_mid_pass_still_hands_off_the_work_already_committed(
 
     assert orchestrator.nodes[first].state == "complete"
     assert orchestrator.nodes[second].state == "ready"
+
+
+class _SatisfiedPolicy(StubPersistencePolicy):
+    """Durable satisfaction already holds for every scope."""
+
+    def is_satisfied(self, _ctx, _scope) -> bool:
+        return True
+
+
+def test_a_satisfied_node_that_nothing_needs_completes_rather_than_being_stopped_at_start(
+    sample_turn,
+):
+    """The satisfaction short-circuit is prepared before the START gate.
+
+    A ready node whose running step is limited to ``END_AFTER_STEP`` (left by
+    a settle while it ran) and that nothing needs would be refused a start,
+    but its durable result is already there, so it completes without running.
+    """
+    scope, _other = _two_shared_scopes(sample_turn)
+    step_runs: list[object] = []
+
+    def run_step(job):
+        step_runs.append(job)
+        return {"result": job["scope"]}
+
+    registration = replace(
+        inline_compute_registration(SHARED_ID),
+        persistence_policy=_SatisfiedPolicy(),
+        run_steps=(("materialize", run_step),),
+    )
+    orchestrator = ComputeOrchestrator(compute_registry=build_compute_registry((registration,)))
+    _hold_and_submit(orchestrator, _ctx(sample_turn), (scope,))
+    node = orchestrator.nodes[scope]
+    node.running_step = RunningStepDisposition.END_AFTER_STEP
+
+    orchestrator.dispatch_ready_work()
+
+    assert node.state == "complete"
+    assert node.error is None
+    assert orchestrator.metrics.satisfaction_short_circuits == 1
+    assert step_runs == []

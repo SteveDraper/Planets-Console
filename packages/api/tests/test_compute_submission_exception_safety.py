@@ -26,7 +26,7 @@ from tests.compute_orchestrator_fixtures import (
     pool_compute_registration,
 )
 from tests.compute_pool_test_helpers import complete_running_pool_step
-from tests.fixtures.export_framework.diamond_exports import SHARED_ID
+from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
@@ -129,6 +129,39 @@ def test_waking_a_parked_node_dispatches_it_before_returning(sample_turn):
     assert handle is not None
     assert orchestrator.nodes[scope].state == "running"
     assert submitter.submissions == [(scope, "materialize"), (scope, "materialize")]
+
+
+def test_a_force_fresh_attach_that_readies_a_waiting_node_dispatches_it_before_returning(
+    sample_turn,
+):
+    """The attach refreshes the waiting node's readiness and schedules the pass that runs it.
+
+    The dependent is left ``waiting_deps`` with no dependency still pending,
+    as when its dependencies settled without reaching it, so only the
+    ``force_fresh`` attach makes it ready.
+    """
+    export_scope = make_export_scope(sample_turn)
+    shared = make_compute_scope(SHARED_ID, export_scope)
+    dependent = make_compute_scope(BRANCH_B_ID, export_scope)
+    submitter = RecordingPoolSubmitter()
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry(
+            (
+                pool_compute_registration(SHARED_ID, backend="thread"),
+                pool_compute_registration(BRANCH_B_ID, backend="thread"),
+            )
+        ),
+        pool_submitter=submitter,
+    )
+    ctx = _ctx(sample_turn)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=dependent))
+    assert orchestrator.nodes[dependent].state == "waiting_deps"
+    orchestrator.nodes[dependent].dependency_scopes = ()
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=dependent, force_fresh=True))
+
+    assert orchestrator.nodes[dependent].state == "running"
+    assert submitter.submissions == [(shared, "materialize"), (dependent, "materialize")]
 
 
 @pytest.mark.allows_post_lock_callback_errors

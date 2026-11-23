@@ -525,3 +525,64 @@ def test_existing_mark_moves_applies_from_backward_only(sample_turn):
         evidence_generation=4,
         applies_from_turn=4,
     )
+
+
+def test_a_widened_mark_is_stored_before_registration_and_read_by_every_dispatch_pass(sample_turn):
+    """A narrower stored mark is widened before any walk node is queued.
+
+    The submitter's own dispatch pass and a later pass on another thread both
+    read the widened mark, so every pass agrees on what the walk established.
+    A dispatch gate reads the mark on the pass's own thread; it holds the
+    submitter's pass so the other thread's pass dispatches the first hop.
+    """
+    host, ctx = context_at_turn(sample_turn, 10)
+    enable_backfill_earlier_turns(ctx)
+    player_id = first_player_id(host)
+    persistence = fleet_persistence(ctx)
+    write_evidence_mark(
+        persistence,
+        ctx.game_id,
+        ctx.perspective,
+        player_id,
+        generation=4,
+        applies_from=8,
+    )
+    for turn in (1, 2, 3):
+        _store_final(persistence, ctx, turn, player_id, 4)
+    widened = FleetEvidenceMark(evidence_generation=4, applies_from_turn=4)
+
+    def stored_mark() -> FleetEvidenceMark:
+        return persistence.evidence_mark(ctx.game_id, ctx.perspective, player_id)
+
+    marks_at_first_enqueue: list[FleetEvidenceMark] = []
+    marks_at_gate: list[FleetEvidenceMark] = []
+    marks_at_pool_submit: list[FleetEvidenceMark] = []
+    orchestrator = ComputeOrchestrator(
+        compute_registry=FLEET_SCORES_REGISTRY,
+        pool_submitter=lambda *_args, **_kwargs: marks_at_pool_submit.append(stored_mark()),
+    )
+
+    def on_ready_queue_changed(ready_scopes) -> None:
+        if ready_scopes and not marks_at_first_enqueue:
+            marks_at_first_enqueue.append(stored_mark())
+
+    orchestrator.observers.register_ready_queue_listener(on_ready_queue_changed)
+    is_gate_open = False
+
+    def gate(_node) -> bool:
+        marks_at_gate.append(stored_mark())
+        return is_gate_open
+
+    orchestrator.observers.register_dispatch_gate(gate)
+
+    submit_shell(ctx, FLEET_ANALYTIC_ID, 10, player_id, orchestrator=orchestrator)
+    is_gate_open = True
+    other_pass = threading.Thread(target=orchestrator.dispatch_ready_work)
+    other_pass.start()
+    other_pass.join()
+
+    assert (FLEET_ANALYTIC_ID, 4) in _player_node_keys(orchestrator, player_id)
+    assert marks_at_first_enqueue == [widened]
+    # One gate read per pass: the submitter's, then the other thread's.
+    assert marks_at_gate == [widened, widened]
+    assert marks_at_pool_submit == [widened]
