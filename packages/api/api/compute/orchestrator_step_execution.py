@@ -48,7 +48,7 @@ class OrchestratorStepExecutionMixin:
     ``_published_executions``, ``_ready_queue``, ``_metrics``, ``_observers``,
     ``_compute_registry``, ``_pool_submitter``, ``_ctx_for_node``,
     ``_complete_node``, ``_fail_node``, ``_refuse_step_exit``,
-    ``_finish_step``, ``_running_execution_or_record_ignored``,
+    ``_finish_step``, ``_running_execution``, ``_running_execution_or_record_ignored``,
     ``_deps_complete``, ``_enqueue_ready``, ``_ready_depth``, and
     ``_notify_ready_queue_changed``.
     """
@@ -213,18 +213,16 @@ class OrchestratorStepExecutionMixin:
     ) -> None:
         """Fail ``item``'s node when this attempt failed before it was handed on.
 
-        Takes the orchestrator lock. Acts only while the attempt's finish has
-        not started to apply (``item.is_finish_applied``) and the node is
-        still running the execution the attempt was dispatched for. Records
-        the step as failed, then fails the node.
+        Takes the orchestrator lock. Acts only while the attempt has not been
+        handed on (``item.is_finish_applied``) and the node is still running
+        the execution the attempt was dispatched for. Records the step as
+        failed, then fails the node.
         """
-        node = item.node
         with self._condition:
             if item.is_finish_applied:
                 return
-            if self._nodes.get(node.scope) is not node or not node.is_running_execution(
-                item.execution_generation
-            ):
+            node = self._running_execution(item.node.scope, item.execution_generation)
+            if node is None:
                 return
             self._observers.notify_step_complete(
                 node,
@@ -390,6 +388,8 @@ class OrchestratorStepExecutionMixin:
 
         Never raises. A submission whose build or submit raises fails its own
         attempt (:meth:`_fail_running_step`); the rest are still submitted.
+        A submitter that returns has accepted the item, which then belongs to
+        the pool, so the submission is marked handed on in the next hold.
         Dispatch commits pool work only while a ``pool_submitter`` is
         configured, and requeues it otherwise.
         """
@@ -417,7 +417,9 @@ class OrchestratorStepExecutionMixin:
                     if node.state != "running":
                         continue
                 self._pool_submitter(node, step, work=work)
-                self._metrics.pool_submissions += 1
+                with self._condition:
+                    submission.is_finish_applied = True
+                    self._metrics.pool_submissions += 1
             except BaseException as exc:
                 logger.exception("Submitting pool step for %r failed", node.scope)
                 self._fail_running_step(submission, "pool", exc)

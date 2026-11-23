@@ -92,7 +92,11 @@ PoolStepWork = ThreadStepWork | RemoteStepWork
 
 
 class PoolSubmitter(Protocol):
-    """Callback the orchestrator uses to enqueue ready steps on a worker pool."""
+    """Callback the orchestrator uses to enqueue ready steps on a worker pool.
+
+    Returning means the pool accepted the item; raising means it refused it
+    and enqueued nothing. A submitter never raises once it has enqueued.
+    """
 
     def __call__(
         self,
@@ -422,7 +426,11 @@ class ComputeWorkerPool:
         *,
         work: PoolStepWork,
     ) -> None:
-        """Enqueue one ready orchestrator step for pool execution."""
+        """Enqueue one ready orchestrator step for pool execution.
+
+        Keeps the :class:`PoolSubmitter` contract: once the item is enqueued
+        this returns, so an enqueue hook that raises is logged and contained.
+        """
         item = PoolWorkItem(
             orchestrator_id=orchestrator_id,
             scope=node.scope,
@@ -442,7 +450,10 @@ class ComputeWorkerPool:
         # (must not nest under the pool condition -- workers hold pool then
         # controller in predicate / on_dequeued).
         if on_enqueued is not None:
-            on_enqueued(enqueued, queue_depth)
+            try:
+                on_enqueued(enqueued, queue_depth)
+            except BaseException:
+                logger.exception("Compute pool enqueue hook failed for %r", item.scope)
 
     def shutdown(self, *, wait_for_interpreters: bool = False) -> None:
         with self._condition:

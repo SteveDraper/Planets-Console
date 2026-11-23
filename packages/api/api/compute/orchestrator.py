@@ -317,7 +317,7 @@ class ComputeOrchestrator(
         """
         with self._condition:
             node = self._nodes.get(scope)
-            if node is None or not node.is_running_execution(execution_generation):
+            if self._running_execution(scope, execution_generation) is None:
                 reason = _unbound_step_item_reason(node, execution_generation)
             elif self._refuse_step_exit(node, StepExit.START):
                 reason = StepItemIgnoredReason.START_REFUSED
@@ -386,6 +386,23 @@ class ComputeOrchestrator(
                 )
         self._observers.drain_post_lock_callbacks()
 
+    def _running_execution(
+        self,
+        scope: ComputeScope,
+        execution_generation: int,
+    ) -> ComputeNodeRun | None:
+        """The node running execution ``execution_generation`` of ``scope``, or None.
+
+        Caller holds the orchestrator lock. This is the one execution-binding
+        check: pool picks, pool and inline finishes, and failed hand-offs all
+        bind to their execution here. Execution generations are unique per
+        orchestrator, so a match is the dispatching node itself.
+        """
+        node = self._nodes.get(scope)
+        if node is not None and node.is_running_execution(execution_generation):
+            return node
+        return None
+
     def _running_execution_or_record_ignored(
         self,
         kind: StepItemIgnoredKind,
@@ -402,9 +419,10 @@ class ComputeOrchestrator(
         with the reason and returns None. Caller holds the orchestrator lock.
         A pool finish and an inline finish both bind to their execution here.
         """
+        running = self._running_execution(scope, execution_generation)
+        if running is not None:
+            return running
         node = self._nodes.get(scope)
-        if node is not None and node.is_running_execution(execution_generation):
-            return node
         self._notify_step_item_ignored(
             kind,
             scope,

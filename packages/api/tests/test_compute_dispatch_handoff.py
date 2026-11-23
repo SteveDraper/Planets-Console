@@ -13,6 +13,8 @@ from dataclasses import replace
 
 import pytest
 from api.compute import ComputeOrchestrator, ComputeRequest, build_compute_registry
+from api.compute.orchestrator_pending import DispatchedWork
+from api.compute.pools import ComputeWorkerPool
 
 from tests.compute_orchestrator_fixtures import (
     RecordingPersistencePolicy,
@@ -132,16 +134,28 @@ def test_an_inline_start_listener_that_raises_fails_only_that_item(sample_turn):
     assert orchestrator.nodes[second].state == "complete"
 
 
-def test_a_finish_that_raises_after_an_epoch_requeue_leaves_the_retry_running(sample_turn):
+class _FinishError(RuntimeError):
+    pass
+
+
+class _GenerationFailsAfterRunPolicy(StubPersistencePolicy):
+    """Never satisfied; reading the invalidation generation raises once the step has run."""
+
+    def __init__(self) -> None:
+        self.has_step_run = False
+
+    def invalidation_generation(self, _ctx, _scope) -> int:
+        if self.has_step_run:
+            raise _FinishError("generation read failed at the finish")
+        return 0
+
+
+def test_a_finish_that_raises_while_its_execution_runs_fails_the_node(sample_turn):
     scope, _other = _two_shared_scopes(sample_turn)
-    persistence = RecordingPersistencePolicy()
-    ctx = _ctx(sample_turn)
-    stale_once = [True]
+    persistence = _GenerationFailsAfterRunPolicy()
 
     def run_step(job):
-        if stale_once[0]:
-            stale_once[0] = False
-            persistence.invalidate(ctx, scope)
+        persistence.has_step_run = True
         return {"result": job["scope"]}
 
     registration = replace(
@@ -150,6 +164,86 @@ def test_a_finish_that_raises_after_an_epoch_requeue_leaves_the_retry_running(sa
         run_steps=(("materialize", run_step),),
     )
     orchestrator = ComputeOrchestrator(compute_registry=build_compute_registry((registration,)))
+
+    orchestrator.submit(ComputeRequest(ctx=_ctx(sample_turn), scope=scope))
+
+    node = orchestrator.nodes[scope]
+    assert node.state == "failed"
+    assert isinstance(node.error, _FinishError)
+
+
+def _epoch_bumping_inline_orchestrator(ctx, scope) -> ComputeOrchestrator:
+    """An inline orchestrator whose first run of ``scope`` makes itself epoch-stale."""
+    persistence = RecordingPersistencePolicy()
+    is_first_run = [True]
+
+    def run_step(job):
+        if is_first_run[0]:
+            is_first_run[0] = False
+            persistence.invalidate(ctx, scope)
+        return {"result": job["scope"]}
+
+    registration = replace(
+        inline_compute_registration(SHARED_ID),
+        persistence_policy=persistence,
+        run_steps=(("materialize", run_step),),
+    )
+    return ComputeOrchestrator(compute_registry=build_compute_registry((registration,)))
+
+
+class _HandOffError(RuntimeError):
+    pass
+
+
+def test_a_hand_off_failure_after_the_finish_applied_leaves_the_epoch_retry_running(
+    sample_turn, monkeypatch
+):
+    scope, _other = _two_shared_scopes(sample_turn)
+    ctx = _ctx(sample_turn)
+    orchestrator = _epoch_bumping_inline_orchestrator(ctx, scope)
+    real_run_inline = orchestrator._run_inline_outside_lock
+    retry_work = DispatchedWork()
+
+    def run_inline_then_fail_once_the_retry_runs(item) -> None:
+        real_run_inline(item)
+        if retry_work.inline:
+            return
+        # The finish requeued the epoch-stale step; dispatch the retry so it
+        # runs the same execution and step index, then fail this hand-off.
+        with orchestrator._condition:
+            orchestrator._dispatch(retry_work)
+        raise _HandOffError("hand-off failed after the finish applied")
+
+    monkeypatch.setattr(
+        orchestrator, "_run_inline_outside_lock", run_inline_then_fail_once_the_retry_runs
+    )
+
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+
+    node = orchestrator.nodes[scope]
+    assert len(retry_work.inline) == 1
+    assert node.state == "running"
+    assert node.error is None
+    assert orchestrator.metrics.epoch_discards == 1
+
+    orchestrator._hand_off(retry_work)
+
+    assert node.state == "complete"
+    assert node.error is None
+
+
+def test_a_ready_queue_listener_that_raises_on_an_epoch_requeue_strands_the_node_ready(
+    sample_turn,
+):
+    """The requeue raises before it schedules a pass, so nothing dispatches the retry.
+
+    The finish's own containment swallows the error and leaves the node
+    ``ready``, which is the synchronous ready-queue listener failure policy
+    owned by #650. This pins that the original attempt does not fail the node.
+    """
+    scope, _other = _two_shared_scopes(sample_turn)
+    ctx = _ctx(sample_turn)
+    orchestrator = _epoch_bumping_inline_orchestrator(ctx, scope)
     # The first time the scope is queued is the submission; the second is the
     # epoch requeue inside the inline finish.
     times_queued = [0]
@@ -164,11 +258,11 @@ def test_a_finish_that_raises_after_an_epoch_requeue_leaves_the_retry_running(sa
     orchestrator.observers.register_ready_queue_listener(on_ready_queue_changed)
 
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
-    orchestrator.dispatch_ready_work()
 
     node = orchestrator.nodes[scope]
     assert node.error is None
-    assert node.state == "complete"
+    assert node.state == "ready"
+    assert orchestrator.ready_scopes() == (scope,)
     assert orchestrator.metrics.epoch_discards == 1
 
 
@@ -186,6 +280,60 @@ def test_a_pool_submitter_that_raises_fails_its_node(sample_turn):
 
     assert orchestrator.nodes[scope].state == "failed"
     assert isinstance(orchestrator.nodes[scope].error, _ListenerError)
+
+
+def test_an_enqueue_hook_that_raises_leaves_the_accepted_pool_item_queued_and_running(
+    sample_turn,
+):
+    scope, _other = _two_shared_scopes(sample_turn)
+    pool = ComputeWorkerPool(worker_count=0)
+
+    def on_enqueued(_item, _depth) -> None:
+        raise _ListenerError("enqueue hook failed")
+
+    pool.set_on_item_enqueued(on_enqueued)
+    try:
+        orchestrator = ComputeOrchestrator(
+            compute_registry=build_compute_registry(
+                (pool_compute_registration(SHARED_ID, backend="thread"),)
+            ),
+            worker_pool=pool,
+        )
+
+        orchestrator.submit(ComputeRequest(ctx=_ctx(sample_turn), scope=scope))
+
+        assert [queued.item.scope for queued in pool.snapshot_work_queue()] == [scope]
+        assert orchestrator.nodes[scope].state == "running"
+        assert orchestrator.nodes[scope].error is None
+    finally:
+        pool.shutdown()
+
+
+def test_a_hand_off_failure_for_an_accepted_pool_item_leaves_its_node_running(
+    sample_turn, monkeypatch
+):
+    scope, _other = _two_shared_scopes(sample_turn)
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry(
+            (pool_compute_registration(SHARED_ID, backend="thread"),)
+        ),
+        pool_submitter=RecordingPoolSubmitter(),
+    )
+    accepted = []
+    real_flush = orchestrator._flush_pending_pool_submissions
+
+    def flush_and_keep(pending) -> None:
+        real_flush(pending)
+        accepted.extend(pending)
+
+    monkeypatch.setattr(orchestrator, "_flush_pending_pool_submissions", flush_and_keep)
+    orchestrator.submit(ComputeRequest(ctx=_ctx(sample_turn), scope=scope))
+    assert len(accepted) == 1
+
+    orchestrator._fail_running_step(accepted[0], "pool", _HandOffError("late failure"))
+
+    assert orchestrator.nodes[scope].state == "running"
+    assert orchestrator.nodes[scope].error is None
 
 
 @pytest.mark.allows_post_lock_callback_errors
