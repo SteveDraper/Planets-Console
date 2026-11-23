@@ -125,9 +125,9 @@ class RootRegistration:
     planned: tuple[PlannedComputeNode, ...]
     # The ``force_fresh`` root being replaced; its replace is a lifecycle event.
     superseded_root: ComputeNodeRun | None
-    # Terminal nodes replaced silently: an ensure's hollow root, and planned
-    # dependencies whose durable result is gone.
-    hollow_terminals: tuple[ComputeNodeRun, ...]
+    # Every terminal node to replace: the existing root (superseded or an
+    # ensure's hollow root), and planned dependencies whose durable result is gone.
+    replaced_terminals: tuple[ComputeNodeRun, ...]
     # Planned nodes to register, each with its resolved profile step index.
     new_nodes: tuple[tuple[PlannedComputeNode, int], ...]
     # An empty plan for the root registers a synthetic ``complete`` root.
@@ -328,7 +328,7 @@ class OrchestratorSubmissionMixin:
             game_id=bundle.game_id,
             perspective=bundle.perspective,
         )
-        hollow_terminals: list[ComputeNodeRun] = []
+        replaced_terminals: list[ComputeNodeRun] = []
         new_nodes: list[tuple[PlannedComputeNode, int]] = []
         for planned in planned_nodes:
             registration = self._compute_registry[planned.scope.analytic_id]
@@ -339,18 +339,17 @@ class OrchestratorSubmissionMixin:
                     ctx, planned.scope
                 ):
                     continue
-                hollow_terminals.append(existing)
+                replaced_terminals.append(existing)
             entry_step_kind = request.step_kind if is_root else None
             new_nodes.append(
                 (planned, self._resolve_profile_step_index(registration, entry_step_kind))
             )
-        superseded_root = existing_root if request.force_fresh else None
-        if existing_root is not None and superseded_root is None:
-            hollow_terminals.append(existing_root)
+        if existing_root is not None:
+            replaced_terminals.append(existing_root)
         return RootRegistration(
             planned=planned_nodes,
-            superseded_root=superseded_root,
-            hollow_terminals=tuple(hollow_terminals),
+            superseded_root=existing_root if request.force_fresh else None,
+            replaced_terminals=tuple(replaced_terminals),
             new_nodes=tuple(new_nodes),
             needs_complete_root=all(planned.scope != root_scope for planned, _ in new_nodes),
         )
@@ -362,23 +361,24 @@ class OrchestratorSubmissionMixin:
     ) -> ComputeHandle:
         """Apply a decided fresh root, after its root plan accepted it. Caller holds the lock.
 
-        Schedules the dispatch pass first, so even a synchronous ready-queue
-        listener that raises partway leaves the registered nodes with a pass.
-        Then replaces terminals, registers the new nodes, refreshes readiness
-        across the DAG and raises the root's standing band.
+        Emits ``force_fresh_replace`` for a superseded root, then schedules the
+        dispatch pass, so the replace precedes the replacing execution's events
+        and even a synchronous ready-queue listener that raises partway leaves
+        the registered nodes with a pass. Then replaces terminals, registers
+        the new nodes, refreshes readiness across the DAG and raises the root's
+        standing band.
         """
-        self._observers.schedule_post_lock(self.dispatch_ready_work)
-        bundle = self._require_bundle(request)
-        submission_open = request.submission_open
         if registration.superseded_root is not None:
             self._emit_force_fresh_lifecycle(
                 kind="force_fresh_replace",
                 node=registration.superseded_root,
                 request=request,
             )
-            self._replace_terminal_node(registration.superseded_root)
-        for hollow in registration.hollow_terminals:
-            self._replace_terminal_node(hollow)
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
+        bundle = self._require_bundle(request)
+        submission_open = request.submission_open
+        for terminal in registration.replaced_terminals:
+            self._replace_terminal_node(terminal)
         for planned, profile_step_index in registration.new_nodes:
             self._nodes[planned.scope] = ComputeNodeRun(
                 scope=planned.scope,
@@ -413,20 +413,25 @@ class OrchestratorSubmissionMixin:
         """Join ``existing`` for ``request``, and schedule a dispatch pass.
 
         Caller holds the orchestrator lock. Refuses an ended requester first.
-        A ``force_fresh`` join resolves readiness once: a parked node wakes;
+        A ``force_fresh`` join emits ``force_fresh_attach`` before the pass is
+        scheduled, so the event precedes the joined execution's step events.
+        The pass is scheduled before readiness changes, so a raising
+        ready-queue listener still leaves the node with a pass. A
+        ``force_fresh`` join then resolves readiness once: a parked node wakes;
         a waiting or ready node is refreshed, since its dependencies may have
         settled without reaching it (e.g. evidence-close ``force_fresh`` after
         scores completed); a running node is left alone. The request raises
         only the joined scope's standing band.
         """
         self._refuse_ended_requester(request)
-        self._observers.schedule_post_lock(self.dispatch_ready_work)
         if request.force_fresh:
             self._emit_force_fresh_lifecycle(
                 kind="force_fresh_attach",
                 node=existing,
                 request=request,
             )
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
+        if request.force_fresh:
             if existing.state == "parked":
                 self._wake_parked_node(existing)
             else:
