@@ -51,8 +51,8 @@ class OrchestratorStepExecutionMixin:
     ``_compute_registry``, ``_pool_submitter``, ``_ctx_for_node``,
     ``_complete_node``, ``_fail_node``, ``_refuse_step_exit``,
     ``_finish_step``, ``_running_execution``, ``_running_execution_or_record_ignored``,
-    ``_deps_complete``, ``_enqueue_ready``, ``_ready_depth``, and
-    ``_notify_ready_queue_changed``.
+    ``_deps_complete``, ``_refresh_all_readiness``, ``_refresh_node_readiness``,
+    ``_ready_depth``, and ``_notify_ready_queue_changed``.
     """
 
     def _run_dispatch_pass(self, *, refresh_all: bool = False) -> bool:
@@ -435,7 +435,8 @@ class OrchestratorStepExecutionMixin:
         A submitter that returns has accepted the item, which then belongs to
         the pool, so the submission is marked handed on in the next hold.
         Dispatch commits pool work only while a ``pool_submitter`` is
-        configured, and requeues it otherwise.
+        configured; otherwise it leaves the pool step in the ready queue at
+        its position and ends the pass.
         """
         for submission in pending:
             node = submission.node
