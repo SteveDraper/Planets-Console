@@ -41,12 +41,9 @@ class PendingStep:
     registration: AnalyticComputeRegistration
     step: ComputeStepSpec
     job_wire_kwargs: BuildStepJobWireKwargs
+    # The node execution this attempt was dispatched for.
+    execution_generation: int
     is_finish_applied: bool = False
-
-    @property
-    def execution_generation(self) -> int:
-        """The node execution this attempt was dispatched for."""
-        return self.job_wire_kwargs["execution_generation"]
 
 
 @dataclass(eq=False)

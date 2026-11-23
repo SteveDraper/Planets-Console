@@ -208,6 +208,7 @@ def _no_root_plan_action() -> None:
 
 @dataclass(frozen=True)
 class _ArmedRootPlanActions:
+    for_scope: ComputeScope | None
     on_enter: RootPlanAction
     on_accept_plan: RootPlanAction
     on_exit: RootPlanAction
@@ -234,8 +235,9 @@ class ArmableRootPlanHook:
 
     Install it as a registration's ``open_root_plan``. Unarmed, it behaves as
     :func:`open_ignored_root_plan`. :meth:`arm` sets actions for the next
-    submission rooted at that analytic; the hook disarms as it opens that
-    plan, so a submission an action makes opens an unarmed plan.
+    submission rooted at that analytic, or with ``for_scope`` at that one
+    scope; the hook disarms as it opens that plan, so a submission an action
+    makes opens an unarmed plan.
 
     ``on_enter`` runs as the plan opens, outside the orchestrator lock and
     before the dependency chain is prepared, so it may submit or abort.
@@ -251,11 +253,12 @@ class ArmableRootPlanHook:
     def arm(
         self,
         *,
+        for_scope: ComputeScope | None = None,
         on_enter: RootPlanAction = _no_root_plan_action,
         on_accept_plan: RootPlanAction = _no_root_plan_action,
         on_exit: RootPlanAction = _no_root_plan_action,
     ) -> None:
-        self._armed = _ArmedRootPlanActions(on_enter, on_accept_plan, on_exit)
+        self._armed = _ArmedRootPlanActions(for_scope, on_enter, on_accept_plan, on_exit)
 
     def __call__(
         self,
@@ -263,10 +266,11 @@ class ArmableRootPlanHook:
         submission_open: SubmissionOpen,
         ctx: AnalyticQueryContext,
     ) -> AbstractContextManager[RootPlan]:
-        actions, self._armed = self._armed, None
         ignored = open_ignored_root_plan(scope, submission_open, ctx)
-        if actions is None:
+        actions = self._armed
+        if actions is None or actions.for_scope not in (None, scope):
             return ignored
+        self._armed = None
         return _acting_root_plan(ignored, actions)
 
 

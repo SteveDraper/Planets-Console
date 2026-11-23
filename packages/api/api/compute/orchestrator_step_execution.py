@@ -60,8 +60,12 @@ class OrchestratorStepExecutionMixin:
         lock is released, even when the pass raised partway, so every node the
         pass marked ``running`` gets its inline run or pool item. With
         ``refresh_all``, every node's readiness is refreshed first in the
-        same hold. Returns whether any node is running when the pass ends,
-        read in that hold.
+        same hold, so the pass dispatches exactly what that refresh made
+        ready. Returns whether any node is running when the pass ends, read
+        in that hold. ``run_until_idle`` is the one caller that uses either: it
+        checks for pending work in an earlier hold of its own, and anything
+        that changes before the pass's hold is simply what the pass refreshes
+        and dispatches.
         """
         work = DispatchedWork()
         try:
@@ -82,8 +86,12 @@ class OrchestratorStepExecutionMixin:
         is the node marked ``running`` and its record appended, which cannot
         raise. So a node is ``running`` only once its record is in ``work``.
         A raise while preparing one node fails that node and the pass goes on.
-        A dispatch gate or commit hook that raises ends the pass with the
-        error; records already committed stay in ``work``.
+        A pool step with no ``pool_submitter`` configured is requeued after
+        the short-circuit and ends the pass; the requeue is not preparation,
+        so a ready-queue listener that raises there ends the pass with the
+        error instead of failing the node. A dispatch gate or commit hook that
+        raises ends the pass the same way; records already committed stay in
+        ``work``.
 
         Job-wire construction and execution happen only after the caller
         releases the lock. The pass starts by deriving every non-terminal
@@ -101,11 +109,15 @@ class OrchestratorStepExecutionMixin:
                 step = self._current_step_spec(node, registration)
                 if self._maybe_short_circuit_satisfied(node, registration):
                     continue
-                is_pool_step = step.backend != "inline"
-                if is_pool_step and self._pool_submitter is None:
-                    # Cannot run yet; re-enqueue and stop this dispatch pass.
-                    self._enqueue_ready(scope)
-                    break
+            except Exception as exc:
+                self._fail_unstarted_node(node, exc)
+                continue
+            is_pool_step = step.backend != "inline"
+            if is_pool_step and self._pool_submitter is None:
+                # Cannot run yet; re-enqueue and stop this dispatch pass.
+                self._enqueue_ready(scope)
+                break
+            try:
                 if self._refuse_step_exit(node, StepExit.START):
                     continue
                 generation_at_submit = registration.persistence_policy.invalidation_generation(
@@ -119,9 +131,17 @@ class OrchestratorStepExecutionMixin:
             node.state = "running"
             node.generation_at_submit = generation_at_submit
             if is_pool_step:
-                work.pool.append(PendingPoolSubmission(node, registration, step, job_wire_kwargs))
+                work.pool.append(
+                    PendingPoolSubmission(
+                        node, registration, step, job_wire_kwargs, node.execution_generation
+                    )
+                )
                 break
-            work.inline.append(PendingInlineExecution(node, registration, step, job_wire_kwargs))
+            work.inline.append(
+                PendingInlineExecution(
+                    node, registration, step, job_wire_kwargs, node.execution_generation
+                )
+            )
         # Cover successful pops and ready→waiting_deps drops. ``_enqueue_ready`` /
         # ``_dequeue_ready`` notify on their own paths; this catches dispatch-only leaves.
         if self._ready_depth() != initial_ready_depth:

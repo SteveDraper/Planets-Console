@@ -114,6 +114,14 @@ class TerminalRootReuse(Enum):
 
 
 @dataclass(frozen=True)
+class NewNode:
+    """A planned node a fresh root registers, with its resolved profile step index."""
+
+    planned: PlannedComputeNode
+    profile_step_index: int
+
+
+@dataclass(frozen=True)
 class RootRegistration:
     """Everything a fresh root will change, decided before its root plan accepts it.
 
@@ -128,8 +136,8 @@ class RootRegistration:
     # Every terminal node to replace: the existing root (superseded or an
     # ensure's hollow root), and planned dependencies whose durable result is gone.
     replaced_terminals: tuple[ComputeNodeRun, ...]
-    # Planned nodes to register, each with its resolved profile step index.
-    new_nodes: tuple[tuple[PlannedComputeNode, int], ...]
+    # Planned nodes to register.
+    new_nodes: tuple[NewNode, ...]
     # An empty plan for the root registers a synthetic ``complete`` root.
     needs_complete_root: bool
 
@@ -329,7 +337,7 @@ class OrchestratorSubmissionMixin:
             perspective=bundle.perspective,
         )
         replaced_terminals: list[ComputeNodeRun] = []
-        new_nodes: list[tuple[PlannedComputeNode, int]] = []
+        new_nodes: list[NewNode] = []
         for planned in planned_nodes:
             registration = self._compute_registry[planned.scope.analytic_id]
             is_root = planned.scope == root_scope
@@ -342,7 +350,7 @@ class OrchestratorSubmissionMixin:
                 replaced_terminals.append(existing)
             entry_step_kind = request.step_kind if is_root else None
             new_nodes.append(
-                (planned, self._resolve_profile_step_index(registration, entry_step_kind))
+                NewNode(planned, self._resolve_profile_step_index(registration, entry_step_kind))
             )
         if existing_root is not None:
             replaced_terminals.append(existing_root)
@@ -351,7 +359,7 @@ class OrchestratorSubmissionMixin:
             superseded_root=existing_root if request.force_fresh else None,
             replaced_terminals=tuple(replaced_terminals),
             new_nodes=tuple(new_nodes),
-            needs_complete_root=all(planned.scope != root_scope for planned, _ in new_nodes),
+            needs_complete_root=all(new_node.planned.scope != root_scope for new_node in new_nodes),
         )
 
     def _apply_root_registration(
@@ -379,11 +387,11 @@ class OrchestratorSubmissionMixin:
         submission_open = request.submission_open
         for terminal in registration.replaced_terminals:
             self._replace_terminal_node(terminal)
-        for planned, profile_step_index in registration.new_nodes:
-            self._nodes[planned.scope] = ComputeNodeRun(
-                scope=planned.scope,
-                dependency_scopes=planned.dependency_scopes,
-                profile_step_index=profile_step_index,
+        for new_node in registration.new_nodes:
+            self._nodes[new_node.planned.scope] = ComputeNodeRun(
+                scope=new_node.planned.scope,
+                dependency_scopes=new_node.planned.dependency_scopes,
+                profile_step_index=new_node.profile_step_index,
                 execution_generation=self._allocate_execution_generation(),
                 bundle=bundle,
                 submission_open=submission_open,

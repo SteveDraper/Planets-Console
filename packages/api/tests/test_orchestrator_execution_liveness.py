@@ -36,6 +36,7 @@ from api.compute.wire import StepResult
 
 from tests.compute_lifecycle_records import kinds_and_reasons, record_lifecycle
 from tests.compute_orchestrator_fixtures import (
+    RecordingPoolSubmitter,
     StubPersistencePolicy,
     make_compute_scope,
     make_export_scope,
@@ -93,7 +94,7 @@ class _PersistDeferredHarness:
                 step_kind="materialize",
             )
         )
-        self.pool_submissions: list[ComputeScope] = []
+        self.pool_submitter = RecordingPoolSubmitter()
         self.orchestrator = ComputeOrchestrator(
             compute_registry=build_compute_registry(
                 (
@@ -105,7 +106,7 @@ class _PersistDeferredHarness:
                     ),
                 )
             ),
-            pool_submitter=lambda node, _step, **_kwargs: self.pool_submissions.append(node.scope),
+            pool_submitter=self.pool_submitter,
         )
         self.refusals = record_lifecycle(self.orchestrator, ("dependency_submit_refused",))
 
@@ -138,7 +139,7 @@ class _PersistDeferredHarness:
         assert self.node(self.branch_b_scope).state == "running"
         completed_shared = self.node(self.shared_scope)
         assert completed_shared.state == "complete"
-        self.pool_submissions.clear()
+        self.pool_submitter.submissions.clear()
         return completed_shared
 
     def finish_branch_b_with_persist(self) -> None:
@@ -170,7 +171,7 @@ def test_t11a_persist_deferred_recovery_submits_its_dependency_while_the_request
     assert replanned_shared is not completed_shared
     assert replanned_shared.execution_generation > completed_shared.execution_generation
     assert replanned_shared.state == "running"
-    assert harness.pool_submissions == [harness.shared_scope]
+    assert harness.pool_submitter.submissions == [(harness.shared_scope, "materialize")]
     assert harness.refusals == []
 
 
@@ -191,7 +192,7 @@ def test_t11b_an_abort_before_the_queued_dependency_submit_plans_nothing(sample_
     assert harness.node(harness.branch_b_scope).error is _ABORT
     assert harness.node(harness.shared_scope) is completed_shared
     assert completed_shared.state == "complete"
-    assert harness.pool_submissions == []
+    assert harness.pool_submitter.submissions == []
     harness.assert_one_refused_shared_submit(dependency_step_kind="materialize")
 
 
@@ -244,7 +245,7 @@ def test_t11c_an_abort_during_the_dependency_chain_fetch_plans_nothing(sample_tu
     assert harness.node(harness.branch_b_scope).error is _ABORT
     assert harness.node(harness.shared_scope) is completed_shared
     assert completed_shared.state == "complete"
-    assert harness.pool_submissions == []
+    assert harness.pool_submitter.submissions == []
     harness.assert_one_refused_shared_submit(dependency_step_kind="materialize")
 
 
@@ -256,7 +257,7 @@ def test_recreating_an_abort_failed_dependency_plans_nothing_once_its_requester_
     harness.finish_branch_b_with_persist()
     assert harness.orchestrator.abort_scope(harness.shared_scope, _ABORT)
     aborted_shared = harness.node(harness.shared_scope)
-    harness.pool_submissions.clear()
+    harness.pool_submitter.submissions.clear()
     submit = harness.orchestrator.submit
 
     def abort_requester_then_submit(request: ComputeRequest):
@@ -271,7 +272,7 @@ def test_recreating_an_abort_failed_dependency_plans_nothing_once_its_requester_
 
     assert harness.node(harness.branch_b_scope).error is _ABORT
     assert harness.node(harness.shared_scope) is aborted_shared
-    assert harness.pool_submissions == []
+    assert harness.pool_submitter.submissions == []
     harness.assert_one_refused_shared_submit(dependency_step_kind=None)
 
 

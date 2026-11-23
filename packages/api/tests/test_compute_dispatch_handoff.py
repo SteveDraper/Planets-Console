@@ -26,11 +26,12 @@ from tests.compute_orchestrator_fixtures import (
     make_export_scope,
     pool_compute_registration,
 )
-from tests.fixtures.export_framework.diamond_exports import SHARED_ID
+from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
+from tests.fixtures.export_framework.state import FIXTURE_EXPORT_STATE
 
 
 class _PrepareError(RuntimeError):
@@ -91,26 +92,55 @@ def test_a_generation_read_that_raises_fails_that_node_and_the_pass_continues(sa
     assert orchestrator.nodes[second].state == "complete"
 
 
-def test_a_wire_snapshot_that_raises_fails_that_node_and_the_pass_continues(
-    sample_turn, monkeypatch
+class _SatisfiedAtPolicy(StubPersistencePolicy):
+    """Durable satisfaction holds for ``satisfied_scope`` only."""
+
+    def __init__(self, satisfied_scope) -> None:
+        self.satisfied_scope = satisfied_scope
+
+    def is_satisfied(self, _ctx, scope) -> bool:
+        return scope == self.satisfied_scope
+
+
+def test_a_dependency_complete_without_a_result_wire_fails_its_dependent_and_the_pass_continues(
+    sample_turn,
 ):
-    first, second = _two_shared_scopes(sample_turn)
-    orchestrator = _inline_shared(StubPersistencePolicy())
-    _hold_and_submit(orchestrator, _ctx(sample_turn), (first, second))
-    real_snapshot = orchestrator._snapshot_job_wire_kwargs
+    """The job-wire snapshot raises for a dependent whose dependency has no result wire.
 
-    def snapshot(node):
-        if node.scope == first:
-            raise _PrepareError("snapshot failed")
-        return real_snapshot(node)
-
-    monkeypatch.setattr(orchestrator, "_snapshot_job_wire_kwargs", snapshot)
+    A root whose export is already ensured plans nothing and registers a
+    synthetic ``complete`` node with no result wire. Once that export is
+    gone, a dependent plans the scope as a dependency again, but the node is
+    kept because its durable result still holds, so the dependent becomes
+    ready on a dependency with nothing to snapshot.
+    """
+    export_scope = make_export_scope(sample_turn)
+    shared, other_shared = _two_shared_scopes(sample_turn)
+    dependent = make_compute_scope(BRANCH_B_ID, export_scope)
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry(
+            (
+                replace(
+                    inline_compute_registration(SHARED_ID),
+                    persistence_policy=_SatisfiedAtPolicy(shared),
+                ),
+                inline_compute_registration(BRANCH_B_ID),
+            )
+        )
+    )
+    ctx = _ctx(sample_turn)
+    FIXTURE_EXPORT_STATE.mark_persisted(SHARED_ID, export_scope)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=shared))
+    assert orchestrator.nodes[shared].state == "complete"
+    assert orchestrator.nodes[shared].result_wire is None
+    FIXTURE_EXPORT_STATE.persisted.discard((SHARED_ID, export_scope))
+    _hold_and_submit(orchestrator, ctx, (dependent, other_shared))
+    assert orchestrator.nodes[dependent].dependency_scopes == (shared,)
 
     orchestrator.dispatch_ready_work()
 
-    assert orchestrator.nodes[first].state == "failed"
-    assert isinstance(orchestrator.nodes[first].error, _PrepareError)
-    assert orchestrator.nodes[second].state == "complete"
+    assert orchestrator.nodes[dependent].state == "failed"
+    assert "without a result wire" in str(orchestrator.nodes[dependent].error)
+    assert orchestrator.nodes[other_shared].state == "complete"
 
 
 class _ListenerError(RuntimeError):

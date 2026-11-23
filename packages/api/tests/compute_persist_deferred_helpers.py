@@ -28,6 +28,7 @@ from api.compute.wire import StepResult
 from tests.compute_orchestrator_fixtures import (
     ArmableRootPlanHook,
     RecordingPersistencePolicy,
+    RecordingPoolSubmitter,
     inline_compute_registration,
     make_compute_scope,
     make_export_scope,
@@ -77,10 +78,6 @@ class RunningBranch:
     shared_root_plan: ArmableRootPlanHook
 
 
-def _hold_pool_steps(node, step, **_kwargs) -> None:
-    del node, step
-
-
 def running_branch(
     sample_turn, *, extra_registrations: tuple[TurnAnalyticRegistration, ...] = ()
 ) -> RunningBranch:
@@ -114,7 +111,9 @@ def running_branch(
             *extra_registrations,
         )
     )
-    orchestrator = ComputeOrchestrator(compute_registry=registry, pool_submitter=_hold_pool_steps)
+    orchestrator = ComputeOrchestrator(
+        compute_registry=registry, pool_submitter=RecordingPoolSubmitter()
+    )
     shared = make_compute_scope(SHARED_ID, export_scope)
     branch = make_compute_scope(BRANCH_B_ID, export_scope)
     root = make_compute_scope(ROOT_ID, export_scope)

@@ -96,7 +96,7 @@ class OrchestratorEnsureMixin:
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
             try:
-                self._submit_unsatisfied_roots(resolved_unsatisfied, handles_by_index)
+                handles_by_index |= self._submit_unsatisfied_roots(resolved_unsatisfied)
             finally:
                 self._observers.drain_post_lock_callbacks()
 
@@ -108,12 +108,12 @@ class OrchestratorEnsureMixin:
     def _submit_unsatisfied_roots(
         self: ComputeOrchestrator,
         resolved_unsatisfied: Sequence[tuple[int, ResolvedComputeRequest]],
-        handles_by_index: dict[int, ComputeHandle],
-    ) -> None:
+    ) -> dict[int, ComputeHandle]:
         """Open every root plan, then register every root in one lock hold.
 
-        Each registered root schedules its own dispatch pass; the caller
-        drains them after the root plans close, even when one raises.
+        Returns each root's handle by its request index. Each registered root
+        schedules its own dispatch pass; the caller drains them after the root
+        plans close, even when one raises.
         """
         with ExitStack() as root_plans:
             opened_unsatisfied = [
@@ -125,7 +125,9 @@ class OrchestratorEnsureMixin:
                 for index, resolved, root_plan in opened_unsatisfied
             ]
             with self._condition:
-                for index, planned_request, root_plan in planned_unsatisfied:
-                    handles_by_index[index] = self._submit_locked(
+                return {
+                    index: self._submit_locked(
                         planned_request, root_plan, TerminalRootReuse.REPLACE_TERMINAL
                     )
+                    for index, planned_request, root_plan in planned_unsatisfied
+                }
