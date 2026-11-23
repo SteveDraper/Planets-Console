@@ -431,9 +431,8 @@ def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sam
     """Parked ENSURE deps do not auto-wake; dependents wait for a real publisher.
 
     Soft-park is intentionally non-complete, so fleet-style dependents stay
-    ``waiting_deps``. Progress requires an explicit ``force_fresh`` wake (analytic
-    ``wake_scores_scope``, evidence close, RowRun adopt, or PersistDeferred) --
-    not an orchestrator demand redispath.
+    ``waiting_deps``. Progress requires an explicit ``force_fresh`` wake from the
+    analytic -- not an orchestrator demand redispatch.
     """
     ctx = make_fixture_query_context(
         sample_turn,
@@ -446,7 +445,7 @@ def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sam
         nonlocal shared_calls
         shared_calls += 1
         if shared_calls == 1:
-            return StepResult(outcome="park", park_reason="scores_empty_tier_outcome")
+            return StepResult(outcome="park", park_reason="fixture_park")
         return {"result": SHARED_ID}
 
     registry = build_compute_registry(
@@ -476,7 +475,7 @@ def test_parked_ensure_dependency_stays_idle_until_explicit_force_fresh_wake(sam
 
     assert shared_calls == 1
     assert orchestrator.nodes[shared_scope].state == "parked"
-    assert orchestrator.nodes[shared_scope].park_reason == "scores_empty_tier_outcome"
+    assert orchestrator.nodes[shared_scope].park_reason == "fixture_park"
     assert orchestrator.nodes[branch_b_scope].state == "waiting_deps"
     assert handle.state == "waiting_deps"
 
@@ -503,7 +502,7 @@ def test_parked_ensure_dependency_second_park_also_needs_explicit_wake(sample_tu
         nonlocal shared_calls
         shared_calls += 1
         if shared_calls <= 2:
-            return StepResult(outcome="park", park_reason="scores_empty_tier_outcome")
+            return StepResult(outcome="park", park_reason="fixture_park")
         return {"result": SHARED_ID}
 
     registry = build_compute_registry(

@@ -19,6 +19,7 @@ from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator
 from api.compute.registry import build_compute_registry
 from api.compute.scope import ComputeScope, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
+from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.fleet_exports_helpers import host_turn_at
@@ -82,9 +83,15 @@ def write_evidence_mark(
     persistence.update_evidence_mark(game_id, perspective, player_id, lambda _: mark)
 
 
-def context_at_turn(sample_turn, turn_number: int):
+def context_at_turn(
+    sample_turn,
+    turn_number: int,
+    *,
+    persistence: InferenceRowPersistenceService | None = None,
+):
+    """Host turn ``turn_number`` and its context; scores rows go to ``persistence``, if any."""
     host, stored = host_turn_at(sample_turn, turn_number)
-    ctx = export_chain_query_context(host, stored_turns=stored)
+    ctx = export_chain_query_context(host, persistence=persistence, stored_turns=stored)
     return host, ctx
 
 

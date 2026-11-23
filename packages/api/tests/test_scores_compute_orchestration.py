@@ -26,7 +26,10 @@ from api.analytics.fleet.types import (
     PersistedFleetLedger,
 )
 from api.analytics.military_score_inference.analytic import build_inference_observation
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+    TierJobRowComplete,
+)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     _query_context_for_session,
@@ -57,6 +60,7 @@ from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
     _retire_row_run,
     get_row_run_for_scope,
+    new_tier_row_run,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
@@ -70,7 +74,7 @@ from api.compute import (
     compute_scope_to_export_scope,
 )
 from api.compute.dag import plan_compute_dag
-from api.compute.submission_open import SubmissionOpen
+from api.exceptions import ScoresTierOutcomeError
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
@@ -125,7 +129,7 @@ def _scores_scope(sample_turn, player_id: int) -> ComputeScope:
 
 def _register_run(sample_turn, *, player_id: int | None = None) -> RowRun:
     session = _session_for_player(sample_turn, player_id=player_id)
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     return run
 
@@ -152,14 +156,12 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
     run = _register_run(sample_turn)
     job_wire = {"runId": run.run_id, "onWalk": True}
 
-    continue_result = tier_job_outcome_to_step_result(
-        run, TierJobOutcome(enqueue_continuation=True), job_wire
-    )
+    continue_result = tier_job_outcome_to_step_result(run, TierJobContinue(), job_wire)
     assert continue_result.outcome == "continue"
 
     persist_result = tier_job_outcome_to_step_result(
         run,
-        TierJobOutcome(
+        TierJobRowComplete(
             row_complete=row_complete_with_summary(
                 InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
                 summary="exact",
@@ -173,7 +175,7 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
 
     stopped_result = tier_job_outcome_to_step_result(
         run,
-        TierJobOutcome(
+        TierJobRowComplete(
             row_complete=row_complete_with_summary(
                 InferenceResult(status=STATUS_STOPPED, solutions=(), diagnostics={}),
                 summary="stopped",
@@ -184,10 +186,19 @@ def test_tier_job_outcome_mapping(sample_turn) -> None:
     # Stopped closes turn evidence when durable -- persist, do not soft-complete.
     assert stopped_result.outcome == "persist"
 
-    empty_result = tier_job_outcome_to_step_result(run, TierJobOutcome(), job_wire)
-    # Empty terminals must not DAG-complete (unlocks fleet with open evidence).
-    assert empty_result.outcome == "waiting_deps"
-    assert empty_result.wait_recovery is None
+    with pytest.raises(ScoresTierOutcomeError) as raised:
+        tier_job_outcome_to_step_result(
+            run,
+            TierJobRowComplete(
+                row_complete=row_complete_with_summary(
+                    InferenceResult(status="pending", solutions=(), diagnostics={}),
+                    summary="not durable",
+                ),
+            ),
+            job_wire,
+        )
+    assert raised.value.run_id == run.run_id
+    assert raised.value.status == "pending"
 
 
 def test_run_scores_materialize_continues_to_tier_solve() -> None:
@@ -294,7 +305,7 @@ def test_build_scores_tier_solve_job_wire_skips_only_when_evidence_closed(
     )
 
     # Open evidence + ensure still needs work (schedule patched away): hard fail --
-    # not empty-complete, and not a soft defer without an armed wake publisher.
+    # not empty-complete, and not a wait without an armed wake publisher.
     with patch("api.analytics.scores.exports.schedule_inference_row"):
         with pytest.raises(RuntimeError, match="invariant broken"):
             build_scores_tier_solve_job_wire(
@@ -1046,7 +1057,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
     )
     assert tier_wire.get("runId") is not None
 
-    outcome = TierJobOutcome(
+    outcome = TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary="historical persist via orchestrator",
@@ -1288,7 +1299,7 @@ def test_scores_persistence_policy_persist_delegates_to_inference_service(
 
 def test_run_scores_tier_solve_returns_orchestrator_outcome(sample_turn) -> None:
     run = _register_run(sample_turn)
-    outcome = TierJobOutcome(
+    outcome = TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
             summary="terminal",
@@ -1362,7 +1373,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         turn=sample_turn.settings.turn,
         player_id=run.session.player_id,
     )
-    terminal = TierJobOutcome(
+    terminal = TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary="done",
@@ -1382,149 +1393,6 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
 
     assert handle.state == "complete", handle.error
     assert handle.result_wire is not None
-
-
-def test_orchestrator_waits_empty_soft_terminal_without_redispatch(sample_turn) -> None:
-    """Empty tier soft-defers to waiting_deps; force_fresh wake re-queues work.
-
-    Soft defer must not graft the scores scope onto its own dependency_scopes --
-    that self-edge leaves ``_deps_complete`` false forever so force_fresh attach
-    cannot promote the node out of waiting_deps.
-    """
-    from api.analytics.catalog import TurnAnalyticCatalogEntry
-    from api.analytics.exports.catalog import AnalyticExportCatalog
-    from api.analytics.exports.registry import EXPORT_REGISTRY
-    from api.analytics.registration import TurnAnalyticRegistration
-    from api.compute import AnalyticComputeProfile, ComputeStepSpec
-
-    tier_catalog = AnalyticExportCatalog(
-        analytic_id="scores-tier-probe",
-        is_ensure_satisfied=lambda _ctx, _scope: False,
-    )
-    run = _register_run(sample_turn)
-    ctx = make_analytic_query_context(
-        sample_turn,
-        TurnAnalyticsOptions(),
-        export_registry={**EXPORT_REGISTRY, "scores-tier-probe": tier_catalog},
-        export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
-        game_id=sample_turn.game.id,
-        perspective=sample_turn.player.id,
-        read_backfill_earlier_turns=backfill_earlier_turns_disabled,
-    )
-    tier_registration = TurnAnalyticRegistration(
-        catalog_entry=TurnAnalyticCatalogEntry(
-            id="scores-tier-probe",
-            name="scores-tier-probe",
-            supports_table=True,
-            supports_map=False,
-            type="selectable",
-        ),
-        compute=lambda _ctx: {"analyticId": "scores-tier-probe"},
-        export_catalog=tier_catalog,
-        scope_key_spec=SCORES_REGISTRATION.scope_key_spec,
-        compute_profile=AnalyticComputeProfile(
-            steps=(ComputeStepSpec(step_kind=SCORES_TIER_SOLVE, backend="thread"),),
-        ),
-        persistence_policy=SCORES_REGISTRATION.persistence_policy,
-        build_step_job_wires=((SCORES_TIER_SOLVE, build_scores_tier_solve_job_wire),),
-        run_steps=((SCORES_TIER_SOLVE, run_scores_tier_solve),),
-    )
-    compute_registry = build_compute_registry((tier_registration,))
-    submitted_scopes: list[ComputeScope] = []
-
-    def pool_submitter(node, step, **_kwargs) -> None:
-        del step
-        submitted_scopes.append(node.scope)
-
-    orchestrator = ComputeOrchestrator(
-        compute_registry=compute_registry,
-        pool_submitter=pool_submitter,
-    )
-    scope = ComputeScope(
-        analytic_id="scores-tier-probe",
-        game_id=628580,
-        perspective=1,
-        turn=sample_turn.settings.turn,
-        player_id=run.session.player_id,
-    )
-    defer_notifications: list[str] = []
-
-    def record_outcome(snapshot) -> None:
-        if snapshot.scope.analytic_id == "scores-tier-probe":
-            defer_notifications.append(snapshot.state)
-
-    unregister = orchestrator.observers.register_scope_outcome_listener(
-        record_outcome,
-    )
-
-    with patch(
-        "api.analytics.scores.compute_orchestration.run_inference_tier_job",
-        return_value=TierJobOutcome(),
-    ):
-        handle = orchestrator.submit(
-            ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE),
-        )
-        assert submitted_scopes == [scope]
-        result_wire = run_scores_tier_solve(
-            {
-                "runId": run.run_id,
-                "gameId": scope.game_id,
-                "perspective": scope.perspective,
-                "turn": scope.turn,
-                "playerId": scope.player_id,
-            }
-        )
-        assert result_wire.outcome == "waiting_deps"
-        assert result_wire.wait_recovery is None
-        complete_running_pool_step(orchestrator, scope, result_wire=result_wire)
-
-    unregister()
-    node = orchestrator.nodes[scope]
-    assert node.state == "waiting_deps"
-    assert handle.state == "waiting_deps"
-    assert scope not in node.dependency_scopes
-    assert defer_notifications == []
-    assert submitted_scopes == [scope]
-    assert orchestrator.metrics.epoch_discards == 1
-    # Soft park must not satisfy dependents the way complete would.
-    from api.compute.orchestrator import ComputeNodeRun
-
-    dependent = ComputeNodeRun(
-        scope=ComputeScope(
-            analytic_id="fleet-probe",
-            game_id=scope.game_id,
-            perspective=scope.perspective,
-            turn=scope.turn,
-            player_id=scope.player_id,
-        ),
-        dependency_scopes=(scope,),
-        state="waiting_deps",
-        submission_open=SubmissionOpen(),
-    )
-    assert orchestrator._deps_complete(dependent) is False
-
-    submits_before_wake = len(submitted_scopes)
-    with patch(
-        "api.analytics.scores.compute_orchestration.run_inference_tier_job",
-        return_value=TierJobOutcome(
-            row_complete=row_complete_with_summary(
-                InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
-                summary="done",
-            ),
-        ),
-    ):
-        orchestrator.submit(
-            ComputeRequest(
-                ctx=ctx,
-                scope=scope,
-                step_kind=SCORES_TIER_SOLVE,
-                force_fresh=True,
-            ),
-        )
-
-    assert len(submitted_scopes) > submits_before_wake
-    assert node.state in {"ready", "running"}
-    assert scope not in node.dependency_scopes
 
 
 def test_orchestrator_entry_tier_solve_dispatches_with_registered_scheduler_row(
@@ -1694,131 +1562,3 @@ def test_enqueue_tier_ladder_requires_query_context_to_submit(sample_turn) -> No
             scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
     finally:
         scheduler.detach_inference_stream(scope, (), stream_token=stream_token)
-
-
-def test_row_run_adopt_refreshes_waiting_scores_node(sample_turn, persistence) -> None:
-    """Background RowRun register must force_fresh-refresh a waiting_deps scores node."""
-    from api.analytics.military_score_inference.inference_scheduler import (
-        reset_inference_row_scheduler_for_tests,
-    )
-    from api.analytics.scores.compute_orchestration import wake_scores_scope
-    from api.analytics.scores_defer_wake import ScoresWakeReason
-    from api.compute import runtime as compute_runtime
-    from api.compute.orchestrator import ComputeNodeRun
-    from api.compute.runtime import reset_orchestrators_for_tests
-
-    reset_orchestrators_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    reset_tier_row_run_registry_for_tests()
-
-    player_id = sample_turn.scores[0].ownerid
-    scheduler = InferenceRowScheduler(defer_orchestrator_submit=False)
-    ctx = export_chain_query_context(
-        sample_turn,
-        persistence=persistence,
-        scheduler=scheduler,
-        seed_fleet_prerequisites_for=player_id,
-    )
-    scope = _scores_scope(sample_turn, player_id)
-    compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
-    submitted_scopes: list[ComputeScope] = []
-
-    def pool_submitter(node, step, **_kwargs) -> None:
-        del step
-        submitted_scopes.append(node.scope)
-
-    orchestrator = ComputeOrchestrator(
-        compute_registry=compute_registry,
-        pool_submitter=pool_submitter,
-    )
-    compute_runtime._process_orchestrator = orchestrator
-
-    waiting = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="waiting_deps",
-        profile_step_index=1,
-        step_index=1,
-        bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
-        submission_open=SubmissionOpen(),
-    )
-    orchestrator._nodes[scope] = waiting
-
-    assert (
-        wake_scores_scope(
-            scope,
-            ctx=ctx,
-            reason=ScoresWakeReason.ROW_RUN_ADOPTED,
-        )
-        is True
-    )
-    assert waiting.state in {"ready", "running"}
-    assert submitted_scopes == [scope]
-
-    submitted_scopes.clear()
-    assert (
-        wake_scores_scope(
-            scope,
-            ctx=ctx,
-            reason=ScoresWakeReason.ROW_RUN_ADOPTED,
-        )
-        is False
-    )
-    assert submitted_scopes == []
-
-
-def test_enqueue_without_stream_token_wakes_parked_scores_node(
-    sample_turn,
-    persistence,
-) -> None:
-    """enqueue_tier_ladder with no stream token still wakes a parked scores DAG."""
-    from api.analytics.military_score_inference.inference_scheduler import (
-        reset_inference_row_scheduler_for_tests,
-    )
-    from api.compute import runtime as compute_runtime
-    from api.compute.orchestrator import ComputeNodeRun
-    from api.compute.runtime import reset_orchestrators_for_tests
-
-    reset_orchestrators_for_tests()
-    reset_inference_row_scheduler_for_tests()
-    reset_tier_row_run_registry_for_tests()
-
-    player_id = sample_turn.scores[0].ownerid
-    scheduler = InferenceRowScheduler(defer_orchestrator_submit=False)
-    ctx = export_chain_query_context(
-        sample_turn,
-        persistence=persistence,
-        scheduler=scheduler,
-        seed_fleet_prerequisites_for=player_id,
-    )
-    session = _session_for_player(sample_turn, player_id=player_id, query_context=ctx)
-    scope = _scores_scope(sample_turn, player_id)
-    compute_registry = build_compute_registry((FLEET_REGISTRATION, SCORES_REGISTRATION))
-    submitted_scopes: list[ComputeScope] = []
-
-    def pool_submitter(node, step, **_kwargs) -> None:
-        del step
-        submitted_scopes.append(node.scope)
-
-    orchestrator = ComputeOrchestrator(
-        compute_registry=compute_registry,
-        pool_submitter=pool_submitter,
-    )
-    compute_runtime._process_orchestrator = orchestrator
-    parked = ComputeNodeRun(
-        scope=scope,
-        dependency_scopes=(),
-        state="parked",
-        profile_step_index=1,
-        step_index=1,
-        bundle=ComputeRequest(ctx=ctx, scope=scope).resolved_bundle(),
-        submission_open=SubmissionOpen(),
-    )
-    orchestrator._nodes[scope] = parked
-
-    # No active stream token: background ensure path registers RowRun and must wake.
-    scheduler.enqueue_tier_ladder(session, stream_token=None)
-
-    assert parked.state in {"ready", "running"}
-    assert submitted_scopes == [scope]
-    assert get_row_run_for_scope(scope) is not None

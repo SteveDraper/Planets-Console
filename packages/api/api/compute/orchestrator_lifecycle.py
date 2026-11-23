@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING, Literal
 
 from api.analytics.export_dependency_walk import walkable_export_catalog
 from api.compute.dag_reach import needed_scopes
-from api.compute.errors import ComputeScopeAbortedError
+from api.compute.errors import ComputeScopeAbortedError, PersistDependencyRecoveryExhaustedError
 from api.compute.orchestrator_observers import LifecycleEventKind
-from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest
+from api.compute.orchestrator_state import ComputeNodeRun, ComputeRequest, PersistDeferral
 from api.compute.persistence import (
     InvalidPersistDependencyRecoveryError,
     PersistDeferredError,
@@ -44,7 +44,6 @@ _STEP_EXIT_BY_OUTCOME: Mapping[StepOutcome, StepExit] = MappingProxyType(
         "complete": StepExit.COMPLETE,
         "continue": StepExit.START,
         "park": StepExit.REQUEUE,
-        "waiting_deps": StepExit.REQUEUE,
     }
 )
 
@@ -80,8 +79,8 @@ class OrchestratorLifecycleMixin:
         """Clear the submit generation so the node can re-enter the dispatch loop.
 
         Shared by every path that leaves an in-flight step and reopens the node
-        for later work: epoch-retry, soft defer, persist-deferred recovery, and
-        a soft ``park`` outcome. Returns the step index at reset time for
+        for later work: epoch-retry, persist-deferred recovery, and a ``park``
+        outcome. Returns the step index at reset time for
         lifecycle notifications.
         """
         prior_step_index = node.step_index
@@ -138,21 +137,6 @@ class OrchestratorLifecycleMixin:
         self._dequeue_ready(node.scope)
         return True
 
-    def _demote_to_waiting_deps(self: ComputeOrchestrator, node: ComputeNodeRun) -> None:
-        """Demote a running node to ``waiting_deps`` without grafting dependencies.
-
-        Soft defer (scores empty tier / non-durable rowComplete, missing RowRun)
-        waits for an external ``force_fresh`` / ``wake_scores_scope`` wake -- not
-        for another scope to reach ``complete``. Grafting ``node.scope`` onto
-        ``dependency_scopes`` would make ``_deps_complete`` require self-complete
-        while the node is non-terminal, so force_fresh attach could never promote.
-        """
-        with self._condition:
-            if node.state != "running" or self._refuse_step_exit(node, StepExit.REQUEUE):
-                return
-            self._reset_for_requeue(node)
-            self._demote_unless_dependency_failed(node)
-
     def _recover_after_persist_deferred(
         self: ComputeOrchestrator,
         node: ComputeNodeRun,
@@ -161,8 +145,8 @@ class OrchestratorLifecycleMixin:
         """Recover onto ``waiting_deps`` and recreate the recovery's dependency.
 
         Analytic ``PersistencePolicy.persist`` raises :class:`PersistDeferredError`
-        (or a step returns ``waiting_deps`` with ``wait_recovery``) when a durable
-        write cannot complete until a dependency re-closes. Failing the node
+        when a durable write cannot complete until a dependency re-closes. It is
+        the only way a node defers onto a dependency. Failing the node
         left dependents waiting with no wake for background DAG nodes (no
         table-stream controller). Recreating the declared dependency reopens
         the ENSURE edge; when it completes, readiness promotes this node.
@@ -189,12 +173,24 @@ class OrchestratorLifecycleMixin:
         execution as its requester, so it plans nothing once that execution
         has ended (aborted or replaced) before the plan would be registered.
 
-        After the graft, the node records the recovery dependency's execution
-        as ``superseded_dependency`` when that execution is terminal (None
-        when the scope has no node, or its node is still live and the submit
-        attaches to it). Readiness reads a superseded execution as not there
-        (:meth:`_readiness_dependency`), so no refresh before the recreation
-        registers cascades its failure or promotes on its completion; the
+        A recovery that changed nothing is not retried: when the node's last
+        deferral (``last_persist_deferral``) named the same dependency scope at
+        the same invalidation generation of the node, the recreation it asked
+        for completed (a ``waiting_deps`` node only runs again once its
+        dependencies are complete) and the persist still could not land. The
+        node then fails with :class:`PersistDependencyRecoveryExhaustedError`
+        and a ``persist_recovery_exhausted`` record, before the graft, with no
+        ``persist_deferred`` record and no dependency submit. A moved generation
+        is a new reason to wait, so the node recovers again.
+
+        After the graft, the node records this deferral as
+        ``last_persist_deferral``: the dependency scope, its invalidation
+        generation, and the recovery dependency's execution as ``superseded``
+        when that execution is terminal (None when the scope has no node, or
+        its node is still live and the submit attaches to it). Readiness reads
+        a superseded execution as not there (:meth:`_readiness_dependency`), so
+        no refresh before the recreation registers cascades its failure or
+        promotes on its completion; the
         node settles on the recreation's outcome. A failed dependency whose
         failure still cascades fails the node, with no ``persist_deferred``
         record and no dependency submit. A recovery submit that raises is
@@ -208,17 +204,42 @@ class OrchestratorLifecycleMixin:
                 self._fail_node(node, InvalidPersistDependencyRecoveryError(recovery))
                 return
             dependency_scope = recovery.dependency_scope
+            invalidation_generation = self._current_invalidation_generation(node)
+            previous = node.last_persist_deferral
+            if (
+                previous is not None
+                and previous.dependency_scope == dependency_scope
+                and previous.invalidation_generation == invalidation_generation
+            ):
+                self._observers.notify_lifecycle(
+                    "persist_recovery_exhausted",
+                    node.scope,
+                    execution_generation=node.execution_generation,
+                    node=node,
+                    step_index=prior_step_index,
+                    detail={
+                        "relatedScopeKey": format_compute_scope_key(dependency_scope),
+                        "invalidationGeneration": invalidation_generation,
+                    },
+                )
+                self._fail_node(node, PersistDependencyRecoveryExhaustedError(dependency_scope))
+                return
             if dependency_scope != node.scope and dependency_scope not in node.dependency_scopes:
                 node.dependency_scopes = (
                     *node.dependency_scopes,
                     dependency_scope,
                 )
             dependency = self._nodes.get(dependency_scope)
-            node.superseded_dependency = (
-                dependency.execution_ref
-                if dependency is not None and dependency.is_terminal
-                else None
+            deferral = PersistDeferral(
+                dependency_scope=dependency_scope,
+                superseded=(
+                    dependency.execution_ref
+                    if dependency is not None and dependency.is_terminal
+                    else None
+                ),
+                invalidation_generation=invalidation_generation,
             )
+            node.last_persist_deferral = deferral
             if not self._demote_unless_dependency_failed(node):
                 return
             self._observers.notify_lifecycle(
@@ -235,8 +256,8 @@ class OrchestratorLifecycleMixin:
                     "priorityBand": node.priority_band,
                     "supersededExecutionGeneration": (
                         None
-                        if node.superseded_dependency is None
-                        else node.superseded_dependency.execution_generation
+                        if deferral.superseded is None
+                        else deferral.superseded.execution_generation
                     ),
                 },
             )
@@ -249,10 +270,9 @@ class OrchestratorLifecycleMixin:
                 requester=node.execution_ref,
             )
             generation = node.execution_generation
-            superseded = node.superseded_dependency
             self._observers.schedule_post_lock(
                 lambda: self._submit_recovery_dependency(
-                    node, generation, superseded, dependency_request
+                    node, generation, deferral, dependency_request
                 )
             )
 
@@ -302,7 +322,7 @@ class OrchestratorLifecycleMixin:
         Asked for ``START`` or ``REQUEUE``, this is the start-or-requeue gate:
         at the pool pick and the thread re-check (``begin_pool_step``), the
         inline post-wire-build re-check, ``_begin_step_execution``, and before
-        epoch retry, persist-deferred recovery, soft demotion and park.
+        epoch retry, persist-deferred recovery and park.
         """
         if node.running_step.permits(step_exit, is_needed=lambda: self._is_needed(node)):
             return False
@@ -394,29 +414,6 @@ class OrchestratorLifecycleMixin:
             self._park_node_step(node, reason=step_result.park_reason)
             return
 
-        if step_result.outcome == "waiting_deps":
-            if step_result.payload is not None:
-                node.result_wire = step_result.payload
-            recovery = step_result.wait_recovery
-            if recovery is None:
-                # Soft defer: demote without PersistDependencyRecovery self-graft.
-                def _soft_waiting_deps(
-                    deferred_node: ComputeNodeRun = node,
-                ) -> None:
-                    self._demote_to_waiting_deps(deferred_node)
-
-                self._observers.schedule_post_lock(_soft_waiting_deps)
-                return
-
-            def _defer_waiting_deps(
-                deferred_node: ComputeNodeRun = node,
-                deferred_recovery: PersistDependencyRecovery = recovery,
-            ) -> None:
-                self._recover_after_persist_deferred(deferred_node, deferred_recovery)
-
-            self._observers.schedule_post_lock(_defer_waiting_deps)
-            return
-
         if step_result.outcome == "persist":
             if step_result.payload is not None:
                 node.result_wire = step_result.payload
@@ -464,7 +461,7 @@ class OrchestratorLifecycleMixin:
                     # Do not re-raise: pool workers call complete_pool_step on this thread
                     # and an escaping exception would kill the worker loop.
                     if isinstance(exc, PersistDeferredError):
-                        # Analytic-owned recovery: demote to waiting_deps and optionally
+                        # Analytic-owned recovery: demote to waiting_deps and
                         # force_fresh the declared dependency (e.g. open scores evidence).
                         self._recover_after_persist_deferred(
                             completed_node,

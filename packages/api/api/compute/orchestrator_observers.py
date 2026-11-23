@@ -33,8 +33,7 @@ class ScopeLifecycleSnapshot:
     execution_generation: int
     result_wire: object | None
     error: BaseException | None
-    # Analytic park site string (e.g. SoftTerminalReason.value); None when not parked.
-    # Soft-stream policy coerces to SoftTerminalReason at the scores adapter boundary.
+    # Analytic park site string from the step's ``park`` outcome; None when not parked.
     park_reason: str | None = None
     # Profile position at settlement, so diagnostics can name the failed step.
     step_index: int | None = None
@@ -102,6 +101,7 @@ LifecycleEventKind = (
         "abort",
         "epoch_retry",
         "persist_deferred",
+        "persist_recovery_exhausted",
         "step_parked",
         "dependency_submit_refused",
     ]

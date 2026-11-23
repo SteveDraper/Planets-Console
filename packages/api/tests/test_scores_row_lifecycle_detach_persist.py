@@ -12,7 +12,7 @@ from api.analytics.military_score_inference.row_complete_factory import row_comp
 from api.analytics.military_score_inference.solver import (
     STATUS_EXACT,
 )
-from api.analytics.scores.tier_row_run_registry import get_row_run
+from api.analytics.scores.tier_row_run_registry import get_row_run, new_tier_row_run
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
@@ -31,7 +31,6 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
     RowComplete. The row stays ``REGISTERED`` until its own stream ends.
     """
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -61,7 +60,7 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
         )
         first_token = scheduler.begin_scope(scope)
         session = _session_for_player(sample_turn, player_id=player_id)
-        row_run = RowRun(session)
+        row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(
@@ -114,7 +113,7 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
 
         # Compact cancel admission still refuses a late persist.
         persistence.delete_row(628580, 1, turn_number, player_id)
-        cancelled = RowRun(_session_for_player(sample_turn, player_id=player_id))
+        cancelled = new_tier_row_run(_session_for_player(sample_turn, player_id=player_id))
         register_row_run(cancelled, scope_index=ScopeIndexPolicy.TAKE)
         from api.analytics.scores.tier_row_run_registry import _mark_row_run_cancelled
 
@@ -144,7 +143,6 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
 
     Same-scope re-register supersedes cancel; cross-scope detach must not.
     """
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
@@ -161,7 +159,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
     assert len(players) == 2
     reset_tier_row_run_registry_for_tests()
     try:
-        cancelled = RowRun(_session_for_player(sample_turn, player_id=players[0]))
+        cancelled = new_tier_row_run(_session_for_player(sample_turn, player_id=players[0]))
         register_row_run(cancelled, scope_index=ScopeIndexPolicy.TAKE)
         _mark_row_run_cancelled(cancelled.run_id)
         assert get_row_run_phase(cancelled.run_id) is None
@@ -169,7 +167,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
             should_retire=True
         )
 
-        detached = RowRun(_session_for_player(sample_turn, player_id=players[1]))
+        detached = new_tier_row_run(_session_for_player(sample_turn, player_id=players[1]))
         register_row_run(detached, scope_index=ScopeIndexPolicy.TAKE)
         _detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
@@ -184,7 +182,6 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
 def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_turn):
     """Disconnect detaches without cancel refuse; finish may persist."""
     from api.analytics.export_context import make_analytic_query_context
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.export_services import ScoresExportContext
@@ -214,7 +211,7 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         )
         stream_token = scheduler.begin_scope(scope)
         session = _session_for_player(sample_turn, player_id=player_id)
-        row_run = RowRun(session)
+        row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
             scheduler._runs[session.run_id] = ComputeScope(

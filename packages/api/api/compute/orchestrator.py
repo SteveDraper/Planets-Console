@@ -708,8 +708,8 @@ class ComputeOrchestrator(
     ) -> ComputeNodeRun | None:
         """The node at ``dependency_scope`` that ``node``'s readiness counts, if any.
 
-        None when the scope has no node, or when its node is the execution
-        ``node.superseded_dependency`` names: a terminal dependency execution
+        None when the scope has no node, or when its node is the ``superseded``
+        execution of ``node.last_persist_deferral``: a terminal dependency execution
         the node's persist-deferred recovery asked to be recreated counts as
         not there, so it neither cascades its failure nor completes the node.
 
@@ -719,7 +719,10 @@ class ComputeOrchestrator(
         persist-deferred overwrites it.
         """
         dependency = self._nodes.get(dependency_scope)
-        if dependency is None or dependency.execution_ref == node.superseded_dependency:
+        deferral = node.last_persist_deferral
+        if dependency is None or (
+            deferral is not None and dependency.execution_ref == deferral.superseded
+        ):
             return None
         return dependency
 

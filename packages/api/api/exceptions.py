@@ -139,6 +139,23 @@ class DiscardedWorkRefused(CoreAPIError):
     http_error: int = 409
 
 
+class ScoresTierOutcomeError(CoreAPIError):
+    """A scores tier job finished with a row status that does not close turn evidence.
+
+    Every status the tier ladder, refusal, stop and accelerated builders produce
+    is durable, so this is a broken contract, not a wait. The scores node fails;
+    a later ``force_fresh`` submit replaces it. The message is shown on the
+    stream row and to ensure callers.
+    """
+
+    def __init__(self, *, run_id: str, status: str) -> None:
+        super().__init__(
+            f"Inference finished with a result that cannot be saved (status {status!r})."
+        )
+        self.run_id = run_id
+        self.status = status
+
+
 class FleetScoresEvidenceOpenError(PersistDeferredError, CoreAPIError):
     """Fleet host-turn persist refused because same-turn scores evidence is open.
 

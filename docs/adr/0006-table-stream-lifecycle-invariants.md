@@ -66,22 +66,38 @@ Shell + admission + cancel seal + session token cancel go only through `apply_sc
 - An intentional abort is not a row terminal. `ScopeLifecycleSnapshot.is_intentional_abort` (failed with `ComputeScopeAbortedError`) is the one test, read by the scores listener above and by the fleet listener (§7). Whoever ended the node owns the row's next step: an explicit cancel re-admits or tears down the row itself, and a settle reschedules the live rows whose own root it stopped (`analytics/walk_row_reschedule.py`, through `OnWalkStreamController.reschedule_player`). The **Backfill walk stop** does this in its follow-up, after its drain, so a row still open on the game (a second tab, or a stop that arrives late) restarts its walk instead of erroring or hanging.
 - A `tier_solve` claim made for an execution that has already ended changes nothing: it neither stamps nor retires, so a late wire build cannot take a reopened stream's run.
 
-### 5. Soft defer wake (scores)
+### 5. Scores has no soft wait
 
-Scores soft defer uses orchestrator ``waiting_deps`` (not ``parked``) plus stream
-``TerminalSource.ROW_DEFER``. Wake is **scores-owned** via ``wake_scores_scope``
-(``ScoresWakeReason`` → ``force_fresh`` submit).
+A scores ``tier_solve`` step never waits for a wake:
 
-- The orchestrator does **not** demand-wake ``waiting_deps`` / parked nodes just
-  because dependents enter the DAG.
-- Soft provisional / pending-wire upgrade is stream policy
-  (``soft_stream_policy``), not DAG completion.
-- **Justified non-`wake_scores_scope` reopen:** when fleet finalization persist
-  refuses for open turn evidence, it raises ``PersistDependencyRecovery(force_fresh=True)``
-  on the scores scope. Orchestrator persist-deferred recovery then ``submit``s that
-  scope with ``force_fresh=True``, which refreshes ``waiting_deps`` / absent /
-  terminal nodes. Fleet must **not** also call ``wake_scores_scope`` for the same
-  reopen -- that would be a second encoding of one policy. Details:
+- A tier terminal whose status does not close turn evidence is a broken
+  contract: the step raises ``ScoresTierOutcomeError`` and the node fails. There
+  is no soft stream row for it; the stream sees the failure through
+  ``SCOPE_OUTCOME`` like any other failed node.
+- A step that finds its claimed RowRun gone returns ``continue``, and the
+  rebuilt wire re-claims, admits, skips on closed evidence or raises.
+
+The only ways a scores node is reopened are the stream reschedule (a plain
+``force_fresh`` ``tier_solve`` submit) and fleet's persist-deferred recovery
+below.
+
+- Entering the DAG does not make a dependent wake a ``waiting_deps`` / parked
+  node. Every submission's plan (``_plan_submission_locked``) does re-resolve the
+  readiness of every ``waiting_deps`` and ``ready`` node, so an unrelated submit
+  can promote a waiting node whose dependencies are complete; nothing relies on
+  that as a wake.
+- Admission's soft-provisional claim is stream policy
+  (``stream_terminal_policy``), not DAG completion.
+- **Fleet's reopen:** when fleet finalization persist refuses for open turn
+  evidence, it raises ``FleetScoresEvidenceOpenError`` carrying a
+  ``PersistDependencyRecovery`` of the scores scope from ``tier_solve``.
+  Orchestrator persist-deferred recovery then ``submit``s that scope with
+  ``force_fresh=True``, which recreates absent or terminal nodes and attaches to
+  a live one. Fleet must **not** also submit scores for the same reopen -- that
+  would be a second encoding of one policy. If fleet defers again at the same
+  invalidation generation after that recreation completed, the orchestrator
+  fails fleet with ``PersistDependencyRecoveryExhaustedError`` instead of
+  recreating scores again. Details:
   [design-compute-orchestrator.md](../design-compute-orchestrator.md).
 
 Generic orchestrator ``park`` / ``wake_if_parked`` machinery may remain for

@@ -171,6 +171,22 @@ class PublishedExecution:
     execution_generation: int
 
 
+@dataclass(frozen=True, slots=True)
+class PersistDeferral:
+    """One persist-deferred recovery of a node execution.
+
+    ``superseded`` is the terminal execution of ``dependency_scope`` the
+    recovery asked to be recreated (None when the scope had no node or its
+    node was still live). ``invalidation_generation`` is the deferring node's
+    own generation when it deferred: a later deferral onto the same scope at
+    the same generation means the recovery changed nothing.
+    """
+
+    dependency_scope: ComputeScope
+    superseded: ExecutionRef | None
+    invalidation_generation: int
+
+
 class NodeExecutionBinding:
     """The rule binding a pool item to the execution of its scope that dispatched it.
 
@@ -224,7 +240,7 @@ class ComputeNodeRun(NodeExecutionBinding):
     generation_at_submit: int | None = None
     result_wire: object | None = None
     error: BaseException | None = None
-    # Analytic park site reason (e.g. SoftTerminalReason); set while ``parked``.
+    # Analytic park site reason from the step's ``park`` outcome; set while ``parked``.
     park_reason: str | None = None
     waiters: list[ComputeHandle] = field(default_factory=list)
     # Leader-retained query context / export services.
@@ -233,10 +249,10 @@ class ComputeNodeRun(NodeExecutionBinding):
     # (``RunningStepDisposition.permits``). Written under the orchestrator
     # lock; a settle only raises it.
     running_step: RunningStepDisposition = RunningStepDisposition.CONTINUE
-    # The terminal dependency execution this node's last persist-deferred
-    # recovery asked to be recreated. Readiness treats that execution as not
-    # there (``ComputeOrchestrator._readiness_dependency``).
-    superseded_dependency: ExecutionRef | None = None
+    # This execution's last persist-deferred recovery. Readiness reads its
+    # ``superseded`` execution as not there, and the recovery bound compares a
+    # new deferral against it.
+    last_persist_deferral: PersistDeferral | None = None
     _: KW_ONLY
     # Root turn and backfill choice of the submission that planned this node.
     # A later submission that roots at this scope replaces the open turn and

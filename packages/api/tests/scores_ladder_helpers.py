@@ -16,12 +16,17 @@ test module shares both fixtures.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.military_score_inference.analytic import build_inference_observation
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+    TierJobOutcome,
+    TierJobRowComplete,
+)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
@@ -70,12 +75,43 @@ def ladder_scope(sample_turn, player_id: int) -> ComputeScope:
 
 
 def durable_row_complete(summary: str) -> TierJobOutcome:
-    return TierJobOutcome(
+    return TierJobRowComplete(
         row_complete=row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary=summary,
         ),
     )
+
+
+@contextmanager
+def scripted_tier_job(
+    outcome: TierJobOutcome | BaseException,
+    *,
+    on_tier_step: Callable[[RowRun], None] = lambda _run: None,
+) -> Iterator[None]:
+    """Script every scores tier job run inside the block.
+
+    Each job calls ``on_tier_step`` with its run, then raises ``outcome`` or
+    returns it. A continue finishes one tier of the run's ladder; a row
+    complete finishes the ladder.
+    """
+
+    def tier_job(run: RowRun, _callbacks) -> TierJobOutcome:
+        on_tier_step(run)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        ladder_state = run.ladder_state
+        if isinstance(outcome, TierJobContinue):
+            ladder_state.next_step_index += 1
+        else:
+            ladder_state.ladder_complete = True
+        return outcome
+
+    with patch(
+        "api.analytics.scores.compute_orchestration.run_inference_tier_job",
+        side_effect=tier_job,
+    ):
+        yield
 
 
 class ShellLadder:
@@ -167,21 +203,10 @@ class ShellLadder:
         so nothing has persisted. A failing tier raises.
         """
 
-        def tier_job(run: RowRun, _callbacks) -> TierJobOutcome:
-            ladder_state = run.ladder_state
-            self.tier_steps.append((run.run_id, ladder_state.next_step_index))
-            if isinstance(outcome, BaseException):
-                raise outcome
-            if outcome.enqueue_continuation:
-                ladder_state.next_step_index += 1
-            else:
-                ladder_state.ladder_complete = True
-            return outcome
+        def record_tier_step(run: RowRun) -> None:
+            self.tier_steps.append((run.run_id, run.ladder_state.next_step_index))
 
-        with patch(
-            "api.analytics.scores.compute_orchestration.run_inference_tier_job",
-            side_effect=tier_job,
-        ):
+        with scripted_tier_job(outcome, on_tier_step=record_tier_step):
             work = self.submitted_work[-1]
             return work.run_step(work.job_wire_for(self.scope))
 

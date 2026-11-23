@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.compute.step_execution_key import ExecutionRef
-from api.errors import ConflictError, ValidationError
+from api.errors import ConflictError, CoreAPIError, ValidationError
 
 
 class UnresolvedSubmissionOpenError(ValidationError):
@@ -26,6 +26,24 @@ class ComputeRequesterEndedError(ConflictError):
             f"{requester.execution_generation} is no longer live"
         )
         self.requester = requester
+
+
+class PersistDependencyRecoveryExhaustedError(CoreAPIError):
+    """A node deferred onto a dependency again although its last recovery changed nothing.
+
+    The node's previous persist-deferred recovery recreated ``recovery_scope``
+    at the same invalidation generation, the recreation completed, and the
+    persist still could not land. Recreating it again would loop, so the node
+    fails. It is not an abort, so the failure cascades to waiting dependents;
+    a later submit replaces the nodes.
+    """
+
+    def __init__(self, recovery_scope: ComputeScope) -> None:
+        super().__init__(
+            "persist-deferred recovery exhausted: recreating "
+            f"{format_compute_scope_key(recovery_scope)} did not let the persist land"
+        )
+        self.recovery_scope = recovery_scope
 
 
 class ComputeExecutionEndedError(RuntimeError):

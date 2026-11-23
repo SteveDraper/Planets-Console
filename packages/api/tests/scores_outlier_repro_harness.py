@@ -56,7 +56,6 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     records_for_scope,
     resolution_from_fleet_records,
 )
-from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.compute_orchestration import (
     _apply_fleet_resolution_to_row_run,
@@ -64,6 +63,7 @@ from api.analytics.scores.compute_orchestration import (
 )
 from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
+    new_tier_row_run,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
@@ -286,7 +286,7 @@ def reproduce_admit_ship_outlier(
         freighter_delta=observation.freighter_delta,
         starbases_owned=observation.starbases_owned,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     _apply_fleet_resolution_to_row_run(run, resolution)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     probe = PhaseProbe(report)

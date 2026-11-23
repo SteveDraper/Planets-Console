@@ -12,11 +12,12 @@ from api.analytics.military_score_inference.inference_admission import (
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
     clear_row_runs,
+    get_row_run,
+    new_tier_row_run,
     register_row_run,
 )
 from api.compute.sat_gil_overlap import (
@@ -24,6 +25,7 @@ from api.compute.sat_gil_overlap import (
     SatGilOverlap,
     capture_cp_sat_solve_overlap,
 )
+from api.compute.wire import StepResult
 from api.errors import NotFoundError
 from api.models.game import TurnInfo
 from api.serialization.turn import turn_info_from_json
@@ -154,19 +156,19 @@ def _time_player_tier_solves(
         turn_number=turn.settings.turn,
         load_scoreboard_turn=load_scoreboard_turn,
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
     try:
         with capture_cp_sat_solve_overlap() as captures:
             started = time.perf_counter()
-            result = run_scores_tier_solve({"runId": run.run_id})
+            result = _run_probe_tier_step(run.run_id)
             steps = 1
             while (
                 result.outcome == "continue"
                 and steps < SCORES_SOLVE_MAX_TIER_STEPS
                 and _longest_solve_wall(captures) < GIL_MIN_SOLVE_WALL_SECONDS
             ):
-                result = run_scores_tier_solve({"runId": run.run_id})
+                result = _run_probe_tier_step(run.run_id)
                 steps += 1
             tier_wall_seconds = time.perf_counter() - started
     finally:
@@ -183,6 +185,18 @@ def _time_player_tier_solves(
         overlap=overlap,
         solve_count=len(captures),
     )
+
+
+def _run_probe_tier_step(run_id: str) -> StepResult:
+    """Run one tier step of the probe's own RowRun.
+
+    A step whose RowRun is gone returns ``continue`` so the orchestrator rebuilds
+    its wire. The probe has no wire build, so it would count that as a tier, and
+    nothing here retires the run, so a missing run is a broken probe.
+    """
+    if get_row_run(run_id) is None:
+        raise RuntimeError(f"scores tier_solve probe lost its RowRun {run_id}")
+    return run_scores_tier_solve({"runId": run_id})
 
 
 def _longest_solve_wall(captures: list[SatGilOverlap]) -> float:

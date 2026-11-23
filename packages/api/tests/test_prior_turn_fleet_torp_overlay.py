@@ -22,6 +22,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     schedule_background_prior_turn_fleet_warm,
 )
 from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores.tier_row_run_registry import new_tier_row_run
 
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
 from tests.fleet_chain_test_turns import HOST_TURN
@@ -273,7 +274,6 @@ def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, per
     from api.analytics.military_score_inference.inference_stream_session import (
         InferenceRowStreamSession,
     )
-    from api.analytics.military_score_inference.row_run import RowRun
     from api.analytics.scores.compute_orchestration import build_scores_tier_solve_job_wire
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
@@ -337,7 +337,7 @@ def test_scores_tier_wire_applies_prior_fleet_dependency_output(sample_turn, per
         turn_number=host_turn.settings.turn,
         fleet_torp_input_status="pending",
     )
-    run = RowRun(session)
+    run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
 
     prior_fleet_scope = ComputeScope(

@@ -11,7 +11,6 @@ from api.analytics.military_score_inference.analytic import build_inference_obse
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.persist_decision import PersistDecision
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
@@ -19,6 +18,7 @@ from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
     get_row_run,
     get_row_run_phase,
+    new_tier_row_run,
     register_row_run,
     reset_tier_row_run_registry_for_tests,
 )
@@ -47,7 +47,7 @@ def test_apply_scores_row_lifecycle_cancel(sample_turn) -> None:
     reset_tier_row_run_registry_for_tests()
     reset_stream_resolution_registry_for_tests()
     try:
-        run = RowRun(_session(sample_turn))
+        run = new_tier_row_run(_session(sample_turn))
         register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
         assert not run.session.cancel_token.is_cancelled()
 
@@ -70,7 +70,7 @@ def test_apply_scores_row_lifecycle_detach(sample_turn) -> None:
     reset_tier_row_run_registry_for_tests()
     reset_stream_resolution_registry_for_tests()
     try:
-        run = RowRun(_session(sample_turn))
+        run = new_tier_row_run(_session(sample_turn))
         register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
 
         apply_scores_row_lifecycle(RowLifecycleOp.DETACH, run.run_id)
@@ -92,7 +92,7 @@ def test_apply_scores_row_lifecycle_retire(sample_turn) -> None:
     reset_tier_row_run_registry_for_tests()
     reset_stream_resolution_registry_for_tests()
     try:
-        run = RowRun(_session(sample_turn))
+        run = new_tier_row_run(_session(sample_turn))
         register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
         apply_scores_row_lifecycle(RowLifecycleOp.DETACH, run.run_id)
 

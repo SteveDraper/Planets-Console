@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+from api.analytics.scores import tier_solve_jobs
 from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores.tier_solve_jobs import time_scores_tier_solve_jobs
 from api.storage.memory_asset import MemoryAssetBackend
@@ -58,3 +60,18 @@ def test_time_scores_tier_solve_jobs_runs_registered_tier_on_corpus():
     else:
         assert payload["pythonProgressedDuringSolve"] is None
         assert payload["solveWallSeconds"] is None
+
+
+def test_the_probe_raises_when_its_row_run_is_gone(monkeypatch):
+    reset_tier_row_run_registry_for_tests()
+    storage = _seed_corpus_backend()
+    monkeypatch.setattr(tier_solve_jobs, "get_row_run", lambda _run_id: None)
+
+    with pytest.raises(RuntimeError, match="lost its RowRun"):
+        time_scores_tier_solve_jobs(
+            storage,
+            game_id=CORPUS_GAME_ID,
+            perspective=CORPUS_PERSPECTIVE,
+            turn_number=CORPUS_TURN,
+            player_id=CORPUS_PLAYER_ID,
+        )

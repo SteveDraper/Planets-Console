@@ -47,7 +47,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.orchestrator import ComputeOrchestrator
+from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.pending_accepts import PendingAccepts
@@ -423,11 +423,12 @@ class InferenceRowScheduler(
         is ``stream_token`` while that token still owns the scope, decided
         before the run is registered. With an owner the run is
         ``STREAM_BOUND`` (the caller runs ``accept_pending_run``) or ``HELD``
-        while globally paused. With no owner the run is ``BACKGROUND`` and the
-        scope's deferred scores node is woken after the lock: that covers no
-        token at all, whatever stream is active, and a token that lost the
-        scope to another stream. A submit-deferred scheduler returns
-        ``SUBMIT_DEFERRED`` after registering.
+        while globally paused. With no owner the run is ``BACKGROUND``, and
+        after the lock the scheduler remembers the scope's node execution so
+        ``cancel_run`` can abort it: that covers no token at all, whatever
+        stream is active, and a token that lost the scope to another stream.
+        A submit-deferred scheduler returns ``SUBMIT_DEFERRED`` after
+        registering.
 
         Ownership also decides the scope index, so the scope's next ladder
         claim stamps the stream's run: an owned run takes the index, and a
@@ -442,7 +443,11 @@ class InferenceRowScheduler(
         at its own scope, so that admit has none and registers ``BACKGROUND``,
         and the stream's own admission then takes the index.
         """
-        from api.analytics.scores.tier_row_run_registry import ScopeIndexPolicy, register_row_run
+        from api.analytics.scores.tier_row_run_registry import (
+            ScopeIndexPolicy,
+            new_tier_row_run,
+            register_row_run,
+        )
 
         with self._lock:
             owning_token = (
@@ -451,7 +456,7 @@ class InferenceRowScheduler(
                 and self._scope_guard.owns_table_stream_locked(stream_token)
                 else None
             )
-            row_run = RowRun(session)
+            row_run = new_tier_row_run(session, orchestration=orchestration)
             register_row_run(
                 row_run,
                 scope_index=(
@@ -459,7 +464,6 @@ class InferenceRowScheduler(
                     if owning_token is not None
                     else ScopeIndexPolicy.TAKE_IF_VACANT
                 ),
-                orchestration=orchestration,
             )
             self._register_tier_callbacks_for_run(row_run)
             root_scope = scores_root_scope_for_session(session)
@@ -483,10 +487,10 @@ class InferenceRowScheduler(
                     self._tier_accept(binding, root_scope, session.run_id),
                 )
                 return TierLadderRegistration.STREAM_BOUND
-        # No stream submits this run, so a soft-parked scores node needs an
-        # explicit force_fresh wake.
+        # No stream submits this run. Remember the scope's node execution so a
+        # cancel of this run aborts that node.
         self._orchestrator_attachment.ensure_registered()
-        self._wake_deferred_scores_after_row_run_adopt(root_scope, session)
+        self._remember_execution_generation_for_scope(root_scope)
         return TierLadderRegistration.BACKGROUND
 
     def accept_pending_run(self, run_id: str) -> None:
@@ -548,7 +552,7 @@ class InferenceRowScheduler(
         if row_run is None:
             return False
         state = row_run.ladder_state
-        if state is None or state.catalog is None or not state.merged_solutions:
+        if state.catalog is None or not state.merged_solutions:
             return False
         orchestration = row_run.orchestration
         segment_id: str | None = None
@@ -580,7 +584,7 @@ class InferenceRowScheduler(
         if row_run is None:
             return
         state = row_run.ladder_state
-        if state is None or state.catalog is None:
+        if state.catalog is None:
             return
         session.event_queue.put(
             TierProgress(
@@ -596,7 +600,7 @@ class InferenceRowScheduler(
         if row_run is None:
             return
         state = row_run.ladder_state
-        if state is None or state.next_step_index >= len(state.policy_steps):
+        if state.next_step_index >= len(state.policy_steps):
             return
         step = state.policy_steps[state.next_step_index]
         session.event_queue.put(
@@ -645,22 +649,6 @@ class InferenceRowScheduler(
         self._stream_bindings[stream_token] = binding
         return binding
 
-    def _wake_deferred_scores_after_row_run_adopt(
-        self,
-        root_scope: ComputeScope,
-        session: InferenceRowStreamSession,
-    ) -> None:
-        """Wake a deferred scores node after background RowRun register."""
-        from api.analytics.scores.compute_orchestration import wake_scores_scope
-        from api.analytics.scores_defer_wake import ScoresWakeReason
-
-        wake_scores_scope(
-            root_scope,
-            ctx=_query_context_for_session(session, scheduler=self),
-            reason=ScoresWakeReason.ROW_RUN_ADOPTED,
-        )
-        self._remember_execution_generation_for_scope(root_scope)
-
     def _broadcast_global_pause_locked(self, *, paused: bool) -> None:
         event = GlobalPauseChanged(paused=paused)
         for run_id in self._runs:
@@ -676,17 +664,18 @@ class InferenceRowScheduler(
         """Submit/wake tier_solve for ``root_scope``. Caller must not hold ``_lock``."""
         if self._defer_orchestrator_submit:
             return
-        from api.analytics.scores.compute_orchestration import wake_scores_scope
-        from api.analytics.scores_defer_wake import ScoresWakeReason
+        from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
 
         # force_fresh may replace a prior empty/admission terminal. Reopen the multiplex
         # row so progress drains and a later RowComplete can upgrade the soft terminal.
         self._reopen_stream_row_for_force_fresh(root_scope)
-        wake_scores_scope(
-            root_scope,
-            ctx=binding.query_context,
-            reason=ScoresWakeReason.STREAM_RESCHEDULED,
-            orchestrator=binding.orchestrator,
+        binding.orchestrator.submit(
+            ComputeRequest(
+                scope=root_scope,
+                step_kind=SCORES_TIER_SOLVE,
+                force_fresh=True,
+                ctx=binding.query_context,
+            )
         )
         self._remember_execution_generation_for_scope(
             root_scope,

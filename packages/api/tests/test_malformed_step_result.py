@@ -46,7 +46,7 @@ _MALFORMED_RESULT = {"outcome": "not-an-outcome"}
 _MALFORMED_RESULTS = (
     pytest.param(_MALFORMED_RESULT, id="unknown-outcome"),
     pytest.param({"outcome": "park", "parkReason": 7}, id="non-string-park-reason"),
-    pytest.param({"outcome": "waiting_deps", "waitRecovery": {}}, id="untyped-wait-recovery"),
+    pytest.param({"outcome": "waiting_deps"}, id="waiting-deps-is-not-a-step-outcome"),
 )
 
 

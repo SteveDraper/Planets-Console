@@ -29,7 +29,9 @@ from api.analytics.fleet.compute_orchestration import (
 )
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet_walk_analytics import FLEET_WALK_ANALYTIC_IDS
-from api.analytics.military_score_inference.inference_row_runner import TierJobOutcome
+from api.analytics.military_score_inference.inference_row_runner import (
+    TierJobContinue,
+)
 from api.analytics.scores.tier_row_run_registry import get_persist_admission, get_row_run
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
@@ -191,12 +193,6 @@ def _outcome(outcome: StepOutcome) -> Callable[[Walk], object]:
 _ENDINGS = {
     "continue": _StepEnding(_outcome("continue")),
     "park": _StepEnding(_outcome("park")),
-    "soft-defer": _StepEnding(_outcome("waiting_deps")),
-    "recovery-outcome": _StepEnding(
-        lambda walk: StepResult(
-            outcome="waiting_deps", wait_recovery=scores_evidence_recovery(walk.scope(3))
-        )
-    ),
     "persist-defer": _StepEnding(_outcome("persist"), before_finish=_defer_the_persist_on_scores),
     "epoch-retry": _StepEnding(_outcome("complete"), before_finish=_bump_player_epoch),
 }
@@ -303,7 +299,7 @@ def test_a_running_scoreboard_tier_aborts_its_stamped_run_and_persists_nothing(l
             open_turn=ladder.scope.turn + 1, backfill_earlier_turns=True, on_walk=True
         )
     )
-    ladder.run_tier(TierJobOutcome(enqueue_continuation=True))
+    ladder.run_tier(TierJobContinue())
     stamped = ladder.session
     work = ladder.submitted_work[-1]
     job_wire = work.job_wire_for(ladder.scope)

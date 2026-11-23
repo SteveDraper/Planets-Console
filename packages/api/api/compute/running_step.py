@@ -20,7 +20,7 @@ class StepExit(Enum):
     COMPLETE = "complete"
     # Start a step: a pool pick, an inline start, or a continue into the next step.
     START = "start"
-    # Re-enter dispatch: epoch retry, persist-deferred recovery, soft waiting_deps, park.
+    # Re-enter dispatch: epoch retry, persist-deferred recovery, park.
     REQUEUE = "requeue"
 
 
