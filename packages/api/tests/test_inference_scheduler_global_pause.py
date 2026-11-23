@@ -20,15 +20,23 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.models import InferenceSolution, InferenceSolutionAction
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
+from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
 from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun
+from api.compute.orchestrator_state import ComputeRequest
+from api.compute.pools import reset_compute_worker_pool_for_tests
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.errors import ValidationError
 
-from tests.scores_exports_helpers import minimal_stream_query_context
+from tests.scores_exports_helpers import (
+    minimal_stream_query_context,
+    scores_query_context,
+    stream_scope_for_turn,
+)
+from tests.scores_row_lifecycle_test_helpers import _patch_scores_dag_without_fleet_deps
 
 
 @pytest.fixture(autouse=True)
@@ -260,6 +268,43 @@ def test_resume_runs_a_dispatch_pass_on_the_pause_gate_orchestrator(sample_turn,
     scheduler.resume_globally(scope)
 
     assert dispatch_calls == [1]
+
+
+def test_resume_commits_every_tier_solve_the_pause_gate_held_in_its_one_pass(
+    sample_turn, persistence, monkeypatch
+):
+    reset_inference_row_scheduler_for_tests()
+    pool = reset_compute_worker_pool_for_tests(worker_count=0)
+    _patch_scores_dag_without_fleet_deps(monkeypatch)
+    scheduler = InferenceRowScheduler()
+    scope = stream_scope_for_turn(sample_turn)
+    scheduler.begin_scope(scope)
+    scheduler.pause_globally(scope)
+    orchestrator = get_compute_orchestrator()
+    ctx = scores_query_context(sample_turn, persistence=persistence, scheduler=scheduler)
+    held = tuple(
+        ComputeScope(
+            analytic_id=SCORES_ANALYTIC_ID,
+            game_id=scope.game_id,
+            perspective=scope.perspective,
+            turn=scope.turn_number,
+            player_id=row.ownerid,
+        )
+        for row in sample_turn.scores
+    )
+    assert len(held) > 2
+    for root_scope in held:
+        orchestrator.submit(ComputeRequest(ctx=ctx, scope=root_scope, step_kind=SCORES_TIER_SOLVE))
+    assert set(orchestrator.ready_scopes()) == set(held)
+    assert pool.snapshot_work_queue() == ()
+    dispatch_calls = _count_process_dispatch_passes(monkeypatch)
+
+    scheduler.resume_globally(scope)
+
+    assert dispatch_calls == [1]
+    assert orchestrator.ready_scopes() == ()
+    assert all(orchestrator.nodes[root_scope].state == "running" for root_scope in held)
+    assert {queued.item.scope for queued in pool.snapshot_work_queue()} == set(held)
 
 
 def test_new_scope_invalidates_retained_pause_state(sample_turn):

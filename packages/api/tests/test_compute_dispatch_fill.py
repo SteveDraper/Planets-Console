@@ -9,25 +9,31 @@ the whole backlog it releases in one pass.
 
 from __future__ import annotations
 
+import threading
 from collections import Counter
 from dataclasses import replace
 
 import pytest
 from api.analytics.export_types import ExportScope
-from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
+from api.compute import (
+    ComputeHandle,
+    ComputeOrchestrator,
+    ComputeRequest,
+    ComputeScope,
+    build_compute_registry,
+)
 from api.compute.diagnostics import (
     ShellContextKey,
     get_compute_diagnostics_controller,
     reset_compute_diagnostics_for_tests,
 )
-from api.compute.errors import ComputeRequesterEndedError
+from api.compute.errors import ComputeRequesterEndedError, ComputeWaitTimeoutError
 from api.compute.pools import ComputeWorkerPool
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
 from tests.compute_orchestrator_fixtures import (
     RecordingPoolSubmitter,
-    inline_compute_registration,
     make_compute_scope,
     make_export_scope,
     pool_compute_registration,
@@ -92,13 +98,15 @@ def _pool_orchestrator(pool_submitter) -> ComputeOrchestrator:
     )
 
 
-def _submit_held_then_dispatch(orchestrator: ComputeOrchestrator, ctx, scopes) -> None:
+def _submit_held_then_dispatch(
+    orchestrator: ComputeOrchestrator, ctx, scopes
+) -> tuple[ComputeHandle, ...]:
     """Submit ``scopes`` behind a gate, lift it, and run exactly one dispatch pass."""
     release = orchestrator.observers.register_dispatch_gate(lambda _node: False)
-    for scope in scopes:
-        orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    handles = tuple(orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope)) for scope in scopes)
     release()
     orchestrator.dispatch_ready_work()
+    return handles
 
 
 def test_one_pass_commits_every_ready_pool_step(sample_turn):
@@ -179,9 +187,8 @@ def test_a_demotion_whose_recovery_submit_is_refused_leaves_no_ready_pool_step_b
 
 def test_a_pass_asks_each_gate_once_per_ready_node(sample_turn):
     held, *admitted = _perspective_scopes(sample_turn, (1, 2, 3, 4))
-    orchestrator = ComputeOrchestrator(
-        compute_registry=build_compute_registry((inline_compute_registration(SHARED_ID),))
-    )
+    submitter = RecordingPoolSubmitter()
+    orchestrator = _pool_orchestrator(submitter)
     ctx = _ctx(sample_turn)
     release = orchestrator.observers.register_dispatch_gate(lambda _node: False)
     for scope in (held, *admitted):
@@ -197,11 +204,97 @@ def test_a_pass_asks_each_gate_once_per_ready_node(sample_turn):
 
     orchestrator.dispatch_ready_work()
 
-    assert all(orchestrator.nodes[scope].state == "complete" for scope in admitted)
+    assert [scope for scope, _kind in submitter.submissions] == admitted
     assert orchestrator.ready_scopes() == (held,)
-    # Every later pass (each completion schedules one) asks the held node once more.
-    assert asked[held] == 1 + len(admitted)
-    assert all(asked[scope] == 1 for scope in admitted)
+    assert asked == Counter(dict.fromkeys((held, *admitted), 1))
+
+
+def test_an_ensure_batch_commits_every_pool_root_in_its_first_pass(sample_turn, monkeypatch):
+    scopes = _perspective_scopes(sample_turn, (1, 2, 3))
+    submitter = RecordingPoolSubmitter()
+    orchestrator = _pool_orchestrator(submitter)
+    ctx = _ctx(sample_turn)
+    committed_per_pass: list[int] = []
+    run_pass = orchestrator.dispatch_ready_work
+
+    def record_committed_by_each_pass() -> None:
+        before = len(submitter.submissions)
+        run_pass()
+        committed_per_pass.append(len(submitter.submissions) - before)
+
+    monkeypatch.setattr(orchestrator, "dispatch_ready_work", record_committed_by_each_pass)
+
+    with pytest.raises(ComputeWaitTimeoutError):
+        orchestrator.ensure_scopes(
+            tuple(ComputeRequest(ctx=ctx, scope=scope) for scope in scopes),
+            timeout=0.01,
+        )
+
+    assert committed_per_pass[0] == len(scopes)
+    assert {scope for scope, _kind in submitter.submissions} == set(scopes)
+    assert all(orchestrator.nodes[scope].state == "running" for scope in scopes)
+
+
+_PROBE_TIMEOUT_SEC = 5.0
+
+
+class _ConcurrencyProbe:
+    """A blocking pool ``run_step`` that records how many runs overlap.
+
+    Each run waits for ``release``; ``filled`` is set once ``expected`` runs
+    are in progress at the same time.
+    """
+
+    def __init__(self, expected: int) -> None:
+        self._lock = threading.Lock()
+        self._expected = expected
+        self._running = 0
+        self.peak = 0
+        self.filled = threading.Event()
+        self.release = threading.Event()
+
+    def run_step(self, job: dict[str, str]) -> dict[str, str]:
+        with self._lock:
+            self._running += 1
+            self.peak = max(self.peak, self._running)
+            if self._running == self._expected:
+                self.filled.set()
+        try:
+            self.release.wait(timeout=_PROBE_TIMEOUT_SEC)
+            return {"result": job["scope"]}
+        finally:
+            with self._lock:
+                self._running -= 1
+
+
+def test_one_pass_fills_every_free_pool_worker(sample_turn):
+    scopes = _perspective_scopes(sample_turn, (1, 2, 3, 4))
+    worker_count = 2
+    probe = _ConcurrencyProbe(expected=worker_count)
+    registration = replace(
+        pool_compute_registration(SHARED_ID, backend="thread"),
+        run_steps=(("materialize", probe.run_step),),
+    )
+    pool = ComputeWorkerPool(worker_count=worker_count)
+    try:
+        orchestrator = ComputeOrchestrator(
+            compute_registry=build_compute_registry((registration,)),
+            worker_pool=pool,
+        )
+
+        handles = _submit_held_then_dispatch(orchestrator, _ctx(sample_turn), scopes)
+
+        # Nothing completes while the probe holds its runs, so no later pass
+        # can commit the second step: only the release pass fills both workers.
+        assert probe.filled.wait(timeout=_PROBE_TIMEOUT_SEC)
+        probe.release.set()
+        for handle in handles:
+            handle.wait(timeout=_PROBE_TIMEOUT_SEC)
+        assert all(orchestrator.nodes[scope].state == "complete" for scope in scopes)
+        assert probe.peak == worker_count
+    finally:
+        probe.release.set()
+        pool.shutdown()
 
 
 def _bound_backlog(sample_turn):
