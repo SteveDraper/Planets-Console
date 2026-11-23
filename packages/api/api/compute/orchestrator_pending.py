@@ -9,14 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from api.compute.dag import PlannedComputeNode
-from api.compute.orchestrator_state import ComputeHandle, ComputeNodeRun
+from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.profile import ComputeStepSpec
 from api.compute.registry import AnalyticComputeRegistration
 from api.compute.wire import BuildStepJobWireKwargs
 
 __all__ = [
-    "AcceptedSubmission",
     "DispatchedWork",
     "PendingInlineExecution",
     "PendingPoolSubmission",
@@ -77,15 +75,3 @@ class DispatchedWork:
 
     inline: list[PendingInlineExecution] = field(default_factory=list)
     pool: list[PendingPoolSubmission] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class AcceptedSubmission:
-    """One submission applied under the orchestrator lock.
-
-    ``planned`` is the plan a fresh root registered, or None when the
-    submission attached to existing work.
-    """
-
-    handle: ComputeHandle
-    planned: tuple[PlannedComputeNode, ...] | None

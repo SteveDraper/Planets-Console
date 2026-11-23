@@ -463,15 +463,15 @@ def test_no_walk_node_is_dispatched_before_the_mark_is_established(
         orchestrator.dispatch_ready_work()
         competing_dispatch.append("dispatched")
 
-    real_plan_registered = _OnWalkShell.plan_registered
+    real_accept_plan = _OnWalkShell.accept_plan
 
-    def plan_registered_with_competitor(shell, planned):
+    def accept_plan_with_competitor(shell, planned):
         competitor = threading.Thread(target=compete)
         competitor.start()
         competitor.join()
-        real_plan_registered(shell, planned)
+        real_accept_plan(shell, planned)
 
-    monkeypatch.setattr(_OnWalkShell, "plan_registered", plan_registered_with_competitor)
+    monkeypatch.setattr(_OnWalkShell, "accept_plan", accept_plan_with_competitor)
 
     enter_walk(
         orchestrator,

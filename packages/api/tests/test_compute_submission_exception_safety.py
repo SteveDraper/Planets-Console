@@ -9,11 +9,13 @@ hiding the submission's own outcome.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 
 import pytest
 from api.compute import ComputeOrchestrator, ComputeRequest, build_compute_registry
 from api.compute.errors import ComputeWaitTimeoutError
+from api.compute.root_plan import open_ignored_root_plan
 from api.compute.wire import StepResult
 
 from tests.compute_orchestrator_fixtures import (
@@ -143,3 +145,139 @@ def test_a_gate_that_raises_in_the_submitters_pass_does_not_fail_the_submit(samp
 
     assert handle.state == "ready"
     assert submitter.submissions == []
+
+
+class _AcceptError(RuntimeError):
+    pass
+
+
+def _raise_accept_error() -> None:
+    raise _AcceptError("root plan refused the plan")
+
+
+class _RefusePlanFor:
+    """An ``open_root_plan`` hook whose root plan for ``refused_scope`` refuses its plan."""
+
+    def __init__(self, refused_scope) -> None:
+        self.refused_scope = refused_scope
+
+    def __call__(self, scope, submission_open, ctx):
+        inner = open_ignored_root_plan(scope, submission_open, ctx)
+        if scope != self.refused_scope:
+            return inner
+        return _refusing_root_plan(inner)
+
+
+@contextmanager
+def _refusing_root_plan(inner):
+    with inner as plan:
+        yield _ArmedRefusal(plan)
+
+
+@dataclass(frozen=True)
+class _ArmedRefusal:
+    inner: object
+
+    @property
+    def submission_open(self):
+        return self.inner.submission_open
+
+    def accept_plan(self, planned) -> None:
+        raise _AcceptError("root plan refused the plan")
+
+
+def _record_lifecycle_kinds(orchestrator: ComputeOrchestrator) -> list[str]:
+    kinds: list[str] = []
+    orchestrator.observers.register_lifecycle_listener(
+        lambda kind, *_args, **_kwargs: kinds.append(kind)
+    )
+    return kinds
+
+
+def test_a_refused_force_fresh_plan_leaves_the_terminal_node_in_place(sample_turn):
+    (scope,) = _shared_scopes(sample_turn, 1)
+    hook = ArmableRootPlanHook()
+    orchestrator, submitter = _pool_orchestrator(hook)
+    ctx = _ctx(sample_turn)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    complete_running_pool_step(
+        orchestrator, scope, result_wire=StepResult(outcome="complete", payload={})
+    )
+    terminal = orchestrator.nodes[scope]
+    assert terminal.state == "complete"
+    lifecycle_kinds = _record_lifecycle_kinds(orchestrator)
+    hook.arm(on_accept_plan=_raise_accept_error)
+
+    with pytest.raises(_AcceptError):
+        orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
+
+    assert orchestrator.nodes[scope] is terminal
+    assert "force_fresh_replace" not in lifecycle_kinds
+    assert submitter.submissions == [(scope, "materialize")]
+
+
+def test_an_ensure_batch_whose_second_plan_is_refused_runs_only_the_first(sample_turn):
+    first, second, third = _shared_scopes(sample_turn, 3)
+    orchestrator, submitter = _pool_orchestrator(_RefusePlanFor(second))
+    ctx = _ctx(sample_turn)
+
+    with pytest.raises(_AcceptError):
+        orchestrator.ensure_scopes(
+            tuple(ComputeRequest(ctx=ctx, scope=scope) for scope in (first, second, third))
+        )
+
+    assert submitter.submissions == [(first, "materialize")]
+    assert second not in orchestrator.nodes
+    assert third not in orchestrator.nodes
+
+
+def test_a_refused_ensure_plan_leaves_a_hollow_terminal_root_in_place(sample_turn):
+    (scope,) = _shared_scopes(sample_turn, 1)
+    ctx = _ctx(sample_turn)
+    # The stub persistence policy is never satisfied, so a complete node at
+    # the scope is a hollow terminal for ensure.
+    refusing = _RefusePlanFor(None)
+    orchestrator, _submitter = _pool_orchestrator(refusing)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    complete_running_pool_step(
+        orchestrator, scope, result_wire=StepResult(outcome="complete", payload={})
+    )
+    hollow = orchestrator.nodes[scope]
+    refusing.refused_scope = scope
+
+    with pytest.raises(_AcceptError):
+        orchestrator.ensure_scopes((ComputeRequest(ctx=ctx, scope=scope),))
+
+    assert orchestrator.nodes[scope] is hollow
+
+
+def test_an_ensure_replaces_a_failed_terminal_root_instead_of_reraising_its_error(sample_turn):
+    (scope,) = _shared_scopes(sample_turn, 1)
+    orchestrator, submitter = _pool_orchestrator()
+    ctx = _ctx(sample_turn)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    complete_running_pool_step(orchestrator, scope, error=RuntimeError("old failure"))
+    assert orchestrator.nodes[scope].state == "failed"
+
+    with pytest.raises(ComputeWaitTimeoutError):
+        orchestrator.ensure_scopes((ComputeRequest(ctx=ctx, scope=scope),), timeout=0.01)
+
+    assert orchestrator.nodes[scope].state == "running"
+    assert len(submitter.submissions) == 2
+
+
+def test_a_plain_submit_reuses_a_terminal_root(sample_turn):
+    (scope,) = _shared_scopes(sample_turn, 1)
+    orchestrator, submitter = _pool_orchestrator()
+    ctx = _ctx(sample_turn)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    complete_running_pool_step(
+        orchestrator, scope, result_wire=StepResult(outcome="complete", payload={})
+    )
+    terminal = orchestrator.nodes[scope]
+
+    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+
+    assert handle.state == "complete"
+    assert orchestrator.nodes[scope] is terminal
+    assert submitter.submissions == [(scope, "materialize")]

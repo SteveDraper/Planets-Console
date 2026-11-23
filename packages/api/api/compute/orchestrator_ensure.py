@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
-from api.compute.orchestrator_submission import resolve_submission_open
+from api.compute.orchestrator_submission import TerminalRootReuse, resolve_submission_open
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -44,11 +44,11 @@ class OrchestratorEnsureMixin:
         F1) and waits until the scope is terminal or ``timeout``.
 
         When durable satisfaction fails but a terminal node remains (hollow after
-        wipe / invalidate), that cache-hit node is dropped under the orchestrator
-        lock before submit so ``force_fresh=False`` plans fresh work instead of
-        attaching to a stale ``complete``. ``_plan_and_register`` also drops
-        hollow terminals on planned dependency scopes (same wipe class -- root-only
-        eviction left chains ready against empty durable state). Explicit
+        wipe / invalidate), ensure submits with ``TerminalRootReuse.REPLACE_TERMINAL``,
+        so ``force_fresh=False`` plans fresh work that replaces it instead of
+        attaching to a stale ``complete`` or re-raising a stale failure.
+        ``_decide_root_registration`` also replaces hollow terminals on planned
+        dependency scopes (same wipe class). Explicit
         ``force_fresh=True`` remains the wipe / reschedule wake path; ensure does
         not silently set it.
 
@@ -126,21 +126,6 @@ class OrchestratorEnsureMixin:
             ]
             with self._condition:
                 for index, planned_request, root_plan in planned_unsatisfied:
-                    self._drop_hollow_terminal_locked(planned_request)
-                    submission = self._submit_root_planned_locked(planned_request, root_plan)
-                    handles_by_index[index] = submission.handle
-
-    def _drop_hollow_terminal_locked(
-        self: ComputeOrchestrator,
-        request: ResolvedComputeRequest,
-    ) -> None:
-        """Drop a terminal node left for an unsatisfied ensure scope.
-
-        Hollow terminal: durable gone, node still complete/failed. Dropping it
-        lets default force_fresh=False plan fresh work (F1). Non-terminal nodes
-        stay for attach / singleflight; parked wake stays explicit. Caller holds
-        the orchestrator lock.
-        """
-        existing = self._nodes.get(request.scope)
-        if existing is not None and existing.is_terminal and not request.force_fresh:
-            self._replace_terminal_node(existing)
+                    handles_by_index[index] = self._submit_locked(
+                        planned_request, root_plan, TerminalRootReuse.REPLACE_TERMINAL
+                    )

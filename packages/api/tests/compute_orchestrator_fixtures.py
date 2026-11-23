@@ -209,24 +209,24 @@ def _no_root_plan_action() -> None:
 @dataclass(frozen=True)
 class _ArmedRootPlanActions:
     on_enter: RootPlanAction
-    on_registered: RootPlanAction
+    on_accept_plan: RootPlanAction
     on_exit: RootPlanAction
 
 
 @dataclass(frozen=True)
 class _ActingRootPlan:
-    """The ignored root plan, running ``on_registered`` when its plan registers."""
+    """The ignored root plan, running ``on_accept_plan`` when it is offered the plan."""
 
     inner: RootPlan
-    on_registered: RootPlanAction
+    on_accept_plan: RootPlanAction
 
     @property
     def submission_open(self) -> SubmissionOpen:
         return self.inner.submission_open
 
-    def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
-        self.inner.plan_registered(planned)
-        self.on_registered()
+    def accept_plan(self, planned: tuple[PlannedComputeNode, ...]) -> None:
+        self.inner.accept_plan(planned)
+        self.on_accept_plan()
 
 
 class ArmableRootPlanHook:
@@ -239,8 +239,9 @@ class ArmableRootPlanHook:
 
     ``on_enter`` runs as the plan opens, outside the orchestrator lock and
     before the dependency chain is prepared, so it may submit or abort.
-    ``on_registered`` runs under the lock in the hold that registers the
-    plan, so it must not call back into the orchestrator. ``on_exit`` runs as
+    ``on_accept_plan`` runs under the lock when the plan is offered, before
+    anything is registered, so it must not call back into the orchestrator;
+    raising there refuses the submission. ``on_exit`` runs as
     the plan closes after a clean submission. Any of them may raise.
     """
 
@@ -251,10 +252,10 @@ class ArmableRootPlanHook:
         self,
         *,
         on_enter: RootPlanAction = _no_root_plan_action,
-        on_registered: RootPlanAction = _no_root_plan_action,
+        on_accept_plan: RootPlanAction = _no_root_plan_action,
         on_exit: RootPlanAction = _no_root_plan_action,
     ) -> None:
-        self._armed = _ArmedRootPlanActions(on_enter, on_registered, on_exit)
+        self._armed = _ArmedRootPlanActions(on_enter, on_accept_plan, on_exit)
 
     def __call__(
         self,
@@ -276,5 +277,5 @@ def _acting_root_plan(
 ) -> Iterator[RootPlan]:
     with ignored as inner:
         actions.on_enter()
-        yield _ActingRootPlan(inner, actions.on_registered)
+        yield _ActingRootPlan(inner, actions.on_accept_plan)
         actions.on_exit()

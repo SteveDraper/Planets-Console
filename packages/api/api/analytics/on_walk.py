@@ -45,14 +45,14 @@ class _OnWalkShell:
     player_id: int
     baseline_mark: FleetEvidenceMark
 
-    def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
-        """Establish and widen the mark from the registered plan.
+    def accept_plan(self, planned: tuple[PlannedComputeNode, ...]) -> None:
+        """Establish and widen the mark from the plan, before it is registered.
 
         An empty plan writes nothing. An absent mark becomes generation 1 at
         the ensure baseline. ``appliesFromTurn`` moves backward only, to the
-        earliest planned turn. Runs under the orchestrator lock that
-        registers the plan, so no walk node is dispatched, and nothing on the
-        walk persists, before the mark is stored.
+        earliest planned turn. Runs under the orchestrator lock that then
+        registers the plan, so no walk node exists before the mark is stored.
+        If storing the mark raises, the walk is not registered.
         """
         earliest_turn = earliest_planned_turn(planned)
         if earliest_turn is None:
