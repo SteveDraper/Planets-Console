@@ -191,11 +191,7 @@ class ComputeOrchestrator(
         Holding it across scores/fleet job-wire builders deadlocks with the
         inference scheduler (scheduler lock then orchestrator lock).
         """
-        with self._condition:
-            pending_inline, pending_pool = self._dispatch()
-        self._execute_pending_inlines(pending_inline)
-        self._flush_pending_pool_submissions(pending_pool)
-        self._observers.drain_post_lock_callbacks()
+        self._run_dispatch_pass()
 
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
@@ -346,13 +342,7 @@ class ComputeOrchestrator(
             with self._condition:
                 if not self._has_pending_work():
                     break
-                self._refresh_all_readiness()
-                pending_inline, pending_pool = self._dispatch()
-                has_running = any(node.state == "running" for node in self._nodes.values())
-            self._execute_pending_inlines(pending_inline)
-            self._flush_pending_pool_submissions(pending_pool)
-            self._observers.drain_post_lock_callbacks()
-            if has_running:
+            if self._run_dispatch_pass(refresh_all=True):
                 break
         self._observers.drain_post_lock_callbacks()
 

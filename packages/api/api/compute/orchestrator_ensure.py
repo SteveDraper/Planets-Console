@@ -7,7 +7,7 @@ from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
-from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
+from api.compute.orchestrator_pending import DispatchedWork
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
 from api.compute.orchestrator_submission import resolve_submission_open
 
@@ -105,18 +105,15 @@ class OrchestratorEnsureMixin:
                     (index, self._prepare_root_planned_request(resolved, root_plan), root_plan)
                     for index, resolved, root_plan in opened_unsatisfied
                 ]
-                pending_inline: list[PendingInlineExecution] = []
-                pending_pool: list[PendingPoolSubmission] = []
+                work = DispatchedWork()
                 with self._condition:
                     for index, planned_request, root_plan in planned_unsatisfied:
                         self._drop_hollow_terminal_locked(planned_request)
-                        submission = self._submit_root_planned_locked(planned_request, root_plan)
+                        submission = self._submit_root_planned_locked(
+                            planned_request, root_plan, work
+                        )
                         handles_by_index[index] = submission.handle
-                        pending_inline.extend(submission.pending_inline)
-                        pending_pool.extend(submission.pending_pool)
-            self._execute_pending_inlines(tuple(pending_inline))
-            self._flush_pending_pool_submissions(tuple(pending_pool))
-            self._observers.drain_post_lock_callbacks()
+            self._hand_off(work)
 
         return tuple(
             _wait_ensure_handle(handles_by_index[index], timeout=timeout)

@@ -182,6 +182,23 @@ def make_compute_scope(analytic_id: str, export_scope: ExportScope) -> ComputeSc
     )
 
 
+class RecordingPoolSubmitter:
+    """A ``pool_submitter`` that records each submission and runs nothing.
+
+    With ``raise_on_submit`` set, every submission raises that error instead
+    of being recorded, as a pool that refuses an item would.
+    """
+
+    def __init__(self, *, raise_on_submit: BaseException | None = None) -> None:
+        self.raise_on_submit = raise_on_submit
+        self.submissions: list[tuple[ComputeScope, str]] = []
+
+    def __call__(self, node, step, **_kwargs) -> None:
+        if self.raise_on_submit is not None:
+            raise self.raise_on_submit
+        self.submissions.append((node.scope, step.step_kind))
+
+
 RootPlanAction = Callable[[], None]
 
 

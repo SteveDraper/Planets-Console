@@ -35,6 +35,7 @@ from api.compute.diagnostics.timeline import (
     OccupancyGauges,
     make_concurrency_event,
 )
+from api.compute.orchestrator_pending import DispatchedWork
 from api.compute.runtime import reset_orchestrators_for_tests
 from api.compute.scope import format_compute_scope_key
 from api.compute.submission_open import SubmissionOpen
@@ -522,10 +523,10 @@ def test_ready_to_waiting_deps_notifies_ready_queue_depth(sample_turn):
         orchestrator._nodes[scope] = node
         orchestrator._ready_queue.append(scope)
         snapshots.clear()
-        pending_inline, pending_pool = orchestrator._dispatch()
+        work = DispatchedWork()
+        orchestrator._dispatch(work)
 
-    assert pending_inline == ()
-    assert pending_pool == ()
+    assert work == DispatchedWork()
     assert node.state == "waiting_deps"
     assert orchestrator.ready_scopes() == ()
     assert snapshots, "expected ready-queue-changed after waiting_deps drop"

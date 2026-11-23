@@ -23,6 +23,7 @@ from api.compute.wire import MalformedStepResultError
 from tests.compute_orchestrator_fixtures import (
     ROW_SCOPE_KEY,
     RecordingPersistencePolicy,
+    RecordingPoolSubmitter,
     catalog_entry,
     inline_compute_registration,
     make_compute_scope,
@@ -82,9 +83,6 @@ def _running_pool_node(sample_turn):
     scope = make_compute_scope(SHARED_ID, make_export_scope(sample_turn))
     persistence = RecordingPersistencePolicy()
 
-    def pool_submitter(node, step, **_kwargs) -> None:
-        del node, step
-
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry(
             (
@@ -93,7 +91,7 @@ def _running_pool_node(sample_turn):
                 ),
             )
         ),
-        pool_submitter=pool_submitter,
+        pool_submitter=RecordingPoolSubmitter(),
     )
     handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
     assert orchestrator.nodes[scope].state == "running"

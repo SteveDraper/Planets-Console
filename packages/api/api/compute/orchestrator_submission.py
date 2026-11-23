@@ -16,7 +16,7 @@ from api.compute.errors import (
     UnresolvedSubmissionOpenError,
 )
 from api.compute.orchestration_bundle import OrchestrationBundle
-from api.compute.orchestrator_pending import AcceptedSubmission
+from api.compute.orchestrator_pending import AcceptedSubmission, DispatchedWork
 from api.compute.orchestrator_state import (
     ComputeHandle,
     ComputeNodeRun,
@@ -139,11 +139,13 @@ class OrchestratorSubmissionMixin:
         ``request.requester`` is set and that execution is no longer live.
         """
         resolved = resolve_submission_open(request)
+        work = DispatchedWork()
         with self._open_root_plan(resolved) as root_plan:
             planned_request = self._prepare_root_planned_request(resolved, root_plan)
             with self._condition:
-                submission = self._submit_root_planned_locked(planned_request, root_plan)
-        return self._finish_submission(submission)
+                submission = self._submit_root_planned_locked(planned_request, root_plan, work)
+        self._hand_off(work)
+        return submission.handle
 
     def wake_if_parked(
         self: ComputeOrchestrator,
@@ -161,11 +163,13 @@ class OrchestratorSubmissionMixin:
             if not _is_parked_node(self._nodes.get(request.scope)):
                 return None
         resolved = resolve_submission_open(request)
+        work = DispatchedWork()
         with self._condition:
             if not _is_parked_node(self._nodes.get(resolved.scope)):
                 return None
-            submission = self._submit_locked(resolved)
-        return self._finish_submission(submission)
+            submission = self._submit_locked(resolved, work)
+        self._hand_off(work)
+        return submission.handle
 
     def _open_root_plan(
         self: ComputeOrchestrator,
@@ -205,13 +209,15 @@ class OrchestratorSubmissionMixin:
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
         root_plan: RootPlan,
+        work: DispatchedWork,
     ) -> AcceptedSubmission:
         """Apply one submission and report a freshly registered plan to ``root_plan``.
 
         Caller holds the orchestrator lock, so the report runs in the same hold
-        that registers the plan and before any selected work runs.
+        that registers the plan and before any selected work runs. Work the
+        submission dispatches is committed into ``work``.
         """
-        submission = self._submit_locked(request)
+        submission = self._submit_locked(request, work)
         if submission.planned is not None:
             root_plan.plan_registered(submission.planned)
         return submission
@@ -219,6 +225,7 @@ class OrchestratorSubmissionMixin:
     def _submit_locked(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
+        work: DispatchedWork,
     ) -> AcceptedSubmission:
         """Apply one submission under the orchestrator lock.
 
@@ -226,7 +233,8 @@ class OrchestratorSubmissionMixin:
         run ``resolve_submission_open`` before taking this lock, so this method
         does not read the backfill record. ``planned`` on the result is the plan
         a fresh root registered, or None when the submission attached to
-        existing work.
+        existing work. The dispatch pass it runs commits into ``work``, which
+        the caller hands off after releasing the lock.
 
         A request whose ``requester`` execution is no longer live raises
         :class:`ComputeRequesterEndedError` before anything changes. The check
@@ -272,8 +280,8 @@ class OrchestratorSubmissionMixin:
         # The request raises only its own scope's standing band. Its
         # dependencies take their band from it through the pass derivation.
         self._nodes[scope].raise_standing_band(request.priority_band)
-        pending_inline, pending_pool = self._dispatch()
-        return AcceptedSubmission(handle, pending_inline, pending_pool, planned)
+        self._dispatch(work)
+        return AcceptedSubmission(handle, planned)
 
     def _refuse_ended_requester(
         self: ComputeOrchestrator,
@@ -393,16 +401,6 @@ class OrchestratorSubmissionMixin:
         for node in self._nodes.values():
             self._refresh_node_readiness(node)
         return planned
-
-    def _finish_submission(
-        self: ComputeOrchestrator,
-        submission: AcceptedSubmission,
-    ) -> ComputeHandle:
-        """Run work selected by a submission after releasing the lock."""
-        self._execute_pending_inlines(submission.pending_inline)
-        self._flush_pending_pool_submissions(submission.pending_pool)
-        self._observers.drain_post_lock_callbacks()
-        return submission.handle
 
     def _require_bundle(
         self: ComputeOrchestrator,
