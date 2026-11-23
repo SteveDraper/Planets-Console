@@ -183,13 +183,14 @@ class ComputeOrchestrator(
         self._observers = OrchestratorObservers(self._condition)
 
     def dispatch_ready_work(self) -> None:
-        """Dispatch any ready nodes allowed by the current gates.
+        """Dispatch every ready node the current gates allow, in one pass.
 
-        Inline execution and pool job-wire construction run only after the
-        orchestrator lock is released. Holding that lock across ``pool.submit``
-        deadlocks with pool workers (pool lock then diagnostics controller lock).
-        Holding it across scores/fleet job-wire builders deadlocks with the
-        inference scheduler (scheduler lock then orchestrator lock).
+        Inline execution runs only after the orchestrator lock is released, and
+        pool job wires are built on the pool worker that picks each step.
+        Holding that lock across ``pool.submit`` deadlocks with pool workers
+        (pool lock then diagnostics controller lock). Holding it across
+        scores/fleet job-wire builders deadlocks with the inference scheduler
+        (scheduler lock then orchestrator lock).
         """
         self._run_dispatch_pass()
 

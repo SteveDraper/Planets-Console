@@ -124,9 +124,13 @@ LifecycleListener = Callable[
     ],
     None,
 ]
+# Side-effect-free admission check for one ready node. A dispatch pass asks
+# each gate once per node; a gate must never admit more because of a commit
+# earlier in the same pass.
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 # Side-effecting accept after all gates pass (e.g. consume a single-step slot).
 # Must be idempotent-safe under reject: return False to leave the node ready.
+# Like a gate, it must never admit more because of a commit earlier in the pass.
 NodeDispatchCommitHook = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
 
