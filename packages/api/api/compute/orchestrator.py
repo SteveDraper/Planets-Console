@@ -191,11 +191,7 @@ class ComputeOrchestrator(
         Holding it across scores/fleet job-wire builders deadlocks with the
         inference scheduler (scheduler lock then orchestrator lock).
         """
-        with self._condition:
-            pending_inline, pending_pool = self._dispatch()
-        self._execute_pending_inlines(pending_inline)
-        self._flush_pending_pool_submissions(pending_pool)
-        self._observers.drain_post_lock_callbacks()
+        self._run_dispatch_pass()
 
     @property
     def worker_pool(self) -> ComputeWorkerPool | None:
@@ -320,10 +316,12 @@ class ComputeOrchestrator(
         once more, since the execution can end while the step runs.
         """
         with self._condition:
-            node = self._nodes.get(scope)
-            if node is None or not node.is_running_execution(execution_generation):
+            running = self._running_execution(scope, execution_generation)
+            if running is None:
+                node = self._nodes.get(scope)
                 reason = _unbound_step_item_reason(node, execution_generation)
-            elif self._refuse_step_exit(node, StepExit.START):
+            elif self._refuse_step_exit(running, StepExit.START):
+                node = running
                 reason = StepItemIgnoredReason.START_REFUSED
             else:
                 return True
@@ -346,13 +344,7 @@ class ComputeOrchestrator(
             with self._condition:
                 if not self._has_pending_work():
                     break
-                self._refresh_all_readiness()
-                pending_inline, pending_pool = self._dispatch()
-                has_running = any(node.state == "running" for node in self._nodes.values())
-            self._execute_pending_inlines(pending_inline)
-            self._flush_pending_pool_submissions(pending_pool)
-            self._observers.drain_post_lock_callbacks()
-            if has_running:
+            if self._run_dispatch_pass(refresh_all=True):
                 break
         self._observers.drain_post_lock_callbacks()
 
@@ -396,6 +388,23 @@ class ComputeOrchestrator(
                 )
         self._observers.drain_post_lock_callbacks()
 
+    def _running_execution(
+        self,
+        scope: ComputeScope,
+        execution_generation: int,
+    ) -> ComputeNodeRun | None:
+        """The node running execution ``execution_generation`` of ``scope``, or None.
+
+        Caller holds the orchestrator lock. This is the one execution-binding
+        check: pool picks, pool and inline finishes, and failed hand-offs all
+        bind to their execution here. Execution generations are unique per
+        orchestrator, so a match is the dispatching node itself.
+        """
+        node = self._nodes.get(scope)
+        if node is not None and node.is_running_execution(execution_generation):
+            return node
+        return None
+
     def _running_execution_or_record_ignored(
         self,
         kind: StepItemIgnoredKind,
@@ -412,9 +421,10 @@ class ComputeOrchestrator(
         with the reason and returns None. Caller holds the orchestrator lock.
         A pool finish and an inline finish both bind to their execution here.
         """
+        running = self._running_execution(scope, execution_generation)
+        if running is not None:
+            return running
         node = self._nodes.get(scope)
-        if node is not None and node.is_running_execution(execution_generation):
-            return node
         self._notify_step_item_ignored(
             kind,
             scope,

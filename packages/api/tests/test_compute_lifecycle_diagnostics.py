@@ -35,6 +35,7 @@ from api.config import ApiConfig, set_config
 from tests.compute_orchestrator_fixtures import (
     RecordingPersistencePolicy,
     StubPersistencePolicy,
+    inline_compute_registration,
     make_compute_scope,
     make_export_scope,
     pool_compute_registration,
@@ -134,6 +135,50 @@ def test_force_fresh_replace_and_stale_pool_finish_appear_on_timeline(sample_tur
     assert ignored["detail"]["reason"] == "node_not_running"
     assert ignored["stepKind"] == "materialize"
     assert ignored["stepIndex"] == 0
+
+
+def _record_submission_event_order(orchestrator: ComputeOrchestrator) -> list[str]:
+    """Record lifecycle, inline-start and step-complete events in arrival order."""
+    events: list[str] = []
+    observers = orchestrator.observers
+    observers.register_lifecycle_listener(lambda kind, *_args: events.append(kind))
+    observers.register_inline_start_listener(lambda *_args: events.append("inline_start"))
+    observers.register_step_complete_listener(lambda *_args: events.append("step_complete"))
+    return events
+
+
+def test_force_fresh_replace_precedes_the_replacing_execution_steps(sample_turn):
+    ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    scope = make_compute_scope(SHARED_ID, make_export_scope(sample_turn))
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry((inline_compute_registration(SHARED_ID),))
+    )
+    assert orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope)).state == "complete"
+    events = _record_submission_event_order(orchestrator)
+
+    replaced = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
+
+    assert replaced.state == "complete"
+    assert events == ["force_fresh_replace", "inline_start", "step_complete"]
+
+
+def test_force_fresh_attach_precedes_the_woken_execution_steps(sample_turn):
+    ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+    scope = make_compute_scope(SHARED_ID, make_export_scope(sample_turn))
+    step_runs = iter((StepResult(outcome="park", park_reason="test_park"), {"result": SHARED_ID}))
+    registration = replace(
+        inline_compute_registration(SHARED_ID),
+        run_steps=(("materialize", lambda _job: next(step_runs)),),
+    )
+    orchestrator = ComputeOrchestrator(compute_registry=build_compute_registry((registration,)))
+    assert orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope)).state == "parked"
+    events = _record_submission_event_order(orchestrator)
+
+    woken = orchestrator.wake_if_parked(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
+
+    assert woken is not None
+    assert woken.state == "complete"
+    assert events == ["force_fresh_attach", "inline_start", "step_complete"]
 
 
 def test_persist_deferred_lifecycle_event_includes_related_scope(sample_turn):

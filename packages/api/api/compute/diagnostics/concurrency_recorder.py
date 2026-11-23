@@ -246,7 +246,7 @@ class ConcurrencyTimelineRecorder:
         # Use the ready-queue cache only. Live ``diagnostics_snapshot`` here deadlocks:
         # finish listeners run from ``drain_post_lock_callbacks`` while a peer may hold
         # the scores scheduler lock and wait on an orchestrator condition (or the reverse
-        # via ``submit`` / ``_plan_and_register`` probing the scheduler under the orch lock).
+        # via ``submit`` / ``_decide_root_registration`` probing the scheduler under the orch lock).
         gauges = self._occupancy_gauges(
             shell,
             global_queue_depth=global_queue_depth,
@@ -340,7 +340,7 @@ class ConcurrencyTimelineRecorder:
 
         Ready depth prefers the ready-queue-changed cache so listener callbacks
         (ready / inline_start / finish) never nest into orchestrator locks -- that
-        ABBA-deadlocks with ``submit`` / ``_plan_and_register`` paths that hold an
+        ABBA-deadlocks with ``submit`` / ``_decide_root_registration`` paths that hold an
         orch lock while probing the scores scheduler. When
         ``sample_ready_from_orchestrators`` is true (snapshot assembly only, never
         from drain_post_lock listeners), live orchestrator ready queues are used

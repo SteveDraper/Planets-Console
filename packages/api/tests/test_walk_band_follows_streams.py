@@ -28,7 +28,6 @@ from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
 from api.compute.persistence import PersistDependencyRecovery
 from api.compute.priority_band import ComputeRequestBand
-from api.compute.scope import ComputeScope
 from api.streaming.table_stream.registry import TableStreamRegistry
 from api.streaming.table_stream.registry_bootstrap import (
     ensure_table_stream_registries_registered,
@@ -39,6 +38,7 @@ from api.streaming.table_stream.registry_catalog import (
 )
 from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 
+from tests.compute_orchestrator_fixtures import RecordingPoolSubmitter
 from tests.compute_published_band_helpers import published_band
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.on_walk_live_helpers import LiveStream, attach_stream
@@ -298,11 +298,11 @@ def test_an_interactive_attach_propagates_and_a_stream_close_never_lowers_it(wal
 def test_the_ready_pick_is_by_band_then_first_in_first_out(sample_turn):
     ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     scopes = _player_scopes(sample_turn, ctx, 3)
-    dispatched: list[ComputeScope] = []
+    submitter = RecordingPoolSubmitter()
     gate_open = threading.Event()
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry((_single_step_thread_registration(),)),
-        pool_submitter=lambda node, _step, **_kwargs: dispatched.append(node.scope),
+        pool_submitter=submitter,
     )
     orchestrator.observers.register_dispatch_gate(lambda _node: gate_open.is_set())
     bands: tuple[ComputeRequestBand, ...] = ("background", "interactive_ensure", "background")
@@ -314,4 +314,8 @@ def test_the_ready_pick_is_by_band_then_first_in_first_out(sample_turn):
     for _ in scopes:
         orchestrator.dispatch_ready_work()
 
-    assert dispatched == [scopes[1], scopes[0], scopes[2]]
+    assert [scope for scope, _step_kind in submitter.submissions] == [
+        scopes[1],
+        scopes[0],
+        scopes[2],
+    ]

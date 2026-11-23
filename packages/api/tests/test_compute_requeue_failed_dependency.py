@@ -476,21 +476,22 @@ def test_a_recovery_submit_raising_before_registration_fails_the_node(sample_tur
 
 
 @pytest.mark.allows_post_lock_callback_errors
-def test_a_recovery_plan_raising_after_the_superseded_node_is_replaced_fails_the_node(
+def test_a_recovery_plan_raising_leaves_the_superseded_node_and_fails_the_waiter(
     sample_turn, monkeypatch, caplog
 ):
-    """The recovery scope reads absent once the superseded SHARED is popped."""
+    """Planning changes nothing, so the recovery scope still holds the superseded SHARED."""
     setup = running_branch(sample_turn)
+    complete_shared = setup.orchestrator.nodes[setup.shared]
     plan_failure = RuntimeError("turn unavailable at plan time")
 
     def raise_plan_failure(*_args, **_kwargs) -> None:
         raise plan_failure
 
-    monkeypatch.setattr(setup.orchestrator, "_plan_and_register", raise_plan_failure)
+    monkeypatch.setattr(setup.orchestrator, "_decide_root_registration", raise_plan_failure)
 
     _defer_with_a_raising_recovery_submit(setup, caplog, plan_failure)
 
-    assert setup.shared not in setup.orchestrator.nodes
+    assert setup.orchestrator.nodes[setup.shared] is complete_shared
     _assert_branch_failed_with(setup, plan_failure)
 
 
@@ -511,14 +512,26 @@ def test_a_recovery_submit_raising_leaves_the_node_waiting_on_a_running_dependen
 
 
 @pytest.mark.allows_post_lock_callback_errors
-@pytest.mark.parametrize("hook", ["on_registered", "on_exit"])
+def test_a_recovery_whose_root_plan_refuses_the_plan_fails_the_waiter(sample_turn, caplog):
+    setup = running_branch(sample_turn)
+    complete_shared = setup.orchestrator.nodes[setup.shared]
+    hook_failure = RuntimeError("root plan refused the plan")
+    setup.shared_root_plan.arm(on_accept_plan=_raise(hook_failure))
+
+    _defer_with_a_raising_recovery_submit(setup, caplog, hook_failure)
+
+    assert setup.orchestrator.nodes[setup.shared] is complete_shared
+    _assert_branch_failed_with(setup, hook_failure)
+
+
+@pytest.mark.allows_post_lock_callback_errors
 def test_a_recovery_submit_raising_after_registration_settles_on_the_replacement(
-    sample_turn, caplog, hook
+    sample_turn, caplog
 ):
     setup = running_branch(sample_turn)
     complete_shared = setup.orchestrator.nodes[setup.shared]
     hook_failure = RuntimeError("root plan hook failed")
-    setup.shared_root_plan.arm(**{hook: _raise(hook_failure)})
+    setup.shared_root_plan.arm(on_exit=_raise(hook_failure))
 
     _defer_with_a_raising_recovery_submit(setup, caplog, hook_failure)
 

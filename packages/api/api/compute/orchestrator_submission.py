@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -16,7 +17,6 @@ from api.compute.errors import (
     UnresolvedSubmissionOpenError,
 )
 from api.compute.orchestration_bundle import OrchestrationBundle
-from api.compute.orchestrator_pending import AcceptedSubmission
 from api.compute.orchestrator_state import (
     ComputeHandle,
     ComputeNodeRun,
@@ -100,6 +100,63 @@ def resolve_submission_open(request: ComputeRequest) -> ResolvedComputeRequest:
     return _with_resolved_open(request, resolved_open)
 
 
+class TerminalRootReuse(Enum):
+    """What a fresh submission does with a terminal node already at its root scope.
+
+    ``CACHE_HIT``: a terminal root is reused unless the request is
+    ``force_fresh`` (``submit``). ``REPLACE_TERMINAL``: a terminal root is
+    replaced, because the caller already found the scope unsatisfied outside
+    the lock (``ensure_scopes``).
+    """
+
+    CACHE_HIT = "cache_hit"
+    REPLACE_TERMINAL = "replace_terminal"
+
+
+@dataclass(frozen=True)
+class NewNode:
+    """A planned node a fresh root registers, with its resolved profile step index."""
+
+    planned: PlannedComputeNode
+    profile_step_index: int
+
+
+@dataclass(frozen=True)
+class RootRegistration:
+    """Everything a fresh root will change, decided before its root plan accepts it.
+
+    Deciding changes no orchestrator state, so a root plan that refuses the
+    plan leaves the orchestrator as it was. Applying it cannot fail on the
+    plan's contents: entry step indexes are resolved here.
+    """
+
+    planned: tuple[PlannedComputeNode, ...]
+    # The ``force_fresh`` root being replaced; its replace is a lifecycle event.
+    superseded_root: ComputeNodeRun | None
+    # Every terminal node to replace: the existing root (superseded or an
+    # ensure's hollow root), and planned dependencies whose durable result is gone.
+    replaced_terminals: tuple[ComputeNodeRun, ...]
+    # Planned nodes to register.
+    new_nodes: tuple[NewNode, ...]
+    # An empty plan for the root registers a synthetic ``complete`` root.
+    needs_complete_root: bool
+
+
+def _joins_existing(
+    existing: ComputeNodeRun,
+    request: ResolvedComputeRequest,
+    reuse: TerminalRootReuse,
+) -> bool:
+    """Whether a submission joins the node already at its root scope.
+
+    A live node is always joined. A terminal node is joined only as a cache
+    hit: ``reuse`` keeps it and the request is not ``force_fresh``.
+    """
+    if not existing.is_terminal:
+        return True
+    return reuse is TerminalRootReuse.CACHE_HIT and not request.force_fresh
+
+
 def _is_parked_node(node: ComputeNodeRun | None) -> bool:
     """Whether ``wake_if_parked`` may wake this node."""
     return node is not None and node.state == "parked"
@@ -137,13 +194,25 @@ class OrchestratorSubmissionMixin:
 
         Raises :class:`ComputeRequesterEndedError`, planning nothing, when
         ``request.requester`` is set and that execution is no longer live.
+
+        Submission registers work and schedules a dispatch pass; the
+        post-lock queue is drained in a ``finally``, so that pass runs before
+        this returns or raises, unless another thread's drain ran it first.
+        A raise inside the pass is logged by the drain and does not reach the
+        caller. A root plan that raises as it closes still leaves its
+        registered work dispatched.
         """
         resolved = resolve_submission_open(request)
-        with self._open_root_plan(resolved) as root_plan:
-            planned_request = self._prepare_root_planned_request(resolved, root_plan)
-            with self._condition:
-                submission = self._submit_root_planned_locked(planned_request, root_plan)
-        return self._finish_submission(submission)
+        try:
+            with self._open_root_plan(resolved) as root_plan:
+                planned_request = self._prepare_root_planned_request(resolved, root_plan)
+                with self._condition:
+                    handle = self._submit_locked(
+                        planned_request, root_plan, TerminalRootReuse.CACHE_HIT
+                    )
+        finally:
+            self._observers.drain_post_lock_callbacks()
+        return handle
 
     def wake_if_parked(
         self: ComputeOrchestrator,
@@ -154,6 +223,7 @@ class OrchestratorSubmissionMixin:
         A scope that is not parked returns before the backfill record is read.
         The wake re-checks that state under the same lock hold as the mutation.
         A wake attaches to the parked node, so it never registers a root plan.
+        The attach schedules a dispatch pass, drained before this returns.
         """
         if not request.force_fresh:
             raise ValueError("wake_if_parked requires force_fresh=True")
@@ -161,11 +231,14 @@ class OrchestratorSubmissionMixin:
             if not _is_parked_node(self._nodes.get(request.scope)):
                 return None
         resolved = resolve_submission_open(request)
-        with self._condition:
-            if not _is_parked_node(self._nodes.get(resolved.scope)):
-                return None
-            submission = self._submit_locked(resolved)
-        return self._finish_submission(submission)
+        try:
+            with self._condition:
+                parked = self._nodes.get(resolved.scope)
+                if parked is None or not _is_parked_node(parked):
+                    return None
+                return self._attach_locked(parked, resolved)
+        finally:
+            self._observers.drain_post_lock_callbacks()
 
     def _open_root_plan(
         self: ComputeOrchestrator,
@@ -201,79 +274,181 @@ class OrchestratorSubmissionMixin:
             )
         return planned_request
 
-    def _submit_root_planned_locked(
-        self: ComputeOrchestrator,
-        request: ResolvedComputeRequest,
-        root_plan: RootPlan,
-    ) -> AcceptedSubmission:
-        """Apply one submission and report a freshly registered plan to ``root_plan``.
-
-        Caller holds the orchestrator lock, so the report runs in the same hold
-        that registers the plan and before any selected work runs.
-        """
-        submission = self._submit_locked(request)
-        if submission.planned is not None:
-            root_plan.plan_registered(submission.planned)
-        return submission
-
     def _submit_locked(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
-    ) -> AcceptedSubmission:
-        """Apply one submission under the orchestrator lock.
+        root_plan: RootPlan,
+        reuse: TerminalRootReuse,
+    ) -> ComputeHandle:
+        """Apply one submission under the orchestrator lock, and schedule a dispatch pass.
 
         ``request.submission_open`` is the open for this submission. Callers
         run ``resolve_submission_open`` before taking this lock, so this method
-        does not read the backfill record. ``planned`` on the result is the plan
-        a fresh root registered, or None when the submission attached to
-        existing work.
+        does not read the backfill record. A live node at the scope is joined,
+        and so is a terminal one that ``reuse`` keeps (:meth:`_attach_locked`).
+        Otherwise a fresh root is decided (:meth:`_decide_root_registration`),
+        reported to ``root_plan.accept_plan``, and only then applied. A root
+        plan that raises refuses the submission and nothing changes. Submission
+        marks nothing ``running``: it schedules a dispatch pass on the
+        post-lock queue, which the caller drains after releasing the lock.
 
         A request whose ``requester`` execution is no longer live raises
         :class:`ComputeRequesterEndedError` before anything changes. The check
         runs in this hold, so an abort that lands while the submit fetched its
         dependency chain outside the lock still refuses it.
         """
+        existing = self._nodes.get(request.scope)
+        if existing is not None and _joins_existing(existing, request, reuse):
+            return self._attach_locked(existing, request)
         self._refuse_ended_requester(request)
-        scope = request.scope
-        existing = self._nodes.get(scope)
-        planned: tuple[PlannedComputeNode, ...] | None = None
-        if existing is not None and not (request.force_fresh and existing.is_terminal):
-            if request.force_fresh:
-                self._emit_force_fresh_lifecycle(
-                    kind="force_fresh_attach",
-                    node=existing,
-                    request=request,
-                )
-                # Resolve readiness once: a parked node wakes; a waiting or
-                # ready node is refreshed, since its dependencies may have
-                # settled without reaching it (e.g. evidence-close force_fresh
-                # after scores completed). A running node is left alone.
-                if existing.state == "parked":
-                    self._wake_parked_node(existing)
-                else:
-                    self._refresh_node_readiness(existing)
-                if existing.state == "waiting_deps":
-                    self._schedule_recreate_aborted_dependencies(existing)
-            handle = self._attach_to_existing(existing, request)
-        else:
+        registration = self._decide_root_registration(request, existing)
+        root_plan.accept_plan(registration.planned)
+        return self._apply_root_registration(request, registration)
+
+    def _decide_root_registration(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+        existing_root: ComputeNodeRun | None,
+    ) -> RootRegistration:
+        """Plan a fresh root and decide what it replaces and registers.
+
+        Changes no orchestrator state. Caller holds the orchestrator lock.
+        ``existing_root`` is the terminal node at the root scope, if any; the
+        caller has decided to replace it. A planned dependency with a terminal
+        node whose durable result is gone (a hollow terminal: durable wiped,
+        node still ``complete``) is replaced so the chain rebuilds; a planned
+        scope with any other node is kept as it is.
+        """
+        bundle = self._require_bundle(request)
+        root_scope = request.scope
+        ctx = self._ctx_for_bundle(bundle)
+        planned_nodes = plan_compute_dag(
+            ctx,
+            root_scope.analytic_id,
+            compute_scope_to_export_scope(root_scope),
+            compute_registry=self._compute_registry,
+            force_root=force_root_for_entry_step(request.step_kind),
+            backfill_earlier_turns=request.submission_open.backfill_earlier_turns,
+        )
+        self.turn_cache.prefetch_planned_nodes(
+            planned_nodes,
+            load_turn=bundle.query_context.load_turn,
+            game_id=bundle.game_id,
+            perspective=bundle.perspective,
+        )
+        replaced_terminals: list[ComputeNodeRun] = []
+        new_nodes: list[NewNode] = []
+        for planned in planned_nodes:
+            registration = self._compute_registry[planned.scope.analytic_id]
+            is_root = planned.scope == root_scope
+            existing = None if is_root else self._nodes.get(planned.scope)
             if existing is not None:
-                self._emit_force_fresh_lifecycle(
-                    kind="force_fresh_replace",
-                    node=existing,
-                    request=request,
-                )
-                self._replace_terminal_node(existing)
-            planned = self._plan_submission_locked(request)
-            handle = ComputeHandle(
-                scope=scope,
-                _node=self._nodes[scope],
-                _condition=self._condition,
+                if not existing.is_terminal or registration.persistence_policy.is_satisfied(
+                    ctx, planned.scope
+                ):
+                    continue
+                replaced_terminals.append(existing)
+            entry_step_kind = request.step_kind if is_root else None
+            new_nodes.append(
+                NewNode(planned, self._resolve_profile_step_index(registration, entry_step_kind))
             )
+        if existing_root is not None:
+            replaced_terminals.append(existing_root)
+        return RootRegistration(
+            planned=planned_nodes,
+            superseded_root=existing_root if request.force_fresh else None,
+            replaced_terminals=tuple(replaced_terminals),
+            new_nodes=tuple(new_nodes),
+            needs_complete_root=all(new_node.planned.scope != root_scope for new_node in new_nodes),
+        )
+
+    def _apply_root_registration(
+        self: ComputeOrchestrator,
+        request: ResolvedComputeRequest,
+        registration: RootRegistration,
+    ) -> ComputeHandle:
+        """Apply a decided fresh root, after its root plan accepted it. Caller holds the lock.
+
+        Emits ``force_fresh_replace`` for a superseded root, then schedules the
+        dispatch pass, so the replace precedes the replacing execution's events
+        and even a synchronous ready-queue listener that raises partway leaves
+        the registered nodes with a pass. Then replaces terminals, registers
+        the new nodes, refreshes readiness across the DAG and raises the root's
+        standing band.
+        """
+        if registration.superseded_root is not None:
+            self._emit_force_fresh_lifecycle(
+                kind="force_fresh_replace",
+                node=registration.superseded_root,
+                request=request,
+            )
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
+        bundle = self._require_bundle(request)
+        submission_open = request.submission_open
+        for terminal in registration.replaced_terminals:
+            self._replace_terminal_node(terminal)
+        for new_node in registration.new_nodes:
+            self._nodes[new_node.planned.scope] = ComputeNodeRun(
+                scope=new_node.planned.scope,
+                dependency_scopes=new_node.planned.dependency_scopes,
+                profile_step_index=new_node.profile_step_index,
+                execution_generation=self._allocate_execution_generation(),
+                bundle=bundle,
+                submission_open=submission_open,
+            )
+        if registration.needs_complete_root:
+            self._nodes[request.scope] = ComputeNodeRun(
+                scope=request.scope,
+                dependency_scopes=(),
+                state="complete",
+                execution_generation=self._allocate_execution_generation(),
+                bundle=bundle,
+                submission_open=submission_open,
+            )
+        for node in self._nodes.values():
+            self._refresh_node_readiness(node)
+        root = self._nodes[request.scope]
         # The request raises only its own scope's standing band. Its
         # dependencies take their band from it through the pass derivation.
-        self._nodes[scope].raise_standing_band(request.priority_band)
-        pending_inline, pending_pool = self._dispatch()
-        return AcceptedSubmission(handle, pending_inline, pending_pool, planned)
+        root.raise_standing_band(request.priority_band)
+        return ComputeHandle(scope=request.scope, _node=root, _condition=self._condition)
+
+    def _attach_locked(
+        self: ComputeOrchestrator,
+        existing: ComputeNodeRun,
+        request: ResolvedComputeRequest,
+    ) -> ComputeHandle:
+        """Join ``existing`` for ``request``, and schedule a dispatch pass.
+
+        Caller holds the orchestrator lock. Refuses an ended requester first.
+        A ``force_fresh`` join emits ``force_fresh_attach`` before the pass is
+        scheduled, so the event precedes the joined execution's step events.
+        The pass is scheduled before readiness changes, so a raising
+        ready-queue listener still leaves the node with a pass. A
+        ``force_fresh`` join then resolves readiness once: a parked node wakes;
+        a waiting or ready node is refreshed, since its dependencies may have
+        settled without reaching it (e.g. evidence-close ``force_fresh`` after
+        scores completed); a running node is left alone. The request raises
+        only the joined scope's standing band.
+        """
+        self._refuse_ended_requester(request)
+        if request.force_fresh:
+            self._emit_force_fresh_lifecycle(
+                kind="force_fresh_attach",
+                node=existing,
+                request=request,
+            )
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
+        if request.force_fresh:
+            if existing.state == "parked":
+                self._wake_parked_node(existing)
+            else:
+                self._refresh_node_readiness(existing)
+            if existing.state == "waiting_deps":
+                self._schedule_recreate_aborted_dependencies(existing)
+        handle = self._attach_to_existing(existing, request)
+        existing.raise_standing_band(request.priority_band)
+        return handle
 
     def _refuse_ended_requester(
         self: ComputeOrchestrator,
@@ -378,31 +553,6 @@ class OrchestratorSubmissionMixin:
                 and self._readiness_dependency(node, deferral.dependency_scope) is None
             ):
                 self._fail_node(node, error)
-
-    def _plan_submission_locked(
-        self: ComputeOrchestrator,
-        request: ResolvedComputeRequest,
-    ) -> tuple[PlannedComputeNode, ...]:
-        """Plan and register a fresh scope, then refresh readiness across the DAG."""
-        planned = self._plan_and_register(
-            request.scope,
-            bundle=self._require_bundle(request),
-            entry_step_kind=request.step_kind,
-            submission_open=request.submission_open,
-        )
-        for node in self._nodes.values():
-            self._refresh_node_readiness(node)
-        return planned
-
-    def _finish_submission(
-        self: ComputeOrchestrator,
-        submission: AcceptedSubmission,
-    ) -> ComputeHandle:
-        """Run work selected by a submission after releasing the lock."""
-        self._execute_pending_inlines(submission.pending_inline)
-        self._flush_pending_pool_submissions(submission.pending_pool)
-        self._observers.drain_post_lock_callbacks()
-        return submission.handle
 
     def _require_bundle(
         self: ComputeOrchestrator,
@@ -518,82 +668,6 @@ class OrchestratorSubmissionMixin:
         self._dequeue_ready(node.scope)
         node.waiters.clear()
         self._nodes.pop(node.scope, None)
-
-    def _plan_and_register(
-        self: ComputeOrchestrator,
-        root_scope: ComputeScope,
-        *,
-        bundle: OrchestrationBundle,
-        entry_step_kind: str | None = None,
-        submission_open: SubmissionOpen,
-    ) -> tuple[PlannedComputeNode, ...]:
-        export_scope = compute_scope_to_export_scope(root_scope)
-        ctx = self._ctx_for_bundle(bundle)
-        planned_nodes = plan_compute_dag(
-            ctx,
-            root_scope.analytic_id,
-            export_scope,
-            compute_registry=self._compute_registry,
-            force_root=force_root_for_entry_step(entry_step_kind),
-            backfill_earlier_turns=submission_open.backfill_earlier_turns,
-        )
-        self.turn_cache.prefetch_planned_nodes(
-            planned_nodes,
-            load_turn=bundle.query_context.load_turn,
-            game_id=bundle.game_id,
-            perspective=bundle.perspective,
-        )
-        # Hollow terminals on the planned DAG (root or deps): durable wipe left
-        # orchestrator ``complete`` nodes that ``_register_planned_node`` would
-        # otherwise keep. Drop unsatisfied terminals so the chain rebuilds -- not
-        # only the ensure root (see ensure_scope hollow-root eviction).
-        for planned in planned_nodes:
-            existing = self._nodes.get(planned.scope)
-            if existing is not None and existing.is_terminal:
-                registration = self._compute_registry[planned.scope.analytic_id]
-                if not registration.persistence_policy.is_satisfied(ctx, planned.scope):
-                    self._replace_terminal_node(existing)
-            self._register_planned_node(
-                planned,
-                bundle=bundle,
-                entry_step_kind=entry_step_kind if planned.scope == root_scope else None,
-                submission_open=submission_open,
-            )
-        if root_scope not in self._nodes:
-            self._nodes[root_scope] = ComputeNodeRun(
-                scope=root_scope,
-                dependency_scopes=(),
-                state="complete",
-                execution_generation=self._allocate_execution_generation(),
-                bundle=bundle,
-                submission_open=submission_open,
-            )
-        return planned_nodes
-
-    def _register_planned_node(
-        self: ComputeOrchestrator,
-        planned: PlannedComputeNode,
-        *,
-        bundle: OrchestrationBundle,
-        entry_step_kind: str | None = None,
-        submission_open: SubmissionOpen,
-    ) -> None:
-        if planned.scope in self._nodes:
-            return
-        registration = self._compute_registry[planned.scope.analytic_id]
-        profile_step_index = self._resolve_profile_step_index(
-            registration,
-            entry_step_kind,
-        )
-        node = ComputeNodeRun(
-            scope=planned.scope,
-            dependency_scopes=planned.dependency_scopes,
-            profile_step_index=profile_step_index,
-            execution_generation=self._allocate_execution_generation(),
-            bundle=bundle,
-            submission_open=submission_open,
-        )
-        self._nodes[planned.scope] = node
 
     def _allocate_execution_generation(self: ComputeOrchestrator) -> int:
         generation = self._next_execution_generation

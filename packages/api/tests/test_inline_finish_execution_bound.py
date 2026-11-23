@@ -36,6 +36,7 @@ from tests.compute_lifecycle_records import LifecycleRecord, record_lifecycle
 from tests.compute_orchestrator_fixtures import (
     ROW_SCOPE_KEY,
     RecordingPersistencePolicy,
+    RecordingPoolSubmitter,
     make_compute_scope,
     make_export_scope,
 )
@@ -73,7 +74,7 @@ class _InlineHarness:
         self.scope = make_compute_scope(SHARED_ID, make_export_scope(sample_turn))
         self.persistence = RecordingPersistencePolicy()
         self.runs = 0
-        self.pool_submissions: list[str] = []
+        self.pool_submitter = RecordingPoolSubmitter()
 
         def counted_run(job):
             self.runs += 1
@@ -101,9 +102,7 @@ class _InlineHarness:
                     ),
                 )
             ),
-            pool_submitter=lambda _node, step, **_kwargs: self.pool_submissions.append(
-                step.step_kind
-            ),
+            pool_submitter=self.pool_submitter,
         )
         self.ignored = record_lifecycle(self.orchestrator, ("inline_finish_ignored",))
 
@@ -125,7 +124,7 @@ class _InlineHarness:
         assert self.runs == 1
         assert self.orchestrator.metrics.epoch_discards == 0
         assert self.persistence.persist_calls == []
-        assert self.pool_submissions == []
+        assert self.pool_submitter.submissions == []
 
 
 def test_an_aborted_inline_step_that_returns_after_an_epoch_bump_is_not_requeued(sample_turn):

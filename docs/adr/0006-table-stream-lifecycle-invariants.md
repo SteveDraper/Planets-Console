@@ -82,7 +82,7 @@ The only ways a scores node is reopened are the stream reschedule (a plain
 below.
 
 - Entering the DAG does not make a dependent wake a ``waiting_deps`` / parked
-  node. Every submission's plan (``_plan_submission_locked``) does re-resolve the
+  node. Every fresh submission (``_apply_root_registration``) does re-resolve the
   readiness of every ``waiting_deps`` and ``ready`` node, so an unrelated submit
   can promote a waiting node whose dependencies are complete; nothing relies on
   that as a wake.

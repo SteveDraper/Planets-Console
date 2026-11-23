@@ -9,12 +9,18 @@ focused on readiness, singleflight, and terminal lifecycle.
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from api.compute.backend_runtime import effective_compute_backend
-from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
+from api.compute.orchestrator_pending import (
+    DispatchedWork,
+    PendingInlineExecution,
+    PendingPoolSubmission,
+    PendingStep,
+)
 from api.compute.orchestrator_state import PublishedExecution
 from api.compute.pools import PoolStepWork, RemoteStepWork, ThreadStepWork
 from api.compute.priority_band import (
@@ -28,8 +34,11 @@ from api.compute.running_step import StepExit
 from api.compute.wire import BuildStepJobWireKwargs, DependencyOutputs
 
 if TYPE_CHECKING:
+    from api.compute.orchestrator_observers import StepSurface
     from api.compute.orchestrator_state import ComputeNodeRun
     from api.compute.scope import ComputeScope
+
+logger = logging.getLogger(__name__)
 
 
 class OrchestratorStepExecutionMixin:
@@ -39,74 +48,114 @@ class OrchestratorStepExecutionMixin:
     ``_published_executions``, ``_ready_queue``, ``_metrics``, ``_observers``,
     ``_compute_registry``, ``_pool_submitter``, ``_ctx_for_node``,
     ``_complete_node``, ``_fail_node``, ``_refuse_step_exit``,
-    ``_finish_step``, ``_running_execution_or_record_ignored``,
+    ``_finish_step``, ``_running_execution``, ``_running_execution_or_record_ignored``,
     ``_deps_complete``, ``_enqueue_ready``, ``_ready_depth``, and
     ``_notify_ready_queue_changed``.
     """
 
-    def _dispatch(
-        self,
-    ) -> tuple[tuple[PendingInlineExecution, ...], tuple[PendingPoolSubmission, ...]]:
-        """Select and begin ready work under the orchestrator lock.
+    def _run_dispatch_pass(self, *, refresh_all: bool = False) -> bool:
+        """Run one dispatch pass and hand off everything it committed.
 
-        Inline and pool steps are prepared here (state → running, job-wire builder
-        kwargs snapshotted) but job-wire construction and execution happen only after the
-        caller releases the orchestrator lock.
+        The pass runs under the orchestrator lock; the hand-off runs after the
+        lock is released, even when the pass raised partway, so every node the
+        pass marked ``running`` gets its inline run or pool item. With
+        ``refresh_all``, every node's readiness is refreshed first in the
+        same hold, so the pass dispatches exactly what that refresh made
+        ready. Returns whether any node is running when the pass ends, read
+        in that hold. ``run_until_idle`` is the one caller that uses either: it
+        checks for pending work in an earlier hold of its own, and anything
+        that changes before the pass's hold is simply what the pass refreshes
+        and dispatches.
+        """
+        work = DispatchedWork()
+        try:
+            with self._condition:
+                if refresh_all:
+                    self._refresh_all_readiness()
+                self._dispatch(work)
+                return any(node.state == "running" for node in self._nodes.values())
+        finally:
+            self._hand_off(work)
 
-        Before execution, durable satisfaction short-circuits the node so a node
-        whose durable artifact already satisfies this step never re-runs it.
+    def _dispatch(self, work: DispatchedWork) -> None:
+        """Select and commit ready work into ``work`` under the orchestrator lock.
 
-        The pass starts by deriving every non-terminal node's band, which
-        orders the ready pick and is published for the worker pool.
+        For each picked node, everything that can raise happens first, in this
+        order: step spec, durable-satisfaction short-circuit, the START gate,
+        the invalidation-generation read and the job-wire snapshot. Only then
+        is the node marked ``running`` and its record appended, which cannot
+        raise. So a node is ``running`` only once its record is in ``work``.
+        A raise while preparing one node fails that node and the pass goes on.
+        A pool step with no ``pool_submitter`` configured is requeued after
+        the short-circuit and ends the pass; the requeue is not preparation,
+        so a ready-queue listener that raises there ends the pass with the
+        error instead of failing the node. A dispatch gate or commit hook that
+        raises ends the pass the same way; records already committed stay in
+        ``work``.
+
+        Job-wire construction and execution happen only after the caller
+        releases the lock. The pass starts by deriving every non-terminal
+        node's band, which orders the ready pick and is published for the
+        worker pool. It commits at most one pool step.
         """
         self._derive_and_publish_bands()
-        pending_inline: list[PendingInlineExecution] = []
-        pending_pool: list[PendingPoolSubmission] = []
         initial_ready_depth = self._ready_depth()
         while self._ready_queue:
             scope, node = self._dequeue_dispatchable_ready_node()
             if scope is None or node is None:
                 break
-
-            registration = self._compute_registry[node.scope.analytic_id]
-            step = self._current_step_spec(node, registration)
-            if self._maybe_short_circuit_satisfied(node, registration):
-                continue
-
-            if step.backend == "inline":
-                if not self._begin_step_execution(node):
+            try:
+                registration = self._compute_registry[node.scope.analytic_id]
+                step = self._current_step_spec(node, registration)
+                if self._maybe_short_circuit_satisfied(node, registration):
                     continue
-                pending_inline.append(
-                    PendingInlineExecution(
-                        node=node,
-                        registration=registration,
-                        step=step,
-                        job_wire_kwargs=self._snapshot_job_wire_kwargs(node),
-                    )
-                )
+            except Exception as exc:
+                self._fail_unstarted_node(node, exc)
                 continue
-
-            if self._pool_submitter is None:
+            is_pool_step = step.backend != "inline"
+            if is_pool_step and self._pool_submitter is None:
                 # Cannot run yet; re-enqueue and stop this dispatch pass.
                 self._enqueue_ready(scope)
-                node.state = "ready"
                 break
-            if not self._begin_step_execution(node):
+            try:
+                if self._refuse_step_exit(node, StepExit.START):
+                    continue
+                generation_at_submit = registration.persistence_policy.invalidation_generation(
+                    self._ctx_for_node(node),
+                    node.scope,
+                )
+                job_wire_kwargs = self._snapshot_job_wire_kwargs(node)
+            except Exception as exc:
+                self._fail_unstarted_node(node, exc)
                 continue
-            pending_pool.append(
-                PendingPoolSubmission(
-                    node=node,
-                    registration=registration,
-                    step=step,
-                    job_wire_kwargs=self._snapshot_job_wire_kwargs(node),
+            node.state = "running"
+            node.generation_at_submit = generation_at_submit
+            if is_pool_step:
+                work.pool.append(
+                    PendingPoolSubmission(
+                        node, registration, step, job_wire_kwargs, node.execution_generation
+                    )
+                )
+                break
+            work.inline.append(
+                PendingInlineExecution(
+                    node, registration, step, job_wire_kwargs, node.execution_generation
                 )
             )
-            break
         # Cover successful pops and ready→waiting_deps drops. ``_enqueue_ready`` /
         # ``_dequeue_ready`` notify on their own paths; this catches dispatch-only leaves.
         if self._ready_depth() != initial_ready_depth:
             self._notify_ready_queue_changed()
-        return tuple(pending_inline), tuple(pending_pool)
+
+    def _fail_unstarted_node(self, node: ComputeNodeRun, error: Exception) -> None:
+        """Fail a picked node whose step could not be prepared. Caller holds the lock.
+
+        The node was never marked ``running``. A node the preparation already
+        ended (for example the START gate) is left as it is.
+        """
+        logger.exception("Preparing compute node %r for dispatch failed", node.scope)
+        if not node.is_terminal:
+            self._fail_node(node, error)
 
     def _derive_and_publish_bands(self) -> None:
         """Derive every non-terminal node's band, write it, and publish the map.
@@ -159,13 +208,50 @@ class OrchestratorStepExecutionMixin:
             is_execution_live=partial(node.is_live_execution, node.execution_generation),
         )
 
-    def _execute_pending_inlines(
+    def _hand_off(self, work: DispatchedWork) -> None:
+        """Run committed inline steps, submit committed pool steps, then drain callbacks.
+
+        Runs after the orchestrator lock is released, and never raises: a
+        failure of one record fails only that record's own attempt
+        (:meth:`_fail_running_step`) and the rest still run. Post-lock
+        callbacks are drained last, with their own failure isolation.
+        """
+        for item in work.inline:
+            try:
+                self._run_inline_outside_lock(item)
+            except BaseException as exc:
+                logger.exception("Handing off inline step for %r failed", item.node.scope)
+                self._fail_running_step(item, "inline", exc)
+        self._flush_pending_pool_submissions(work.pool)
+        self._observers.drain_post_lock_callbacks()
+
+    def _fail_running_step(
         self,
-        pending: tuple[PendingInlineExecution, ...],
+        item: PendingStep,
+        surface: StepSurface,
+        error: BaseException,
     ) -> None:
-        """Build and run accepted inline steps without holding the orchestrator lock."""
-        for item in pending:
-            self._run_inline_outside_lock(item)
+        """Fail ``item``'s node when this attempt failed before it was handed on.
+
+        Takes the orchestrator lock. Acts only while the attempt has not been
+        handed on (``item.is_handed_on``) and the node is still running
+        the execution the attempt was dispatched for. Records the step as
+        failed, then fails the node.
+        """
+        with self._condition:
+            if item.is_handed_on:
+                return
+            node = self._running_execution(item.node.scope, item.execution_generation)
+            if node is None:
+                return
+            self._observers.notify_step_complete(
+                node,
+                item.step.step_kind,
+                step_index=node.step_index,
+                surface=surface,
+                terminal_state="failed",
+            )
+            self._fail_node(node, error)
 
     def _dequeue_dispatchable_ready_node(
         self,
@@ -214,24 +300,6 @@ class OrchestratorStepExecutionMixin:
                 f"{node.profile_step_index}"
             )
         return steps[node.profile_step_index]
-
-    def _begin_step_execution(self, node: ComputeNodeRun) -> bool:
-        """Mark ``node`` running its current step; return False when the gate ends it instead.
-
-        A continued or re-queued execution keeps its ``running_step``, so the
-        start-or-requeue gate decides here whether it may start this step. A
-        fresh execution is ``CONTINUE`` and always starts.
-        """
-        if self._refuse_step_exit(node, StepExit.START):
-            return False
-        registration = self._compute_registry[node.scope.analytic_id]
-        node.state = "running"
-        ctx = self._ctx_for_node(node)
-        node.generation_at_submit = registration.persistence_policy.invalidation_generation(
-            ctx,
-            node.scope,
-        )
-        return True
 
     def _maybe_short_circuit_satisfied(
         self,
@@ -291,32 +359,45 @@ class OrchestratorStepExecutionMixin:
         result_wire: object | None = None,
         failure: BaseException | None = None,
     ) -> None:
-        """Apply an inline step's result or failure to its execution, if still running."""
+        """Apply an inline step's result or failure to its execution, if still running.
+
+        Marks the attempt handed on before applying its finish. A raise while
+        applying fails the execution if it is still running, in the same hold.
+        """
         node = pending.node
         with self._condition:
             self._metrics.inline_executions += 1
             running = self._running_execution_or_record_ignored(
                 "inline_finish_ignored",
                 node.scope,
-                node.execution_generation,
+                pending.execution_generation,
                 step_kind=pending.step.step_kind,
                 step_index=node.step_index,
                 had_error=failure is not None,
             )
             if running is None:
                 return
-            self._finish_step(
-                running,
-                pending.step.step_kind,
-                step_index=running.step_index,
-                surface="inline",
-                result_wire=result_wire,
-                failure=failure,
-            )
+            pending.is_handed_on = True
+            try:
+                self._finish_step(
+                    running,
+                    pending.step.step_kind,
+                    step_index=running.step_index,
+                    surface="inline",
+                    result_wire=result_wire,
+                    failure=failure,
+                )
+            except Exception as exc:
+                # Same lock hold: if the finish left this execution running,
+                # nothing else can have re-dispatched it, so failing it here
+                # cannot touch a retry.
+                logger.exception("Applying the inline finish of %r failed", node.scope)
+                if running.is_running_execution(pending.execution_generation):
+                    self._fail_node(running, exc)
 
     def _flush_pending_pool_submissions(
         self,
-        pending: tuple[PendingPoolSubmission, ...],
+        pending: list[PendingPoolSubmission],
     ) -> None:
         """Turn each submission's dispatch-time builder inputs into pool work and submit it.
 
@@ -324,11 +405,14 @@ class OrchestratorStepExecutionMixin:
         step, including a declared ``interpreter`` step remapped to ``thread``,
         carries the builder inputs to the pool worker, which builds the wire there.
         Either way the wire is built from the one snapshot taken at dispatch.
+
+        Never raises. A submission whose build or submit raises fails its own
+        attempt (:meth:`_fail_running_step`); the rest are still submitted.
+        A submitter that returns has accepted the item, which then belongs to
+        the pool, so the submission is marked handed on in the next hold.
+        Dispatch commits pool work only while a ``pool_submitter`` is
+        configured, and requeues it otherwise.
         """
-        if not pending:
-            return
-        if self._pool_submitter is None:
-            raise RuntimeError("pool_submitter is not configured")
         for submission in pending:
             node = submission.node
             step = submission.step
@@ -353,15 +437,9 @@ class OrchestratorStepExecutionMixin:
                     if node.state != "running":
                         continue
                 self._pool_submitter(node, step, work=work)
-                self._metrics.pool_submissions += 1
-            except BaseException as exc:
                 with self._condition:
-                    if node.state == "running":
-                        self._observers.notify_step_complete(
-                            node,
-                            step.step_kind,
-                            step_index=node.step_index,
-                            surface="pool",
-                            terminal_state="failed",
-                        )
-                        self._fail_node(node, exc)
+                    submission.is_handed_on = True
+                    self._metrics.pool_submissions += 1
+            except BaseException as exc:
+                logger.exception("Submitting pool step for %r failed", node.scope)
+                self._fail_running_step(submission, "pool", exc)

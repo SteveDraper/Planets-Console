@@ -182,6 +182,23 @@ def make_compute_scope(analytic_id: str, export_scope: ExportScope) -> ComputeSc
     )
 
 
+class RecordingPoolSubmitter:
+    """A ``pool_submitter`` that records each submission and runs nothing.
+
+    With ``raise_on_submit`` set, every submission raises that error instead
+    of being recorded, as a pool that refuses an item would.
+    """
+
+    def __init__(self, *, raise_on_submit: BaseException | None = None) -> None:
+        self.raise_on_submit = raise_on_submit
+        self.submissions: list[tuple[ComputeScope, str]] = []
+
+    def __call__(self, node, step, **_kwargs) -> None:
+        if self.raise_on_submit is not None:
+            raise self.raise_on_submit
+        self.submissions.append((node.scope, step.step_kind))
+
+
 RootPlanAction = Callable[[], None]
 
 
@@ -191,25 +208,26 @@ def _no_root_plan_action() -> None:
 
 @dataclass(frozen=True)
 class _ArmedRootPlanActions:
+    for_scope: ComputeScope | None
     on_enter: RootPlanAction
-    on_registered: RootPlanAction
+    on_accept_plan: RootPlanAction
     on_exit: RootPlanAction
 
 
 @dataclass(frozen=True)
 class _ActingRootPlan:
-    """The ignored root plan, running ``on_registered`` when its plan registers."""
+    """The ignored root plan, running ``on_accept_plan`` when it is offered the plan."""
 
     inner: RootPlan
-    on_registered: RootPlanAction
+    on_accept_plan: RootPlanAction
 
     @property
     def submission_open(self) -> SubmissionOpen:
         return self.inner.submission_open
 
-    def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
-        self.inner.plan_registered(planned)
-        self.on_registered()
+    def accept_plan(self, planned: tuple[PlannedComputeNode, ...]) -> None:
+        self.inner.accept_plan(planned)
+        self.on_accept_plan()
 
 
 class ArmableRootPlanHook:
@@ -217,13 +235,15 @@ class ArmableRootPlanHook:
 
     Install it as a registration's ``open_root_plan``. Unarmed, it behaves as
     :func:`open_ignored_root_plan`. :meth:`arm` sets actions for the next
-    submission rooted at that analytic; the hook disarms as it opens that
-    plan, so a submission an action makes opens an unarmed plan.
+    submission rooted at that analytic, or with ``for_scope`` at that one
+    scope; the hook disarms as it opens that plan, so a submission an action
+    makes opens an unarmed plan.
 
     ``on_enter`` runs as the plan opens, outside the orchestrator lock and
     before the dependency chain is prepared, so it may submit or abort.
-    ``on_registered`` runs under the lock in the hold that registers the
-    plan, so it must not call back into the orchestrator. ``on_exit`` runs as
+    ``on_accept_plan`` runs under the lock when the plan is offered, before
+    anything is registered, so it must not call back into the orchestrator;
+    raising there refuses the submission. ``on_exit`` runs as
     the plan closes after a clean submission. Any of them may raise.
     """
 
@@ -233,11 +253,12 @@ class ArmableRootPlanHook:
     def arm(
         self,
         *,
+        for_scope: ComputeScope | None = None,
         on_enter: RootPlanAction = _no_root_plan_action,
-        on_registered: RootPlanAction = _no_root_plan_action,
+        on_accept_plan: RootPlanAction = _no_root_plan_action,
         on_exit: RootPlanAction = _no_root_plan_action,
     ) -> None:
-        self._armed = _ArmedRootPlanActions(on_enter, on_registered, on_exit)
+        self._armed = _ArmedRootPlanActions(for_scope, on_enter, on_accept_plan, on_exit)
 
     def __call__(
         self,
@@ -245,10 +266,11 @@ class ArmableRootPlanHook:
         submission_open: SubmissionOpen,
         ctx: AnalyticQueryContext,
     ) -> AbstractContextManager[RootPlan]:
-        actions, self._armed = self._armed, None
         ignored = open_ignored_root_plan(scope, submission_open, ctx)
-        if actions is None:
+        actions = self._armed
+        if actions is None or actions.for_scope not in (None, scope):
             return ignored
+        self._armed = None
         return _acting_root_plan(ignored, actions)
 
 
@@ -259,5 +281,5 @@ def _acting_root_plan(
 ) -> Iterator[RootPlan]:
     with ignored as inner:
         actions.on_enter()
-        yield _ActingRootPlan(inner, actions.on_registered)
+        yield _ActingRootPlan(inner, actions.on_accept_plan)
         actions.on_exit()

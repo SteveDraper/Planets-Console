@@ -7,9 +7,8 @@ from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
-from api.compute.orchestrator_pending import PendingInlineExecution, PendingPoolSubmission
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
-from api.compute.orchestrator_submission import resolve_submission_open
+from api.compute.orchestrator_submission import TerminalRootReuse, resolve_submission_open
 
 if TYPE_CHECKING:
     from api.compute.orchestrator import ComputeOrchestrator
@@ -45,11 +44,11 @@ class OrchestratorEnsureMixin:
         F1) and waits until the scope is terminal or ``timeout``.
 
         When durable satisfaction fails but a terminal node remains (hollow after
-        wipe / invalidate), that cache-hit node is dropped under the orchestrator
-        lock before submit so ``force_fresh=False`` plans fresh work instead of
-        attaching to a stale ``complete``. ``_plan_and_register`` also drops
-        hollow terminals on planned dependency scopes (same wipe class -- root-only
-        eviction left chains ready against empty durable state). Explicit
+        wipe / invalidate), ensure submits with ``TerminalRootReuse.REPLACE_TERMINAL``,
+        so ``force_fresh=False`` plans fresh work that replaces it instead of
+        attaching to a stale ``complete`` or re-raising a stale failure.
+        ``_decide_root_registration`` also replaces hollow terminals on planned
+        dependency scopes (same wipe class). Explicit
         ``force_fresh=True`` remains the wipe / reschedule wake path; ensure does
         not silently set it.
 
@@ -96,44 +95,39 @@ class OrchestratorEnsureMixin:
             resolved_unsatisfied = [
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
-            with ExitStack() as root_plans:
-                opened_unsatisfied = [
-                    (index, resolved, root_plans.enter_context(self._open_root_plan(resolved)))
-                    for index, resolved in resolved_unsatisfied
-                ]
-                planned_unsatisfied = [
-                    (index, self._prepare_root_planned_request(resolved, root_plan), root_plan)
-                    for index, resolved, root_plan in opened_unsatisfied
-                ]
-                pending_inline: list[PendingInlineExecution] = []
-                pending_pool: list[PendingPoolSubmission] = []
-                with self._condition:
-                    for index, planned_request, root_plan in planned_unsatisfied:
-                        self._drop_hollow_terminal_locked(planned_request)
-                        submission = self._submit_root_planned_locked(planned_request, root_plan)
-                        handles_by_index[index] = submission.handle
-                        pending_inline.extend(submission.pending_inline)
-                        pending_pool.extend(submission.pending_pool)
-            self._execute_pending_inlines(tuple(pending_inline))
-            self._flush_pending_pool_submissions(tuple(pending_pool))
-            self._observers.drain_post_lock_callbacks()
+            try:
+                handles_by_index |= self._submit_unsatisfied_roots(resolved_unsatisfied)
+            finally:
+                self._observers.drain_post_lock_callbacks()
 
         return tuple(
             _wait_ensure_handle(handles_by_index[index], timeout=timeout)
             for index in range(len(requests))
         )
 
-    def _drop_hollow_terminal_locked(
+    def _submit_unsatisfied_roots(
         self: ComputeOrchestrator,
-        request: ResolvedComputeRequest,
-    ) -> None:
-        """Drop a terminal node left for an unsatisfied ensure scope.
+        resolved_unsatisfied: Sequence[tuple[int, ResolvedComputeRequest]],
+    ) -> dict[int, ComputeHandle]:
+        """Open every root plan, then register every root in one lock hold.
 
-        Hollow terminal: durable gone, node still complete/failed. Dropping it
-        lets default force_fresh=False plan fresh work (F1). Non-terminal nodes
-        stay for attach / singleflight; parked wake stays explicit. Caller holds
-        the orchestrator lock.
+        Returns each root's handle by its request index. Each registered root
+        schedules its own dispatch pass; the caller drains them after the root
+        plans close, even when one raises.
         """
-        existing = self._nodes.get(request.scope)
-        if existing is not None and existing.is_terminal and not request.force_fresh:
-            self._replace_terminal_node(existing)
+        with ExitStack() as root_plans:
+            opened_unsatisfied = [
+                (index, resolved, root_plans.enter_context(self._open_root_plan(resolved)))
+                for index, resolved in resolved_unsatisfied
+            ]
+            planned_unsatisfied = [
+                (index, self._prepare_root_planned_request(resolved, root_plan), root_plan)
+                for index, resolved, root_plan in opened_unsatisfied
+            ]
+            with self._condition:
+                return {
+                    index: self._submit_locked(
+                        planned_request, root_plan, TerminalRootReuse.REPLACE_TERMINAL
+                    )
+                    for index, planned_request, root_plan in planned_unsatisfied
+                }

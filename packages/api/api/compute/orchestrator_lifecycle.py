@@ -321,7 +321,7 @@ class OrchestratorLifecycleMixin:
 
         Asked for ``START`` or ``REQUEUE``, this is the start-or-requeue gate:
         at the pool pick and the thread re-check (``begin_pool_step``), the
-        inline post-wire-build re-check, ``_begin_step_execution``, and before
+        inline post-wire-build re-check, dispatch (``_dispatch``), and before
         epoch retry, persist-deferred recovery and park.
         """
         if node.running_step.permits(step_exit, is_needed=lambda: self._is_needed(node)):

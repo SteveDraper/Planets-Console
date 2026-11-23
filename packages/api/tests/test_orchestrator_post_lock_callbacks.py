@@ -11,6 +11,7 @@ from api.compute.orchestrator_observers import OrchestratorObservers
 from api.compute.wire import StepResult
 
 from tests.compute_orchestrator_fixtures import (
+    RecordingPoolSubmitter,
     StubPersistencePolicy,
     make_compute_scope,
     make_export_scope,
@@ -92,7 +93,7 @@ def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency
 ):
     ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
     export_scope = make_export_scope(sample_turn)
-    dispatched: list[str] = []
+    pool_submitter = RecordingPoolSubmitter()
     orchestrator = ComputeOrchestrator(
         compute_registry=build_compute_registry(
             (
@@ -104,12 +105,12 @@ def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency
                 pool_compute_registration(BRANCH_B_ID, backend="thread"),
             )
         ),
-        pool_submitter=lambda node, _step, **_kwargs: dispatched.append(node.scope.analytic_id),
+        pool_submitter=pool_submitter,
     )
     shared_scope = make_compute_scope(SHARED_ID, export_scope)
     branch_scope = make_compute_scope(BRANCH_B_ID, export_scope)
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_scope))
-    assert dispatched == [SHARED_ID]
+    assert pool_submitter.submissions == [(shared_scope, "materialize")]
 
     with caplog.at_level(logging.ERROR, logger=OBSERVERS_LOGGER):
         complete_running_pool_step(
@@ -120,7 +121,10 @@ def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency
 
     assert orchestrator.nodes[shared_scope].state == "complete"
     assert orchestrator.nodes[branch_scope].state == "running"
-    assert dispatched == [SHARED_ID, BRANCH_B_ID]
+    assert pool_submitter.submissions == [
+        (shared_scope, "materialize"),
+        (branch_scope, "materialize"),
+    ]
     assert len(_callback_failure_records(caplog)) == 1
 
 

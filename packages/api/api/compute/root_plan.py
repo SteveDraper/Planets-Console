@@ -2,12 +2,12 @@
 
 A registration may open a root plan for each submission of its analytic. The
 orchestrator holds it open while it fills dependency-chain turns and plans
-the DAG, and reports the plan it registered. Every node the submission
-registers carries the root plan's submission open. A submission that joins
-in-flight work registers no plan. The orchestrator opens and closes the hook
-outside its lock, and closes it before any selected work runs. It reports the
-registered plan under its lock, in the same hold that registers the plan, so
-no node of the plan is dispatched before the report returns.
+the DAG, and offers it the plan before registering anything. Every node the
+submission registers carries the root plan's submission open. A submission
+that joins in-flight work offers no plan. The orchestrator opens and closes
+the hook outside its lock. It offers the plan under its lock, in the hold that
+then registers it, so no node of the plan exists before ``accept_plan``
+returns, and a root plan that raises leaves the orchestrator unchanged.
 """
 
 from __future__ import annotations
@@ -33,11 +33,13 @@ class RootPlan(Protocol):
         """The open every node this submission registers carries."""
         ...
 
-    def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
-        """The submission registered a fresh root with ``planned`` (possibly empty).
+    def accept_plan(self, planned: tuple[PlannedComputeNode, ...]) -> None:
+        """Accept ``planned`` (possibly empty) for a fresh root, before it is registered.
 
-        Runs under the orchestrator lock, before any node of ``planned`` can be
-        dispatched. It must not call back into the orchestrator.
+        Runs under the orchestrator lock, after the plan is decided and before
+        any of it is registered. It may write durable state and must not call
+        back into the orchestrator. Raising refuses the submission: nothing is
+        registered and the error reaches the submitter.
         """
 
 
@@ -53,7 +55,7 @@ class IgnoredRootPlan:
 
     submission_open: SubmissionOpen
 
-    def plan_registered(self, planned: tuple[PlannedComputeNode, ...]) -> None:
+    def accept_plan(self, planned: tuple[PlannedComputeNode, ...]) -> None:
         return None
 
 
