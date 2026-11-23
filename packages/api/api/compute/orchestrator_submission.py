@@ -16,7 +16,7 @@ from api.compute.errors import (
     UnresolvedSubmissionOpenError,
 )
 from api.compute.orchestration_bundle import OrchestrationBundle
-from api.compute.orchestrator_pending import AcceptedSubmission, DispatchedWork
+from api.compute.orchestrator_pending import AcceptedSubmission
 from api.compute.orchestrator_state import (
     ComputeHandle,
     ComputeNodeRun,
@@ -137,14 +137,22 @@ class OrchestratorSubmissionMixin:
 
         Raises :class:`ComputeRequesterEndedError`, planning nothing, when
         ``request.requester`` is set and that execution is no longer live.
+
+        Submission registers work and schedules a dispatch pass; the
+        post-lock queue is drained in a ``finally``, so that pass runs before
+        this returns or raises, unless another thread's drain ran it first.
+        A raise inside the pass is logged by the drain and does not reach the
+        caller. A root plan that raises as it closes still leaves its
+        registered work dispatched.
         """
         resolved = resolve_submission_open(request)
-        work = DispatchedWork()
-        with self._open_root_plan(resolved) as root_plan:
-            planned_request = self._prepare_root_planned_request(resolved, root_plan)
-            with self._condition:
-                submission = self._submit_root_planned_locked(planned_request, root_plan, work)
-        self._hand_off(work)
+        try:
+            with self._open_root_plan(resolved) as root_plan:
+                planned_request = self._prepare_root_planned_request(resolved, root_plan)
+                with self._condition:
+                    submission = self._submit_root_planned_locked(planned_request, root_plan)
+        finally:
+            self._observers.drain_post_lock_callbacks()
         return submission.handle
 
     def wake_if_parked(
@@ -156,6 +164,7 @@ class OrchestratorSubmissionMixin:
         A scope that is not parked returns before the backfill record is read.
         The wake re-checks that state under the same lock hold as the mutation.
         A wake attaches to the parked node, so it never registers a root plan.
+        The attach schedules a dispatch pass, drained before this returns.
         """
         if not request.force_fresh:
             raise ValueError("wake_if_parked requires force_fresh=True")
@@ -163,13 +172,14 @@ class OrchestratorSubmissionMixin:
             if not _is_parked_node(self._nodes.get(request.scope)):
                 return None
         resolved = resolve_submission_open(request)
-        work = DispatchedWork()
-        with self._condition:
-            if not _is_parked_node(self._nodes.get(resolved.scope)):
-                return None
-            submission = self._submit_locked(resolved, work)
-        self._hand_off(work)
-        return submission.handle
+        try:
+            with self._condition:
+                parked = self._nodes.get(resolved.scope)
+                if parked is None or not _is_parked_node(parked):
+                    return None
+                return self._attach_locked(parked, resolved)
+        finally:
+            self._observers.drain_post_lock_callbacks()
 
     def _open_root_plan(
         self: ComputeOrchestrator,
@@ -209,15 +219,13 @@ class OrchestratorSubmissionMixin:
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
         root_plan: RootPlan,
-        work: DispatchedWork,
     ) -> AcceptedSubmission:
         """Apply one submission and report a freshly registered plan to ``root_plan``.
 
         Caller holds the orchestrator lock, so the report runs in the same hold
-        that registers the plan and before any selected work runs. Work the
-        submission dispatches is committed into ``work``.
+        that registers the plan, before any dispatch pass can run.
         """
-        submission = self._submit_locked(request, work)
+        submission = self._submit_locked(request)
         if submission.planned is not None:
             root_plan.plan_registered(submission.planned)
         return submission
@@ -225,63 +233,78 @@ class OrchestratorSubmissionMixin:
     def _submit_locked(
         self: ComputeOrchestrator,
         request: ResolvedComputeRequest,
-        work: DispatchedWork,
     ) -> AcceptedSubmission:
-        """Apply one submission under the orchestrator lock.
+        """Apply one submission under the orchestrator lock, and schedule a dispatch pass.
 
         ``request.submission_open`` is the open for this submission. Callers
         run ``resolve_submission_open`` before taking this lock, so this method
-        does not read the backfill record. ``planned`` on the result is the plan
-        a fresh root registered, or None when the submission attached to
-        existing work. The dispatch pass it runs commits into ``work``, which
-        the caller hands off after releasing the lock.
+        does not read the backfill record. A live node at the scope is joined
+        (:meth:`_attach_locked`); otherwise a fresh root is planned and
+        registered. ``planned`` on the result is that fresh plan, or None
+        for a join. Submission marks nothing ``running``: it schedules a
+        dispatch pass on the post-lock queue, which the caller drains after
+        releasing the lock.
 
         A request whose ``requester`` execution is no longer live raises
         :class:`ComputeRequesterEndedError` before anything changes. The check
         runs in this hold, so an abort that lands while the submit fetched its
         dependency chain outside the lock still refuses it.
         """
-        self._refuse_ended_requester(request)
         scope = request.scope
         existing = self._nodes.get(scope)
-        planned: tuple[PlannedComputeNode, ...] | None = None
         if existing is not None and not (request.force_fresh and existing.is_terminal):
-            if request.force_fresh:
-                self._emit_force_fresh_lifecycle(
-                    kind="force_fresh_attach",
-                    node=existing,
-                    request=request,
-                )
-                # Resolve readiness once: a parked node wakes; a waiting or
-                # ready node is refreshed, since its dependencies may have
-                # settled without reaching it (e.g. evidence-close force_fresh
-                # after scores completed). A running node is left alone.
-                if existing.state == "parked":
-                    self._wake_parked_node(existing)
-                else:
-                    self._refresh_node_readiness(existing)
-                if existing.state == "waiting_deps":
-                    self._schedule_recreate_aborted_dependencies(existing)
-            handle = self._attach_to_existing(existing, request)
-        else:
-            if existing is not None:
-                self._emit_force_fresh_lifecycle(
-                    kind="force_fresh_replace",
-                    node=existing,
-                    request=request,
-                )
-                self._replace_terminal_node(existing)
-            planned = self._plan_submission_locked(request)
-            handle = ComputeHandle(
-                scope=scope,
-                _node=self._nodes[scope],
-                _condition=self._condition,
+            return AcceptedSubmission(self._attach_locked(existing, request), None)
+        self._refuse_ended_requester(request)
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
+        if existing is not None:
+            self._emit_force_fresh_lifecycle(
+                kind="force_fresh_replace",
+                node=existing,
+                request=request,
             )
+            self._replace_terminal_node(existing)
+        planned = self._plan_submission_locked(request)
         # The request raises only its own scope's standing band. Its
         # dependencies take their band from it through the pass derivation.
         self._nodes[scope].raise_standing_band(request.priority_band)
-        self._dispatch(work)
+        handle = ComputeHandle(
+            scope=scope,
+            _node=self._nodes[scope],
+            _condition=self._condition,
+        )
         return AcceptedSubmission(handle, planned)
+
+    def _attach_locked(
+        self: ComputeOrchestrator,
+        existing: ComputeNodeRun,
+        request: ResolvedComputeRequest,
+    ) -> ComputeHandle:
+        """Join ``existing`` for ``request``, and schedule a dispatch pass.
+
+        Caller holds the orchestrator lock. Refuses an ended requester first.
+        A ``force_fresh`` join resolves readiness once: a parked node wakes;
+        a waiting or ready node is refreshed, since its dependencies may have
+        settled without reaching it (e.g. evidence-close ``force_fresh`` after
+        scores completed); a running node is left alone. The request raises
+        only the joined scope's standing band.
+        """
+        self._refuse_ended_requester(request)
+        self._observers.schedule_post_lock(self.dispatch_ready_work)
+        if request.force_fresh:
+            self._emit_force_fresh_lifecycle(
+                kind="force_fresh_attach",
+                node=existing,
+                request=request,
+            )
+            if existing.state == "parked":
+                self._wake_parked_node(existing)
+            else:
+                self._refresh_node_readiness(existing)
+            if existing.state == "waiting_deps":
+                self._schedule_recreate_aborted_dependencies(existing)
+        handle = self._attach_to_existing(existing, request)
+        existing.raise_standing_band(request.priority_band)
+        return handle
 
     def _refuse_ended_requester(
         self: ComputeOrchestrator,

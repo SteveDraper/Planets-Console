@@ -7,7 +7,6 @@ from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
-from api.compute.orchestrator_pending import DispatchedWork
 from api.compute.orchestrator_state import ComputeHandle, ComputeRequest, ResolvedComputeRequest
 from api.compute.orchestrator_submission import resolve_submission_open
 
@@ -96,29 +95,40 @@ class OrchestratorEnsureMixin:
             resolved_unsatisfied = [
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
-            with ExitStack() as root_plans:
-                opened_unsatisfied = [
-                    (index, resolved, root_plans.enter_context(self._open_root_plan(resolved)))
-                    for index, resolved in resolved_unsatisfied
-                ]
-                planned_unsatisfied = [
-                    (index, self._prepare_root_planned_request(resolved, root_plan), root_plan)
-                    for index, resolved, root_plan in opened_unsatisfied
-                ]
-                work = DispatchedWork()
-                with self._condition:
-                    for index, planned_request, root_plan in planned_unsatisfied:
-                        self._drop_hollow_terminal_locked(planned_request)
-                        submission = self._submit_root_planned_locked(
-                            planned_request, root_plan, work
-                        )
-                        handles_by_index[index] = submission.handle
-            self._hand_off(work)
+            try:
+                self._submit_unsatisfied_roots(resolved_unsatisfied, handles_by_index)
+            finally:
+                self._observers.drain_post_lock_callbacks()
 
         return tuple(
             _wait_ensure_handle(handles_by_index[index], timeout=timeout)
             for index in range(len(requests))
         )
+
+    def _submit_unsatisfied_roots(
+        self: ComputeOrchestrator,
+        resolved_unsatisfied: Sequence[tuple[int, ResolvedComputeRequest]],
+        handles_by_index: dict[int, ComputeHandle],
+    ) -> None:
+        """Open every root plan, then register every root in one lock hold.
+
+        Each registered root schedules its own dispatch pass; the caller
+        drains them after the root plans close, even when one raises.
+        """
+        with ExitStack() as root_plans:
+            opened_unsatisfied = [
+                (index, resolved, root_plans.enter_context(self._open_root_plan(resolved)))
+                for index, resolved in resolved_unsatisfied
+            ]
+            planned_unsatisfied = [
+                (index, self._prepare_root_planned_request(resolved, root_plan), root_plan)
+                for index, resolved, root_plan in opened_unsatisfied
+            ]
+            with self._condition:
+                for index, planned_request, root_plan in planned_unsatisfied:
+                    self._drop_hollow_terminal_locked(planned_request)
+                    submission = self._submit_root_planned_locked(planned_request, root_plan)
+                    handles_by_index[index] = submission.handle
 
     def _drop_hollow_terminal_locked(
         self: ComputeOrchestrator,
