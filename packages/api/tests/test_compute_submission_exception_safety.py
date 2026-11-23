@@ -14,6 +14,7 @@ from dataclasses import replace
 import pytest
 from api.compute import ComputeOrchestrator, ComputeRequest, build_compute_registry
 from api.compute.errors import ComputeWaitTimeoutError
+from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.wire import StepResult
 
 from tests.compute_orchestrator_fixtures import (
@@ -134,9 +135,10 @@ def test_a_force_fresh_attach_that_readies_a_waiting_node_dispatches_it_before_r
 ):
     """The attach refreshes the waiting node's readiness and schedules the pass that runs it.
 
-    The dependent is left ``waiting_deps`` with no dependency still pending,
-    as when its dependencies settled without reaching it, so only the
-    ``force_fresh`` attach makes it ready.
+    A scope-outcome listener on the dependency's completion runs before the
+    settle refreshes its dependents, so the dependent is still ``waiting_deps``
+    with its dependency complete there: only the ``force_fresh`` attach the
+    listener submits makes it ready.
     """
     export_scope = make_export_scope(sample_turn)
     shared = make_compute_scope(SHARED_ID, export_scope)
@@ -153,12 +155,20 @@ def test_a_force_fresh_attach_that_readies_a_waiting_node_dispatches_it_before_r
     )
     ctx = _ctx(sample_turn)
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=dependent))
-    assert orchestrator.nodes[dependent].state == "waiting_deps"
-    orchestrator.nodes[dependent].dependency_scopes = ()
+    states_around_attach: list[tuple[str, str, str]] = []
 
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=dependent, force_fresh=True))
+    def attach_on_shared_complete(snapshot: ScopeLifecycleSnapshot) -> None:
+        if snapshot.scope != shared:
+            return
+        before = orchestrator.nodes[dependent].state
+        orchestrator.submit(ComputeRequest(ctx=ctx, scope=dependent, force_fresh=True))
+        states_around_attach.append((snapshot.state, before, orchestrator.nodes[dependent].state))
 
-    assert orchestrator.nodes[dependent].state == "running"
+    orchestrator.observers.register_scope_outcome_listener(attach_on_shared_complete)
+
+    complete_running_pool_step(orchestrator, shared, result_wire={"result": SHARED_ID})
+
+    assert states_around_attach == [("complete", "waiting_deps", "running")]
     assert submitter.submissions == [(shared, "materialize"), (dependent, "materialize")]
 
 

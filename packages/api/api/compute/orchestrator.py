@@ -316,10 +316,12 @@ class ComputeOrchestrator(
         once more, since the execution can end while the step runs.
         """
         with self._condition:
-            node = self._nodes.get(scope)
-            if self._running_execution(scope, execution_generation) is None:
+            running = self._running_execution(scope, execution_generation)
+            if running is None:
+                node = self._nodes.get(scope)
                 reason = _unbound_step_item_reason(node, execution_generation)
-            elif self._refuse_step_exit(node, StepExit.START):
+            elif self._refuse_step_exit(running, StepExit.START):
+                node = running
                 reason = StepItemIgnoredReason.START_REFUSED
             else:
                 return True

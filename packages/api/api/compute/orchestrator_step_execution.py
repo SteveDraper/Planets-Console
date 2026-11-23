@@ -234,12 +234,12 @@ class OrchestratorStepExecutionMixin:
         """Fail ``item``'s node when this attempt failed before it was handed on.
 
         Takes the orchestrator lock. Acts only while the attempt has not been
-        handed on (``item.is_finish_applied``) and the node is still running
+        handed on (``item.is_handed_on``) and the node is still running
         the execution the attempt was dispatched for. Records the step as
         failed, then fails the node.
         """
         with self._condition:
-            if item.is_finish_applied:
+            if item.is_handed_on:
                 return
             node = self._running_execution(item.node.scope, item.execution_generation)
             if node is None:
@@ -361,7 +361,7 @@ class OrchestratorStepExecutionMixin:
     ) -> None:
         """Apply an inline step's result or failure to its execution, if still running.
 
-        Marks the attempt's finish as applied before applying it. A raise while
+        Marks the attempt handed on before applying its finish. A raise while
         applying fails the execution if it is still running, in the same hold.
         """
         node = pending.node
@@ -370,14 +370,14 @@ class OrchestratorStepExecutionMixin:
             running = self._running_execution_or_record_ignored(
                 "inline_finish_ignored",
                 node.scope,
-                node.execution_generation,
+                pending.execution_generation,
                 step_kind=pending.step.step_kind,
                 step_index=node.step_index,
                 had_error=failure is not None,
             )
             if running is None:
                 return
-            pending.is_finish_applied = True
+            pending.is_handed_on = True
             try:
                 self._finish_step(
                     running,
@@ -438,7 +438,7 @@ class OrchestratorStepExecutionMixin:
                         continue
                 self._pool_submitter(node, step, work=work)
                 with self._condition:
-                    submission.is_finish_applied = True
+                    submission.is_handed_on = True
                     self._metrics.pool_submissions += 1
             except BaseException as exc:
                 logger.exception("Submitting pool step for %r failed", node.scope)

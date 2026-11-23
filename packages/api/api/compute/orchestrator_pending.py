@@ -26,7 +26,7 @@ __all__ = [
 class PendingStep:
     """One step attempt a dispatch pass committed: its node, step and builder inputs.
 
-    ``is_finish_applied`` turns True, under the orchestrator lock, once the
+    ``is_handed_on`` turns True, under the orchestrator lock, once the
     attempt is handed on: an inline finish has started to apply, or the pool
     submitter returned, which means the pool accepted the item. After that
     the attempt's outcome belongs to that finish or to the pool, so a later
@@ -43,7 +43,7 @@ class PendingStep:
     job_wire_kwargs: BuildStepJobWireKwargs
     # The node execution this attempt was dispatched for.
     execution_generation: int
-    is_finish_applied: bool = False
+    is_handed_on: bool = False
 
 
 @dataclass(eq=False)
