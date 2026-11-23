@@ -209,21 +209,32 @@ class OrchestratorStepExecutionMixin:
         )
 
     def _hand_off(self, work: DispatchedWork) -> None:
-        """Run committed inline steps, submit committed pool steps, then drain callbacks.
+        """Submit committed pool steps, run committed inline steps, then drain callbacks.
 
-        Runs after the orchestrator lock is released, and never raises: a
-        failure of one record fails only that record's own attempt
-        (:meth:`_fail_running_step`) and the rest still run. Post-lock
-        callbacks are drained last, with their own failure isolation.
+        Runs after the orchestrator lock is released. Pool steps go first:
+        submitting one only enqueues it, so pool workers start before an
+        inline step occupies this thread. A failure of one record fails only
+        that record's own attempt (:meth:`_fail_running_step`) and the rest
+        still run. Each stage also runs whatever an earlier stage raised, so
+        a raise that escapes one stage never strands the next stage's
+        records or the post-lock callbacks; it propagates once all have run.
         """
-        for item in work.inline:
+        try:
+            self._flush_pending_pool_submissions(work.pool)
+        finally:
+            try:
+                self._run_inline_records(work.inline)
+            finally:
+                self._observers.drain_post_lock_callbacks()
+
+    def _run_inline_records(self, records: list[PendingInlineExecution]) -> None:
+        """Run each committed inline step outside the lock, isolating each failure."""
+        for item in records:
             try:
                 self._run_inline_outside_lock(item)
             except BaseException as exc:
                 logger.exception("Handing off inline step for %r failed", item.node.scope)
                 self._fail_running_step(item, "inline", exc)
-        self._flush_pending_pool_submissions(work.pool)
-        self._observers.drain_post_lock_callbacks()
 
     def _fail_running_step(
         self,
