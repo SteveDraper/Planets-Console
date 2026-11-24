@@ -100,7 +100,7 @@ def test_waiting_on_an_already_terminal_handle_inside_a_drain_raises(sample_turn
     assert handle.wait() is handle
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_blocking_wait_escaping_a_callback_is_logged_and_the_drain_goes_on(sample_turn, caplog):
     ctx, shared, _branch = _diamond(sample_turn)
     orchestrator = _inline_orchestrator(inline_compute_registration(SHARED_ID))

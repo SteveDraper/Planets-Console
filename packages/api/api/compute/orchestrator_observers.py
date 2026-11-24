@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -69,8 +69,11 @@ ReadyListener = Callable[[ComputeScope, "ComputeNodeRun"], None]
 # Fired under the orchestrator lock whenever the ready-queue membership of
 # ``state == "ready"`` scopes may have changed. Argument is the current ready
 # scopes snapshot. Listeners must not re-enter this orchestrator's condition.
+# A listener that raises is logged and contained: it cannot abort the
+# transition that changed the queue.
 ReadyQueueChangedListener = Callable[[tuple[ComputeScope, ...]], None]
 # Fired when an inline step begins execution outside the orchestrator lock.
+# A listener that raises is logged and contained: the step still runs.
 InlineStartListener = Callable[[ComputeScope, "ComputeNodeRun", str], None]
 # A step item left unapplied: ``pool_item_dropped`` when a worker picks a pool
 # item and drops it without running its step, ``pool_finish_ignored`` when a
@@ -135,6 +138,28 @@ NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 # Like a gate, it must never admit more because of a commit earlier in the pass.
 NodeDispatchCommitHook = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
+# Names the kind of observer callback in a failure log.
+ObserverRole = Literal["Post-lock callback", "Ready-queue listener", "Inline-start listener"]
+
+
+def _call_each_contained[*Args](
+    callbacks: Iterable[Callable[[*Args], None]],
+    args: tuple[*Args],
+    role: ObserverRole,
+) -> None:
+    """Call every callback with ``args``, logging each failure and running the rest.
+
+    A failure is logged with its stack trace and the callback named, and is
+    not re-raised. An observer callback never fails the work that notified
+    it: the notifier may be partway through a node transition under the
+    orchestrator lock, or be a pool worker that must keep running. Only
+    ``Exception`` is contained, so an interrupt still propagates.
+    """
+    for callback in callbacks:
+        try:
+            callback(*args)
+        except Exception:
+            logger.exception("%s %r failed; running the rest", role, callback)
 
 
 class _DrainState(threading.local):
@@ -197,6 +222,24 @@ class OrchestratorObservers:
         """Live commit-hook list; callers must hold the orchestrator condition to mutate."""
         return self._dispatch_commit_hooks
 
+    def _register[Callback](
+        self,
+        registry: list[Callback],
+        callback: Callback,
+    ) -> Callable[[], None]:
+        """Add ``callback`` to ``registry`` under the condition; return an idempotent unregister."""
+        with self._condition:
+            registry.append(callback)
+
+        def unregister() -> None:
+            with self._condition:
+                try:
+                    registry.remove(callback)
+                except ValueError:
+                    return
+
+        return unregister
+
     def schedule_post_lock(self, callback: PostLockCallback) -> None:
         """Append a callback to run after the orchestrator lock is released.
 
@@ -209,130 +252,50 @@ class OrchestratorObservers:
         self,
         gate: NodeDispatchGate,
     ) -> Callable[[], None]:
-        with self._condition:
-            self._dispatch_gates.append(gate)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._dispatch_gates.remove(gate)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._register(self._dispatch_gates, gate)
 
     def register_dispatch_commit_hook(
         self,
         hook: NodeDispatchCommitHook,
     ) -> Callable[[], None]:
-        with self._condition:
-            self._dispatch_commit_hooks.append(hook)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._dispatch_commit_hooks.remove(hook)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._register(self._dispatch_commit_hooks, hook)
 
     def register_scope_outcome_listener(
         self,
         listener: ScopeOutcomeListener,
     ) -> Callable[[], None]:
         """Observe parked, complete, and failed outcomes after lock release."""
-        with self._condition:
-            self._scope_outcome_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._scope_outcome_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._register(self._scope_outcome_listeners, listener)
 
     def register_step_complete_listener(
         self,
         listener: StepCompleteListener,
     ) -> Callable[[], None]:
-        with self._condition:
-            self._step_complete_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._step_complete_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._register(self._step_complete_listeners, listener)
 
     def register_ready_listener(
         self,
         listener: ReadyListener,
     ) -> Callable[[], None]:
-        with self._condition:
-            self._ready_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._ready_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._register(self._ready_listeners, listener)
 
     def register_ready_queue_listener(
         self,
         listener: ReadyQueueChangedListener,
     ) -> Callable[[], None]:
-        with self._condition:
-            self._ready_queue_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._ready_queue_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._register(self._ready_queue_listeners, listener)
 
     def register_inline_start_listener(
         self,
         listener: InlineStartListener,
     ) -> Callable[[], None]:
-        with self._condition:
-            self._inline_start_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._inline_start_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._register(self._inline_start_listeners, listener)
 
     def register_lifecycle_listener(
         self,
         listener: LifecycleListener,
     ) -> Callable[[], None]:
-        with self._condition:
-            self._lifecycle_listeners.append(listener)
-
-        def unregister() -> None:
-            with self._condition:
-                try:
-                    self._lifecycle_listeners.remove(listener)
-                except ValueError:
-                    return
-
-        return unregister
+        return self._register(self._lifecycle_listeners, listener)
 
     def notify_scope_outcome(self, node: ComputeNodeRun) -> None:
         """Schedule an immutable terminal-or-parked outcome snapshot."""
@@ -361,18 +324,20 @@ class OrchestratorObservers:
             )
 
     def notify_ready_queue_changed(self, ready_scopes: tuple[ComputeScope, ...]) -> None:
-        """Push ready-scopes snapshot to depth listeners (caller holds lock)."""
-        listeners = tuple(self._ready_queue_listeners)
-        if not listeners:
-            return
-        for listener in listeners:
-            listener(ready_scopes)
+        """Push the ready-scopes snapshot to every ready-queue listener (caller holds lock).
+
+        Never raises for a listener, so the transition that changed the queue
+        always completes.
+        """
+        _call_each_contained(
+            tuple(self._ready_queue_listeners), (ready_scopes,), "Ready-queue listener"
+        )
 
     def notify_inline_start(self, node: ComputeNodeRun, step_kind: str) -> None:
+        """Tell every inline-start listener the step is starting; never raises for a listener."""
         with self._condition:
             listeners = tuple(self._inline_start_listeners)
-        for listener in listeners:
-            listener(node.scope, node, step_kind)
+        _call_each_contained(listeners, (node.scope, node, step_kind), "Inline-start listener")
 
     def notify_step_complete(
         self,
@@ -460,14 +425,14 @@ class OrchestratorObservers:
         drain therefore returns before the callbacks it queued have run.
 
         Each drain claims everything queued so far in one lock hold and runs
-        it in order. Each callback runs even when an earlier one raises. A
-        failure is logged with its stack trace and is not re-raised: the batch
-        mixes callbacks scheduled by other nodes and threads, so the draining
-        thread is not their owner, and a pool worker draining after its own
-        step must keep running. Persist failures are handled inside their own
-        callback. If anything else escapes (a ``BaseException``), the claimed
-        callbacks not yet started go back to the head of the queue, in order,
-        for the next drain; the one that raised is not run again.
+        it in order. Failures are contained as for every observer fan-out
+        (``_call_each_contained``): the batch mixes callbacks scheduled by
+        other nodes and threads, so the draining thread is not their owner,
+        and a pool worker draining after its own step must keep running.
+        Persist failures are handled inside their own callback. If anything
+        else escapes (a ``BaseException``), the claimed callbacks not yet
+        started go back to the head of the queue, in order, for the next
+        drain; the one that raised is not run again.
         """
         if self._drain_state.is_draining:
             return
@@ -486,12 +451,10 @@ class OrchestratorObservers:
         if not batch:
             return False
         try:
-            while batch:
-                callback = batch.popleft()
-                try:
-                    callback()
-                except Exception:
-                    logger.exception("Post-lock callback %r failed; draining the rest", callback)
+            # Popped one at a time, so what is left in ``batch`` is exactly
+            # what has not started when a ``BaseException`` escapes.
+            unstarted = (batch.popleft() for _ in range(len(batch)))
+            _call_each_contained(unstarted, (), "Post-lock callback")
         finally:
             if batch:
                 with self._condition:
