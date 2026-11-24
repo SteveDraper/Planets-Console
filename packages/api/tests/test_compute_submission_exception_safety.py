@@ -159,7 +159,7 @@ def test_a_force_fresh_attach_that_readies_a_waiting_node_dispatches_it_in_the_s
     assert submitter.submissions == [(shared, "materialize"), (dependent, "materialize")]
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_gate_that_raises_in_the_submitters_pass_does_not_fail_the_submit(sample_turn):
     (scope,) = _shared_scopes(sample_turn, 1)
     orchestrator, submitter = _pool_orchestrator()

@@ -23,7 +23,7 @@ from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
-from tests.post_lock_callback_guard import failing_on_post_lock_callback_errors
+from tests.observer_callback_guard import failing_on_observer_callback_errors
 
 OBSERVERS_LOGGER = "api.compute.orchestrator_observers"
 
@@ -40,7 +40,7 @@ def _callback_failure_records(caplog) -> list[logging.LogRecord]:
     return [record for record in caplog.records if record.name == OBSERVERS_LOGGER]
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_raising_callback_does_not_drop_the_rest_of_its_batch(caplog):
     condition = threading.Condition()
     observers = OrchestratorObservers(condition)
@@ -59,7 +59,7 @@ def test_a_raising_callback_does_not_drop_the_rest_of_its_batch(caplog):
     assert record.exc_info[0] is _PostLockCallbackFailed
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_callbacks_a_survivor_schedules_still_run_in_the_same_drain(caplog):
     condition = threading.Condition()
     observers = OrchestratorObservers(condition)
@@ -87,7 +87,7 @@ class _PersistWithRaisingNotification(StubPersistencePolicy):
         return _raise_post_lock_failure
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency_completes(
     sample_turn, caplog
 ):
@@ -128,7 +128,7 @@ def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency
     assert len(_callback_failure_records(caplog)) == 1
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_the_suite_guard_fails_a_test_whose_callback_raises_on_another_thread():
     condition = threading.Condition()
     observers = OrchestratorObservers(condition)
@@ -137,7 +137,7 @@ def test_the_suite_guard_fails_a_test_whose_callback_raises_on_another_thread():
     drainer = threading.Thread(target=observers.drain_post_lock_callbacks)
 
     with pytest.raises(pytest.fail.Exception) as guard_failure:
-        with failing_on_post_lock_callback_errors():
+        with failing_on_observer_callback_errors():
             drainer.start()
             drainer.join()
 

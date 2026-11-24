@@ -367,7 +367,7 @@ def test_a_hand_off_failure_for_an_accepted_pool_item_leaves_its_node_running(
     assert orchestrator.nodes[scope].error is None
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_gate_that_raises_mid_pass_still_hands_off_the_work_already_committed(sample_turn):
     first, second = _two_shared_scopes(sample_turn)
     orchestrator = _inline_shared(StubPersistencePolicy())
@@ -466,7 +466,7 @@ def test_a_pass_hands_its_pool_work_to_the_pool_before_it_runs_its_inline_work(s
     assert orchestrator.nodes[pool_scope].state == "running"
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_raise_out_of_the_pool_hand_off_still_runs_the_inline_work_and_drains(
     sample_turn, monkeypatch
 ):
