@@ -92,11 +92,8 @@ export function isIncompleteInferenceRow(detail: ScoresInferenceRowDetail): bool
   )
 }
 
-export function isActivelySearchingInference(
-  detail: ScoresInferenceRowDetail,
-  isGloballyPaused = false
-): boolean {
-  if (detail.isComplete || isGloballyPaused || detail.displayStatus === 'paused') {
+export function isActivelySearchingInference(detail: ScoresInferenceRowDetail): boolean {
+  if (detail.isComplete || detail.displayStatus === 'paused') {
     return false
   }
   return detail.displayStatus === 'pending' || detail.displayStatus === 'success'

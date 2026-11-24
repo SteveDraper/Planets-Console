@@ -452,7 +452,6 @@ describe('ScoresTableView', () => {
     const { container } = render(
       <ScoresTableView
         analyticScope={testScope}
-        isGloballyPaused
         data={tableData({
           columns: ['Race (player)', 'Build inference'],
           rows: [['Federation (alice)']],
@@ -479,7 +478,6 @@ describe('ScoresTableView', () => {
     render(
       <ScoresTableView
         analyticScope={testScope}
-        isGloballyPaused
         data={tableData({
           columns: ['Race (player)', 'Build inference'],
           rows: [['Federation (alice)']],

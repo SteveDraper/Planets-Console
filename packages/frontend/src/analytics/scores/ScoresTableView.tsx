@@ -39,7 +39,6 @@ import type { UseGlobalInferencePauseResult } from './useGlobalInferencePause'
 type ScoresTableViewProps = {
   data: ScoresTableWithInferenceData
   analyticScope: AnalyticShellScope
-  isGloballyPaused?: boolean
   globalInferencePause?: UseGlobalInferencePauseResult
 }
 
@@ -47,12 +46,10 @@ function InferenceStatusCell({
   detail,
   onOpenDetail,
   onOpenHullCatalog,
-  isGloballyPaused = false,
 }: {
   detail: ScoresInferenceRowDetail
   onOpenDetail: () => void
   onOpenHullCatalog: () => void
-  isGloballyPaused?: boolean
 }) {
   const label = inferenceAccessibleLabel(detail)
   const playerId = detail.playerId
@@ -79,7 +76,7 @@ function InferenceStatusCell({
   }
 
   if (isIncompleteInferenceRow(detail)) {
-    const activelySearching = isActivelySearchingInference(detail, isGloballyPaused)
+    const activelySearching = isActivelySearchingInference(detail)
     return (
       <InferenceCellChrome {...chromeProps}>
         <InferenceSolutionCountBadge
@@ -210,7 +207,6 @@ function InferenceStatusCell({
 export function ScoresTableView({
   data,
   analyticScope,
-  isGloballyPaused = false,
   globalInferencePause,
 }: ScoresTableViewProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
@@ -280,7 +276,6 @@ export function ScoresTableView({
                           detail={inferenceByRow[rowIndex]}
                           onOpenDetail={() => setSelectedRowIndex(rowIndex)}
                           onOpenHullCatalog={() => setHullCatalogRowIndex(rowIndex)}
-                          isGloballyPaused={isGloballyPaused}
                         />
                       </td>
                     )
@@ -301,7 +296,6 @@ export function ScoresTableView({
         onClose={() => setSelectedRowIndex(null)}
         racePlayer={selectedRacePlayer}
         detail={selectedDetail}
-        isGloballyPaused={isGloballyPaused}
       />
       {typeof hullCatalogPlayerId === 'number' ? (
         <HullCatalogMaskDialog

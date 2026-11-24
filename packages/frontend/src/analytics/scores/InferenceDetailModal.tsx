@@ -31,7 +31,6 @@ type InferenceDetailModalProps = {
   onClose: () => void
   racePlayer: string
   detail: ScoresInferenceRowDetail | null
-  isGloballyPaused?: boolean
 }
 
 function militaryMismatchWarning(arithmetic: MilitaryScoreArithmetic): string {
@@ -147,14 +146,11 @@ function SolutionSection({
   )
 }
 
-function inferenceSearchBanner(
-  detail: ScoresInferenceRowDetail,
-  isGloballyPaused: boolean
-): string | null {
+function inferenceSearchBanner(detail: ScoresInferenceRowDetail): string | null {
   if (detail.isComplete) {
     return null
   }
-  if (detail.displayStatus === 'paused' || isGloballyPaused) {
+  if (detail.displayStatus === 'paused') {
     return 'Search paused -- held explanations are current.'
   }
   return 'Search continuing -- more explanations may appear.'
@@ -165,7 +161,6 @@ export function InferenceDetailModal({
   onClose,
   racePlayer,
   detail,
-  isGloballyPaused = false,
 }: InferenceDetailModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
@@ -199,7 +194,7 @@ export function InferenceDetailModal({
   const hostTurn =
     constraints?.hostTurn ??
     (scoreboardTurn != null && scoreboardTurn > 1 ? scoreboardTurn - 1 : null)
-  const searchBanner = inferenceSearchBanner(detail, isGloballyPaused)
+  const searchBanner = inferenceSearchBanner(detail)
 
   return (
     <div

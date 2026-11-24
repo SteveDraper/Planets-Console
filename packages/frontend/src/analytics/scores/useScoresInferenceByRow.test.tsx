@@ -1,4 +1,5 @@
 import { renderHook, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { AnalyticShellScope, TableDataResponse } from '../../api/bff'
 import * as bff from '../../api/bff'
@@ -84,6 +85,18 @@ function emitGlobalPause(
   paused: boolean
 ): void {
   onEvent({ type: 'globalPause', paused } satisfies InferenceStreamEvent)
+}
+
+/** Wires the table-level pause the way `useScoresShellStream` does. */
+function useScoresInferenceByRowWithTablePause(
+  tableData: TableDataResponse,
+  scope: AnalyticShellScope
+) {
+  const [isGloballyPaused, setIsGloballyPaused] = useState(false)
+  return useScoresInferenceByRow(tableData, scope, true, {
+    onGlobalPauseChange: setIsGloballyPaused,
+    isGloballyPaused,
+  })
 }
 
 const scope: AnalyticShellScope = {
@@ -210,7 +223,7 @@ describe('useScoresInferenceByRow', () => {
       }
     )
 
-    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+    const { result } = renderHook(() => useScoresInferenceByRowWithTablePause(tableData, scope))
 
     await waitFor(() => {
       expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('paused')
@@ -229,7 +242,7 @@ describe('useScoresInferenceByRow', () => {
       }
     )
 
-    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+    const { result } = renderHook(() => useScoresInferenceByRowWithTablePause(tableData, scope))
 
     await waitFor(() => {
       expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('pending')
@@ -255,12 +268,64 @@ describe('useScoresInferenceByRow', () => {
       }
     )
 
-    const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+    const { result } = renderHook(() => useScoresInferenceByRowWithTablePause(tableData, scope))
 
     await waitFor(() => {
       expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('success')
       expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('paused')
     })
+  })
+
+  it('keeps a row paused when its work is accepted while the table is paused', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({
+          type: 'stored_row',
+          playerId: 8,
+          status: 'exact',
+          displayStatus: 'success',
+          summary: 'Stored build',
+          solutionCount: 0,
+          isComplete: true,
+          evidenceGeneration: 1,
+          evidenceMark: 2,
+          solutions: [],
+        })
+        handlers.onEvent({ type: 'globalPause', paused: true })
+        await delay(0)
+        handlers.onEvent({ type: 'work_accepted', playerId: 8 })
+        handlers.onEvent({ type: 'work_accepted', playerId: 9 })
+        await new Promise(() => {})
+      }
+    )
+
+    const { result } = renderHook(() => useScoresInferenceByRowWithTablePause(tableData, scope))
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.isComplete).toBe(false)
+      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('paused')
+      expect(result.current.inferenceByRow?.[1]?.displayStatus).toBe('paused')
+    })
+    expect(result.current.inferenceByRow?.[0]?.summary).toBe('Build inference paused')
+  })
+
+  it('shows accepted work as in progress once the table resumes', async () => {
+    vi.spyOn(bff, 'fetchScoresTableInferenceStream').mockImplementation(
+      async (_scope, _playerIds, handlers) => {
+        handlers.onEvent({ type: 'globalPause', paused: true })
+        handlers.onEvent({ type: 'work_accepted', playerId: 8 })
+        await delay(0)
+        handlers.onEvent({ type: 'globalPause', paused: false })
+        await new Promise(() => {})
+      }
+    )
+
+    const { result } = renderHook(() => useScoresInferenceByRowWithTablePause(tableData, scope))
+
+    await waitFor(() => {
+      expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('pending')
+    })
+    expect(result.current.inferenceByRow?.[0]?.summary).toBe('Build inference in progress')
   })
 
   it('notifies onGlobalPauseChange from globalPause stream events', async () => {
@@ -499,7 +564,7 @@ describe('useScoresInferenceByRow', () => {
         }
       )
 
-      const { result } = renderHook(() => useScoresInferenceByRow(tableData, scope, true))
+      const { result } = renderHook(() => useScoresInferenceByRowWithTablePause(tableData, scope))
 
       await waitFor(() => {
         expect(result.current.inferenceByRow?.[0]?.displayStatus).toBe('pending')

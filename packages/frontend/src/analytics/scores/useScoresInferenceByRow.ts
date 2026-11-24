@@ -11,12 +11,16 @@ import {
   initialRowStreamState,
   reduceRowStreamState,
   rowDetailFromStreamState,
+  withTablePause,
   type RowStreamState,
 } from './inferenceRowStreamState'
 import { connectTableInferenceStreamUntilComplete } from './tableInferenceStreamConnect'
 
 export type UseScoresInferenceByRowOptions = {
+  /** Called with each `globalPause` stream event, and with false when the stream ends. */
   onGlobalPauseChange?: (paused: boolean) => void
+  /** The table-level pause; every incomplete row shows paused while it is true. */
+  isGloballyPaused?: boolean
 }
 
 export type UseScoresInferenceByRowResult = {
@@ -47,10 +51,9 @@ function createScoresInferenceStreamPolicy(
       playerId,
       detail: summary,
     }),
-    routeStreamEvent: (event, { applyToAllPlayers }) => {
+    routeStreamEvent: (event) => {
       if (event.type === 'globalPause') {
         onGlobalPauseChangeRef.current?.(event.paused)
-        applyToAllPlayers(event)
         return true
       }
       return false
@@ -78,7 +81,7 @@ export function useScoresInferenceByRow(
   enabled: boolean,
   options: UseScoresInferenceByRowOptions = {}
 ): UseScoresInferenceByRowResult {
-  const { onGlobalPauseChange } = options
+  const { onGlobalPauseChange, isGloballyPaused = false } = options
   const inferenceByRowStubs = tableData?.inferenceByRow
 
   const playerIdsKey = useMemo(() => {
@@ -116,9 +119,10 @@ export function useScoresInferenceByRow(
     if (typeof playerId !== 'number') {
       return failureDetail(-(rowIndex + 1), 'Missing player id for build inference')
     }
-    return (
+    return withTablePause(
       detailsByPlayerId.get(playerId) ??
-      rowDetailFromStreamState(playerId, initialRowStreamState())
+        rowDetailFromStreamState(playerId, initialRowStreamState()),
+      isGloballyPaused
     )
   })
 
