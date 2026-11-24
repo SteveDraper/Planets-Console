@@ -343,7 +343,12 @@ class ComputeOrchestrator(
         return False
 
     def run_until_idle(self) -> None:
-        """Drain ready inline work until no ready or running nodes remain."""
+        """Drain ready inline work until no ready or running nodes remain.
+
+        Raises :class:`NestedBlockingWaitError` when called inside a drain or a
+        step of this orchestrator.
+        """
+        self._observers.reject_blocking_wait("run_until_idle")
         while True:
             with self._condition:
                 if not self._has_pending_work():

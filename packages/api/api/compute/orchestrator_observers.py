@@ -10,12 +10,13 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
-from api.compute.errors import ComputeScopeAbortedError
+from api.compute.errors import ComputeScopeAbortedError, NestedBlockingWaitError
 from api.compute.profile import StepSurface
 from api.compute.scope import ComputeScope
 
@@ -137,10 +138,11 @@ PostLockCallback = Callable[[], None]
 
 
 class _DrainState(threading.local):
-    """Whether this thread is running a drain of one orchestrator's post-lock queue."""
+    """What this thread is doing for one orchestrator: draining its queue, or running a step."""
 
     def __init__(self) -> None:
         self.is_draining = False
+        self.steps_running = 0
 
 
 class OrchestratorObservers:
@@ -158,6 +160,32 @@ class OrchestratorObservers:
         self._dispatch_commit_hooks: list[NodeDispatchCommitHook] = []
         self._post_lock_callbacks: list[PostLockCallback] = []
         self._drain_state = _DrainState()
+
+    @property
+    def condition(self) -> threading.Condition:
+        """The orchestrator condition this surface guards its lists and queue with."""
+        return self._condition
+
+    def reject_blocking_wait(self, operation: str) -> None:
+        """Raise when this thread is inside a drain or a step of this orchestrator.
+
+        Called at the entry of every blocking wait (``ensure_scopes``,
+        ``run_until_idle``, ``ComputeHandle.wait``), before it plans or waits,
+        whatever the state of the work it would wait on.
+        """
+        state = self._drain_state
+        if state.is_draining or state.steps_running:
+            raise NestedBlockingWaitError(operation)
+
+    @contextmanager
+    def running_step(self) -> Iterator[None]:
+        """Mark this thread as running one of this orchestrator's steps (wire build or step)."""
+        state = self._drain_state
+        state.steps_running += 1
+        try:
+            yield
+        finally:
+            state.steps_running -= 1
 
     @property
     def dispatch_gates(self) -> list[NodeDispatchGate]:

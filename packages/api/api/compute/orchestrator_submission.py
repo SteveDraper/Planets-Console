@@ -411,7 +411,7 @@ class OrchestratorSubmissionMixin:
         # The request raises only its own scope's standing band. Its
         # dependencies take their band from it through the pass derivation.
         root.raise_standing_band(request.priority_band)
-        return ComputeHandle(scope=request.scope, _node=root, _condition=self._condition)
+        return ComputeHandle(scope=request.scope, _node=root, _observers=self._observers)
 
     def _attach_locked(
         self: ComputeOrchestrator,
@@ -629,7 +629,7 @@ class OrchestratorSubmissionMixin:
             return ComputeHandle(
                 scope=node.scope,
                 _node=node,
-                _condition=self._condition,
+                _observers=self._observers,
             )
         self._adopt_rooted_open_turn(node, request)
         # A root attach needs the node again; a planned join instead adds the
@@ -639,7 +639,7 @@ class OrchestratorSubmissionMixin:
             scope=node.scope,
             _node=node,
             is_waiter=True,
-            _condition=self._condition,
+            _observers=self._observers,
         )
         node.waiters.append(handle)
         return handle

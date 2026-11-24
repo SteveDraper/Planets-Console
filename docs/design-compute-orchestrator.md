@@ -562,7 +562,7 @@ BFF table/map contracts are unchanged.
 
 ### Export ensure migration ([#204](https://github.com/SteveDraper/Planets-Console/issues/204))
 
-**Ensure means DAG unwind, not a second walker.** Bringing export scope `S` to terminal quality is `orchestrator.submit(S)` (plans `ENSURE_DEPENDENCIES` via `plan_compute_dag`) plus, for designated in-process callers, **orchestration-plane** `ComputeHandle.wait(timeout=…)` (default 300s, ported from the former gap-fill waiter). Pool workers and leaf `run_step` never wait.
+**Ensure means DAG unwind, not a second walker.** Bringing export scope `S` to terminal quality is `orchestrator.submit(S)` (plans `ENSURE_DEPENDENCIES` via `plan_compute_dag`) plus, for designated in-process callers, **orchestration-plane** `ComputeHandle.wait(timeout=…)` (default 300s, ported from the former gap-fill waiter). Pool workers and leaf `run_step` never wait. This is enforced: `ensure_scopes`, `run_until_idle` and `ComputeHandle.wait` call `OrchestratorObservers.reject_blocking_wait` first, and raise `NestedBlockingWaitError` on a thread that is draining that orchestrator's post-lock queue or running one of its steps (an inline step's wire build or `run_step`, or a thread-backend pool step's, marked by `running_step()`). A wait there could block on work only the suspended drain would run. The check comes before any planning or turn fetch and does not depend on how far the awaited work has got; in a step the error fails that node, in a post-lock callback the drain logs it.
 
 | Lock | Rule |
 |------|------|

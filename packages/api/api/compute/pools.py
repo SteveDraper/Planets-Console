@@ -628,14 +628,20 @@ class ComputeWorkerPool:
         """
         item = picked.item
         try:
-            job_wire = work.job_wire_for(item.scope)
+            with orchestrator.observers.running_step():
+                job_wire = work.job_wire_for(item.scope)
         except BaseException as exc:
             self._report_item_outcome(item, result_wire=None, error=exc)
             return False
         if not _begin_pool_step(orchestrator, item):
             return False
         if work.backend == "thread":
-            self._complete_item(item, partial(work.run_step, job_wire))
+
+            def run_thread_step() -> object:
+                with orchestrator.observers.running_step():
+                    return work.run_step(job_wire)
+
+            self._complete_item(item, run_thread_step)
             return False
         try:
             future = self._submit_remote_step(work.backend, work.run_step, job_wire)
