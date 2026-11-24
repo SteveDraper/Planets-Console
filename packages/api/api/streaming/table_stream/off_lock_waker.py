@@ -42,8 +42,11 @@ class OffLockWaker:
     Started by ``ensure_started`` from a caller that holds no lock the callback
     takes. Each start gets a fresh queue and thread, so a stop posted to a
     previous thread is never seen by a newer one. A wake while not started,
-    including after ``shutdown``, does nothing. A callback that raises is
-    logged and the thread waits for the next wake.
+    including after ``shutdown``, does nothing. A callback that raises an
+    ``Exception`` is logged and the thread waits for the next wake. A
+    ``BaseException`` ends the thread: it is logged and re-raised, and the
+    waker forgets that thread, so wakes until the next ``ensure_started``
+    do nothing and that call starts a new thread.
     """
 
     def __init__(self, callback: Callable[[], None], *, thread_name: str) -> None:
@@ -93,12 +96,24 @@ class OffLockWaker:
             thread.join(timeout)
 
     def _run(self, signals: queue.SimpleQueue[_Signal]) -> None:
-        while signals.get() is not _STOP:
-            try:
-                self._callback()
-            except Exception:
-                logger.exception(
-                    "%s callback %r failed; waiting for the next wake",
-                    self._thread_name,
-                    self._callback,
-                )
+        try:
+            while signals.get() is not _STOP:
+                try:
+                    self._callback()
+                except Exception:
+                    logger.exception(
+                        "%s callback %r failed; waiting for the next wake",
+                        self._thread_name,
+                        self._callback,
+                    )
+        except BaseException:
+            logger.exception(
+                "%s thread stopped unexpectedly; the next ensure_started starts a new one",
+                self._thread_name,
+            )
+            raise
+        finally:
+            with self._lifecycle_lock:
+                if self._signals is signals:
+                    self._signals = None
+                    self._thread = None

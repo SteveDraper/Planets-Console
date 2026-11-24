@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import threading
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
-from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_stream_registry import (
     detach_fleet_table_stream,
@@ -31,9 +29,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
-from api.analytics.military_score_inference.inference_stream_teardown import (
-    InferenceStreamOrchestratorBinding,
-)
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     get_inference_table_stream_registry,
 )
@@ -186,11 +181,6 @@ def test_scores_pause_peek_leaves_scheduler_lock_free_and_detach_returns(
     scope = _scores_scope()
     token = scheduler.begin_scope(scope)
     orchestrator = get_compute_orchestrator()
-    # Pause status reads binding.orchestrator. Query context is unused on this path.
-    scheduler._stream_bindings[token] = InferenceStreamOrchestratorBinding(
-        orchestrator=orchestrator,
-        query_context=cast(AnalyticQueryContext, SimpleNamespace()),
-    )
     entered_peek = threading.Event()
     real_peek = orchestrator.peek_ready_step_indexes
 

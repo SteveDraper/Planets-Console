@@ -2,9 +2,9 @@
 
 A scores stream detaches its own rows when it ends. Claiming a scope, whether
 the first claim, a scope change or a same-scope preempt, only resets
-stream-owned scheduler state: global pause, held submissions and bindings.
-Clearing pause releases held work: each held submission is submitted and the
-nodes the pause gate held are dispatched.
+stream-owned scheduler state: global pause and stream bindings. Pause holds
+work only at the dispatch gate, so a claim that clears pause runs one dispatch
+pass for the nodes the gate held.
 """
 
 from __future__ import annotations

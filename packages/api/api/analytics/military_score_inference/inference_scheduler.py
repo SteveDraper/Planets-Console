@@ -82,7 +82,7 @@ class TierLadderRegistration(Enum):
     BACKGROUND = "background"
     # The scheduler was built with ``defer_orchestrator_submit`` (tests and
     # diagnostics): the run is registered, taking the scope index as stream
-    # ownership decides, and nothing is bound, accepted, held or woken.
+    # ownership decides, and nothing is bound, accepted or woken.
     SUBMIT_DEFERRED = "submit_deferred"
 
 
@@ -357,6 +357,9 @@ class InferenceRowScheduler(
         takes the scheduler lock, so a replaced orchestrator still honors pause.
         The pause-release waker is started here too, outside every lock, so a
         stream close can release pause without calling the orchestrator.
+        Both run before the scope check; a rejected pause leaves them in place,
+        which is harmless because the gate holds nothing and the waker runs
+        nothing until pause is set.
         """
         self._orchestrator_attachment.ensure_registered()
         self._pause_release_waker.ensure_started()
