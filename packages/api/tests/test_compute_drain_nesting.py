@@ -37,9 +37,10 @@ LONG_CHAIN_TURNS = 600
 MAX_CHAIN_STACK_FRAMES = 120
 # Short enough that a chain the orchestrator strands fails the test promptly.
 CHAIN_ENSURE_TIMEOUT_SEC = 30.0
-# Each recovery nests a submit drain inside a post-lock callback, so per-node
-# recursion overflowed the default limit by 20 turns. 1.5x that still overflows
-# it, and stays fast: this chain's cost grows much faster than its length.
+# Each recovery submits from inside a post-lock callback. If those drains nested,
+# about 20 turns would pass the default recursion limit, so this length catches
+# that. It stays short because band derivation makes this chain's cost grow much
+# faster than its length.
 RECOVERY_CHAIN_TURNS = 30
 
 
