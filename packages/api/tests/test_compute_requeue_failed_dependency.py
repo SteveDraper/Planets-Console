@@ -462,7 +462,7 @@ def test_a_recovery_submit_refused_because_the_requester_ended_plans_nothing(sam
     assert branch_node.error is abort_error
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_recovery_submit_raising_before_registration_fails_the_node(sample_turn, caplog):
     setup = running_branch(sample_turn)
     complete_shared = setup.orchestrator.nodes[setup.shared]
@@ -475,7 +475,7 @@ def test_a_recovery_submit_raising_before_registration_fails_the_node(sample_tur
     _assert_branch_failed_with(setup, submit_failure)
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_recovery_plan_raising_leaves_the_superseded_node_and_fails_the_waiter(
     sample_turn, monkeypatch, caplog
 ):
@@ -495,7 +495,7 @@ def test_a_recovery_plan_raising_leaves_the_superseded_node_and_fails_the_waiter
     _assert_branch_failed_with(setup, plan_failure)
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_recovery_submit_raising_leaves_the_node_waiting_on_a_running_dependency(
     sample_turn, caplog
 ):
@@ -511,7 +511,7 @@ def test_a_recovery_submit_raising_leaves_the_node_waiting_on_a_running_dependen
     _assert_branch_waits_then_settles_on(setup, running_shared)
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_recovery_whose_root_plan_refuses_the_plan_fails_the_waiter(sample_turn, caplog):
     setup = running_branch(sample_turn)
     complete_shared = setup.orchestrator.nodes[setup.shared]
@@ -524,7 +524,7 @@ def test_a_recovery_whose_root_plan_refuses_the_plan_fails_the_waiter(sample_tur
     _assert_branch_failed_with(setup, hook_failure)
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_recovery_submit_raising_after_registration_settles_on_the_replacement(
     sample_turn, caplog
 ):

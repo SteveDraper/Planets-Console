@@ -166,7 +166,7 @@ def test_an_item_dropped_at_its_pick_leaves_no_ready_pool_step_behind(sample_tur
         pool.shutdown()
 
 
-@pytest.mark.allows_post_lock_callback_errors
+@pytest.mark.allows_observer_callback_errors
 def test_a_demotion_whose_recovery_submit_is_refused_leaves_no_ready_pool_step_behind(
     sample_turn, monkeypatch
 ):

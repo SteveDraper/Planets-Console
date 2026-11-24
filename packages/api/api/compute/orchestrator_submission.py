@@ -370,11 +370,9 @@ class OrchestratorSubmissionMixin:
         """Apply a decided fresh root, after its root plan accepted it. Caller holds the lock.
 
         Emits ``force_fresh_replace`` for a superseded root, then schedules the
-        dispatch pass, so the replace precedes the replacing execution's events
-        and even a synchronous ready-queue listener that raises partway leaves
-        the registered nodes with a pass. Then replaces terminals, registers
-        the new nodes, refreshes readiness across the DAG and raises the root's
-        standing band.
+        dispatch pass, so the replace precedes the replacing execution's events.
+        Then replaces terminals, registers the new nodes, refreshes readiness
+        across the DAG and raises the root's standing band.
         """
         if registration.superseded_root is not None:
             self._emit_force_fresh_lifecycle(
@@ -423,13 +421,11 @@ class OrchestratorSubmissionMixin:
         Caller holds the orchestrator lock. Refuses an ended requester first.
         A ``force_fresh`` join emits ``force_fresh_attach`` before the pass is
         scheduled, so the event precedes the joined execution's step events.
-        The pass is scheduled before readiness changes, so a raising
-        ready-queue listener still leaves the node with a pass. A
-        ``force_fresh`` join then resolves readiness once: a parked node wakes;
-        a waiting or ready node is refreshed, since its dependencies may have
-        settled without reaching it (e.g. evidence-close ``force_fresh`` after
-        scores completed); a running node is left alone. The request raises
-        only the joined scope's standing band.
+        A ``force_fresh`` join then resolves readiness once: a parked node
+        wakes; a waiting or ready node is refreshed, since its dependencies may
+        have settled without reaching it (e.g. evidence-close ``force_fresh``
+        after scores completed); a running node is left alone. The request
+        raises only the joined scope's standing band.
         """
         self._refuse_ended_requester(request)
         if request.force_fresh:

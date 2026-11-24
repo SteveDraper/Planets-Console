@@ -123,12 +123,7 @@ class DiagnosticsOrchestratorBindMixin:
             )
         )
         unregister_inline_start = orchestrator.observers.register_inline_start_listener(
-            lambda scope, node, step_kind, _orch_id=registration_id: self._on_inline_start(
-                scope,
-                node,
-                step_kind,
-                orchestrator_id=_orch_id,
-            )
+            partial(self._on_inline_start, orchestrator_id=registration_id)
         )
         unregister_scope_outcome = orchestrator.observers.register_scope_outcome_listener(
             self._on_scope_outcome
