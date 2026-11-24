@@ -6,6 +6,7 @@ import {
   type PerPlayerAnalyticStreamPolicy,
 } from '../../lib/usePerPlayerAnalyticStream'
 import { stablePlayerIdsKey } from '../../lib/stablePlayerIdsKey'
+import type { UseGlobalInferencePauseResult } from './useGlobalInferencePause'
 import {
   failureDetail,
   initialRowStreamState,
@@ -16,19 +17,22 @@ import {
 } from './inferenceRowStreamState'
 import { connectTableInferenceStreamUntilComplete } from './tableInferenceStreamConnect'
 
-export type UseScoresInferenceByRowOptions = {
-  /** Called with each `globalPause` stream event, and with false when the stream ends. */
-  onGlobalPauseChange?: (paused: boolean) => void
-  /** The table-level pause; every incomplete row shows paused while it is true. */
-  isGloballyPaused?: boolean
-}
+/**
+ * The table-level pause the rows read and the stream writes: every incomplete row
+ * shows paused while `isGloballyPaused` is true, and `syncPausedFromStream`
+ * receives each `globalPause` stream event, and false when the stream ends.
+ */
+export type ScoresInferenceTablePause = Pick<
+  UseGlobalInferencePauseResult,
+  'isGloballyPaused' | 'syncPausedFromStream'
+>
 
 export type UseScoresInferenceByRowResult = {
   inferenceByRow: ScoresInferenceRowDetail[] | undefined
 }
 
 function createScoresInferenceStreamPolicy(
-  onGlobalPauseChange: ((paused: boolean) => void) | undefined
+  syncPausedFromStream: ScoresInferenceTablePause['syncPausedFromStream']
 ): PerPlayerAnalyticStreamPolicy<
   InferenceStreamEvent,
   RowStreamState,
@@ -53,16 +57,16 @@ function createScoresInferenceStreamPolicy(
     }),
     routeStreamEvent: (event) => {
       if (event.type === 'globalPause') {
-        onGlobalPauseChange?.(event.paused)
+        syncPausedFromStream(event.paused)
         return true
       }
       return false
     },
     onConnectionCleared: () => {
-      onGlobalPauseChange?.(false)
+      syncPausedFromStream(false)
     },
     onConnectionTeardown: () => {
-      onGlobalPauseChange?.(false)
+      syncPausedFromStream(false)
     },
     connectUntilComplete: (scope, playerIds, handlers) =>
       connectTableInferenceStreamUntilComplete(scope, playerIds, {
@@ -79,9 +83,9 @@ export function useScoresInferenceByRow(
   tableData: TableDataResponse | undefined,
   scope: AnalyticShellScope | null,
   enabled: boolean,
-  options: UseScoresInferenceByRowOptions = {}
+  tablePause: ScoresInferenceTablePause
 ): UseScoresInferenceByRowResult {
-  const { onGlobalPauseChange, isGloballyPaused = false } = options
+  const { isGloballyPaused, syncPausedFromStream } = tablePause
   const inferenceByRowStubs = tableData?.inferenceByRow
 
   const playerIdsKey = useMemo(() => {
@@ -94,11 +98,13 @@ export function useScoresInferenceByRow(
     return stablePlayerIdsKey(playerIds)
   }, [enabled, inferenceByRowStubs])
 
-  // usePerPlayerAnalyticStream reads the latest policy without reconnecting,
-  // so a new callback only replaces the policy.
+  // usePerPlayerAnalyticStream routes events, publishes and tears down through
+  // the latest policy, so a new callback reaches those paths without reconnecting;
+  // the open connection's connect, completion and failure handling keep the policy
+  // it started with.
   const policy = useMemo(
-    () => createScoresInferenceStreamPolicy(onGlobalPauseChange),
-    [onGlobalPauseChange]
+    () => createScoresInferenceStreamPolicy(syncPausedFromStream),
+    [syncPausedFromStream]
   )
 
   const { publishedByPlayerId: detailsByPlayerId } = usePerPlayerAnalyticStream({

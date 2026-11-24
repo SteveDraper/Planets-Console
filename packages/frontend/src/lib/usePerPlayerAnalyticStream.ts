@@ -16,7 +16,6 @@ type StreamErrorEvent = {
 
 export type PerPlayerStreamEventRouterContext<TEvent> = {
   applyToPlayer: (playerId: number, event: TEvent) => void
-  applyToAllPlayers: (event: TEvent) => void
 }
 
 export type PerPlayerAnalyticStreamPolicy<TEvent extends StreamErrorEvent, TRefState, TPublished> =
@@ -154,11 +153,6 @@ export function usePerPlayerAnalyticStream<
       const activePolicy = policyRef.current
       const routerContext: PerPlayerStreamEventRouterContext<TEvent> = {
         applyToPlayer: applyStreamEvent,
-        applyToAllPlayers: (fanOutEvent) => {
-          for (const playerId of refStateByPlayerId.current.keys()) {
-            applyStreamEvent(playerId, fanOutEvent)
-          }
-        },
       }
       if (activePolicy.routeStreamEvent?.(event, routerContext)) {
         return

@@ -448,7 +448,7 @@ describe('ScoresTableView', () => {
     expect(screen.queryByLabelText('Still searching')?.className).toContain('border-dashed')
   })
 
-  it('does not animate incomplete rows while globally paused', () => {
+  it('does not animate paused rows', () => {
     const { container } = render(
       <ScoresTableView
         analyticScope={testScope}
