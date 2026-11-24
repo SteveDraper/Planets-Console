@@ -83,7 +83,7 @@ class StepItemIgnoredReason(StrEnum):
 
     The first three say the item's execution is no longer running.
     ``START_REFUSED`` says it was running, and the start-or-requeue gate
-    ended it at the pick or the thread re-check (``pool_item_dropped`` only).
+    ended it at the pick or the post-build re-check (``pool_item_dropped`` only).
     """
 
     MISSING_NODE = "missing_node"
@@ -124,9 +124,13 @@ LifecycleListener = Callable[
     ],
     None,
 ]
+# Side-effect-free admission check for one ready node. A dispatch pass asks
+# each gate once per node; a gate must never admit more because of a commit
+# earlier in the same pass.
 NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 # Side-effecting accept after all gates pass (e.g. consume a single-step slot).
 # Must be idempotent-safe under reject: return False to leave the node ready.
+# Like a gate, it must never admit more because of a commit earlier in the pass.
 NodeDispatchCommitHook = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
 

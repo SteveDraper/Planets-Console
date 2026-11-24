@@ -23,6 +23,8 @@ from api.compute.diagnostics import (
 from api.compute.diagnostics.controller import ComputeDiagnosticsController
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.pools import PoolWorkItem
+from api.compute.running_step import RunningStepDisposition
+from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
@@ -34,7 +36,16 @@ from tests.off_mode_catch_up_helpers import context_at_turn, store_generation, w
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_exports_helpers import first_player_id
 from tests.walk_band_helpers import SHELL_TURN, WALK_TURNS, Walk, end_shell, no_live_streams
-from tests.walk_stop_helpers import assert_aborted, plant_node, walk_node
+from tests.walk_stop_helpers import (
+    assert_aborted,
+    assert_dropped_by_the_start_gate,
+    begin_pick,
+    finish_step,
+    plant_node,
+    stop_walks_and_follow_up,
+    take_queued_item,
+    walk_node,
+)
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
@@ -172,6 +183,74 @@ def test_with_the_setting_off_a_held_off_walk_item_on_a_live_row_turn_is_kept(wa
     assert kept.state == "running"
     assert walk.pool.take_next_item_for_tests() is None
     assert len(_queued_items(controller, shell)) == 1
+    end_shell(row)
+
+
+# --- A walk stop leaves the queued hop freeze is holding running, to end at its pick ---
+
+
+def _stop_with_the_baseline_hop_held(
+    walk: Walk,
+) -> tuple[ComputeDiagnosticsController, ShellContextKey, ComputeNodeRun]:
+    """Queue the baseline hop, arm freeze so the dequeue hold keeps it, then stop the walk."""
+    controller, shell = _diagnose(walk)
+    walk.submit_shell()
+    controller.set_freeze_armed(shell, freeze_armed=True)
+    hop = walk_node(walk, BASELINE_TURN)
+    assert hop.state == "running"
+
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
+
+    return controller, shell, hop
+
+
+def _disarm(controller: ComputeDiagnosticsController, shell: ShellContextKey, _walk: Walk) -> None:
+    controller.set_freeze_armed(shell, freeze_armed=False)
+
+
+def _single_step(
+    controller: ComputeDiagnosticsController, shell: ShellContextKey, walk: Walk
+) -> None:
+    controller.set_allowlist(shell, frozenset({walk.player_id}))
+    assert controller.single_step(shell) is True
+
+
+@pytest.mark.parametrize("release", [_disarm, _single_step], ids=["disarm", "single_step"])
+def test_a_walk_stop_leaves_the_held_hop_running_until_its_release_drops_it_at_its_pick(
+    walk, release
+):
+    controller, shell, hop = _stop_with_the_baseline_hop_held(walk)
+    dropped = record_lifecycle(walk.orchestrator, ("pool_item_dropped",))
+
+    assert hop.state == "running"
+    assert hop.running_step is RunningStepDisposition.END_AFTER_STEP
+    assert len(_queued_items(controller, shell)) == 1
+    assert walk.pool.take_next_item_for_tests() is None
+
+    release(controller, shell, walk)
+    assert not begin_pick(walk, take_queued_item(walk))
+
+    assert_aborted(hop)
+    assert_dropped_by_the_start_gate(dropped, RunningStepDisposition.END_AFTER_STEP)
+    assert _queued_items(controller, shell) == []
+
+
+def test_a_root_attach_after_a_walk_stop_lets_the_held_hop_run_after_disarm(walk):
+    row = walk.open_shell(turn=BASELINE_TURN)
+    controller, shell, hop = _stop_with_the_baseline_hop_held(walk)
+    assert row.fleet_stream.rescheduled_player_ids == [walk.player_id]
+
+    walk.submit_shell(BASELINE_TURN)
+
+    assert walk_node(walk, BASELINE_TURN) is hop
+    assert hop.running_step is RunningStepDisposition.CONTINUE
+    assert walk.pool.take_next_item_for_tests() is None
+    controller.set_freeze_armed(shell, freeze_armed=False)
+    item = take_queued_item(walk)
+    assert item.scope == hop.scope
+    assert begin_pick(walk, item)
+    finish_step(walk, item, StepResult(outcome="complete"))
+    assert hop.state == "complete"
     end_shell(row)
 
 

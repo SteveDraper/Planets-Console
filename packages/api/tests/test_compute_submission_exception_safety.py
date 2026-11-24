@@ -96,21 +96,6 @@ def test_an_ensure_batch_whose_root_plan_exit_raises_still_dispatches_its_pool_s
     )
 
 
-def test_an_ensure_batch_puts_every_pool_root_in_flight(sample_turn):
-    scopes = _shared_scopes(sample_turn, 3)
-    orchestrator, submitter = _pool_orchestrator()
-    ctx = _ctx(sample_turn)
-
-    with pytest.raises(ComputeWaitTimeoutError):
-        orchestrator.ensure_scopes(
-            tuple(ComputeRequest(ctx=ctx, scope=scope) for scope in scopes),
-            timeout=0.01,
-        )
-
-    assert {scope for scope, _step_kind in submitter.submissions} == set(scopes)
-    assert all(orchestrator.nodes[scope].state == "running" for scope in scopes)
-
-
 def test_waking_a_parked_node_dispatches_it_before_returning(sample_turn):
     (scope,) = _shared_scopes(sample_turn, 1)
     orchestrator, submitter = _pool_orchestrator()

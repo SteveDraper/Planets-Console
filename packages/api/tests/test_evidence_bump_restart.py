@@ -9,7 +9,9 @@ makes itself where it matters.
 - With the setting on, the bump keeps nothing: every node of the player's walk
   is aborted, and each live row at the evidence host turn or later, or whose
   own root was stopped, is rescheduled.
-- With the setting off, a running off-walk node on a live-row turn is kept.
+- With the setting off, a running off-walk node on a live-row turn is kept. A
+  kept step still queued runs on its pre-bump epoch, takes an epoch retry and
+  never stamps.
 - A turn with no live row is never woken, and another player is untouched.
 """
 
@@ -42,7 +44,7 @@ from tests.compute_lifecycle_records import record_lifecycle
 from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.off_mode_catch_up_helpers import context_at_turn, write_evidence_mark
 from tests.on_walk_helpers import fleet_persistence
-from tests.scores_exports_helpers import inference_target_player_id
+from tests.scores_exports_helpers import first_player_id, inference_target_player_id
 from tests.test_scores_row_awaits_walk import (
     HOST_TURN,
     MARK_GENERATION,
@@ -212,6 +214,48 @@ def test_with_the_setting_off_running_off_walk_work_on_a_live_row_turn_is_kept(w
     assert_aborted(walk.orchestrator.nodes[off_screen_root])
     for shell in (row, other_row):
         end_shell(shell)
+
+
+def test_with_the_setting_off_a_queued_off_walk_step_is_kept_epoch_retried_and_never_stamps(
+    sample_turn,
+):
+    """The kept step was committed under the pre-bump epoch and not yet picked.
+
+    It runs on that epoch, so its persist result is discarded for an epoch
+    retry, and the node is queued again under the bumped epoch.
+    """
+    host, ctx = context_at_turn(sample_turn, SHELL_TURN + 2)
+    off_mode = Walk(ctx, first_player_id(host))
+    persistence = fleet_persistence(ctx)
+    keys = (ctx.game_id, ctx.perspective, off_mode.player_id)
+    row = off_mode.open_shell(turn=BASELINE_TURN)
+    off_mode.submit_shell(turn=BASELINE_TURN)
+    queued = walk_node(off_mode, BASELINE_TURN)
+    assert not queued.submission_open.on_walk
+    epoch_before = persistence.player_invalidation_generation(*keys)
+    assert queued.generation_at_submit == epoch_before
+    retries = record_lifecycle(off_mode.orchestrator, ("epoch_retry", "pool_item_dropped"))
+
+    _bump(off_mode, SHELL_TURN, backfill_enabled=False)
+    off_mode.orchestrator.drain_post_lock_callbacks()
+
+    epoch_after = persistence.player_invalidation_generation(*keys)
+    assert epoch_after == epoch_before + 1
+    item = take_queued_item(off_mode)
+    assert item.scope == queued.scope
+    assert begin_pick(off_mode, item)
+    finish_step(off_mode, item, StepResult(outcome="persist", payload={}))
+    off_mode.orchestrator.drain_post_lock_callbacks()
+
+    assert [(record.kind, record.detail["generationAtSubmit"]) for record in retries] == [
+        ("epoch_retry", epoch_before)
+    ]
+    assert persistence.get_ledger(keys[0], keys[1], BASELINE_TURN, keys[2]) is None
+    assert walk_node(off_mode, BASELINE_TURN) is queued
+    assert queued.state == "running"
+    assert queued.generation_at_submit == epoch_after
+    assert take_queued_item(off_mode).scope == queued.scope
+    end_shell(row)
 
 
 def test_with_the_setting_on_running_off_walk_work_on_a_live_row_turn_is_aborted(walk):

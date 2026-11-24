@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import Future, InterpreterPoolExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from api.compute.backend_runtime import interpreter_remap_reason
 from api.compute.priority_band import PRIORITY_BAND_RANK, ComputePriorityBand
@@ -24,6 +24,7 @@ from api.compute.profile import (
     REMOTE_COMPUTE_BACKENDS,
     ComputeBackend,
     ComputeStepSpec,
+    PoolComputeBackend,
     RemoteComputeBackend,
 )
 from api.compute.remote_futures import RemotePoolFutureRecord, remote_future_record
@@ -44,19 +45,23 @@ _DEFAULT_WORKER_COUNT = 8
 _DEQUEUE_WAIT_SECONDS = 0.25
 
 
-@dataclass(frozen=True)
-class ThreadStepWork:
-    """A thread step as dispatched: its builder inputs and the functions that use them.
+@dataclass(frozen=True, eq=False)
+class PoolStepWork:
+    """A pool step as dispatched: its builder inputs and the functions that use them.
 
-    The orchestrator snapshots ``job_wire_kwargs`` under its lock at dispatch.
-    The pool worker builds the job wire from that snapshot, checks again that
-    the execution which dispatched the step is still running and that the
-    start-or-requeue gate permits the step, and only then runs the step, as
-    the inline path re-checks after its own wire build.
+    The orchestrator snapshots ``job_wire_kwargs`` under its lock at dispatch
+    and resolves ``backend``, the backend the step runs on, once at hand-off.
+    A pool worker builds the job wire from that snapshot, checks again that the
+    execution which dispatched the step is still running and that the
+    start-or-requeue gate permits the step, and only then runs the step
+    (``thread``) or submits it to the executor for ``backend``. The inline
+    path re-checks after its own wire build the same way.
+
+    Compared and hashed by identity: its builder inputs are a mutable mapping,
+    and one dispatch's work is never equal to another's.
     """
 
-    backend: ClassVar[Literal["thread"]] = "thread"
-
+    backend: PoolComputeBackend
     build_job_wire: BuildStepJobWireFn
     job_wire_kwargs: BuildStepJobWireKwargs
     run_step: RunStepFn
@@ -64,31 +69,6 @@ class ThreadStepWork:
     def job_wire_for(self, scope: ComputeScope) -> object:
         """Build the job wire for ``scope`` from the dispatch snapshot."""
         return self.build_job_wire(scope, **self.job_wire_kwargs)
-
-
-@dataclass(frozen=True)
-class RemoteStepWork:
-    """An interpreter or process step: its serializable job wire, built before submit.
-
-    The orchestrator builds ``job_wire`` from its dispatch-time snapshot of the
-    builder inputs. The executor for ``backend`` runs ``run_step`` on it.
-    """
-
-    backend: RemoteComputeBackend
-    job_wire: object
-    run_step: RunStepFn
-
-    def __post_init__(self) -> None:
-        if self.backend not in REMOTE_COMPUTE_BACKENDS:
-            raise ValueError(
-                f"RemoteStepWork backend must be one of {REMOTE_COMPUTE_BACKENDS}, "
-                f"got {self.backend!r}"
-            )
-
-
-# The orchestrator builds the work for the step's effective backend. The pool
-# runs each item on ``work.backend``.
-PoolStepWork = ThreadStepWork | RemoteStepWork
 
 
 class PoolSubmitter(Protocol):
@@ -595,17 +575,16 @@ class ComputeWorkerPool:
         dispatched the item is still running and that the start-or-requeue
         gate permits the step (``begin_pool_step``). Otherwise the
         orchestrator records ``pool_item_dropped`` with its typed reason, and
-        the item finishes here without running its step.
+        the item finishes here without running its step. Every backend then
+        builds its wire on this worker and is confirmed again
+        (:meth:`_build_and_run_step`).
 
-        ``ThreadStepWork`` builds its wire and runs synchronously on the pool
-        worker, and confirms the execution again between the two
-        (``_run_thread_step``). ``RemoteStepWork``
-        goes to the executor for ``work.backend`` and completes via a done
-        callback, so a stuck remote future cannot pin a pool worker thread (and
-        stall the rest of the queue under freeze single-step). The done callback
-        then owns the item's finish; every other path finishes it here. A
-        failure to get the executor or to submit to it is reported as the
-        step's error, as a failed future's is (``_submit_remote_step``).
+        A ``thread`` step runs synchronously on the pool worker. An
+        ``interpreter`` or ``process`` step goes to the executor for its
+        backend and completes via a done callback, so a stuck remote future
+        cannot pin a pool worker thread (and stall the rest of the queue under
+        freeze single-step). The done callback then owns the item's finish;
+        every other path finishes it here.
 
         Frozen processes and ``api.remap_interpreter_backend_to_thread`` remap
         ``interpreter`` to ``thread`` when the orchestrator builds the work:
@@ -623,49 +602,54 @@ class ComputeWorkerPool:
                 self._log_backend_remap(item.backend, work.backend)
             with self._condition:
                 self._record_backend_execution_locked(work.backend)
-            if isinstance(work, ThreadStepWork):
-                self._run_thread_step(orchestrator, item, work)
-                return
-            try:
-                future = self._submit_remote_step(work)
-            except BaseException as exc:
-                self._report_item_outcome(item, result_wire=None, error=exc)
-                return
-            self._register_remote_future(picked, work.backend, future)
-            future.add_done_callback(
-                lambda completed, pool_item=item: self._on_remote_future_done(
-                    pool_item,
-                    completed,
-                )
-            )
-            is_finish_owned_by_future = True
+            is_finish_owned_by_future = self._build_and_run_step(orchestrator, picked, work)
         finally:
             if not is_finish_owned_by_future:
                 self._notify_item_finished(item)
 
-    def _run_thread_step(
+    def _build_and_run_step(
         self,
         orchestrator: ComputeOrchestrator,
-        item: PoolWorkItem,
-        work: ThreadStepWork,
-    ) -> None:
-        """Build the step's wire on this worker, then run it if its step may still start.
+        picked: BandedWorkItem,
+        work: PoolStepWork,
+    ) -> bool:
+        """Build the step's wire on this worker, then run or submit it if it may still start.
 
         While the wire builds, the execution can end (an abort or a replace),
         or a settle can raise its running-step disposition so that the
         start-or-requeue gate refuses the step. ``begin_pool_step`` is asked
         again after the build, so such an item is dropped there exactly as at
-        the pick, with its typed reason, and never runs its step. A wire build
-        that raises fails the step through ``complete_pool_step``.
+        the pick, with its typed reason, and never runs or reaches an
+        executor. A wire build that raises fails the step through
+        ``complete_pool_step``, as does a failure to get the executor or to
+        submit to it (``_submit_remote_step``).
+
+        Returns whether a remote future now owns the item's finish.
         """
+        item = picked.item
         try:
             job_wire = work.job_wire_for(item.scope)
         except BaseException as exc:
             self._report_item_outcome(item, result_wire=None, error=exc)
-            return
+            return False
         if not _begin_pool_step(orchestrator, item):
-            return
-        self._complete_item(item, partial(work.run_step, job_wire))
+            return False
+        if work.backend == "thread":
+            self._complete_item(item, partial(work.run_step, job_wire))
+            return False
+        try:
+            future = self._submit_remote_step(work.backend, work.run_step, job_wire)
+        except BaseException as exc:
+            self._report_item_outcome(item, result_wire=None, error=exc)
+            return False
+        self._register_remote_future(picked, work.backend, future)
+        future.add_done_callback(
+            lambda completed, pool_item=item: self._on_remote_future_done(
+                pool_item,
+                completed,
+            )
+        )
+        return True
 
     def _log_backend_remap(
         self,
@@ -749,8 +733,13 @@ class ComputeWorkerPool:
             )
         return self._process_executor
 
-    def _submit_remote_step(self, work: RemoteStepWork) -> Future[object]:
-        """Submit ``work`` to the executor for its backend and return the future.
+    def _submit_remote_step(
+        self,
+        backend: RemoteComputeBackend,
+        run_step: RunStepFn,
+        job_wire: object,
+    ) -> Future[object]:
+        """Submit ``run_step(job_wire)`` to the executor for ``backend`` and return the future.
 
         A ``RuntimeError`` from ``submit`` means the executor can take no more
         work: it is broken (``BrokenExecutor``, e.g. after a worker died) or
@@ -759,11 +748,11 @@ class ComputeWorkerPool:
         report as this step's error.
         """
         with self._condition:
-            executor = self._remote_executor_locked(work.backend)
+            executor = self._remote_executor_locked(backend)
         try:
-            return executor.submit(work.run_step, work.job_wire)
+            return executor.submit(run_step, job_wire)
         except RuntimeError:
-            self._discard_remote_executor(work.backend, executor)
+            self._discard_remote_executor(backend, executor)
             raise
 
     def _discard_remote_executor(

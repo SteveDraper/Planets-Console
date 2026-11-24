@@ -183,13 +183,14 @@ class ComputeOrchestrator(
         self._observers = OrchestratorObservers(self._condition)
 
     def dispatch_ready_work(self) -> None:
-        """Dispatch any ready nodes allowed by the current gates.
+        """Dispatch every ready node the current gates allow, in one pass.
 
-        Inline execution and pool job-wire construction run only after the
-        orchestrator lock is released. Holding that lock across ``pool.submit``
-        deadlocks with pool workers (pool lock then diagnostics controller lock).
-        Holding it across scores/fleet job-wire builders deadlocks with the
-        inference scheduler (scheduler lock then orchestrator lock).
+        Inline execution runs only after the orchestrator lock is released, and
+        pool job wires are built on the pool worker that picks each step.
+        Holding that lock across ``pool.submit`` deadlocks with pool workers
+        (pool lock then diagnostics controller lock). Holding it across
+        scores/fleet job-wire builders deadlocks with the inference scheduler
+        (scheduler lock then orchestrator lock).
         """
         self._run_dispatch_pass()
 
@@ -310,9 +311,9 @@ class ComputeOrchestrator(
         execution of ``scope`` is no longer running (aborted, or replaced by a
         newer execution), or the start-or-requeue gate ends it here, the item
         is dropped: this records ``pool_item_dropped``, whose reason tells the
-        two apart, and returns False. A worker asks at the pick and, for a
-        thread step, again after building the wire, since the execution can
-        end during the build. :meth:`complete_pool_step` checks the binding
+        two apart, and returns False. A worker asks at the pick and again
+        after building the wire, whatever the step's backend, since the
+        execution can end during the build. :meth:`complete_pool_step` checks the binding
         once more, since the execution can end while the step runs.
         """
         with self._condition:

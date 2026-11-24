@@ -26,7 +26,7 @@ from tests.compute_orchestrator_fixtures import (
     make_export_scope,
     pool_compute_registration,
 )
-from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
+from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, BRANCH_C_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
@@ -426,3 +426,66 @@ def test_a_satisfied_node_that_nothing_needs_completes_rather_than_being_stopped
     assert node.error is None
     assert orchestrator.metrics.satisfaction_short_circuits == 1
     assert step_runs == []
+
+
+class _FlushError(RuntimeError):
+    pass
+
+
+def test_a_pass_hands_its_pool_work_to_the_pool_before_it_runs_its_inline_work(sample_turn):
+    """Once the shared dependency completes, one pass commits an inline and a pool dependent."""
+    export_scope = make_export_scope(sample_turn)
+    inline_scope = make_compute_scope(BRANCH_B_ID, export_scope)
+    pool_scope = make_compute_scope(BRANCH_C_ID, export_scope)
+    submitter = RecordingPoolSubmitter()
+    submissions_seen_by_inline: list[list[object]] = []
+
+    def inline_run_step(job):
+        submissions_seen_by_inline.append(list(submitter.submissions))
+        return {"result": job["scope"]}
+
+    orchestrator = ComputeOrchestrator(
+        compute_registry=build_compute_registry(
+            (
+                inline_compute_registration(SHARED_ID),
+                replace(
+                    inline_compute_registration(BRANCH_B_ID),
+                    run_steps=(("materialize", inline_run_step),),
+                ),
+                pool_compute_registration(BRANCH_C_ID, backend="thread"),
+            )
+        ),
+        pool_submitter=submitter,
+    )
+    _hold_and_submit(orchestrator, _ctx(sample_turn), (inline_scope, pool_scope))
+
+    orchestrator.dispatch_ready_work()
+
+    assert submissions_seen_by_inline == [[(pool_scope, "materialize")]]
+    assert orchestrator.nodes[inline_scope].state == "complete"
+    assert orchestrator.nodes[pool_scope].state == "running"
+
+
+@pytest.mark.allows_post_lock_callback_errors
+def test_a_raise_out_of_the_pool_hand_off_still_runs_the_inline_work_and_drains(
+    sample_turn, monkeypatch
+):
+    scope, _other = _two_shared_scopes(sample_turn)
+    orchestrator = _inline_shared(StubPersistencePolicy())
+    _hold_and_submit(orchestrator, _ctx(sample_turn), (scope,))
+    drained: list[bool] = []
+    real_flush = orchestrator._flush_pending_pool_submissions
+
+    def flush_raises_once(pending) -> None:
+        monkeypatch.setattr(orchestrator, "_flush_pending_pool_submissions", real_flush)
+        with orchestrator._condition:
+            orchestrator.observers.schedule_post_lock(lambda: drained.append(True))
+        raise _FlushError("pool hand-off failed")
+
+    monkeypatch.setattr(orchestrator, "_flush_pending_pool_submissions", flush_raises_once)
+
+    with pytest.raises(_FlushError):
+        orchestrator.dispatch_ready_work()
+
+    assert orchestrator.nodes[scope].state == "complete"
+    assert drained == [True]

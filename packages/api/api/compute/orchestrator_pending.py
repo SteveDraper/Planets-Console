@@ -59,7 +59,10 @@ class PendingInlineExecution(PendingStep):
 
 @dataclass(eq=False)
 class PendingPoolSubmission(PendingStep):
-    """Pool work committed under the orchestrator lock; built and submitted after release."""
+    """Pool work committed under the orchestrator lock; submitted after release.
+
+    Its job wire is built later, on the pool worker that picks it.
+    """
 
 
 @dataclass
@@ -68,8 +71,7 @@ class DispatchedWork:
 
     The pass appends each record in the hold that marks its node ``running``,
     so a raise later in the pass still leaves every committed record here for
-    the hand-off. A pass submits at most one pool step today; ``pool`` is a
-    list so the hand-off does not encode that rule.
+    the hand-off.
     """
 
     inline: list[PendingInlineExecution] = field(default_factory=list)

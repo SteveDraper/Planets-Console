@@ -10,11 +10,15 @@ from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator
+from api.compute.orchestrator_observers import StepItemIgnoredReason
 from api.compute.orchestrator_state import ComputeNodeRun, NodeState
-from api.compute.pools import PoolWorkItem, ThreadStepWork
+from api.compute.pools import PoolWorkItem
+from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
+from api.services.backfill_walk_stop import stop_backfill_walks
 
+from tests.compute_lifecycle_records import LifecycleRecord
 from tests.walk_band_helpers import SHELL_TURN, Walk
 
 WALK_ANALYTIC_IDS = (FLEET_ANALYTIC_ID, SCORES_ANALYTIC_ID)
@@ -27,6 +31,20 @@ def walk_node(walk: Walk, turn: int, analytic_id: str = FLEET_ANALYTIC_ID) -> Co
 def assert_aborted(node: ComputeNodeRun) -> None:
     assert node.state == "failed"
     assert isinstance(node.error, ComputeScopeAbortedError)
+
+
+def stop_walks_and_follow_up(orchestrator: ComputeOrchestrator, game_id: int) -> None:
+    """Stop the game's walks, then run the follow-up the stop returns, as the route's task does."""
+    follow_up = stop_backfill_walks(orchestrator, game_id)
+    follow_up()
+
+
+def assert_dropped_by_the_start_gate(
+    dropped: list[LifecycleRecord], running_step: RunningStepDisposition
+) -> None:
+    (record,) = dropped
+    assert record.detail["reason"] == StepItemIgnoredReason.START_REFUSED
+    assert record.detail["runningStep"] == running_step.name.lower()
 
 
 def plant_node(
@@ -94,8 +112,7 @@ def finish_step(walk: Walk, item: PoolWorkItem, result_wire: object) -> None:
 def run_step(walk: Walk, item: PoolWorkItem) -> None:
     """Build and run a picked item's real step on this thread, then hand its result back."""
     work = item.work
-    job_wire = work.job_wire_for(item.scope) if isinstance(work, ThreadStepWork) else work.job_wire
-    finish_step(walk, item, work.run_step(job_wire))
+    finish_step(walk, item, work.run_step(work.job_wire_for(item.scope)))
 
 
 def non_terminal_walk_scopes(orchestrator: ComputeOrchestrator, game_id: int) -> set:

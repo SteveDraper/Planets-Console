@@ -23,7 +23,7 @@ from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
 from api.analytics.fleet.types import FleetEvidenceMark
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
-from api.compute.pools import PoolStepWork, RemoteStepWork
+from api.compute.pools import PoolStepWork
 from api.compute.scope import ComputeScope
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs
@@ -86,8 +86,8 @@ def _capturing_orchestrator() -> tuple[ComputeOrchestrator, list[tuple[ComputeSc
     captured: list[tuple[ComputeScope, object]] = []
 
     def capture(node, _step, *, work: PoolStepWork) -> None:
-        if isinstance(work, RemoteStepWork):
-            captured.append((node.scope, work.job_wire))
+        if work.backend != "thread":
+            captured.append((node.scope, work.job_wire_for(node.scope)))
 
     return (
         ComputeOrchestrator(

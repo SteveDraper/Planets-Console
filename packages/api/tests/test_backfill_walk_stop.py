@@ -36,7 +36,7 @@ from api.analytics.scores.tier_row_run_registry import get_persist_admission, ge
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.errors import ComputeScopeAbortedError
 from api.compute.in_flight_settle import PlayerWork
-from api.compute.orchestrator import ComputeHandle, ComputeOrchestrator, ComputeRequest
+from api.compute.orchestrator import ComputeHandle, ComputeRequest
 from api.compute.orchestrator_observers import StepItemIgnoredReason
 from api.compute.orchestrator_state import ComputeNodeRun
 from api.compute.running_step import RunningStepDisposition
@@ -50,7 +50,7 @@ from api.services.evidence_bump import BumpSettlePolicy
 from api.streaming.table_stream.registry_catalog import live_table_streams
 from api.streaming.table_stream.row_run_admission import PersistAdmission
 
-from tests.compute_lifecycle_records import LifecycleRecord, record_lifecycle
+from tests.compute_lifecycle_records import record_lifecycle
 from tests.off_mode_catch_up_helpers import FLEET_SCORES_REGISTRY, context_at_turn
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_exports_helpers import first_player_id
@@ -69,11 +69,13 @@ from tests.walk_band_helpers import (
 from tests.walk_stop_helpers import (
     WALK_ANALYTIC_IDS,
     assert_aborted,
+    assert_dropped_by_the_start_gate,
     begin_pick,
     finish_step,
     non_terminal_walk_scopes,
     pick_baseline_hop,
     plant_node,
+    stop_walks_and_follow_up,
     take_queued_item,
     walk_node,
 )
@@ -91,20 +93,6 @@ def walk(sample_turn) -> Walk:
     return Walk.at_shell_turn(sample_turn)
 
 
-def _stop(orchestrator: ComputeOrchestrator, game_id: int) -> None:
-    """Stop the game's walks, then run the follow-up the stop returns, as the route's task does."""
-    follow_up = stop_backfill_walks(orchestrator, game_id)
-    follow_up()
-
-
-def _assert_dropped_by_the_start_gate(
-    dropped: list[LifecycleRecord], running_step: RunningStepDisposition
-) -> None:
-    (record,) = dropped
-    assert record.detail["reason"] == StepItemIgnoredReason.START_REFUSED
-    assert record.detail["runningStep"] == running_step.name.lower()
-
-
 # --- T1: unstarted hops abort; a queued hop drops at its pick; game H is untouched ---
 
 
@@ -116,7 +104,7 @@ def test_a_stop_aborts_unstarted_hops_in_every_perspective_and_drops_queued_ones
     other_game = plant_node(walk, game_offset=1, on_walk=True)
     dropped = record_lifecycle(walk.orchestrator, ("pool_item_dropped",))
 
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
 
     for turn in (4, 5, SHELL_TURN):
         assert_aborted(walk_node(walk, turn))
@@ -129,7 +117,7 @@ def test_a_stop_aborts_unstarted_hops_in_every_perspective_and_drops_queued_ones
     assert not begin_pick(walk, take_queued_item(walk))
 
     assert_aborted(queued)
-    _assert_dropped_by_the_start_gate(dropped, RunningStepDisposition.END_AFTER_STEP)
+    assert_dropped_by_the_start_gate(dropped, RunningStepDisposition.END_AFTER_STEP)
     assert non_terminal_walk_scopes(walk.orchestrator, walk.ctx.game_id) == set()
 
 
@@ -204,7 +192,7 @@ def test_a_picked_fleet_step_ends_at_its_next_start_or_requeue_and_submits_nothi
 ):
     item = pick_baseline_hop(walk)
     restarts = record_lifecycle(walk.orchestrator, ("epoch_retry", "persist_deferred"))
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
     ending.before_finish(walk, monkeypatch)
     nodes_before = set(walk.orchestrator.nodes)
 
@@ -217,9 +205,9 @@ def test_a_picked_fleet_step_ends_at_its_next_start_or_requeue_and_submits_nothi
     assert walk.orchestrator.metrics.epoch_discards == 0
 
 
-def test_a_picked_fleet_step_completes_under_the_stop(walk):
+def test_a_picked_fleet_step_completes_under_thestop_walks_and_follow_up(walk):
     item = pick_baseline_hop(walk)
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
 
     finish_step(walk, item, StepResult(outcome="complete", payload={}))
 
@@ -236,7 +224,7 @@ def test_a_needed_fleet_node_continues_and_the_start_gate_re_derives_needed(walk
         dependency_scopes=(walk.scope(3),),
     )
     unregister_hold = walk.orchestrator.observers.register_dispatch_gate(lambda walk_node: False)
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
 
     finish_step(walk, item, StepResult(outcome="continue"))
 
@@ -263,7 +251,7 @@ def test_an_inline_step_whose_node_stops_being_needed_during_its_wire_build_does
         dependency_scopes=(walk.scope(3),),
     )
     unregister_hold = walk.orchestrator.observers.register_dispatch_gate(lambda walk_node: False)
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
     finish_step(walk, item, StepResult(outcome="continue"))
     fleet = FLEET_SCORES_REGISTRY[FLEET_ANALYTIC_ID]
     finalized: list[object] = []
@@ -305,7 +293,7 @@ def test_a_running_scoreboard_tier_aborts_its_stamped_run_and_persists_nothing(l
     job_wire = work.job_wire_for(ladder.scope)
     generation = ladder.orchestrator.nodes[ladder.scope].execution_generation
 
-    _stop(ladder.orchestrator, ladder.ctx.game_id)
+    stop_walks_and_follow_up(ladder.orchestrator, ladder.ctx.game_id)
 
     node = ladder.orchestrator.nodes[ladder.scope]
     assert node.state == "failed"
@@ -361,7 +349,7 @@ def _walk_keys(walk: BaselineWalk) -> tuple[int, int, int]:
 
 def test_a_picked_fleet_step_stamps_the_walk_generation_then_its_node_ends(held_walk):
     orchestrator = get_compute_orchestrator()
-    _stop(orchestrator, held_walk.ctx.game_id)
+    stop_walks_and_follow_up(orchestrator, held_walk.ctx.game_id)
     hop = _baseline_hop_node(held_walk)
     assert hop.running_step is RunningStepDisposition.END_AFTER_STEP
 
@@ -389,7 +377,7 @@ def test_a_picked_fleet_step_stamps_the_walk_generation_then_its_node_ends(held_
 def test_after_a_bump_the_picked_fleet_persist_is_refused_and_its_node_ends(held_walk):
     orchestrator = get_compute_orchestrator()
     epoch_retries = record_lifecycle(orchestrator, ("epoch_retry",))
-    _stop(orchestrator, held_walk.ctx.game_id)
+    stop_walks_and_follow_up(orchestrator, held_walk.ctx.game_id)
     game_id, perspective, player_id = _walk_keys(held_walk)
     persistence = fleet_persistence(held_walk.ctx)
     baseline_turn = BASELINE_WALK_TURNS[0]
@@ -443,7 +431,7 @@ def test_a_needed_walk_node_runs_to_completion_and_stamps(held_walk):
             state="parked",
             submission_open=SubmissionOpen(),
         )
-    _stop(orchestrator, game_id)
+    stop_walks_and_follow_up(orchestrator, game_id)
     hop = _baseline_hop_node(held_walk)
 
     held_walk.release_baseline_hop.set()
@@ -470,7 +458,7 @@ def test_an_on_walk_ensure_from_another_caller_is_stopped_and_its_waiter_sees_th
     )
     assert walk_node(walk, SHELL_TURN).submission_open.on_walk
 
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
 
     _wait_ended(handle)
 
@@ -481,7 +469,7 @@ def test_an_on_walk_ensure_from_another_caller_is_stopped_and_its_waiter_sees_th
 def test_a_reopen_replaces_the_stopped_walks_failed_scopes(walk):
     walk.submit_shell()
     stopped = {turn: walk_node(walk, turn).execution_generation for turn in (3, 4, 5, SHELL_TURN)}
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
     assert not begin_pick(walk, take_queued_item(walk))
 
     walk.submit_shell()
@@ -495,7 +483,7 @@ def test_a_reopen_replaces_the_stopped_walks_failed_scopes(walk):
 
 def test_a_reopen_joins_a_running_fleet_node_through_its_planned_dependent(walk):
     item = pick_baseline_hop(walk)
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
     hop = walk_node(walk, 3)
     unregister_hold = walk.orchestrator.observers.register_dispatch_gate(lambda walk_node: False)
 
@@ -510,7 +498,7 @@ def test_a_reopen_joins_a_running_fleet_node_through_its_planned_dependent(walk)
 
 def test_a_root_attach_lowers_end_after_step(walk):
     item = pick_baseline_hop(walk)
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
     hop = walk_node(walk, 3)
 
     walk.submit_shell(3)
@@ -535,7 +523,7 @@ def test_a_stop_in_a_game_with_no_walk_changes_nothing_and_the_rows_detach(sampl
     assert before
     assert not any(node.submission_open.on_walk for node in walk.orchestrator.nodes.values())
 
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
     end_shell(shell)
 
     assert {
@@ -601,7 +589,7 @@ def test_the_follow_up_reschedules_only_after_its_drain_ran_the_abort_listeners(
 
     monkeypatch.setattr(shell.fleet_stream, "reschedule_player", record_reschedule)
 
-    _stop(walk.orchestrator, walk.ctx.game_id)
+    stop_walks_and_follow_up(walk.orchestrator, walk.ctx.game_id)
 
     assert order == [("outcome", root), ("reschedule", walk.player_id)]
     end_shell(shell)
