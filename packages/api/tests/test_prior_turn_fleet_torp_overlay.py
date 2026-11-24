@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.fleet.chain import (
     ensure_fleet_baseline_for_player,
@@ -23,11 +25,15 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 )
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.tier_row_run_registry import new_tier_row_run
+from api.compute.orchestrator_observers import OrchestratorObservers
 
 from tests.export_chain_test_fixtures import export_chain_query_context, seed_fleet_unwind_through
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
 from tests.submission_open_helpers import explicit_submission_open, live_execution
+
+# Handles from a stand-in orchestrator still need an observers surface to wait on.
+_STAND_IN_OBSERVERS = OrchestratorObservers(threading.Condition())
 
 
 def test_prior_fleet_max_tech_for_admission_applied_returns_copy():
@@ -442,7 +448,7 @@ def test_background_warm_skips_players_with_final_ledger(
         submitted.append(request)
         from api.compute.orchestrator import ComputeHandle
 
-        return ComputeHandle(scope=request.scope, _node=None)
+        return ComputeHandle(scope=request.scope, _node=None, _observers=_STAND_IN_OBSERVERS)
 
     monkeypatch.setattr(
         "api.compute.orchestrator.ComputeOrchestrator.submit",
@@ -474,7 +480,7 @@ def test_background_warm_submits_orchestrator_background_requests(
         submitted.append(request)
         from api.compute.orchestrator import ComputeHandle
 
-        return ComputeHandle(scope=request.scope, _node=None)
+        return ComputeHandle(scope=request.scope, _node=None, _observers=_STAND_IN_OBSERVERS)
 
     monkeypatch.setattr(
         "api.compute.orchestrator.ComputeOrchestrator.submit",

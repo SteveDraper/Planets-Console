@@ -75,3 +75,18 @@ class ComputeWaitTimeoutError(TimeoutError):
         super().__init__(message)
         self.scope = scope
         self.timeout_sec = timeout_sec
+
+
+class NestedBlockingWaitError(CoreAPIError):
+    """A blocking orchestrator wait was called inside a post-lock drain or a step.
+
+    A wait there could block on work that only the suspended drain on the same
+    thread would run, and leaf steps never wait by design. Raised before any
+    planning, turn fetch or condition wait.
+    """
+
+    def __init__(self, operation: str) -> None:
+        super().__init__(
+            f"{operation} cannot run inside a compute post-lock drain or a compute step"
+        )
+        self.operation = operation

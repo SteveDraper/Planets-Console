@@ -13,6 +13,7 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.models.game import TurnInfo
 from tests.fixtures.export_framework.alpha_exports import EXPORT_CATALOG as ALPHA_EXPORT_CATALOG
 from tests.fixtures.export_framework.beta_exports import EXPORT_CATALOG as BETA_EXPORT_CATALOG
+from tests.fixtures.export_framework.chain_exports import CHAIN_EXPORT_CATALOG
 from tests.fixtures.export_framework.cycle_exports import (
     CYCLE_A_EXPORT_CATALOG,
     CYCLE_B_EXPORT_CATALOG,
@@ -30,6 +31,7 @@ CYCLE_FIXTURE_EXPORT_REGISTRY = merge_export_registry(
     CYCLE_A_EXPORT_CATALOG,
     CYCLE_B_EXPORT_CATALOG,
 )
+CHAIN_FIXTURE_EXPORT_REGISTRY = merge_export_registry(CHAIN_EXPORT_CATALOG)
 DIAMOND_FIXTURE_EXPORT_REGISTRY = merge_export_registry(
     ROOT_EXPORT_CATALOG,
     BRANCH_B_EXPORT_CATALOG,

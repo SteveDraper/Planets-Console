@@ -165,9 +165,13 @@ class InferenceInvalidationService:
         ``recompute`` settles nothing.
 
         The settle's queued abort listeners are drained before the wake, as
-        the game stop drains before its reschedules, so each row's listeners
-        have run before the row is re-admitted. When the mark write raises,
-        the stopped rows are still woken, then the error is raised.
+        the game stop drains before its reschedules. Outside a drain, each
+        row's listeners have therefore run before the row is re-admitted. A
+        durable bump runs inside a scores persist callback, where the drain
+        call returns at once (the active drain runs the listeners after that
+        callback), so there the wake re-admits rows before their abort
+        listeners run. When the mark write raises, the stopped rows are still
+        woken, then the error is raised.
         """
         orchestrator = self._current_orchestrator()
         known_turns: set[int] = set()

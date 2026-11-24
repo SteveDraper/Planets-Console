@@ -44,6 +44,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.military_score_inference.tier_policy import resolve_tier_policies
 from api.analytics.scores.tier_row_run_registry import get_row_run
+from api.compute.orchestrator_observers import OrchestratorObservers
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
@@ -54,6 +55,9 @@ from tests.export_chain_test_fixtures import (
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
 from tests.scores_exports_helpers import inference_target_player_id
+
+# Handles from a stand-in orchestrator still need an observers surface to wait on.
+_STAND_IN_OBSERVERS = OrchestratorObservers(threading.Condition())
 
 
 @pytest.fixture(autouse=True)
@@ -240,7 +244,7 @@ def test_background_warm_submits_orchestrator_background_requests(
         submitted.append(request)
         from api.compute.orchestrator import ComputeHandle
 
-        return ComputeHandle(scope=request.scope, _node=None)
+        return ComputeHandle(scope=request.scope, _node=None, _observers=_STAND_IN_OBSERVERS)
 
     monkeypatch.setattr(
         "api.compute.orchestrator.ComputeOrchestrator.submit",

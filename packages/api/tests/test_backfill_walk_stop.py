@@ -338,7 +338,7 @@ def _baseline_hop_node(walk: BaselineWalk) -> ComputeNodeRun:
 
 def _wait_terminal(node: ComputeNodeRun) -> None:
     handle = ComputeHandle(
-        scope=node.scope, _node=node, _condition=get_compute_orchestrator()._condition
+        scope=node.scope, _node=node, _observers=get_compute_orchestrator().observers
     )
     handle.wait(timeout=WALK_TIMEOUT_SECONDS)
 

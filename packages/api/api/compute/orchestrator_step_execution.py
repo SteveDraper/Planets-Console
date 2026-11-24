@@ -218,6 +218,10 @@ class OrchestratorStepExecutionMixin:
     def _hand_off(self, work: DispatchedWork) -> None:
         """Submit committed pool steps, run committed inline steps, then drain callbacks.
 
+        When this thread is already draining, the drain returns at once and the
+        active drain runs the callbacks the inline steps queued, including the
+        next dispatch pass of an inline chain, so a chain never nests hand-offs.
+
         Runs after the orchestrator lock is released. Pool steps go first:
         submitting one only enqueues it, so pool workers start before an
         inline step occupies this thread. A failure of one record fails only
@@ -362,7 +366,8 @@ class OrchestratorStepExecutionMixin:
         node = pending.node
         try:
             builder = pending.registration.build_step_job_wire[pending.step.step_kind]
-            job_wire = builder(node.scope, **pending.job_wire_kwargs)
+            with self._observers.running_step():
+                job_wire = builder(node.scope, **pending.job_wire_kwargs)
         except BaseException as exc:
             self._finish_inline_step(pending, failure=exc)
             return
@@ -371,7 +376,8 @@ class OrchestratorStepExecutionMixin:
                 return
         self._observers.notify_inline_start(node, pending.step.step_kind)
         try:
-            result_wire = pending.registration.run_step[pending.step.step_kind](job_wire)
+            with self._observers.running_step():
+                result_wire = pending.registration.run_step[pending.step.step_kind](job_wire)
         except BaseException as exc:
             self._finish_inline_step(pending, failure=exc)
             return

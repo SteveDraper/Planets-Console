@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Mapping
+from collections import deque
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
-from api.compute.errors import ComputeScopeAbortedError
+from api.compute.errors import ComputeScopeAbortedError, NestedBlockingWaitError
 from api.compute.profile import StepSurface
 from api.compute.scope import ComputeScope
 
@@ -135,6 +137,14 @@ NodeDispatchCommitHook = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
 
 
+class _DrainState(threading.local):
+    """What this thread is doing for one orchestrator: draining its queue, or running a step."""
+
+    def __init__(self) -> None:
+        self.is_draining = False
+        self.steps_running = 0
+
+
 class OrchestratorObservers:
     """Listener registration, notify fan-out, and post-lock callback drain."""
 
@@ -149,6 +159,33 @@ class OrchestratorObservers:
         self._dispatch_gates: list[NodeDispatchGate] = []
         self._dispatch_commit_hooks: list[NodeDispatchCommitHook] = []
         self._post_lock_callbacks: list[PostLockCallback] = []
+        self._drain_state = _DrainState()
+
+    @property
+    def condition(self) -> threading.Condition:
+        """The orchestrator condition this surface guards its lists and queue with."""
+        return self._condition
+
+    def reject_blocking_wait(self, operation: str) -> None:
+        """Raise when this thread is inside a drain or a step of this orchestrator.
+
+        Called at the entry of every blocking wait (``ensure_scopes``,
+        ``run_until_idle``, ``ComputeHandle.wait``), before it plans or waits,
+        whatever the state of the work it would wait on.
+        """
+        state = self._drain_state
+        if state.is_draining or state.steps_running:
+            raise NestedBlockingWaitError(operation)
+
+    @contextmanager
+    def running_step(self) -> Iterator[None]:
+        """Mark this thread as running one of this orchestrator's steps (wire build or step)."""
+        state = self._drain_state
+        state.steps_running += 1
+        try:
+            yield
+        finally:
+            state.steps_running -= 1
 
     @property
     def dispatch_gates(self) -> list[NodeDispatchGate]:
@@ -415,20 +452,48 @@ class OrchestratorObservers:
     def drain_post_lock_callbacks(self) -> None:
         """Run queued callbacks, and any they schedule, until the queue is empty.
 
-        Each callback runs even when an earlier one raises. A failure is logged
-        with its stack trace and is not re-raised: the batch mixes callbacks
-        scheduled by other nodes and threads, so the draining thread is not
-        their owner, and a pool worker draining after its own step must keep
-        running. Persist failures are handled inside their own callback.
+        A call on a thread that is already draining this queue returns at
+        once: what the caller queued is in the shared queue, and the active
+        drain's loop claims it next. So drains never nest on one thread, and
+        an inline chain, whose every node schedules its successor's dispatch
+        pass from a callback, runs at constant stack depth. A caller inside a
+        drain therefore returns before the callbacks it queued have run.
+
+        Each drain claims everything queued so far in one lock hold and runs
+        it in order. Each callback runs even when an earlier one raises. A
+        failure is logged with its stack trace and is not re-raised: the batch
+        mixes callbacks scheduled by other nodes and threads, so the draining
+        thread is not their owner, and a pool worker draining after its own
+        step must keep running. Persist failures are handled inside their own
+        callback. If anything else escapes (a ``BaseException``), the claimed
+        callbacks not yet started go back to the head of the queue, in order,
+        for the next drain; the one that raised is not run again.
         """
-        while True:
-            with self._condition:
-                callbacks = tuple(self._post_lock_callbacks)
-                self._post_lock_callbacks.clear()
-            if not callbacks:
-                return
-            for callback in callbacks:
+        if self._drain_state.is_draining:
+            return
+        self._drain_state.is_draining = True
+        try:
+            while self._drain_one_batch():
+                pass
+        finally:
+            self._drain_state.is_draining = False
+
+    def _drain_one_batch(self) -> bool:
+        """Claim and run every queued callback; return whether there were any."""
+        with self._condition:
+            batch = deque(self._post_lock_callbacks)
+            self._post_lock_callbacks.clear()
+        if not batch:
+            return False
+        try:
+            while batch:
+                callback = batch.popleft()
                 try:
                     callback()
                 except Exception:
                     logger.exception("Post-lock callback %r failed; draining the rest", callback)
+        finally:
+            if batch:
+                with self._condition:
+                    self._post_lock_callbacks[:0] = batch
+        return True

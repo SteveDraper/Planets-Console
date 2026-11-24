@@ -19,11 +19,15 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.compute.orchestrator import ComputeHandle, ComputeNodeRun, ComputeRequest
+from api.compute.orchestrator_observers import OrchestratorObservers
 from api.compute.submission_open import SubmissionOpen
 from api.transport.fleet_table_stream import (
     fleet_complete_event,
     fleet_ledger_updated_event,
 )
+
+# Handles from a stand-in orchestrator still need an observers surface to wait on.
+_STAND_IN_OBSERVERS = OrchestratorObservers(threading.Condition())
 
 
 class _AdmitOnlyObservers:
@@ -41,7 +45,7 @@ class _AdmitOnlyOrchestrator:
         node = ComputeNodeRun(
             scope=request.scope, dependency_scopes=(), submission_open=SubmissionOpen()
         )
-        return ComputeHandle(scope=request.scope, _node=node)
+        return ComputeHandle(scope=request.scope, _node=node, _observers=_STAND_IN_OBSERVERS)
 
 
 def _install_admit_only_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:

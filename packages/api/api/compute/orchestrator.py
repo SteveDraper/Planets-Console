@@ -185,6 +185,9 @@ class ComputeOrchestrator(
     def dispatch_ready_work(self) -> None:
         """Dispatch every ready node the current gates allow, in one pass.
 
+        Called inside a drain on the same thread, it returns before the
+        post-lock callbacks its pass queued have run; the active drain runs them.
+
         Inline execution runs only after the orchestrator lock is released, and
         pool job wires are built on the pool worker that picks each step.
         Holding that lock across ``pool.submit`` deadlocks with pool workers
@@ -340,7 +343,12 @@ class ComputeOrchestrator(
         return False
 
     def run_until_idle(self) -> None:
-        """Drain ready inline work until no ready or running nodes remain."""
+        """Drain ready inline work until no ready or running nodes remain.
+
+        Raises :class:`NestedBlockingWaitError` when called inside a drain or a
+        step of this orchestrator.
+        """
+        self._observers.reject_blocking_wait("run_until_idle")
         while True:
             with self._condition:
                 if not self._has_pending_work():

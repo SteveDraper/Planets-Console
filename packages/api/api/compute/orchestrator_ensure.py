@@ -72,7 +72,11 @@ class OrchestratorEnsureMixin:
         Batch table/map callers fan out to N player scopes and must not wait on
         the first before submitting the rest -- that would serialize cross-player
         DAG work.
+
+        Raises :class:`NestedBlockingWaitError` before planning when called
+        inside a drain or a step of this orchestrator.
         """
+        self._observers.reject_blocking_wait("ensure_scopes")
         if not requests:
             return ()
 

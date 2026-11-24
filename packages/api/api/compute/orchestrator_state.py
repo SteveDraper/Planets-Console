@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import threading
 import time
 from dataclasses import KW_ONLY, dataclass, field
-from typing import Literal, get_args
+from typing import TYPE_CHECKING, Literal, get_args
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.compute.constants import ENSURE_WAIT_TIMEOUT_SEC
@@ -16,6 +15,9 @@ from api.compute.running_step import RunningStepDisposition
 from api.compute.scope import ComputeScope, format_compute_scope_key
 from api.compute.step_execution_key import ExecutionRef
 from api.compute.submission_open import SubmissionOpen
+
+if TYPE_CHECKING:
+    from api.compute.orchestrator_observers import OrchestratorObservers
 
 NodeState = Literal[
     "waiting_deps",
@@ -92,9 +94,9 @@ class ComputeHandle:
 
     scope: ComputeScope
     _node: ComputeNodeRun
+    _observers: OrchestratorObservers = field(compare=False, repr=False)
     is_waiter: bool = False
     _waiter_error: BaseException | None = field(default=None, compare=False)
-    _condition: threading.Condition | None = field(default=None, compare=False, repr=False)
 
     @property
     def error(self) -> BaseException | None:
@@ -123,13 +125,12 @@ class ComputeHandle:
 
         Soft ``parked`` is not terminal; waiters keep blocking until ``complete`` /
         ``failed`` or timeout.
+
+        Raises :class:`NestedBlockingWaitError` when called inside a drain or a
+        step of the orchestrator, even for a handle that is already terminal.
         """
-        condition = self._condition
-        if condition is None:
-            raise RuntimeError(
-                "ComputeHandle.wait requires an orchestrator condition; "
-                "use handles returned from ComputeOrchestrator.submit / ensure_scope"
-            )
+        self._observers.reject_blocking_wait("ComputeHandle.wait")
+        condition = self._observers.condition
 
         with condition:
             if not self._node.is_terminal:
