@@ -220,3 +220,30 @@ def test_a_nested_drain_returns_and_the_active_drain_runs_its_work():
     observers.drain_post_lock_callbacks()
 
     assert ran == ["nested drain returned", "scheduled by the callback"]
+
+
+def test_a_node_readmitted_inside_a_drain_is_not_terminal_for_callbacks_queued_before_its_pass(
+    sample_turn,
+):
+    """Scores relies on this to ignore an old execution's outcome after a re-admit.
+
+    The re-admit registers the new node in its own lock hold and queues its
+    pass, so a callback queued earlier in the drain still sees it unstarted.
+    """
+    ctx, scope = _chain_ctx_and_scope(sample_turn, 1)
+    orchestrator = _chain_orchestrator(_DeepestStack())
+    _ensure_chain(orchestrator, ctx, scope)
+    seen_by_earlier_callback: list[str] = []
+
+    def readmit() -> None:
+        orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
+
+    with orchestrator._condition:
+        orchestrator.observers.schedule_post_lock(readmit)
+        orchestrator.observers.schedule_post_lock(
+            lambda: seen_by_earlier_callback.append(orchestrator.nodes[scope].state)
+        )
+    orchestrator.drain_post_lock_callbacks()
+
+    assert seen_by_earlier_callback == ["ready"]
+    assert orchestrator.nodes[scope].state == "complete"

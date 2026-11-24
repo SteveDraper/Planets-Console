@@ -85,6 +85,17 @@ class InferenceStreamScopeOutcomesMixin:
         self: InferenceRowScheduler,
         snapshot: ScopeLifecycleSnapshot,
     ) -> None:
+        """Apply a non-abort outcome to the runs mapped to its scope.
+
+        An outcome of an older execution can arrive after a reschedule has
+        re-admitted the scope, routinely when an evidence bump inside a scores
+        persist callback re-admits rows before the active drain delivers
+        outcomes already queued. The re-admitted node is registered in its own
+        lock hold and its pass runs after those outcomes, so it is still live:
+        a stale failure, or a complete with no run id, is ignored as a sibling's
+        (``sibling_still_active``), and a stale complete names its old run id,
+        which no longer maps to the scope.
+        """
         scope = snapshot.scope
         wire_run_id = self._run_id_from_result_wire(snapshot.result_wire)
         sibling_still_active = self._scope_has_live_nonterminal_work(scope)
