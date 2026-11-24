@@ -31,7 +31,6 @@ from api.analytics.scores.persist_decision import PersistDecision
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
     get_row_run_phase,
-    reset_tier_row_run_registry_for_tests,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeRequest
@@ -51,14 +50,10 @@ PERSPECTIVE = 1
 
 
 @pytest.fixture
-def scheduler() -> Iterator[InferenceRowScheduler]:
+def scheduler(make_inference_scheduler) -> Iterator[InferenceRowScheduler]:
     reset_inference_row_scheduler_for_tests()
-    reset_tier_row_run_registry_for_tests()
-    scheduler = InferenceRowScheduler()
-    yield scheduler
-    scheduler.shutdown()
+    yield make_inference_scheduler()
     reset_inference_row_scheduler_for_tests()
-    reset_tier_row_run_registry_for_tests()
 
 
 def _stream_scope(sample_turn, *, turn_offset: int = 0) -> InferenceStreamScope:

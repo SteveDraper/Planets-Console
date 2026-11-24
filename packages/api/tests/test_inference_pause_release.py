@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 
 import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
@@ -46,10 +47,8 @@ def workerless_pool(monkeypatch: pytest.MonkeyPatch) -> Iterator[ComputeWorkerPo
 
 
 @pytest.fixture
-def scheduler() -> Iterator[InferenceRowScheduler]:
-    scheduler = InferenceRowScheduler()
-    yield scheduler
-    scheduler.shutdown()
+def scheduler(make_inference_scheduler) -> InferenceRowScheduler:
+    return make_inference_scheduler()
 
 
 def _session(sample_turn, persistence, scheduler, player_index: int) -> InferenceRowStreamSession:
@@ -256,24 +255,36 @@ def _wait_until(predicate, timeout: float = RELEASE_WAIT_SECONDS) -> bool:
     return predicate()
 
 
-def _hold_waker_until(
-    scheduler: InferenceRowScheduler,
-    monkeypatch: pytest.MonkeyPatch,
-    release: threading.Event,
-) -> threading.Event:
-    """Make the waker thread's pass wait on ``release``; returns an event set when it starts."""
-    entered = threading.Event()
+@dataclass(frozen=True)
+class HeldWakerPass:
+    """The waker thread's release pass, held until the test sets ``release``.
+
+    ``entered`` is set when the pass starts and ``resumed`` when it saw ``release``
+    in time; the test asserts both on its own thread.
+    """
+
+    entered: threading.Event = field(default_factory=threading.Event)
+    release: threading.Event = field(default_factory=threading.Event)
+    resumed: threading.Event = field(default_factory=threading.Event)
+
+
+def _hold_waker_pass(
+    scheduler: InferenceRowScheduler, monkeypatch: pytest.MonkeyPatch
+) -> HeldWakerPass:
+    """Make the waker thread's pass wait until the returned pass is released."""
+    held = HeldWakerPass()
     attachment = scheduler._orchestrator_attachment
     real_registered = attachment.registered_orchestrator
 
     def registered_orchestrator():
         if threading.current_thread().name == PAUSE_RELEASE_THREAD_NAME:
-            entered.set()
-            assert release.wait(RELEASE_WAIT_SECONDS)
+            held.entered.set()
+            if held.release.wait(RELEASE_WAIT_SECONDS):
+                held.resumed.set()
         return real_registered()
 
     monkeypatch.setattr(attachment, "registered_orchestrator", registered_orchestrator)
-    return entered
+    return held
 
 
 def _accepted_paused_row(sample_turn, persistence, scheduler, token, player_index: int = 0):
@@ -308,30 +319,45 @@ def test_a_close_while_the_orchestrator_lock_is_held_returns_and_releases_afterw
     session = _accepted_paused_row(sample_turn, persistence, scheduler, token)
     root_scope = _root_scope(sample_turn, 0)
     orchestrator = get_compute_orchestrator()
+    detach = threading.Thread(
+        target=scheduler.detach_inference_stream,
+        args=(scope, (session,)),
+        kwargs={"stream_token": token},
+    )
 
     with orchestrator._condition:
-        scheduler.detach_inference_stream(scope, (session,), stream_token=token)
-        time.sleep(0.05)
-        assert _pool_scopes(workerless_pool) == set()
+        detach.start()
+        detach.join(RELEASE_WAIT_SECONDS)
+        detach_returned_under_the_lock = not detach.is_alive()
+        pool_under_the_lock = _pool_scopes(workerless_pool)
 
+    detach.join(RELEASE_WAIT_SECONDS)
+    assert detach_returned_under_the_lock
+    assert pool_under_the_lock == set()
     assert _wait_until(lambda: _pool_scopes(workerless_pool) == {root_scope})
 
 
 def test_a_reopen_before_the_close_releases_gets_no_work_from_the_old_stream(
     sample_turn, persistence, workerless_pool, scheduler, monkeypatch
 ) -> None:
+    """A structural guard: the closed stream's release pass submits nothing of its own.
+
+    The pass only dispatches what the gate holds, so after it runs the pool holds
+    the row's single tier_solve and the reopened stream sees exactly one
+    WorkAccepted, its own.
+    """
     scope = stream_scope_for_turn(sample_turn)
     closed_token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
     closed_session = _accepted_paused_row(sample_turn, persistence, scheduler, closed_token)
-    release = threading.Event()
-    waker_entered = _hold_waker_until(scheduler, monkeypatch, release)
+    held = _hold_waker_pass(scheduler, monkeypatch)
     scheduler.detach_inference_stream(scope, (closed_session,), stream_token=closed_token)
-    assert waker_entered.wait(RELEASE_WAIT_SECONDS)
+    assert held.entered.wait(RELEASE_WAIT_SECONDS)
 
     reopened_token = scheduler.begin_scope(scope)
     reopened_session = _accepted_paused_row(sample_turn, persistence, scheduler, reopened_token)
-    release.set()
+    held.release.set()
+    assert held.resumed.wait(RELEASE_WAIT_SECONDS)
 
     root_scope = _root_scope(sample_turn, 0)
     assert _wait_until(lambda: _pool_scopes(workerless_pool) == {root_scope})
@@ -349,16 +375,16 @@ def test_shutdown_with_a_release_pending_registers_nothing_again(
     scheduler.pause_globally(scope)
     session = _accepted_paused_row(sample_turn, persistence, scheduler, token)
     orchestrator = get_compute_orchestrator()
-    release = threading.Event()
-    waker_entered = _hold_waker_until(scheduler, monkeypatch, release)
+    held = _hold_waker_pass(scheduler, monkeypatch)
     scheduler.detach_inference_stream(scope, (session,), stream_token=token)
-    assert waker_entered.wait(RELEASE_WAIT_SECONDS)
+    assert held.entered.wait(RELEASE_WAIT_SECONDS)
 
     shutdown = threading.Thread(target=scheduler.shutdown)
     shutdown.start()
-    release.set()
+    held.release.set()
     shutdown.join(RELEASE_WAIT_SECONDS)
 
+    assert held.resumed.is_set()
     assert not shutdown.is_alive()
     assert scheduler._orchestrator_attachment.registered_orchestrator() is None
     assert scheduler._pause_dispatch_gate not in orchestrator.observers.dispatch_gates

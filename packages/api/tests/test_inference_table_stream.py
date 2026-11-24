@@ -278,10 +278,11 @@ def test_cancel_run_clears_gated_orchestrator_continuation(
                 if scope in scopes and node.state == "ready"
             }
 
+    gate_orchestrator = GateOrchestrator()
     monkeypatch.setattr(
         scheduler._orchestrator_attachment,
         "registered_orchestrator",
-        GateOrchestrator,
+        lambda: gate_orchestrator,
     )
 
     assert scheduler.global_pause_status(scope)["heldContinuationCount"] == 1
