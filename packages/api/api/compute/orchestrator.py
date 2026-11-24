@@ -185,6 +185,9 @@ class ComputeOrchestrator(
     def dispatch_ready_work(self) -> None:
         """Dispatch every ready node the current gates allow, in one pass.
 
+        Called inside a drain on the same thread, it returns before the
+        post-lock callbacks its pass queued have run; the active drain runs them.
+
         Inline execution runs only after the orchestrator lock is released, and
         pool job wires are built on the pool worker that picks each step.
         Holding that lock across ``pool.submit`` deadlocks with pool workers

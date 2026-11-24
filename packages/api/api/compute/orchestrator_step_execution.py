@@ -218,6 +218,10 @@ class OrchestratorStepExecutionMixin:
     def _hand_off(self, work: DispatchedWork) -> None:
         """Submit committed pool steps, run committed inline steps, then drain callbacks.
 
+        When this thread is already draining, the drain returns at once and the
+        active drain runs the callbacks the inline steps queued, including the
+        next dispatch pass of an inline chain, so a chain never nests hand-offs.
+
         Runs after the orchestrator lock is released. Pool steps go first:
         submitting one only enqueues it, so pool workers start before an
         inline step occupies this thread. A failure of one record fails only

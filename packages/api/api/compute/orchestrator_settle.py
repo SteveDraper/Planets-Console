@@ -2,9 +2,10 @@
 
 A settle applies a caller's policy to the non-terminal nodes its work
 selection names, all in one orchestrator lock hold. It never drains post-lock
-callbacks. They share one queue, so the caller's drain, or another thread's
-drain that runs first, applies them. ``drain_post_lock_callbacks`` is the
-public drain for a caller with no drain of its own.
+callbacks. They share one queue, so the caller's drain, another thread's
+drain that runs first, or the drain already active on the caller's thread
+applies them. ``drain_post_lock_callbacks`` is the public drain for a caller
+with no drain of its own.
 """
 
 from __future__ import annotations
@@ -119,7 +120,9 @@ class OrchestratorSettleMixin:
 
         A settle does not drain. A caller that settles outside a drain of its
         own runs this afterwards, for example off the response path of the
-        request that settled.
+        request that settled. Called on a thread that is already draining this
+        orchestrator's queue, for example from a persist callback, it returns
+        at once and that drain runs the work after the current callback.
         """
         self._observers.drain_post_lock_callbacks()
 

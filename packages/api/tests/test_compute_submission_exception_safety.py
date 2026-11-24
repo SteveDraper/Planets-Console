@@ -115,7 +115,7 @@ def test_waking_a_parked_node_dispatches_it_before_returning(sample_turn):
     assert submitter.submissions == [(scope, "materialize"), (scope, "materialize")]
 
 
-def test_a_force_fresh_attach_that_readies_a_waiting_node_dispatches_it_before_returning(
+def test_a_force_fresh_attach_that_readies_a_waiting_node_dispatches_it_in_the_same_drain(
     sample_turn,
 ):
     """The attach refreshes the waiting node's readiness and schedules the pass that runs it.
@@ -123,7 +123,8 @@ def test_a_force_fresh_attach_that_readies_a_waiting_node_dispatches_it_before_r
     A scope-outcome listener on the dependency's completion runs before the
     settle refreshes its dependents, so the dependent is still ``waiting_deps``
     with its dependency complete there: only the ``force_fresh`` attach the
-    listener submits makes it ready.
+    listener submits makes it ready. The listener runs inside a drain, so the
+    attach returns with the node ``ready`` and the active drain runs its pass.
     """
     export_scope = make_export_scope(sample_turn)
     shared = make_compute_scope(SHARED_ID, export_scope)
@@ -153,7 +154,8 @@ def test_a_force_fresh_attach_that_readies_a_waiting_node_dispatches_it_before_r
 
     complete_running_pool_step(orchestrator, shared, result_wire={"result": SHARED_ID})
 
-    assert states_around_attach == [("complete", "waiting_deps", "running")]
+    assert states_around_attach == [("complete", "waiting_deps", "ready")]
+    assert orchestrator.nodes[dependent].state == "running"
     assert submitter.submissions == [(shared, "materialize"), (dependent, "materialize")]
 
 

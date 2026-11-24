@@ -255,8 +255,10 @@ class InferenceTableStreamController(
         ``deliver_domain_event``. Holding ``stream_lock`` across that path self-deadlocks
         on the non-reentrant lock, as it would for the fleet controller.
 
-        Cancel runs outside ``stream_lock``: cancel aborts orchestrator scopes and drains
-        node-complete listeners that call ``deliver_domain_event`` (needs this lock).
+        Cancel runs outside ``stream_lock``: cancel aborts orchestrator scopes, and the
+        node-complete listeners that drain runs call ``deliver_domain_event`` (needs this
+        lock). Inside an active drain (a reschedule from a persist callback) those
+        listeners run after this call returns, so the row is re-admitted first.
 
         After a cancel, re-admit with ``force_schedule`` so cached-complete
         does not skip ``force_fresh`` replace of the aborted orchestrator node.
