@@ -172,7 +172,7 @@ def test_a_drain_of_one_orchestrator_does_not_defer_another(sample_turn):
         handle = inner.submit(ComputeRequest(ctx=ctx, scope=scope))
         inner_states.append(handle.state)
 
-    with outer._condition:
+    with outer.observers.condition:
         outer.observers.schedule_post_lock(submit_to_the_other_orchestrator)
     outer.drain_post_lock_callbacks()
 
@@ -241,7 +241,7 @@ def test_a_node_readmitted_inside_a_drain_is_not_terminal_for_callbacks_queued_b
     def readmit() -> None:
         orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope, force_fresh=True))
 
-    with orchestrator._condition:
+    with orchestrator.observers.condition:
         orchestrator.observers.schedule_post_lock(readmit)
         orchestrator.observers.schedule_post_lock(
             lambda: seen_by_earlier_callback.append(orchestrator.nodes[scope].state)

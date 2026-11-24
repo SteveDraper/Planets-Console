@@ -62,7 +62,7 @@ def _errors_inside_a_drain(orchestrator: ComputeOrchestrator, blocking_call) -> 
         except Exception as error:
             raised.append(type(error))
 
-    with orchestrator._condition:
+    with orchestrator.observers.condition:
         orchestrator.observers.schedule_post_lock(callback)
     orchestrator.drain_post_lock_callbacks()
     return raised
@@ -106,7 +106,7 @@ def test_a_blocking_wait_escaping_a_callback_is_logged_and_the_drain_goes_on(sam
     orchestrator = _inline_orchestrator(inline_compute_registration(SHARED_ID))
     ran_after: list[str] = []
 
-    with orchestrator._condition:
+    with orchestrator.observers.condition:
         orchestrator.observers.schedule_post_lock(
             lambda: orchestrator.ensure_scope(ComputeRequest(ctx=ctx, scope=shared))
         )
