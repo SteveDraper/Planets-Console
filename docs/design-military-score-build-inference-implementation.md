@@ -422,7 +422,7 @@ One schedulable step = one full **inference search tier** for one scoreboard row
 
 **Table stream multiplexing:** per-row event queues are round-robin drained into one NDJSON generator; `playerId` tags identify the row on the wire.
 
-**Global pause (soft):** pause broadcasts `globalPause` and blocks new `tier_solve` dispatches via an orchestrator **dispatch gate**; deferred tier-1 and continuation steps stay in the adapter held buffer. In-flight pool work already running continues until the current tier step completes and may still emit `solution` events. Resume requeues held work through the orchestrator on the same connection. A turn or perspective switch clears pause the same way: the new stream's scope claim requeues held work and runs a dispatch pass. Applies only while the table stream stays connected. **Stream disconnect** clears server-side global pause and **detaches** row shells (does not cancel in-flight tokens); reconnect replays durable row persistence where present.
+**Global pause (soft):** pause broadcasts `globalPause` and blocks new `tier_solve` dispatches via an orchestrator **dispatch gate**, the only place pause holds work: tier-1 and continuation steps wait in the ready queue behind the gate, and a row admitted while paused is still submitted. In-flight pool work already running continues until the current tier step completes and may still emit `solution` events. Resume clears pause and runs one dispatch pass, releasing the gate-held nodes. A turn or perspective switch clears pause the same way: the new stream's scope claim runs that dispatch pass. Applies only while the table stream stays connected. **Stream disconnect** clears server-side global pause and **detaches** row shells (does not cancel in-flight tokens); reconnect replays durable row persistence where present.
 
 **Accelerated-start rows:** same scheduler path as normal rows in v1; internal accel segments stay inside the row path (no per-segment SPA time split).
 
@@ -1114,7 +1114,7 @@ Files:
 Steps:
 
 1. Define NDJSON event types: `solution`, optional `progress`, `globalPause`, terminal `complete` / `error`. `complete.status` includes `exact`, `no_exact_solution`, `stopped`, etc. Table-stream row events include `playerId`.
-2. Implement **inference row scheduler** (section 7.5) as a thin orchestrator adapter: register process-wide listeners/gates; submit `tier_solve` per row; chain continuations on `continue`; soft non-durable terminals `park`. Add **inference global pause** (dispatch gate + held buffer + broadcast).
+2. Implement **inference row scheduler** (section 7.5) as a thin orchestrator adapter: register process-wide listeners/gates; submit `tier_solve` per row; chain continuations on `continue`; soft non-durable terminals `park`. Add **inference global pause** (dispatch gate + broadcast).
 3. Emit `solution` when the ladder admits a **new** **inference explanation signature** to held top-K. Payload is the **full held top-K** for that row (ranked explanation rows plus **inference solution rank weight**). Do not emit on suppressed re-discoveries. Consumer replaces local held state; no client-side merge.
 4. Refactor the within-tier top-K loop to flush each feasible solution to the emit hook before the next no-good cut.
 5. Add stream endpoint on Core and BFF; document in BFF OpenAPI for visibility; treat Zod as authoritative for frontend parsing.

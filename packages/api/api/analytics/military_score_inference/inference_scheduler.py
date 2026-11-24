@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -37,17 +37,15 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.inference_stream_teardown import (
-    HeldTierSubmission,
     InferenceStreamOrchestratorBinding,
     InferenceStreamTeardownMixin,
-    PauseRelease,
 )
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     wake_inference_table_stream_multiplex,
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
+from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
 from api.streaming.table_stream.pending_accepts import PendingAccepts
@@ -71,19 +69,28 @@ class TierLadderRegistration(Enum):
     """How ``enqueue_tier_ladder`` registered a RowRun. The RowRun is registered in every case."""
 
     # The scope's table stream owns the run: a stream binding exists and an
-    # accept is pending. The caller submits it with ``accept_pending_run``.
+    # accept is pending. The caller submits it with ``accept_pending_run``,
+    # paused or not: global pause holds its ``tier_solve`` at the dispatch gate.
     STREAM_BOUND = "stream_bound"
     # No table stream owns the run: there was no stream token, or the token no
     # longer owns the scope. A deferred scores node for the scope is woken, and
     # the run is never accepted by a stream.
     BACKGROUND = "background"
-    # The owning stream is globally paused: a held submission is queued, and
-    # clearing pause (``resume_globally`` or a stream switch) submits it.
-    HELD = "held"
     # The scheduler was built with ``defer_orchestrator_submit`` (tests and
     # diagnostics): the run is registered, taking the scope index as stream
     # ownership decides, and nothing is bound, accepted, held or woken.
     SUBMIT_DEFERRED = "submit_deferred"
+
+
+@dataclass(frozen=True)
+class GlobalPauseStatusInputs:
+    """The scheduler-owned pause fields, read under the scheduler lock."""
+
+    scope_matches: bool
+    globally_paused: bool
+    active_session_count: int
+    active_scope: InferenceStreamScope | None
+    root_scopes: tuple[ComputeScope, ...]
 
 
 class InferenceRowScheduler(
@@ -117,8 +124,9 @@ class InferenceRowScheduler(
         self._lock = threading.RLock()
         self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
         self._stream_bindings: dict[str, InferenceStreamOrchestratorBinding] = {}
+        # Read without the lock by the pause dispatch gate. Only ``pause_globally``
+        # sets it; every clear goes through ``_clear_global_pause_locked``.
         self._globally_paused = False
-        self._held_initial_submissions: list[HeldTierSubmission] = []
         self._pending_accepts = PendingAccepts()
         # Listener and pause gate are scheduler-lifetime. Do not register here:
         # ``get_inference_row_scheduler`` holds ``_scheduler_lock`` across
@@ -273,16 +281,46 @@ class InferenceRowScheduler(
     def _global_pause_status_inputs_locked(
         self,
         scope: InferenceStreamScope,
-    ) -> dict[str, object]:
+    ) -> GlobalPauseStatusInputs:
         """Scheduler-owned pause fields. Caller holds ``self._lock``."""
         active_scope = self._scope_guard.active_scope
         scope_matches = active_scope == scope
+        return GlobalPauseStatusInputs(
+            scope_matches=scope_matches,
+            globally_paused=self._globally_paused,
+            active_session_count=len(self._runs) if scope_matches else 0,
+            active_scope=active_scope,
+            root_scopes=tuple(self._runs.values()),
+        )
+
+    def _global_pause_status_from_inputs(
+        self,
+        scope: InferenceStreamScope,
+        inputs: GlobalPauseStatusInputs,
+    ) -> dict[str, object]:
+        """Build the pause status wire; may peek the orchestrator (no scheduler lock).
+
+        Pause holds work only at the dispatch gate, so the held counts are the
+        gate-held ``ready`` nodes on the orchestrator the gate is registered on:
+        step index 0 is a held job, a later step a held continuation.
+        """
+        held_jobs = 0
+        held_continuations = 0
+        orchestrator = self._orchestrator_attachment.registered_orchestrator()
+        if inputs.globally_paused and inputs.scope_matches and orchestrator is not None:
+            ready_steps = orchestrator.peek_ready_step_indexes(inputs.root_scopes)
+            for step_index in ready_steps.values():
+                if step_index == 0:
+                    held_jobs += 1
+                else:
+                    held_continuations += 1
+        active_scope = inputs.active_scope
         return {
-            "scope_matches": scope_matches,
-            "globally_paused": self._globally_paused,
-            "held_base_jobs": len(self._held_initial_submissions),
-            "active_session_count": len(self._runs) if scope_matches else 0,
-            "active_scope_wire": (
+            "gameId": scope.game_id,
+            "perspective": scope.perspective,
+            "turn": scope.turn_number,
+            "paused": inputs.globally_paused and inputs.scope_matches,
+            "activeScope": (
                 {
                     "gameId": active_scope.game_id,
                     "perspective": active_scope.perspective,
@@ -291,42 +329,9 @@ class InferenceRowScheduler(
                 if active_scope is not None
                 else None
             ),
-            "root_scopes": tuple(self._runs.values()),
-            "orchestrators": tuple(
-                binding.orchestrator for binding in self._stream_bindings.values()
-            ),
-        }
-
-    def _global_pause_status_from_inputs(
-        self,
-        scope: InferenceStreamScope,
-        inputs: dict[str, object],
-    ) -> dict[str, object]:
-        """Build pause status wire; may peek orchestrators (no scheduler lock)."""
-        scope_matches = bool(inputs["scope_matches"])
-        globally_paused = bool(inputs["globally_paused"])
-        held_jobs = int(inputs["held_base_jobs"])
-        held_continuations = 0
-        if globally_paused and scope_matches:
-            root_scopes = inputs["root_scopes"]
-            orchestrators = inputs["orchestrators"]
-            if isinstance(root_scopes, tuple) and isinstance(orchestrators, tuple):
-                for orchestrator in orchestrators:
-                    ready_steps = orchestrator.peek_ready_step_indexes(root_scopes)
-                    for step_index in ready_steps.values():
-                        if step_index == 0:
-                            held_jobs += 1
-                        else:
-                            held_continuations += 1
-        return {
-            "gameId": scope.game_id,
-            "perspective": scope.perspective,
-            "turn": scope.turn_number,
-            "paused": globally_paused and scope_matches,
-            "activeScope": inputs["active_scope_wire"],
-            "heldJobCount": held_jobs if scope_matches else 0,
-            "heldContinuationCount": held_continuations if scope_matches else 0,
-            "activeSessionCount": inputs["active_session_count"],
+            "heldJobCount": held_jobs,
+            "heldContinuationCount": held_continuations,
+            "activeSessionCount": inputs.active_session_count,
         }
 
     def _require_active_stream_for_scope_locked(self, scope: InferenceStreamScope) -> None:
@@ -355,39 +360,37 @@ class InferenceRowScheduler(
         """Clear global pause and release the work it held."""
         with self._lock:
             self._require_active_stream_for_scope_locked(scope)
-            release = self._clear_global_pause_locked()
+            was_paused = self._clear_global_pause_locked()
             inputs = self._global_pause_status_inputs_locked(scope)
-        self._apply_pause_release(release)
+        if was_paused:
+            self._dispatch_after_pause_cleared()
         return self._global_pause_status_from_inputs(scope, inputs)
 
-    def _clear_global_pause_locked(self) -> PauseRelease:
-        """Clear global pause and take every held submission. Caller holds ``self._lock``.
+    def _clear_global_pause_locked(self) -> bool:
+        """Clear global pause; return whether it was set. Caller holds ``self._lock``.
 
-        Clearing pause releases held work: the caller passes the result to
-        ``_apply_pause_release`` once the lock is released. A caller that drops
-        it instead documents why the held work must not run.
+        Clearing pause releases held work. Pause holds work only at the
+        dispatch gate, so a caller that gets True runs
+        ``_dispatch_after_pause_cleared`` once its lock is released.
         """
         if not self._globally_paused:
-            return PauseRelease()
+            return False
         self._globally_paused = False
         self._broadcast_global_pause_locked(paused=False)
-        held = tuple(self._held_initial_submissions)
-        self._held_initial_submissions.clear()
-        return PauseRelease(was_paused=True, held=held)
+        return True
 
-    def _apply_pause_release(self, release: PauseRelease) -> None:
-        """Submit released held work, then dispatch what the pause gate held.
+    def _dispatch_after_pause_cleared(self) -> None:
+        """Run one dispatch pass so the nodes the pause gate held dispatch.
 
-        Caller must not hold ``self._lock``: submit and dispatch take the
-        orchestrator condition. The dispatch pass runs on the orchestrator the
-        pause gate is registered on.
+        The single release path for every caller that cleared pause. It
+        dispatches on the orchestrator the gate is registered on and never
+        registers anything, so it does nothing once the attachment is shut down.
+        Caller must not hold ``self._lock``: the pass takes the orchestrator
+        condition.
         """
-        if not release.was_paused:
-            return
-        orchestrator = self._orchestrator_attachment.ensure_registered()
-        for held in release.held:
-            self._submit_tier_solve(held.binding, held.root_scope)
-        orchestrator.dispatch_ready_work()
+        orchestrator = self._orchestrator_attachment.registered_orchestrator()
+        if orchestrator is not None:
+            orchestrator.dispatch_ready_work()
 
     def unregister_session(self, run_id: str) -> None:
         with self._lock:
@@ -397,8 +400,7 @@ class InferenceRowScheduler(
         """Drop runs the tier registry already retired from the scheduler's run maps.
 
         Pops ``_runs``, the cached execution generations and pending accepts
-        only. Held submissions stay: they are keyed by root scope, which the
-        scope's surviving run shares.
+        only.
         """
         with self._lock:
             self._forget_runs_locked(run_ids)
@@ -422,9 +424,11 @@ class InferenceRowScheduler(
         The RowRun is always registered. Under ``self._lock`` the owning stream
         is ``stream_token`` while that token still owns the scope, decided
         before the run is registered. With an owner the run is
-        ``STREAM_BOUND`` (the caller runs ``accept_pending_run``) or ``HELD``
-        while globally paused. With no owner the run is ``BACKGROUND``, and
-        after the lock the scheduler remembers the scope's node execution so
+        ``STREAM_BOUND`` and the caller runs ``accept_pending_run``, whether
+        or not the stream is globally paused: pause holds the run's
+        ``tier_solve`` at the dispatch gate, not here. With no owner the run
+        is ``BACKGROUND``, and after the lock the scheduler remembers the
+        scope's node execution so
         ``cancel_run`` can abort it: that covers no token at all, whatever
         stream is active, and a token that lost the scope to another stream.
         A submit-deferred scheduler returns ``SUBMIT_DEFERRED`` after
@@ -472,13 +476,6 @@ class InferenceRowScheduler(
                 return TierLadderRegistration.SUBMIT_DEFERRED
             if owning_token is not None:
                 binding = self._binding_for_stream_locked(owning_token, session=session)
-                if self._globally_paused:
-                    self._held_initial_submissions.append(
-                        HeldTierSubmission(
-                            stream_token=owning_token, binding=binding, root_scope=root_scope
-                        )
-                    )
-                    return TierLadderRegistration.HELD
                 # Accept is separate so connect can paint every player before submit.
                 # Submit stays outside this lock: it drains listeners that re-enter
                 # the scheduler.
@@ -520,19 +517,19 @@ class InferenceRowScheduler(
         self.cancel_run(run_id)
 
     def clear_global_pause_for_replaced_rows(self, scope: InferenceStreamScope) -> None:
-        """Clear global pause at the active ``scope`` before its rows are cancelled and replaced.
+        """Clear global pause at the active ``scope`` once its rows were replaced.
 
-        The caller then cancels and reschedules every row at ``scope``. Each
-        held submission belongs to one of those rows, so it is dropped, not
-        released: submitting it would only start work the cancel aborts, and
-        the replacement rows submit themselves once pause is clear. The
-        dispatch pass still runs for the nodes the pause gate held.
+        Recompute reschedules every row at ``scope`` while still paused, so the
+        cancelled rows' nodes are aborted while the gate holds them and the
+        replacement rows' nodes wait at the gate. Clearing pause then releases
+        them in one dispatch pass.
         """
         with self._lock:
             if self._scope_guard.active_scope != scope:
                 return
-            release = self._clear_global_pause_locked()
-        self._apply_pause_release(replace(release, held=()))
+            was_paused = self._clear_global_pause_locked()
+        if was_paused:
+            self._dispatch_after_pause_cleared()
 
     def shutdown(self) -> None:
         """Reset adapter state; safe for test teardown after dropping a service stack."""
@@ -704,7 +701,7 @@ class InferenceRowScheduler(
                 if scope == root_scope:
                     self._execution_generation_by_run_id[run_id] = generation
 
-    def _pause_dispatch_gate(self, node: object) -> bool:
+    def _pause_dispatch_gate(self, node: ComputeNodeRun) -> bool:
         from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
 
         if not self._globally_paused:

@@ -34,10 +34,6 @@ from api.analytics.military_score_inference.inference_stream_rows import Schedul
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.inference_stream_teardown import (
-    HeldTierSubmission,
-    InferenceStreamOrchestratorBinding,
-)
 from api.analytics.military_score_inference.inference_table_stream_controller import (
     InferenceTableStreamController,
 )
@@ -595,22 +591,12 @@ def test_forget_runs_drops_only_the_retired_runs_scheduler_entries(ladder):
     accepted: list[str] = []
     scheduler._pending_accepts.register(retired_id, lambda: accepted.append(retired_id))
     scheduler._pending_accepts.register(winner.run_id, lambda: accepted.append(winner.run_id))
-    held = HeldTierSubmission(
-        stream_token=ladder.stream_token,
-        binding=InferenceStreamOrchestratorBinding(
-            orchestrator=ladder.orchestrator, query_context=ladder.ctx
-        ),
-        root_scope=ladder.scope,
-    )
-    scheduler._held_initial_submissions.append(held)
-
     scheduler.forget_runs((retired_id,))
 
     assert retired_id not in scheduler._runs
     assert retired_id not in scheduler._execution_generation_by_run_id
     assert scheduler._runs[winner.run_id] == ladder.scope
     assert scheduler._execution_generation_by_run_id[winner.run_id] == 3
-    assert scheduler._held_initial_submissions == [held]
     scheduler.accept_pending_run(retired_id)
     scheduler.accept_pending_run(winner.run_id)
     assert accepted == [winner.run_id]

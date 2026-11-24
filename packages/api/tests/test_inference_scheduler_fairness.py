@@ -97,6 +97,9 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, mon
     scheduler.pause_globally(scope)
     scheduler.enqueue_tier_ladder(session_a, stream_token=stream_token)
     scheduler.enqueue_tier_ladder(session_b, stream_token=stream_token)
+    # Paused runs are accepted like any other; the pause gate holds their tier_solve.
+    scheduler.accept_pending_run(session_a.run_id)
+    scheduler.accept_pending_run(session_b.run_id)
     scheduler.resume_globally(scope)
 
     deadline = time.monotonic() + 2.0
@@ -165,6 +168,9 @@ def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
     scheduler.pause_globally(scope)
     scheduler.enqueue_tier_ladder(session_a, stream_token=stream_token)
     scheduler.enqueue_tier_ladder(session_b, stream_token=stream_token)
+    # Paused runs are accepted like any other; the pause gate holds their tier_solve.
+    scheduler.accept_pending_run(session_a.run_id)
+    scheduler.accept_pending_run(session_b.run_id)
     run_a = get_row_run(session_a.run_id)
     run_b = get_row_run(session_b.run_id)
     assert run_a is not None and run_b is not None

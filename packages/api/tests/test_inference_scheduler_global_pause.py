@@ -186,6 +186,8 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn, monkeypatch):
                 )
             }
 
+            self.dispatch_passes = 0
+
         def peek_ready_step_indexes(self, scopes: tuple) -> dict:
             return {
                 scope: node.step_index
@@ -193,64 +195,25 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn, monkeypatch):
                 if scope in scopes and node.state == "ready"
             }
 
-    fake_orchestrator = FakeOrchestrator()
-    scheduler._stream_bindings[stream_token] = type(
-        "FakeBinding",
-        (),
-        {
-            "orchestrator": fake_orchestrator,
-            "unregister_dispatch_gate": None,
-            "query_context": object(),
-        },
-    )()
+        def dispatch_ready_work(self) -> None:
+            self.dispatch_passes += 1
 
+    fake_orchestrator = FakeOrchestrator()
     scheduler.pause_globally(scope)
+    # Held counts read the orchestrator the pause gate is registered on.
+    monkeypatch.setattr(
+        scheduler._orchestrator_attachment,
+        "registered_orchestrator",
+        lambda: fake_orchestrator,
+    )
 
     status = scheduler.global_pause_status(scope)
     assert status["heldContinuationCount"] == 1
     assert status["heldJobCount"] == 0
 
-    dispatch_calls = _count_process_dispatch_passes(monkeypatch)
     resumed = scheduler.resume_globally(scope)
     assert resumed["heldContinuationCount"] == 0
-    assert dispatch_calls == [1]
-
-
-def test_pause_holds_enqueued_jobs_and_resume_requeues(sample_turn, monkeypatch):
-    reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler()
-    submitted_scopes: list[object] = []
-
-    def record_submit(
-        self,
-        binding: object,
-        root_scope: object,
-    ) -> None:
-        submitted_scopes.append(root_scope)
-
-    monkeypatch.setattr(InferenceRowScheduler, "_submit_tier_solve", record_submit)
-    scope = InferenceStreamScope(
-        game_id=628580,
-        perspective=1,
-        turn_number=sample_turn.settings.turn,
-    )
-    stream_token = scheduler.begin_scope(scope)
-    session = _session_for_turn(sample_turn)
-    scheduler.pause_globally(scope)
-    scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
-
-    paused = scheduler.global_pause_status(scope)
-    assert paused["paused"] is True
-    assert paused["heldJobCount"] == 1
-    assert submitted_scopes == []
-
-    status = scheduler.global_pause_status(scope)
-    assert status["paused"] is True
-
-    resumed = scheduler.resume_globally(scope)
-    assert resumed["paused"] is False
-    assert resumed["heldJobCount"] == 0
-    assert len(submitted_scopes) == 1
+    assert fake_orchestrator.dispatch_passes == 1
 
 
 def test_resume_runs_a_dispatch_pass_on_the_pause_gate_orchestrator(sample_turn, monkeypatch):

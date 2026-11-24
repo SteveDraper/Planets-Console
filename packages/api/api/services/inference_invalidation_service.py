@@ -408,5 +408,9 @@ class InferenceInvalidationService:
             )
         scope = self._scope(game_id, perspective, host_turn)
         scheduler = self._scheduler_instance()
-        scheduler.clear_global_pause_for_replaced_rows(scope)
-        reschedule_all_inference_rows(scope, force_schedule=True)
+        # Reschedule while still paused, so no cancelled row's tier_solve is
+        # dispatched; then release pause, even when the reschedule raises.
+        try:
+            reschedule_all_inference_rows(scope, force_schedule=True)
+        finally:
+            scheduler.clear_global_pause_for_replaced_rows(scope)

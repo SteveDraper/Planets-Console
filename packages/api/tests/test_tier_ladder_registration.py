@@ -144,25 +144,24 @@ def test_no_token_registers_a_background_run_while_a_stream_at_another_turn_is_a
     assert registration is TierLadderRegistration.BACKGROUND
     assert remembered == [scheduler._runs[session.run_id]]
     assert scheduler._stream_bindings == {}
-    assert scheduler._held_initial_submissions == []
     assert submitted == []
 
 
-def test_a_paused_stream_holds_the_submission(sample_turn, monkeypatch):
+def test_a_paused_streams_run_is_stream_bound_and_its_accept_submits(sample_turn, monkeypatch):
     scheduler = InferenceRowScheduler()
     remembered = _record_background_generations(monkeypatch, scheduler)
+    submitted = _record_tier_submits(monkeypatch, scheduler)
     scope = _stream_scope(sample_turn)
     token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
     session = _session_for_player(sample_turn, player_id=sample_turn.scores[1].ownerid)
 
     registration = scheduler.enqueue_tier_ladder(session, stream_token=token)
+    scheduler.accept_pending_run(session.run_id)
 
-    assert registration is TierLadderRegistration.HELD
+    assert registration is TierLadderRegistration.STREAM_BOUND
     assert remembered == []
-    assert [held.root_scope for held in scheduler._held_initial_submissions] == [
-        scheduler._runs[session.run_id]
-    ]
+    assert submitted == [scheduler._runs[session.run_id]]
 
 
 @pytest.mark.parametrize("is_stream_first", [True, False], ids=["stream-first", "background-first"])
