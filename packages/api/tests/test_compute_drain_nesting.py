@@ -37,6 +37,10 @@ LONG_CHAIN_TURNS = 600
 MAX_CHAIN_STACK_FRAMES = 120
 # Short enough that a chain the orchestrator strands fails the test promptly.
 CHAIN_ENSURE_TIMEOUT_SEC = 30.0
+# Each recovery nests a submit drain inside a post-lock callback, so per-node
+# recursion overflowed the default limit by 20 turns. 1.5x that still overflows
+# it, and stays fast: this chain's cost grows much faster than its length.
+RECOVERY_CHAIN_TURNS = 30
 
 
 def _stack_depth() -> int:
@@ -128,8 +132,7 @@ def test_a_chain_whose_every_persist_defers_once_completes_without_growing_the_s
     sample_turn,
 ):
     """Each recovery submits from inside a post-lock callback, nesting a drain."""
-    turns = 300
-    ctx, scope = _chain_ctx_and_scope(sample_turn, turns)
+    ctx, scope = _chain_ctx_and_scope(sample_turn, RECOVERY_CHAIN_TURNS)
     stack = _DeepestStack()
     policy = _DefersOncePerScopePolicy()
     orchestrator = _chain_orchestrator(stack, persistence_policy=policy)
@@ -137,7 +140,7 @@ def test_a_chain_whose_every_persist_defers_once_completes_without_growing_the_s
 
     _ensure_chain(orchestrator, ctx, scope)
 
-    assert len(policy.deferred_scopes) == turns - 1
+    assert len(policy.deferred_scopes) == RECOVERY_CHAIN_TURNS - 1
     assert stack.deepest - base < MAX_CHAIN_STACK_FRAMES
 
 
