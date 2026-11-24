@@ -204,7 +204,21 @@ def _stop_with_the_baseline_hop_held(
     return controller, shell, hop
 
 
-def test_a_walk_stop_leaves_the_held_hop_running_until_disarm_drops_it_at_its_pick(walk):
+def _disarm(controller: ComputeDiagnosticsController, shell: ShellContextKey, _walk: Walk) -> None:
+    controller.set_freeze_armed(shell, freeze_armed=False)
+
+
+def _single_step(
+    controller: ComputeDiagnosticsController, shell: ShellContextKey, walk: Walk
+) -> None:
+    controller.set_allowlist(shell, frozenset({walk.player_id}))
+    assert controller.single_step(shell) is True
+
+
+@pytest.mark.parametrize("release", [_disarm, _single_step], ids=["disarm", "single_step"])
+def test_a_walk_stop_leaves_the_held_hop_running_until_its_release_drops_it_at_its_pick(
+    walk, release
+):
     controller, shell, hop = _stop_with_the_baseline_hop_held(walk)
     dropped = record_lifecycle(walk.orchestrator, ("pool_item_dropped",))
 
@@ -213,7 +227,7 @@ def test_a_walk_stop_leaves_the_held_hop_running_until_disarm_drops_it_at_its_pi
     assert len(_queued_items(controller, shell)) == 1
     assert walk.pool.take_next_item_for_tests() is None
 
-    controller.set_freeze_armed(shell, freeze_armed=False)
+    release(controller, shell, walk)
     assert not begin_pick(walk, take_queued_item(walk))
 
     assert_aborted(hop)

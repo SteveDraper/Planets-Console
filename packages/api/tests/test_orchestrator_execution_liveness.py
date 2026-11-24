@@ -18,13 +18,10 @@ from concurrent.futures import Future
 from typing import get_args
 
 import pytest
-from api.analytics.registration import TurnAnalyticRegistration
 from api.compute import (
-    AnalyticComputeProfile,
     ComputeOrchestrator,
     ComputeRequest,
     ComputeScope,
-    ComputeStepSpec,
     ComputeWorkerPool,
     PoolWorkItem,
     build_compute_registry,
@@ -45,20 +42,13 @@ from tests.compute_orchestrator_fixtures import (
     make_compute_scope,
     make_export_scope,
     pool_compute_registration,
+    pool_step_registration,
 )
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
-from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
-)
-from tests.test_compute_pools import (
-    _ANALYTIC_ID,
-    _POOL_EXPORT_REGISTRY,
-    _ROW_SCOPE_KEY,
-    _catalog_entry,
-    _scope_for_player,
 )
 from tests.test_orchestrator_settle import _StopEverything
 
@@ -280,25 +270,6 @@ def test_recreating_an_abort_failed_dependency_plans_nothing_once_its_requester_
     harness.assert_one_refused_shared_submit(dependency_step_kind=None)
 
 
-def _pool_registration(
-    backend: PoolComputeBackend,
-    build_wire: Callable[..., object],
-    run_step: Callable[[object], object],
-) -> TurnAnalyticRegistration:
-    return TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(),
-        compute=lambda _ctx: {"analyticId": _ANALYTIC_ID},
-        export_catalog=make_fixture_catalog(_ANALYTIC_ID),
-        scope_key_spec=_ROW_SCOPE_KEY,
-        compute_profile=AnalyticComputeProfile(
-            steps=(ComputeStepSpec(step_kind="materialize", backend=backend),),
-        ),
-        persistence_policy=StubPersistencePolicy(),
-        build_step_job_wires=(("materialize", build_wire),),
-        run_steps=(("materialize", run_step),),
-    )
-
-
 class _ImmediateExecutor:
     """Executor stand-in that runs each submitted step on the calling thread."""
 
@@ -338,12 +309,19 @@ class _PoolStepHarness:
         self.pool._process_executor = self.executor  # type: ignore[assignment]
         self.orchestrator = ComputeOrchestrator(
             compute_registry=build_compute_registry(
-                (_pool_registration(backend, self._build_wire, self._run_step),)
+                (
+                    pool_step_registration(
+                        SHARED_ID,
+                        backend=backend,
+                        build_wire=self._build_wire,
+                        run_step=self._run_step,
+                    ),
+                )
             ),
             worker_pool=self.pool,
         )
-        self.ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
-        self.scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
+        self.ctx = make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY)
+        self.scope = make_compute_scope(SHARED_ID, make_export_scope(sample_turn))
         self.finished_items: list[PoolWorkItem] = []
         self.pool.set_on_item_finished(self.finished_items.append)
         self.ignored = record_lifecycle(self.orchestrator, STEP_ITEM_IGNORED_KINDS)
@@ -410,7 +388,9 @@ def test_a_pool_step_its_start_gate_refuses_while_its_wire_builds_never_runs(
 ):
     def stop_during_build() -> None:
         harness.orchestrator.settle_in_flight_work(
-            GameWork(game_id=harness.scope.game_id, analytic_ids=frozenset({_ANALYTIC_ID})),
+            GameWork(
+                game_id=harness.scope.game_id, analytic_ids=frozenset({harness.scope.analytic_id})
+            ),
             _StopEverything(RunningDisposition.END_AFTER_STEP),
         )
 

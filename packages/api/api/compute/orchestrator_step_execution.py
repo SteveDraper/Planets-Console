@@ -225,6 +225,8 @@ class OrchestratorStepExecutionMixin:
         still run. Each stage also runs whatever an earlier stage raised, so
         a raise that escapes one stage never strands the next stage's
         records or the post-lock callbacks; it propagates once all have run.
+        When more than one stage raises, only the last raise propagates, with
+        the earlier one as its ``__context__``.
         """
         try:
             self._flush_pending_pool_submissions(work.pool)

@@ -28,6 +28,7 @@ from api.compute import (
 from api.compute.profile import ComputeBackend
 from api.compute.root_plan import RootPlan, open_ignored_root_plan
 from api.compute.submission_open import SubmissionOpen
+from api.compute.wire import BuildStepJobWireFn, RunStepFn
 
 from tests.compute_pool_test_helpers import (
     run_interpreter_materialize,
@@ -140,13 +141,15 @@ def _pool_run_step_for_backend(backend: ComputeBackend):
     raise ValueError(f"unsupported pool backend {backend!r}")
 
 
-def pool_compute_registration(
+def pool_step_registration(
     analytic_id: str,
     *,
     backend: ComputeBackend,
+    build_wire: BuildStepJobWireFn,
+    run_step: RunStepFn,
     persistence_policy: object | None = None,
 ) -> TurnAnalyticRegistration:
-    """A single ``materialize`` step on the pool ``backend``."""
+    """A single ``materialize`` pool step built by ``build_wire`` and run by ``run_step``."""
     return TurnAnalyticRegistration(
         catalog_entry=catalog_entry(analytic_id),
         compute=lambda _ctx: {"analyticId": analytic_id},
@@ -156,10 +159,24 @@ def pool_compute_registration(
             steps=(ComputeStepSpec(step_kind="materialize", backend=backend),),
         ),
         persistence_policy=persistence_policy or StubPersistencePolicy(),
-        build_step_job_wires=(
-            ("materialize", lambda scope, **_kwargs: {"scope": scope.analytic_id}),
-        ),
-        run_steps=(("materialize", _pool_run_step_for_backend(backend)),),
+        build_step_job_wires=(("materialize", build_wire),),
+        run_steps=(("materialize", run_step),),
+    )
+
+
+def pool_compute_registration(
+    analytic_id: str,
+    *,
+    backend: ComputeBackend,
+    persistence_policy: object | None = None,
+) -> TurnAnalyticRegistration:
+    """A single pool ``materialize`` step that returns ``{"result": <analytic id>}``."""
+    return pool_step_registration(
+        analytic_id,
+        backend=backend,
+        build_wire=lambda scope, **_kwargs: {"scope": scope.analytic_id},
+        run_step=_pool_run_step_for_backend(backend),
+        persistence_policy=persistence_policy,
     )
 
 

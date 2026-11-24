@@ -12,13 +12,10 @@ import threading
 import time
 
 import pytest
-from api.analytics.registration import TurnAnalyticRegistration
 from api.compute import (
-    AnalyticComputeProfile,
     ComputeOrchestrator,
     ComputeRequest,
     ComputeScope,
-    ComputeStepSpec,
     ComputeWorkerPool,
     PoolStepWork,
     build_compute_registry,
@@ -27,15 +24,15 @@ from api.compute.backend_runtime import effective_pool_backend
 from api.compute.wire import StepResult
 from api.config import ApiConfig, set_config
 
-from tests.compute_orchestrator_fixtures import StubPersistencePolicy
-from tests.fixtures.export_framework.fixture_catalog import make_fixture_catalog
-from tests.fixtures.export_framework.harness import make_fixture_query_context
-from tests.test_compute_pools import (
-    _FLEET_ANALYTIC_ID,
-    _POOL_EXPORT_REGISTRY,
-    _ROW_SCOPE_KEY,
-    _catalog_entry,
-    _scope_for_player,
+from tests.compute_orchestrator_fixtures import (
+    make_compute_scope,
+    make_export_scope,
+    pool_step_registration,
+)
+from tests.fixtures.export_framework.diamond_exports import SHARED_ID
+from tests.fixtures.export_framework.harness import (
+    DIAMOND_FIXTURE_EXPORT_REGISTRY,
+    make_fixture_query_context,
 )
 
 
@@ -46,42 +43,32 @@ def _set_interpreter_remap(monkeypatch, *, is_remapped: bool) -> None:
     monkeypatch.setattr("api.compute.backend_runtime.process_is_frozen", lambda: False)
 
 
-def _interpreter_wire_registration(build_wire):
-    return TurnAnalyticRegistration(
-        catalog_entry=_catalog_entry(_FLEET_ANALYTIC_ID),
-        compute=lambda _ctx: {"analyticId": _FLEET_ANALYTIC_ID},
-        export_catalog=make_fixture_catalog(_FLEET_ANALYTIC_ID),
-        scope_key_spec=_ROW_SCOPE_KEY,
-        compute_profile=AnalyticComputeProfile(
-            steps=(ComputeStepSpec(step_kind="materialize", backend="interpreter"),),
-        ),
-        persistence_policy=StubPersistencePolicy(),
-        build_step_job_wires=(("materialize", build_wire),),
-        run_steps=(
-            (
-                "materialize",
-                lambda job: StepResult(outcome="complete", payload=job),
+def _interpreter_step_registry(build_wire):
+    return build_compute_registry(
+        (
+            pool_step_registration(
+                SHARED_ID,
+                backend="interpreter",
+                build_wire=build_wire,
+                run_step=lambda job: StepResult(outcome="complete", payload=job),
             ),
-        ),
+        )
+    )
+
+
+def _interpreter_step_request(sample_turn) -> ComputeRequest:
+    return ComputeRequest(
+        ctx=make_fixture_query_context(sample_turn, registry=DIAMOND_FIXTURE_EXPORT_REGISTRY),
+        scope=make_compute_scope(SHARED_ID, make_export_scope(sample_turn)),
     )
 
 
 def _submit_interpreter_step(sample_turn, *, pool_submitter, build_wire):
-    compute_registry = build_compute_registry((_interpreter_wire_registration(build_wire),))
-    ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     orchestrator = ComputeOrchestrator(
-        compute_registry=compute_registry,
+        compute_registry=_interpreter_step_registry(build_wire),
         pool_submitter=pool_submitter,
     )
-    scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
-    scope = ComputeScope(
-        analytic_id=_FLEET_ANALYTIC_ID,
-        game_id=scope.game_id,
-        perspective=scope.perspective,
-        turn=scope.turn,
-        player_id=scope.player_id,
-    )
-    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    orchestrator.submit(_interpreter_step_request(sample_turn))
     return orchestrator
 
 
@@ -150,10 +137,10 @@ def test_remapped_interpreter_step_builds_its_wire_on_the_worker_from_the_dispat
         assert threading.current_thread() in pool._workers  # noqa: SLF001
         return {"built": True}
 
-    compute_registry = build_compute_registry((_interpreter_wire_registration(build_wire),))
-    ctx = make_fixture_query_context(sample_turn, registry=_POOL_EXPORT_REGISTRY)
     pool = ComputeWorkerPool(worker_count=1)
-    orchestrator = ComputeOrchestrator(compute_registry=compute_registry, worker_pool=pool)
+    orchestrator = ComputeOrchestrator(
+        compute_registry=_interpreter_step_registry(build_wire), worker_pool=pool
+    )
     take_snapshot = orchestrator._snapshot_job_wire_kwargs  # noqa: SLF001
 
     def record_snapshot(node):
@@ -161,15 +148,7 @@ def test_remapped_interpreter_step_builds_its_wire_on_the_worker_from_the_dispat
         return snapshots[-1]
 
     monkeypatch.setattr(orchestrator, "_snapshot_job_wire_kwargs", record_snapshot)
-    scope = _scope_for_player(sample_turn, next(row.ownerid for row in sample_turn.scores))
-    scope = ComputeScope(
-        analytic_id=_FLEET_ANALYTIC_ID,
-        game_id=scope.game_id,
-        perspective=scope.perspective,
-        turn=scope.turn,
-        player_id=scope.player_id,
-    )
-    handle = orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+    handle = orchestrator.submit(_interpreter_step_request(sample_turn))
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
         if handle.state == "complete":

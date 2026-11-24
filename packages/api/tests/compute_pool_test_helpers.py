@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NoReturn
+from unittest.mock import MagicMock
 
+from api.analytics.export_context import AnalyticQueryContext
 from api.compute.pools import PoolStepWork
 from api.compute.profile import PoolComputeBackend
 from api.compute.submission_open import SubmissionOpen
@@ -12,7 +14,6 @@ from api.compute.wire import BuildStepJobWireKwargs, DependencyOutputs, RunStepF
 from tests.submission_open_helpers import live_execution
 
 if TYPE_CHECKING:
-    from api.analytics.export_context import AnalyticQueryContext
     from api.compute.orchestrator import ComputeOrchestrator
     from api.compute.scope import ComputeScope
 
@@ -29,11 +30,10 @@ def _never_run(*_args: object, **_kwargs: object) -> NoReturn:
     raise AssertionError("this test's pool work must not run")
 
 
-def _job_wire_kwargs(ctx: AnalyticQueryContext | None) -> BuildStepJobWireKwargs:
+def _job_wire_kwargs(ctx: AnalyticQueryContext) -> BuildStepJobWireKwargs:
     return BuildStepJobWireKwargs(
         dependency_outputs=DependencyOutputs(),
-        # A test builder that ignores its inputs is given no context.
-        ctx=ctx,  # type: ignore[typeddict-item]
+        ctx=ctx,
         node_result_wire=None,
         submission_open=SubmissionOpen(),
         execution_generation=0,
@@ -50,7 +50,8 @@ def prebuilt_wire_step_work(
     return PoolStepWork(
         backend=backend,
         build_job_wire=lambda _scope, **_kwargs: job_wire,
-        job_wire_kwargs=_job_wire_kwargs(None),
+        # The builder ignores its inputs, so a stand-in context serves.
+        job_wire_kwargs=_job_wire_kwargs(MagicMock(spec=AnalyticQueryContext)),
         run_step=run_step,
     )
 

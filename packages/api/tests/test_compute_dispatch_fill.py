@@ -122,6 +122,12 @@ def test_one_pass_commits_every_ready_pool_step(sample_turn):
     assert orchestrator.ready_scopes() == ()
 
 
+# The park, drop-at-pick and demotion tests below pin that nothing ready is
+# left behind across each transition. Their setup pass already commits every
+# step, so they hold with the one-pass rule rather than test a pass the
+# transition schedules (none does).
+
+
 def test_a_park_leaves_no_ready_pool_step_behind(sample_turn):
     parked, other = _perspective_scopes(sample_turn, (1, 2))
     submitter = RecordingPoolSubmitter()
