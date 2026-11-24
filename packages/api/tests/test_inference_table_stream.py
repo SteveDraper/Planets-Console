@@ -218,9 +218,11 @@ def test_multiplexed_events_include_player_id_tags(sample_turn):
     assert complete_player_ids == set(player_ids)
 
 
-def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn, monkeypatch):
+def test_cancel_run_clears_gated_orchestrator_continuation(
+    make_inference_scheduler, sample_turn, monkeypatch
+):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,

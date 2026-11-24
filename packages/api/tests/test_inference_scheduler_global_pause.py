@@ -114,9 +114,9 @@ def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch) -> None:
     assert submitted == [scores_root_scope_for_session(live)]
 
 
-def test_pause_without_active_stream_raises_validation_error(sample_turn):
+def test_pause_without_active_stream_raises_validation_error(make_inference_scheduler, sample_turn):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -130,9 +130,9 @@ def test_pause_without_active_stream_raises_validation_error(sample_turn):
         scheduler.resume_globally(scope)
 
 
-def test_pause_with_mismatched_scope_raises_validation_error(sample_turn):
+def test_pause_with_mismatched_scope_raises_validation_error(make_inference_scheduler, sample_turn):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope_a = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -152,10 +152,12 @@ def test_pause_with_mismatched_scope_raises_validation_error(sample_turn):
         scheduler.resume_globally(scope_b)
 
 
-def test_pause_counts_gated_orchestrator_continuation(sample_turn, monkeypatch):
+def test_pause_counts_gated_orchestrator_continuation(
+    make_inference_scheduler, sample_turn, monkeypatch
+):
     """Continuations held while paused are ready orchestrator nodes with step_index > 0."""
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -216,9 +218,11 @@ def test_pause_counts_gated_orchestrator_continuation(sample_turn, monkeypatch):
     assert fake_orchestrator.dispatch_passes == 1
 
 
-def test_resume_runs_a_dispatch_pass_on_the_pause_gate_orchestrator(sample_turn, monkeypatch):
+def test_resume_runs_a_dispatch_pass_on_the_pause_gate_orchestrator(
+    make_inference_scheduler, sample_turn, monkeypatch
+):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -234,12 +238,12 @@ def test_resume_runs_a_dispatch_pass_on_the_pause_gate_orchestrator(sample_turn,
 
 
 def test_resume_commits_every_tier_solve_the_pause_gate_held_in_its_one_pass(
-    sample_turn, persistence, monkeypatch
+    make_inference_scheduler, sample_turn, persistence, monkeypatch
 ):
     reset_inference_row_scheduler_for_tests()
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     _patch_scores_dag_without_fleet_deps(monkeypatch)
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope = stream_scope_for_turn(sample_turn)
     scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
@@ -270,9 +274,9 @@ def test_resume_commits_every_tier_solve_the_pause_gate_held_in_its_one_pass(
     assert {queued.item.scope for queued in pool.snapshot_work_queue()} == set(held)
 
 
-def test_new_scope_invalidates_retained_pause_state(sample_turn):
+def test_new_scope_invalidates_retained_pause_state(make_inference_scheduler, sample_turn):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope_a = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -338,9 +342,11 @@ def test_begin_scope_succeeds_after_detach_inference_stream(sample_turn):
     assert status["paused"] is False
 
 
-def test_detach_inference_stream_leaves_runs_running_and_clears_global_pause(sample_turn):
+def test_detach_inference_stream_leaves_runs_running_and_clears_global_pause(
+    make_inference_scheduler, sample_turn
+):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,

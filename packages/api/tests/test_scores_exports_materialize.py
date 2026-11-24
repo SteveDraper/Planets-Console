@@ -179,9 +179,9 @@ def test_persisted_row_replay_overrides_scheduler_state(sample_turn, persistence
     assert result.paths["$.solutions[0].shipBuilds[0].hullId"].value == 42
 
 
-def test_paused_when_globally_paused_on_active_stream(sample_turn):
+def test_paused_when_globally_paused_on_active_stream(make_inference_scheduler, sample_turn):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     player_id = inference_target_player_id(sample_turn)
     stream_scope = stream_scope_for_turn(sample_turn)
     scheduler.begin_scope(stream_scope)

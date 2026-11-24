@@ -48,6 +48,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
+from api.streaming.table_stream.off_lock_waker import OffLockWaker
 from api.streaming.table_stream.pending_accepts import PendingAccepts
 from api.streaming.table_stream.scheduler_orchestrator_attachment import (
     SchedulerOrchestratorAttachment,
@@ -63,6 +64,9 @@ __all__ = [
 ]
 
 OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
+
+# The thread that releases global pause after a stream closes (see detach_inference_stream).
+PAUSE_RELEASE_THREAD_NAME = "scores-pause-release"
 
 
 class TierLadderRegistration(Enum):
@@ -125,8 +129,14 @@ class InferenceRowScheduler(
         self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
         self._stream_bindings: dict[str, InferenceStreamOrchestratorBinding] = {}
         # Read without the lock by the pause dispatch gate. Only ``pause_globally``
-        # sets it; every clear goes through ``_clear_global_pause_locked``.
+        # sets it, and it starts the pause-release waker first, so every clear
+        # can release. Every clear goes through ``_clear_global_pause_locked``.
         self._globally_paused = False
+        # Releases pause for a stream close, which must not call the orchestrator.
+        self._pause_release_waker = OffLockWaker(
+            self._dispatch_after_pause_cleared,
+            thread_name=PAUSE_RELEASE_THREAD_NAME,
+        )
         self._pending_accepts = PendingAccepts()
         # Listener and pause gate are scheduler-lifetime. Do not register here:
         # ``get_inference_row_scheduler`` holds ``_scheduler_lock`` across
@@ -345,8 +355,11 @@ class InferenceRowScheduler(
 
         The pause gate is installed on the live process orchestrator before this
         takes the scheduler lock, so a replaced orchestrator still honors pause.
+        The pause-release waker is started here too, outside every lock, so a
+        stream close can release pause without calling the orchestrator.
         """
         self._orchestrator_attachment.ensure_registered()
+        self._pause_release_waker.ensure_started()
         with self._lock:
             self._require_active_stream_for_scope_locked(scope)
             already_paused = self._globally_paused
@@ -532,7 +545,12 @@ class InferenceRowScheduler(
             self._dispatch_after_pause_cleared()
 
     def shutdown(self) -> None:
-        """Reset adapter state; safe for test teardown after dropping a service stack."""
+        """Reset adapter state; safe for test teardown after dropping a service stack.
+
+        Stops the pause-release waker before unregistering the orchestrator
+        callbacks, so a release still running finishes against them.
+        """
+        self._pause_release_waker.shutdown()
         self._orchestrator_attachment.shutdown()
         with self._lock:
             self._invalidate_retained_state_locked()

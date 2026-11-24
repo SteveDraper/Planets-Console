@@ -54,7 +54,9 @@ PERSPECTIVE = 1
 def scheduler() -> Iterator[InferenceRowScheduler]:
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
-    yield InferenceRowScheduler()
+    scheduler = InferenceRowScheduler()
+    yield scheduler
+    scheduler.shutdown()
     reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
 

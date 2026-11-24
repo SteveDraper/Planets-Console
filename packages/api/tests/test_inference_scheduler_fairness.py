@@ -7,7 +7,6 @@ import time
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -45,14 +44,16 @@ def _session_for_player(
     )
 
 
-def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, monkeypatch):
+def test_tier_one_jobs_run_before_continuations_from_other_rows(
+    make_inference_scheduler, sample_turn, monkeypatch
+):
     """A later row's tier-1 job must not wait behind an earlier row's tier-2+ jobs."""
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
     reset_compute_worker_pool_for_tests(worker_count=1)
     reset_inference_row_scheduler_for_tests()
     _patch_scores_dag_without_fleet_deps(monkeypatch)
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -115,13 +116,15 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(sample_turn, mon
     ]
 
 
-def test_continuation_jobs_round_robin_across_rows(sample_turn, monkeypatch):
+def test_continuation_jobs_round_robin_across_rows(
+    make_inference_scheduler, sample_turn, monkeypatch
+):
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
     reset_compute_worker_pool_for_tests(worker_count=1)
     reset_inference_row_scheduler_for_tests()
     _patch_scores_dag_without_fleet_deps(monkeypatch)
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,

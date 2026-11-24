@@ -88,17 +88,21 @@ class InferenceStreamTeardownMixin:
         stream still owns the scope, so the closing rows get no
         ``globalPause=false``.
 
-        Detach runs from the connect ``finally``, which may already hold the
-        orchestrator condition, so it never calls into the orchestrator. A
-        node the pause gate held dispatches on the next dispatch pass.
+        Clearing pause releases held work, as on a switch or resume, through
+        the same ``_dispatch_after_pause_cleared``. Detach runs from the
+        connect ``finally``, which can run while its generator is collected
+        as garbage on a thread that already holds the orchestrator condition,
+        so it never calls into the orchestrator: it wakes the pause-release
+        waker, whose own thread runs that dispatch pass.
         """
         with self._lock:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
             for session in sessions:
                 self._remove_run_locked(session.run_id, op=RowLifecycleOp.DETACH)
             self._release_stream_locked(stream_token)
-            if owns_scope:
-                self._clear_global_pause_locked()
+            was_paused = owns_scope and self._clear_global_pause_locked()
+        if was_paused:
+            self._pause_release_waker.wake()
 
     def cancel_run(self: InferenceRowScheduler, run_id: str) -> None:
         """Cancel one row run and abort its orchestrator scope when no sibling remains.
