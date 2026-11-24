@@ -1,13 +1,7 @@
-import {
-  HelpCircle,
-  Rocket,
-  Shield,
-  Swords,
-} from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 import {
   classifyInferenceActionFamily,
-  inferenceActionAggregateIcon,
+  inferenceActionAggregateIconKind,
   inferenceActionDisplayRank,
   isComboActionId,
   isDefenseRelatedActionId,
@@ -75,18 +69,18 @@ describe('inferenceActionDisplayRank', () => {
   })
 })
 
-describe('inferenceActionAggregateIcon', () => {
-  it('maps aggregate rows to Lucide icons with torps and fighter precedence', () => {
-    expect(inferenceActionAggregateIcon('ship_torps_loaded_6')).toBe(Rocket)
-    expect(inferenceActionAggregateIcon('ship_fighters_added_total')).toBe(Swords)
-    expect(inferenceActionAggregateIcon('fighters_starbase_to_ship')).toBe(Swords)
-    expect(inferenceActionAggregateIcon('starbase_defense_posts_added_total')).toBe(
-      Shield
+describe('inferenceActionAggregateIconKind', () => {
+  it('maps aggregate rows to icon kinds with torps and fighter precedence', () => {
+    expect(inferenceActionAggregateIconKind('ship_torps_loaded_6')).toBe('torps')
+    expect(inferenceActionAggregateIconKind('ship_fighters_added_total')).toBe('fighter')
+    expect(inferenceActionAggregateIconKind('fighters_starbase_to_ship')).toBe('fighter')
+    expect(inferenceActionAggregateIconKind('starbase_defense_posts_added_total')).toBe(
+      'defense'
     )
-    expect(inferenceActionAggregateIcon('planet_defense_posts_added_total')).toBe(
-      Shield
+    expect(inferenceActionAggregateIconKind('planet_defense_posts_added_total')).toBe(
+      'defense'
     )
-    expect(inferenceActionAggregateIcon('custom_defense_upgrade')).toBe(Shield)
-    expect(inferenceActionAggregateIcon('unknown_action')).toBe(HelpCircle)
+    expect(inferenceActionAggregateIconKind('custom_defense_upgrade')).toBe('defense')
+    expect(inferenceActionAggregateIconKind('unknown_action')).toBe('unknown')
   })
 })

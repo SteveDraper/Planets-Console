@@ -1,7 +1,11 @@
 import type { ScoresInferenceSolutionShipBuild } from '../../api/bff'
+import { HelpCircle, Rocket, Shield, Swords } from 'lucide-react'
 import { HullIcon } from '../../components/HullIcon'
 import { GENERIC_FREIGHTER_HULL_ID } from '../../concepts/hullImageUrl'
-import { inferenceActionAggregateIcon } from './inferenceActionFamily'
+import {
+  inferenceActionAggregateIconKind,
+  type InferenceActionAggregateIconKind,
+} from './inferenceActionFamily'
 import type { MilitaryScoreLineItem } from './inferenceConstraints'
 
 const GENERIC_FREIGHTER_COMBO_ID = 'combo_freighter'
@@ -40,6 +44,21 @@ function resolveHullIdForLine(
   return null
 }
 
+const AGGREGATE_ICON_CLASS_NAME = 'h-5 w-5 text-slate-400'
+
+function AggregateActionIcon({ kind }: { kind: InferenceActionAggregateIconKind }) {
+  switch (kind) {
+    case 'torps':
+      return <Rocket className={AGGREGATE_ICON_CLASS_NAME} aria-hidden />
+    case 'fighter':
+      return <Swords className={AGGREGATE_ICON_CLASS_NAME} aria-hidden />
+    case 'defense':
+      return <Shield className={AGGREGATE_ICON_CLASS_NAME} aria-hidden />
+    case 'unknown':
+      return <HelpCircle className={AGGREGATE_ICON_CLASS_NAME} aria-hidden />
+  }
+}
+
 type InferenceSolutionLineIconProps = {
   line: MilitaryScoreLineItem
   shipBuilds: ScoresInferenceSolutionShipBuild[] | undefined
@@ -56,6 +75,5 @@ export function InferenceSolutionLineIcon({
     return <HullIcon hullId={hullId} className="h-8 w-8" />
   }
 
-  const Icon = inferenceActionAggregateIcon(line.actionId)
-  return <Icon className="h-5 w-5 text-slate-400" aria-hidden />
+  return <AggregateActionIcon kind={inferenceActionAggregateIconKind(line.actionId)} />
 }

@@ -1,4 +1,4 @@
-import { useMemo, useRef, type MutableRefObject } from 'react'
+import { useMemo } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import {
@@ -28,7 +28,7 @@ export type UseScoresInferenceByRowResult = {
 }
 
 function createScoresInferenceStreamPolicy(
-  onGlobalPauseChangeRef: MutableRefObject<((paused: boolean) => void) | undefined>
+  onGlobalPauseChange: ((paused: boolean) => void) | undefined
 ): PerPlayerAnalyticStreamPolicy<
   InferenceStreamEvent,
   RowStreamState,
@@ -53,16 +53,16 @@ function createScoresInferenceStreamPolicy(
     }),
     routeStreamEvent: (event) => {
       if (event.type === 'globalPause') {
-        onGlobalPauseChangeRef.current?.(event.paused)
+        onGlobalPauseChange?.(event.paused)
         return true
       }
       return false
     },
     onConnectionCleared: () => {
-      onGlobalPauseChangeRef.current?.(false)
+      onGlobalPauseChange?.(false)
     },
     onConnectionTeardown: () => {
-      onGlobalPauseChangeRef.current?.(false)
+      onGlobalPauseChange?.(false)
     },
     connectUntilComplete: (scope, playerIds, handlers) =>
       connectTableInferenceStreamUntilComplete(scope, playerIds, {
@@ -94,12 +94,11 @@ export function useScoresInferenceByRow(
     return stablePlayerIdsKey(playerIds)
   }, [enabled, inferenceByRowStubs])
 
-  const onGlobalPauseChangeRef = useRef(onGlobalPauseChange)
-  onGlobalPauseChangeRef.current = onGlobalPauseChange
-
+  // usePerPlayerAnalyticStream reads the latest policy without reconnecting,
+  // so a new callback only replaces the policy.
   const policy = useMemo(
-    () => createScoresInferenceStreamPolicy(onGlobalPauseChangeRef),
-    []
+    () => createScoresInferenceStreamPolicy(onGlobalPauseChange),
+    [onGlobalPauseChange]
   )
 
   const { publishedByPlayerId: detailsByPlayerId } = usePerPlayerAnalyticStream({
