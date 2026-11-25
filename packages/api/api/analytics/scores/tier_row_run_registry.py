@@ -359,13 +359,15 @@ def claim_tier_ladder(
             if stamp is not None:
                 _release_ladder_stamp_locked(scope_key)
             return None
-        handed_over = False
-        if serving_stamp is None or serving_stamp.run_id != winner.run_id:
-            handed_over = serving_stamp is not None and _hand_over_unfinished_ladder_locked(
-                _runs_by_id[serving_stamp.run_id], winner
-            )
-            if not handed_over:
-                winner.pending_rebuild = rebuild
+        if serving_stamp is not None and serving_stamp.run_id == winner.run_id:
+            handed_over = False
+        elif serving_stamp is not None and _hand_over_unfinished_ladder_locked(
+            _runs_by_id[serving_stamp.run_id], winner
+        ):
+            handed_over = True
+        else:
+            handed_over = False
+            winner.pending_rebuild = rebuild
         _ladder_stamp_by_scope_key[scope_key] = TierLadderStamp(
             winner.run_id, execution_generation, scores_epoch
         )

@@ -9,7 +9,7 @@ from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.models.game import TurnInfo
 
-from tests.scores_exports_helpers import scores_export_context
+from tests.export_chain_test_fixtures import scores_export_context
 
 
 def query_context_for_fleet_services(

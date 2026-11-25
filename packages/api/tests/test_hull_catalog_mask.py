@@ -21,6 +21,8 @@ from api.serialization.turn import turn_info_from_json
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.export_chain_test_fixtures import scores_export_context
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 P5_TURN6_PATH = REPO_ROOT / ".data" / "games" / "628580" / "5" / "turns" / "6.json"
 _FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "inference_corpus" / "628580"
@@ -137,34 +139,32 @@ def _fixture_backend_with_turn3() -> tuple[MemoryAssetBackend, int, int, int, in
 
 def test_a_mask_change_through_one_service_stack_is_seen_through_another():
     backend, game_id, perspective, turn_number, player_id = _fixture_backend_with_turn3()
-    writer = build_service_stack(backend).analytics._hull_catalog_masks
-    reader = build_service_stack(backend).analytics._hull_catalog_masks
-    initial = reader.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
+    writer = build_service_stack(backend).analytics
+    reader = build_service_stack(backend).analytics
+    initial = reader.get_inference_hull_catalog_mask(game_id, perspective, turn_number, player_id)
     subset = sorted(entry["hullId"] for entry in initial["masterCatalog"])[:2]
     overrides = hull_mask_overrides_for(backend)
 
-    writer.put_user_mask(game_id, perspective, turn_number, player_id, subset)
+    writer.put_inference_hull_catalog_mask(game_id, perspective, turn_number, player_id, subset)
 
     assert overrides.revision(game_id, player_id) == 1
-    seen = reader.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
+    seen = reader.get_inference_hull_catalog_mask(game_id, perspective, turn_number, player_id)
     assert seen["userEnabledHullIds"] == subset
 
-    writer.reset_user_mask(game_id, perspective, turn_number, player_id)
+    writer.reset_inference_hull_catalog_mask(game_id, perspective, turn_number, player_id)
 
     assert overrides.revision(game_id, player_id) == 2
-    seen = reader.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
+    seen = reader.get_inference_hull_catalog_mask(game_id, perspective, turn_number, player_id)
     assert seen["hasUserOverride"] is False
 
 
 def test_a_mask_change_through_one_stack_moves_the_scores_epoch_another_stack_reads():
     backend, game_id, perspective, turn_number, player_id = _fixture_backend_with_turn3()
     writer = build_service_stack(backend).analytics
-    reader = build_service_stack(backend).analytics
-    turn = reader._turns.get_turn_info(game_id, perspective, turn_number)
     ctx = make_analytic_query_context(
-        turn,
+        _load_standard_fixture_turn(),
         TurnAnalyticsOptions(),
-        export_services={SCORES_ANALYTIC_ID: reader._scores_export_context()},
+        export_services={SCORES_ANALYTIC_ID: scores_export_context(storage=backend)},
         game_id=game_id,
         perspective=perspective,
     )
@@ -176,9 +176,7 @@ def test_a_mask_change_through_one_stack_moves_the_scores_epoch_another_stack_re
         player_id=player_id,
     )
     before = SCORES_PERSISTENCE_POLICY.invalidation_generation(ctx, scope)
-    initial = writer._hull_catalog_masks.hull_catalog_mask_payload(
-        game_id, perspective, turn_number, player_id
-    )
+    initial = writer.get_inference_hull_catalog_mask(game_id, perspective, turn_number, player_id)
     subset = sorted(entry["hullId"] for entry in initial["masterCatalog"])[:2]
 
     writer.put_inference_hull_catalog_mask(game_id, perspective, turn_number, player_id, subset)
@@ -189,8 +187,7 @@ def test_a_mask_change_through_one_stack_moves_the_scores_epoch_another_stack_re
 @pytest.mark.skipif(not P5_TURN6_PATH.is_file(), reason="local store only")
 def test_hull_catalog_service_put_and_reset_round_trip():
     backend = MemoryAssetBackend(initial={})
-    _, turns, _, _, analytics, _, _ = build_service_stack(backend)
-    service = analytics._hull_catalog_masks
+    analytics = build_service_stack(backend).analytics
 
     game_id = 628580
     perspective = 5
@@ -204,15 +201,21 @@ def test_hull_catalog_service_put_and_reset_round_trip():
             json.load(handle),
         )
 
-    initial = service.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
+    initial = analytics.get_inference_hull_catalog_mask(
+        game_id, perspective, turn_number, player_id
+    )
     master_ids = {entry["hullId"] for entry in initial["masterCatalog"]}
     assert master_ids
 
     subset = sorted(master_ids)[:2]
-    updated = service.put_user_mask(game_id, perspective, turn_number, player_id, subset)
+    updated = analytics.put_inference_hull_catalog_mask(
+        game_id, perspective, turn_number, player_id, subset
+    )
     assert updated["hasUserOverride"] is True
     assert updated["effectiveEnabledHullIds"] == subset
 
-    reset = service.reset_user_mask(game_id, perspective, turn_number, player_id)
+    reset = analytics.reset_inference_hull_catalog_mask(
+        game_id, perspective, turn_number, player_id
+    )
     assert reset["hasUserOverride"] is False
     assert reset["effectiveEnabledHullIds"] == initial["defaultEnabledHullIds"]

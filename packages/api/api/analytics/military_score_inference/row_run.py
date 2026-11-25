@@ -24,7 +24,10 @@ class RowRun:
     A run always has a ladder (:class:`TierLadder`), replaced as a whole value.
     Production builds runs through
     :func:`api.analytics.scores.tier_row_run_registry.new_tier_row_run`, which
-    seeds the ladder from the session.
+    seeds the ladder from the session. On the orchestrated path that ladder is
+    a placeholder: the run's first ladder claim replaces it, by hand-over or by
+    a pending rebuild. The tier-solve probe, which never claims, solves it as
+    seeded.
     """
 
     def __init__(self, session: InferenceRowStreamSession, *, ladder: TierLadder) -> None:
