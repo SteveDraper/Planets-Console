@@ -351,7 +351,7 @@ def _hull_mask(*hull_ids: int) -> ResolvedHullCatalogMask:
         master_hull_ids=enabled,
         default_enabled_hull_ids=enabled,
         effective_enabled_hull_ids=enabled,
-        has_user_override=True,
+        user_enabled_hull_ids=frozenset(),
     )
 
 

@@ -288,7 +288,7 @@ def _hull_mask(*, effective_enabled_hull_ids: frozenset[int]) -> ResolvedHullCat
         master_hull_ids=effective_enabled_hull_ids,
         default_enabled_hull_ids=effective_enabled_hull_ids,
         effective_enabled_hull_ids=effective_enabled_hull_ids,
-        has_user_override=True,
+        user_enabled_hull_ids=frozenset(),
     )
 
 
@@ -318,7 +318,7 @@ def test_none_resolved_mask_keeps_default_hull_eligibility(sample_turn):
         master_hull_ids=default_ids,
         default_enabled_hull_ids=default_ids,
         effective_enabled_hull_ids=default_ids,
-        has_user_override=False,
+        user_enabled_hull_ids=None,
     )
     unmasked = post_unsat_placeholders_from_turn(observation, sample_turn)
     via_none = post_unsat_placeholders_from_turn(observation, sample_turn, resolved_mask=None)

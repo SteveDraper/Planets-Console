@@ -583,7 +583,7 @@ def build_scores_export_materialized_tree(
         tree["tierEmissions"] = tier_emissions
 
     if scope.player_id is not None:
-        resolved_mask = services.resolve_hull_catalog_mask(turn, scope.game_id, scope.player_id)
+        resolved_mask = services.mask_overrides.effective_mask(turn, scope.game_id, scope.player_id)
         tree["hullCatalogMask"] = _hull_catalog_mask_branch(
             resolved_mask.effective_enabled_hull_ids
         )

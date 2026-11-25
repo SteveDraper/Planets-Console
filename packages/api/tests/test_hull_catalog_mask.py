@@ -100,7 +100,26 @@ def test_user_override_intersects_master(sample_turn):
         user_enabled_hull_ids=frozenset({99999}),
     )
     assert 99999 not in resolved.effective_enabled_hull_ids
+    assert resolved.user_enabled_hull_ids == frozenset({99999})
     assert resolved.has_user_override is True
+
+
+def test_effective_mask_resolves_under_the_current_stored_override(sample_turn):
+    overrides = hull_mask_overrides_for(MemoryAssetBackend(initial={}))
+    game_id = 628580
+    player_id = sample_turn.players[0].id
+    default = overrides.effective_mask(sample_turn, game_id, player_id)
+    subset = frozenset(sorted(default.master_hull_ids)[:2])
+
+    overrides.change(game_id, player_id, subset)
+    masked = overrides.effective_mask(sample_turn, game_id, player_id)
+    overrides.change(game_id, player_id, None)
+    reset = overrides.effective_mask(sample_turn, game_id, player_id)
+
+    assert default.user_enabled_hull_ids is None
+    assert masked.user_enabled_hull_ids == subset
+    assert masked.effective_enabled_hull_ids == subset
+    assert reset == default
 
 
 def _fixture_backend_with_turn3() -> tuple[MemoryAssetBackend, int, int, int, int]:

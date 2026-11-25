@@ -6,10 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from api.analytics.export_context import AnalyticQueryContext, export_service_for
-from api.analytics.military_score_inference.hull_catalog_mask import (
-    ResolvedHullCatalogMask,
-    resolve_hull_catalog_mask,
-)
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     get_inference_row_scheduler,
@@ -20,7 +16,6 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.scores.hull_mask_overrides import HullMaskOverrides
 from api.analytics.scores_assets import ANALYTIC_ID
-from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
 
@@ -44,13 +39,6 @@ class ScoresExportContext:
         default_factory=lambda: _default_stream_token_resolver
     )
     persistence: InferenceRowPersistenceService | None = None
-
-    def resolve_hull_catalog_mask(
-        self, turn: TurnInfo, game_id: int, player_id: int
-    ) -> ResolvedHullCatalogMask:
-        """The player's effective hull catalog mask on ``turn``, with their stored override."""
-        user_override = self.mask_overrides.snapshot(game_id, player_id).user_override
-        return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=user_override)
 
 
 def resolve_scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext:

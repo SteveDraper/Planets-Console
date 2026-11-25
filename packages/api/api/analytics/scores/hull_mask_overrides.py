@@ -33,8 +33,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from api.analytics.military_score_inference.hull_catalog_mask import (
+    ResolvedHullCatalogMask,
+    resolve_hull_catalog_mask,
+)
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.errors import NotFoundError, ValidationError
+from api.models.game import TurnInfo
 from api.serialization.inference_hull_catalog import (
     InferenceHullCatalogMaskOverride,
     inference_hull_catalog_mask_override_from_json,
@@ -84,6 +89,13 @@ class HullMaskOverrides:
                 revision=self._revisions.get(key, 0),
                 user_override=self._override_locked(key),
             )
+
+    def effective_mask(
+        self, turn: TurnInfo, game_id: int, player_id: int
+    ) -> ResolvedHullCatalogMask:
+        """The player's hull catalog mask on ``turn`` under their current stored override."""
+        user_override = self.snapshot(game_id, player_id).user_override
+        return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=user_override)
 
     def change(self, game_id: int, player_id: int, override: frozenset[int] | None) -> None:
         """Store ``override`` (None deletes it) and increment the revision, in one hold."""

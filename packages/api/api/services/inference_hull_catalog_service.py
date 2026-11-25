@@ -9,7 +9,6 @@ from api.analytics.military_score_inference.hull_catalog_mask import (
 )
 from api.analytics.scores.hull_mask_overrides import HullMaskOverrides
 from api.errors import ValidationError
-from api.models.game import TurnInfo
 from api.services.turn_load_service import TurnLoadService
 
 
@@ -28,16 +27,7 @@ class InferenceHullCatalogService:
         player_id: int,
     ) -> ResolvedHullCatalogMask:
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        return self.resolve_mask_for_player_on_turn(turn, game_id, player_id)
-
-    def resolve_mask_for_player_on_turn(
-        self,
-        turn: TurnInfo,
-        game_id: int,
-        player_id: int,
-    ) -> ResolvedHullCatalogMask:
-        user_override = self._mask_overrides.snapshot(game_id, player_id).user_override
-        return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=user_override)
+        return self._mask_overrides.effective_mask(turn, game_id, player_id)
 
     def hull_catalog_mask_payload(
         self,
@@ -47,8 +37,8 @@ class InferenceHullCatalogService:
         player_id: int,
     ) -> dict[str, object]:
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        user_override = self._mask_overrides.snapshot(game_id, player_id).user_override
-        resolved = resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=user_override)
+        resolved = self._mask_overrides.effective_mask(turn, game_id, player_id)
+        user_override = resolved.user_enabled_hull_ids
         names = hull_names_by_id(turn)
         master_entries = [
             {
