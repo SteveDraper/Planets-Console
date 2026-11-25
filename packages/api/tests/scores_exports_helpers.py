@@ -31,7 +31,7 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
-from tests.export_chain_test_fixtures import scores_export_context, seed_inference_row
+from tests.export_chain_test_fixtures import scores_export_context
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 GAME_ID = 628580
@@ -351,8 +351,7 @@ def put_persisted_row(
     perspective under test differs (e.g. fleet streams hard-code perspective 1
     while the sample turn's logged-in player is another id), pass it explicitly.
     """
-    seed_inference_row(
-        persistence,
+    persistence.put_row_without_notify(
         game_id,
         perspective_id if perspective_id is not None else perspective(sample_turn),
         host_turn if host_turn is not None else sample_turn.settings.turn,

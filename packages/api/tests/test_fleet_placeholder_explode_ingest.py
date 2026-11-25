@@ -20,7 +20,6 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
-from tests.export_chain_test_fixtures import seed_inference_row
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 from tests.scores_exports_helpers import scores_export_context
 
@@ -90,8 +89,7 @@ def _ingest_with_persist_placeholders(
         freighterchange=freighterchange,
     )
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    seed_inference_row(
-        persistence,
+    persistence.put_row_without_notify(
         628580,
         1,
         111,

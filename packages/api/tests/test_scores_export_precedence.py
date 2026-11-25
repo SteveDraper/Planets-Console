@@ -42,7 +42,6 @@ from api.analytics.scores.export_precedence import resolve_scores_export
 from api.analytics.scores.export_snapshot import ScoresInferenceSnapshot
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
-from tests.export_chain_test_fixtures import seed_inference_row
 from tests.scores_exports_helpers import (
     first_player_id,
     inference_solution,
@@ -527,7 +526,7 @@ def _held_scores_for_turn_two_from_turn_three_row(
         scores=[replace(score, turn=2) for score in turn_two.scores],
     )
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    seed_inference_row(persistence, 628580, 1, 3, player_id, persisted_row)
+    persistence.put_row_without_notify(628580, 1, 3, player_id, persisted_row)
 
     def load_turn(turn_number: int):
         if turn_number == 2:

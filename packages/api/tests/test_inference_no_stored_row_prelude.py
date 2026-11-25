@@ -31,7 +31,6 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.streaming.table_stream import stream_drain
 from api.transport.inference_stream import inference_no_stored_row_event
 
-from tests.export_chain_test_fixtures import seed_inference_row
 from tests.scores_exports_helpers import (
     GAME_ID,
     minimal_stream_query_context,
@@ -196,8 +195,7 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
     skip_player, success_player = player_ids[:2]
     turn = sample_turn.settings.turn
     perspective = sample_turn.player.id
-    seed_inference_row(
-        persistence,
+    persistence.put_row_without_notify(
         GAME_ID,
         perspective,
         turn,
@@ -210,8 +208,7 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
             solutions=[],
         ),
     )
-    seed_inference_row(
-        persistence,
+    persistence.put_row_without_notify(
         GAME_ID,
         perspective,
         turn,

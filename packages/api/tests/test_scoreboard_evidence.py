@@ -36,7 +36,6 @@ from api.analytics.scores.exports import _persist_immediate_row_admission
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
-from tests.export_chain_test_fixtures import seed_inference_row
 from tests.scores_exports_helpers import ADMIT_EVERY_WRITE, GAME_ID, scores_export_context
 
 _API_ROOT = Path(__file__).resolve().parents[1] / "api"
@@ -59,8 +58,7 @@ def _dead_complete() -> dict[str, object]:
 
 
 def _stored_skip(persistence: InferenceRowPersistenceService, *, turn: int, player_id: int) -> None:
-    seed_inference_row(
-        persistence,
+    persistence.put_row_without_notify(
         GAME_ID,
         1,
         turn,
