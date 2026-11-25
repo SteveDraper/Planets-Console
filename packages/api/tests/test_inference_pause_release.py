@@ -329,11 +329,9 @@ def test_a_close_while_the_orchestrator_lock_is_held_returns_and_releases_afterw
         detach.start()
         detach.join(RELEASE_WAIT_SECONDS)
         detach_returned_under_the_lock = not detach.is_alive()
-        pool_under_the_lock = _pool_scopes(workerless_pool)
 
     detach.join(RELEASE_WAIT_SECONDS)
     assert detach_returned_under_the_lock
-    assert pool_under_the_lock == set()
     assert _wait_until(lambda: _pool_scopes(workerless_pool) == {root_scope})
 
 

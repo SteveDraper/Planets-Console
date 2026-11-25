@@ -108,7 +108,7 @@ class _ThreadKiller(BaseException):
     """Escapes the callback's ``Exception`` handler and ends the waker thread."""
 
 
-def test_a_thread_ended_by_a_base_exception_is_logged_and_restarted(
+def test_a_thread_ended_by_a_base_exception_is_logged_once_and_restarted(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -121,22 +121,24 @@ def test_a_thread_ended_by_a_base_exception_is_logged_and_restarted(
             should_raise[0] = False
             raise _ThreadKiller
 
-    thread_ended = threading.Event()
     uncaught: list[type[BaseException] | None] = []
-
-    def record_uncaught(args: threading.ExceptHookArgs) -> None:
-        uncaught.append(args.exc_type)
-        thread_ended.set()
-
-    monkeypatch.setattr(threading, "excepthook", record_uncaught)
+    monkeypatch.setattr(threading, "excepthook", lambda args: uncaught.append(args.exc_type))
     waker = OffLockWaker(killing_callback, thread_name="test-off-lock-waker")
     waker.ensure_started()
     try:
         with caplog.at_level(logging.ERROR, logger="api.streaming.table_stream.off_lock_waker"):
             waker.wake()
-            assert thread_ended.wait(WAIT_SECONDS)
-        assert uncaught == [_ThreadKiller]
-        assert any("stopped unexpectedly" in record.getMessage() for record in caplog.records)
+            assert callback.wait_for_calls(1)
+            ended_thread = callback.threads[0]
+            ended_thread.join(WAIT_SECONDS)
+            assert not ended_thread.is_alive()
+        stop_reports = [
+            record for record in caplog.records if "stopped unexpectedly" in record.getMessage()
+        ]
+        assert len(stop_reports) == 1
+        assert stop_reports[0].exc_info is not None
+        assert stop_reports[0].exc_info[0] is _ThreadKiller
+        assert uncaught == []
 
         waker.ensure_started()
         waker.wake()

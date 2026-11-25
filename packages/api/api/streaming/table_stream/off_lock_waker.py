@@ -44,8 +44,8 @@ class OffLockWaker:
     previous thread is never seen by a newer one. A wake while not started,
     including after ``shutdown``, does nothing. A callback that raises an
     ``Exception`` is logged and the thread waits for the next wake. A
-    ``BaseException`` ends the thread: it is logged and re-raised, and the
-    waker forgets that thread, so wakes until the next ``ensure_started``
+    ``BaseException`` ends the thread: it is logged once, not re-raised, and
+    the waker forgets that thread, so wakes until the next ``ensure_started``
     do nothing and that call starts a new thread.
     """
 
@@ -111,7 +111,6 @@ class OffLockWaker:
                 "%s thread stopped unexpectedly; the next ensure_started starts a new one",
                 self._thread_name,
             )
-            raise
         finally:
             with self._lifecycle_lock:
                 if self._signals is signals:
