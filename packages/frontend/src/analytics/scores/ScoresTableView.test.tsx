@@ -448,11 +448,10 @@ describe('ScoresTableView', () => {
     expect(screen.queryByLabelText('Still searching')?.className).toContain('border-dashed')
   })
 
-  it('does not animate incomplete rows while globally paused', () => {
+  it('does not animate paused rows', () => {
     const { container } = render(
       <ScoresTableView
         analyticScope={testScope}
-        isGloballyPaused
         data={tableData({
           columns: ['Race (player)', 'Build inference'],
           rows: [['Federation (alice)']],
@@ -479,7 +478,6 @@ describe('ScoresTableView', () => {
     render(
       <ScoresTableView
         analyticScope={testScope}
-        isGloballyPaused
         data={tableData({
           columns: ['Race (player)', 'Build inference'],
           rows: [['Federation (alice)']],

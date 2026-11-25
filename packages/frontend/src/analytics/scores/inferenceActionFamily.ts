@@ -1,11 +1,3 @@
-import {
-  HelpCircle,
-  Rocket,
-  Shield,
-  Swords,
-  type LucideIcon,
-} from 'lucide-react'
-
 /** Sort/display families for inference solution line action ids. */
 export type InferenceActionFamily =
   | 'combo'
@@ -74,15 +66,21 @@ export function inferenceActionDisplayRank(actionId: string): number {
   return DISPLAY_RANK_BY_FAMILY[classifyInferenceActionFamily(actionId)]
 }
 
-export function inferenceActionAggregateIcon(actionId: string): LucideIcon {
+/** Icon kinds for aggregate (non-hull) solution lines. */
+export type InferenceActionAggregateIconKind = 'torps' | 'fighter' | 'defense' | 'unknown'
+
+/** Torps and fighters take precedence over the broader defense match. */
+export function inferenceActionAggregateIconKind(
+  actionId: string
+): InferenceActionAggregateIconKind {
   if (isTorpsLoadedActionId(actionId)) {
-    return Rocket
+    return 'torps'
   }
   if (isFighterActionId(actionId)) {
-    return Swords
+    return 'fighter'
   }
   if (isDefenseRelatedActionId(actionId)) {
-    return Shield
+    return 'defense'
   }
-  return HelpCircle
+  return 'unknown'
 }

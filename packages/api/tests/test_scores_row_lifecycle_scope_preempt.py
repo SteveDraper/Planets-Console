@@ -2,9 +2,9 @@
 
 A scores stream detaches its own rows when it ends. Claiming a scope, whether
 the first claim, a scope change or a same-scope preempt, only resets
-stream-owned scheduler state: global pause, held submissions and bindings.
-Clearing pause releases held work: each held submission is submitted and the
-nodes the pause gate held are dispatched.
+stream-owned scheduler state: global pause and stream bindings. Pause holds
+work only at the dispatch gate, so a claim that clears pause runs one dispatch
+pass for the nodes the gate held.
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ from api.analytics.scores.persist_decision import PersistDecision
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
     get_row_run_phase,
-    reset_tier_row_run_registry_for_tests,
 )
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeRequest
@@ -51,12 +50,10 @@ PERSPECTIVE = 1
 
 
 @pytest.fixture
-def scheduler() -> Iterator[InferenceRowScheduler]:
+def scheduler(make_inference_scheduler) -> Iterator[InferenceRowScheduler]:
     reset_inference_row_scheduler_for_tests()
-    reset_tier_row_run_registry_for_tests()
-    yield InferenceRowScheduler()
+    yield make_inference_scheduler()
     reset_inference_row_scheduler_for_tests()
-    reset_tier_row_run_registry_for_tests()
 
 
 def _stream_scope(sample_turn, *, turn_offset: int = 0) -> InferenceStreamScope:
@@ -113,15 +110,9 @@ def test_begin_scope_detaches_no_run(scheduler, sample_turn, claim):
 
 
 @pytest.mark.parametrize("turn_offset", [1, 0], ids=["scope-change", "same-scope-preempt"])
-def test_begin_scope_clears_pause_and_bindings_and_releases_held_submissions(
+def test_begin_scope_clears_pause_and_bindings_and_runs_one_dispatch_pass(
     scheduler, sample_turn, turn_offset, monkeypatch
 ):
-    released: list[tuple[object, object]] = []
-    monkeypatch.setattr(
-        scheduler,
-        "_submit_tier_solve",
-        lambda binding, root_scope: released.append((binding, root_scope)),
-    )
     scope = _stream_scope(sample_turn)
     token = scheduler.begin_scope(scope)
     bound = _player_session(sample_turn, 0)
@@ -130,21 +121,22 @@ def test_begin_scope_clears_pause_and_bindings_and_releases_held_submissions(
         is TierLadderRegistration.STREAM_BOUND
     )
     scheduler.pause_globally(scope)
-    held = _player_session(sample_turn, 1)
-    assert scheduler.enqueue_tier_ladder(held, stream_token=token) is TierLadderRegistration.HELD
-    assert [submission.stream_token for submission in scheduler._held_initial_submissions] == [
-        token
-    ]
+    paused_bound = _player_session(sample_turn, 1)
+    assert (
+        scheduler.enqueue_tier_ladder(paused_bound, stream_token=token)
+        is TierLadderRegistration.STREAM_BOUND
+    )
     assert list(scheduler._stream_bindings) == [token]
-    binding = scheduler._stream_bindings[token]
+    orchestrator = get_compute_orchestrator()
+    dispatch_passes: list[None] = []
+    monkeypatch.setattr(orchestrator, "dispatch_ready_work", lambda: dispatch_passes.append(None))
 
     scheduler.begin_scope(_stream_scope(sample_turn, turn_offset=turn_offset))
 
     assert scheduler._globally_paused is False
-    assert scheduler._held_initial_submissions == []
     assert scheduler._stream_bindings == {}
-    assert released == [(binding, scores_root_scope_for_session(held))]
-    for session in (bound, held):
+    assert dispatch_passes == [None]
+    for session in (bound, paused_bound):
         assert get_row_run_phase(session.run_id) is RowRunPhase.REGISTERED
 
 
@@ -205,7 +197,7 @@ def test_a_walk_node_held_behind_pause_dispatches_when_a_switch_clears_pause(
 
 
 @switches
-def test_rows_held_behind_pause_are_submitted_when_a_switch_clears_pause(
+def test_rows_accepted_behind_pause_dispatch_when_a_switch_clears_pause(
     scheduler, sample_turn, walk_orchestrator, scores_rows, switch_to
 ):
     scope = _stream_scope(sample_turn)
@@ -225,10 +217,14 @@ def test_rows_held_behind_pause_are_submitted_when_a_switch_clears_pause(
     replacement = _walk_session(sample_turn, scheduler, scores_rows, 0)
     admitted = _walk_session(sample_turn, scheduler, scores_rows, 1)
     admitted_node = scores_root_scope_for_session(admitted)
-    for held in (replacement, admitted):
+    for paused_row in (replacement, admitted):
         assert (
-            scheduler.enqueue_tier_ladder(held, stream_token=token) is TierLadderRegistration.HELD
+            scheduler.enqueue_tier_ladder(paused_row, stream_token=token)
+            is TierLadderRegistration.STREAM_BOUND
         )
+        scheduler.accept_pending_run(paused_row.run_id)
+    assert walk_orchestrator.nodes[rescheduled_node].state == "ready"
+    assert walk_orchestrator.nodes[admitted_node].state == "ready"
 
     scheduler.begin_scope(switch_to(scope))
 

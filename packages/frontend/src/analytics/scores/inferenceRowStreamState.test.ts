@@ -5,6 +5,7 @@ import {
   pointUnexplainedMilitaryDelta2x,
   reduceRowStreamState,
   rowDetailFromStreamState,
+  withTablePause,
 } from './inferenceRowStreamState'
 
 describe('reduceRowStreamState', () => {
@@ -57,7 +58,7 @@ describe('reduceRowStreamState', () => {
     expect(rowDetailFromStreamState(8, next).solutionCount).toBe(1)
   })
 
-  it('marks paused rows without clearing held solutions', () => {
+  it('leaves row state unchanged on globalPause events', () => {
     const withSolution = reduceRowStreamState(initialRowStreamState(), {
       type: 'solution',
       solutions: [
@@ -67,10 +68,10 @@ describe('reduceRowStreamState', () => {
         },
       ],
     })
-    const paused = reduceRowStreamState(withSolution, { type: 'globalPause', paused: true })
 
-    expect(paused.status).toBe('paused')
-    expect(paused.heldSolutions).toHaveLength(1)
+    expect(reduceRowStreamState(withSolution, { type: 'globalPause', paused: true })).toBe(
+      withSolution
+    )
   })
 
   it('replaces held solutions from complete events when solutions are present', () => {
@@ -625,5 +626,74 @@ describe('pointUnexplainedMilitaryDelta2x', () => {
     ).toBe(22)
     expect(pointUnexplainedMilitaryDelta2x(undefined, 54)).toBe(54)
     expect(pointUnexplainedMilitaryDelta2x(undefined, undefined)).toBeUndefined()
+  })
+})
+
+
+describe('withTablePause', () => {
+  const solution = {
+    objectiveValue: 10,
+    actions: [{ actionId: 'a1', label: 'Build fighter', count: 1 }],
+  }
+
+  it('shows an incomplete row as paused while the table is paused', () => {
+    const searching = rowDetailFromStreamState(
+      4,
+      reduceRowStreamState(initialRowStreamState(), { type: 'solution', solutions: [solution] })
+    )
+
+    const paused = withTablePause(searching, true)
+
+    expect(paused.displayStatus).toBe('paused')
+    expect(paused.summary).toBe('Paused with 1 held solution(s)')
+    expect(paused.solutionCount).toBe(1)
+    expect(paused.isComplete).toBe(false)
+  })
+
+  it('shows a row restarted from a stored row as paused while the table is paused', () => {
+    const stored = reduceRowStreamState(initialRowStreamState(), {
+      type: 'stored_row',
+      status: 'exact',
+      displayStatus: 'success',
+      summary: 'Best build',
+      solutionCount: 0,
+      isComplete: true,
+      evidenceGeneration: 1,
+      evidenceMark: 2,
+      solutions: [],
+    })
+    const restarted = rowDetailFromStreamState(
+      4,
+      reduceRowStreamState(stored, { type: 'work_accepted' })
+    )
+    expect(restarted.displayStatus).toBe('pending')
+
+    const paused = withTablePause(restarted, true)
+
+    expect(paused.displayStatus).toBe('paused')
+    expect(paused.summary).toBe('Build inference paused')
+  })
+
+  it('leaves complete rows as they are', () => {
+    const complete = rowDetailFromStreamState(
+      4,
+      reduceRowStreamState(initialRowStreamState(), {
+        type: 'complete',
+        status: 'exact',
+        displayStatus: 'success',
+        summary: 'Best build',
+        solutionCount: 1,
+        isComplete: true,
+        solutions: [solution],
+      })
+    )
+
+    expect(withTablePause(complete, true)).toBe(complete)
+  })
+
+  it('leaves every row as it is while the table is not paused', () => {
+    const pending = rowDetailFromStreamState(4, initialRowStreamState())
+
+    expect(withTablePause(pending, false)).toBe(pending)
   })
 })

@@ -299,30 +299,14 @@ describe('InferenceDetailModal', () => {
     ).toBeNull()
   })
 
-  it('shows paused banner when row or global pause is active', () => {
-    const { rerender } = render(
+  it('shows paused banner for a paused row', () => {
+    render(
       <InferenceDetailModal
         isOpen
         onClose={vi.fn()}
         racePlayer="Federation (alice)"
         detail={detail({
           displayStatus: 'paused',
-          isComplete: false,
-          solutions: [defenseSolution],
-        })}
-      />
-    )
-    expect(
-      screen.getByText('Search paused -- held explanations are current.')
-    ).toBeInTheDocument()
-
-    rerender(
-      <InferenceDetailModal
-        isOpen
-        onClose={vi.fn()}
-        racePlayer="Federation (alice)"
-        isGloballyPaused
-        detail={detail({
           isComplete: false,
           solutions: [defenseSolution],
         })}

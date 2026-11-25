@@ -130,6 +130,45 @@ describe('FleetTorpInputStatusAnnouncer', () => {
     expect(region).toHaveTextContent(pendingLabel)
   })
 
+  it('remounts the text node when the same text is announced again', async () => {
+    const pendingLabel = fleetTorpInputAccessibleLabel('pending')
+    const pendingRow = inferenceRow({ playerId: 1, fleetTorpInputStatus: 'pending' })
+    const notApplicableRow = inferenceRow({
+      playerId: 1,
+      fleetTorpInputStatus: 'not_applicable',
+    })
+    const { rerender } = render(
+      <FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[pendingRow]} />
+    )
+
+    await act(async () => {
+      await flushAnimationFrame()
+    })
+    const region = screen.getByRole('status')
+    const firstTextNode = region.firstElementChild
+    expect(firstTextNode).toHaveTextContent(pendingLabel)
+
+    rerender(
+      <FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[notApplicableRow]} />
+    )
+    await act(async () => {
+      await flushAnimationFrame()
+    })
+    expect(region.firstElementChild).toBe(firstTextNode)
+
+    rerender(
+      <FleetTorpInputStatusAnnouncer analyticScope={scopeA} inferenceByRow={[{ ...pendingRow }]} />
+    )
+    await act(async () => {
+      await flushAnimationFrame()
+    })
+
+    const repeatedTextNode = region.firstElementChild
+    expect(repeatedTextNode).toHaveTextContent(pendingLabel)
+    expect(repeatedTextNode).not.toBe(firstTextNode)
+    expect(firstTextNode?.isConnected).toBe(false)
+  })
+
   it('isolates transition memory per analytic scope', async () => {
     const pendingLabel = fleetTorpInputAccessibleLabel('pending')
     const appliedLabel = fleetTorpInputAccessibleLabel('applied')

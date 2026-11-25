@@ -17,7 +17,7 @@ export function FleetTorpInputStatusAnnouncer({
   inferenceByRow,
 }: FleetTorpInputStatusAnnouncerProps) {
   const previousStatusesRef = useRef<Map<string, FleetTorpInputStatus | null>>(new Map())
-  const [announcement, setAnnouncement] = useState('')
+  const [announcement, setAnnouncement] = useState({ text: '', sequence: 0 })
 
   useEffect(() => {
     const scopeKey = analyticScopeKey(analyticScope)
@@ -33,9 +33,10 @@ export function FleetTorpInputStatusAnnouncer({
       return
     }
 
-    setAnnouncement('')
+    // A new key per announcement remounts the text node, so the live region
+    // announces again even when the text repeats.
     const frameId = requestAnimationFrame(() => {
-      setAnnouncement(text)
+      setAnnouncement((previous) => ({ text, sequence: previous.sequence + 1 }))
     })
     return () => cancelAnimationFrame(frameId)
   }, [analyticScope, inferenceByRow])
@@ -47,7 +48,7 @@ export function FleetTorpInputStatusAnnouncer({
       aria-atomic="true"
       className="sr-only"
     >
-      {announcement}
+      <span key={announcement.sequence}>{announcement.text}</span>
     </div>
   )
 }

@@ -34,7 +34,7 @@ export function useScoresShellStream(
     data,
     analyticScope,
     inferenceEnabled,
-    { onGlobalPauseChange: globalInferencePause.syncPausedFromStream },
+    globalInferencePause,
   )
   return { inferenceByRow, globalInferencePause }
 }

@@ -1,4 +1,4 @@
-import { useMemo, useRef, type MutableRefObject } from 'react'
+import { useMemo } from 'react'
 import type { AnalyticShellScope, ScoresInferenceRowDetail, TableDataResponse } from '../../api/bff'
 import type { InferenceStreamEvent } from '../../api/inferenceStreamEventSchema'
 import {
@@ -6,25 +6,33 @@ import {
   type PerPlayerAnalyticStreamPolicy,
 } from '../../lib/usePerPlayerAnalyticStream'
 import { stablePlayerIdsKey } from '../../lib/stablePlayerIdsKey'
+import type { UseGlobalInferencePauseResult } from './useGlobalInferencePause'
 import {
   failureDetail,
   initialRowStreamState,
   reduceRowStreamState,
   rowDetailFromStreamState,
+  withTablePause,
   type RowStreamState,
 } from './inferenceRowStreamState'
 import { connectTableInferenceStreamUntilComplete } from './tableInferenceStreamConnect'
 
-export type UseScoresInferenceByRowOptions = {
-  onGlobalPauseChange?: (paused: boolean) => void
-}
+/**
+ * The table-level pause the rows read and the stream writes: every incomplete row
+ * shows paused while `isGloballyPaused` is true, and `syncPausedFromStream`
+ * receives each `globalPause` stream event, and false when the stream ends.
+ */
+export type ScoresInferenceTablePause = Pick<
+  UseGlobalInferencePauseResult,
+  'isGloballyPaused' | 'syncPausedFromStream'
+>
 
 export type UseScoresInferenceByRowResult = {
   inferenceByRow: ScoresInferenceRowDetail[] | undefined
 }
 
 function createScoresInferenceStreamPolicy(
-  onGlobalPauseChangeRef: MutableRefObject<((paused: boolean) => void) | undefined>
+  syncPausedFromStream: ScoresInferenceTablePause['syncPausedFromStream']
 ): PerPlayerAnalyticStreamPolicy<
   InferenceStreamEvent,
   RowStreamState,
@@ -47,19 +55,18 @@ function createScoresInferenceStreamPolicy(
       playerId,
       detail: summary,
     }),
-    routeStreamEvent: (event, { applyToAllPlayers }) => {
+    routeStreamEvent: (event) => {
       if (event.type === 'globalPause') {
-        onGlobalPauseChangeRef.current?.(event.paused)
-        applyToAllPlayers(event)
+        syncPausedFromStream(event.paused)
         return true
       }
       return false
     },
     onConnectionCleared: () => {
-      onGlobalPauseChangeRef.current?.(false)
+      syncPausedFromStream(false)
     },
     onConnectionTeardown: () => {
-      onGlobalPauseChangeRef.current?.(false)
+      syncPausedFromStream(false)
     },
     connectUntilComplete: (scope, playerIds, handlers) =>
       connectTableInferenceStreamUntilComplete(scope, playerIds, {
@@ -76,9 +83,9 @@ export function useScoresInferenceByRow(
   tableData: TableDataResponse | undefined,
   scope: AnalyticShellScope | null,
   enabled: boolean,
-  options: UseScoresInferenceByRowOptions = {}
+  tablePause: ScoresInferenceTablePause
 ): UseScoresInferenceByRowResult {
-  const { onGlobalPauseChange } = options
+  const { isGloballyPaused, syncPausedFromStream } = tablePause
   const inferenceByRowStubs = tableData?.inferenceByRow
 
   const playerIdsKey = useMemo(() => {
@@ -91,12 +98,13 @@ export function useScoresInferenceByRow(
     return stablePlayerIdsKey(playerIds)
   }, [enabled, inferenceByRowStubs])
 
-  const onGlobalPauseChangeRef = useRef(onGlobalPauseChange)
-  onGlobalPauseChangeRef.current = onGlobalPauseChange
-
+  // usePerPlayerAnalyticStream routes events, publishes and tears down through
+  // the latest policy, so a new callback reaches those paths without reconnecting;
+  // the open connection's connect, completion and failure handling keep the policy
+  // it started with.
   const policy = useMemo(
-    () => createScoresInferenceStreamPolicy(onGlobalPauseChangeRef),
-    []
+    () => createScoresInferenceStreamPolicy(syncPausedFromStream),
+    [syncPausedFromStream]
   )
 
   const { publishedByPlayerId: detailsByPlayerId } = usePerPlayerAnalyticStream({
@@ -116,9 +124,10 @@ export function useScoresInferenceByRow(
     if (typeof playerId !== 'number') {
       return failureDetail(-(rowIndex + 1), 'Missing player id for build inference')
     }
-    return (
+    return withTablePause(
       detailsByPlayerId.get(playerId) ??
-      rowDetailFromStreamState(playerId, initialRowStreamState())
+        rowDetailFromStreamState(playerId, initialRowStreamState()),
+      isGloballyPaused
     )
   })
 

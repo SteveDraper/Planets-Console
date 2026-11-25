@@ -96,16 +96,35 @@ export function initialRowStreamState(): RowStreamState {
   }
 }
 
-function pausedSummaryFromSolutions(solutions: ScoresInferenceSolution[]): string {
-  return solutions.length > 0
-    ? `Paused with ${solutions.length} held solution(s)`
+function pausedSummary(solutionCount: number): string {
+  return solutionCount > 0
+    ? `Paused with ${solutionCount} held solution(s)`
     : 'Build inference paused'
 }
 
-function inFlightDisplayStatus(state: RowStreamState): InferenceDisplayStatus {
-  if (state.status === 'paused') {
-    return 'paused'
+/**
+ * Show a row as paused while the table's inference is globally paused.
+ *
+ * The table-level pause is the only pause rule: a row is not paused by the
+ * events it happened to receive, so a row accepted or restarted while paused
+ * shows paused too. A complete row, or any row while the table is not paused,
+ * is returned unchanged.
+ */
+export function withTablePause(
+  detail: ScoresInferenceRowDetail,
+  isGloballyPaused: boolean
+): ScoresInferenceRowDetail {
+  if (!isGloballyPaused || detail.isComplete) {
+    return detail
   }
+  return {
+    ...detail,
+    displayStatus: 'paused',
+    summary: pausedSummary(detail.solutionCount),
+  }
+}
+
+function inFlightDisplayStatus(state: RowStreamState): InferenceDisplayStatus {
   if (state.heldSolutions.length > 0) {
     return 'success'
   }
@@ -283,24 +302,6 @@ export function reduceRowStreamState(
   state: RowStreamState,
   event: InferenceStreamEvent
 ): RowStreamState {
-  if (event.type === 'globalPause') {
-    if (event.paused && !state.isComplete) {
-      return {
-        ...state,
-        status: 'paused',
-        summary: pausedSummaryFromSolutions(state.heldSolutions),
-      }
-    }
-    if (!event.paused && state.status === 'paused') {
-      return {
-        ...state,
-        status: 'pending',
-        summary: BUILD_INFERENCE_IN_PROGRESS_SUMMARY,
-      }
-    }
-    return state
-  }
-
   if (event.type === 'no_stored_row') {
     const freshness = freshnessAfterAbsent(state.freshness)
     if (freshness === state.freshness) {

@@ -218,9 +218,11 @@ def test_multiplexed_events_include_player_id_tags(sample_turn):
     assert complete_player_ids == set(player_ids)
 
 
-def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
+def test_cancel_run_clears_gated_orchestrator_continuation(
+    make_inference_scheduler, sample_turn, monkeypatch
+):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -247,49 +249,41 @@ def test_cancel_run_clears_gated_orchestrator_continuation(sample_turn):
         turn=other_session.turn_number,
         player_id=other_session.player_id,
     )
-    scheduler._stream_bindings[stream_token] = type(
-        "FakeBinding",
-        (),
-        {
-            "orchestrator": type(
-                "FakeOrchestrator",
-                (),
-                {
-                    "nodes": {
-                        session_root_scope: ComputeNodeRun(
-                            scope=session_root_scope,
-                            dependency_scopes=(),
-                            state="ready",
-                            step_index=1,
-                            profile_step_index=1,
-                            submission_open=SubmissionOpen(),
-                        ),
-                        other_root_scope: ComputeNodeRun(
-                            scope=other_root_scope,
-                            dependency_scopes=(),
-                            state="ready",
-                            step_index=0,
-                            profile_step_index=1,
-                            submission_open=SubmissionOpen(),
-                        ),
-                    },
-                    "observers": type(
-                        "FakeObservers",
-                        (),
-                        {"register_dispatch_gate": lambda _self, _gate: lambda: None},
-                    )(),
-                    "dispatch_ready_work": lambda: None,
-                    "peek_ready_step_indexes": lambda self, scopes: {
-                        scope: node.step_index
-                        for scope, node in self.nodes.items()
-                        if scope in scopes and node.state == "ready"
-                    },
-                },
-            )(),
-            "unregister_dispatch_gate": None,
-            "query_context": object(),
-        },
-    )()
+    gate_held_nodes = {
+        session_root_scope: ComputeNodeRun(
+            scope=session_root_scope,
+            dependency_scopes=(),
+            state="ready",
+            step_index=1,
+            profile_step_index=1,
+            submission_open=SubmissionOpen(),
+        ),
+        other_root_scope: ComputeNodeRun(
+            scope=other_root_scope,
+            dependency_scopes=(),
+            state="ready",
+            step_index=0,
+            profile_step_index=1,
+            submission_open=SubmissionOpen(),
+        ),
+    }
+
+    class GateOrchestrator:
+        """The orchestrator the pause gate is registered on; held counts read it."""
+
+        def peek_ready_step_indexes(self, scopes: tuple) -> dict:
+            return {
+                scope: node.step_index
+                for scope, node in gate_held_nodes.items()
+                if scope in scopes and node.state == "ready"
+            }
+
+    gate_orchestrator = GateOrchestrator()
+    monkeypatch.setattr(
+        scheduler._orchestrator_attachment,
+        "registered_orchestrator",
+        lambda: gate_orchestrator,
+    )
 
     assert scheduler.global_pause_status(scope)["heldContinuationCount"] == 1
 

@@ -61,7 +61,6 @@ function ScoresAnalyticTableBody({
       <ScoresTableView
         data={scoresTableWithInference}
         analyticScope={analyticScope}
-        isGloballyPaused={globalInferencePause.isGloballyPaused}
         globalInferencePause={globalInferencePause}
       />
     )

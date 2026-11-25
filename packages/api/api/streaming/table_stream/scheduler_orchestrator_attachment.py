@@ -4,7 +4,8 @@ Fleet and scores both attach to the process orchestrator the same way: one
 scope-outcome listener, plus an optional dispatch gate, registered once per
 live orchestrator. Stream begin, preempt, and end only mutate scheduler maps.
 They do not register or unregister these callbacks, including from a generator
-``finally`` that may already hold the orchestrator condition.
+``finally`` that may already hold the orchestrator condition. Work such a
+``finally`` needs from the orchestrator goes through an ``OffLockWaker``.
 """
 
 from __future__ import annotations
@@ -24,8 +25,9 @@ class SchedulerOrchestratorAttachment:
 
     ``ensure_registered`` takes the orchestrator condition on first use for the
     current process orchestrator. Call it outside the scheduler lock, and not
-    from a caller that already holds that condition. ``shutdown`` unregisters
-    both callbacks.
+    from a caller that already holds that condition. ``registered_orchestrator``
+    reads the registration without registering. ``shutdown`` unregisters both
+    callbacks.
     """
 
     def __init__(
@@ -66,6 +68,21 @@ class SchedulerOrchestratorAttachment:
             if self._dispatch_gate is not None and self._unregister_gate is None:
                 self._unregister_gate = observers.register_dispatch_gate(self._dispatch_gate)
             return orchestrator
+
+    def registered_orchestrator(self) -> ComputeOrchestrator | None:
+        """Return the process orchestrator these callbacks are registered on, if any.
+
+        Read-only: it never registers callbacks and never creates the process
+        orchestrator. None before the first ``ensure_registered``, after
+        ``shutdown``, and after the process orchestrator was replaced (a test
+        reset) until the next ``ensure_registered``.
+        """
+        from api.compute.runtime import peek_compute_orchestrator
+
+        orchestrator = peek_compute_orchestrator()
+        if orchestrator is None or not self._callbacks_current(orchestrator):
+            return None
+        return orchestrator
 
     def _callbacks_current(self, orchestrator: ComputeOrchestrator) -> bool:
         if self._orchestrator is not orchestrator or self._unregister_listener is None:

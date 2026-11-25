@@ -232,6 +232,27 @@ _SLOW_TEST_NAMES = frozenset(
 )
 
 
+@pytest.fixture
+def make_inference_scheduler():
+    """Build ``InferenceRowScheduler``s that are shut down when the test ends.
+
+    A scheduler that pauses starts a pause-release waker thread, which keeps the
+    scheduler alive until it is shut down.
+    """
+    from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+
+    built: list[InferenceRowScheduler] = []
+
+    def make(**kwargs) -> InferenceRowScheduler:
+        scheduler = InferenceRowScheduler(**kwargs)
+        built.append(scheduler)
+        return scheduler
+
+    yield make
+    for scheduler in built:
+        scheduler.shutdown()
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if item.name in _SLOW_TEST_NAMES:

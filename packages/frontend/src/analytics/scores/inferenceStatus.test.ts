@@ -162,15 +162,11 @@ describe('incomplete inference row presentation', () => {
     ).toBe(false)
   })
 
-  it('animates only while actively searching and not globally paused', () => {
+  it('animates only while actively searching and not paused', () => {
     const inFlight = detail({ displayStatus: 'success', solutionCount: 1, isComplete: false })
     expect(isActivelySearchingInference(inFlight)).toBe(true)
-    expect(isActivelySearchingInference(inFlight, true)).toBe(false)
     expect(
       isActivelySearchingInference(detail({ displayStatus: 'paused', isComplete: false }))
-    ).toBe(false)
-    expect(
-      isActivelySearchingInference(detail({ displayStatus: 'pending', isComplete: false }), true)
     ).toBe(false)
   })
 })
