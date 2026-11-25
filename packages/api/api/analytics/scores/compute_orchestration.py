@@ -25,6 +25,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     PriorTurnFleetTorpResolution,
 )
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.tier_ladder import LadderRebuild, rebuild_tier_ladder
 from api.analytics.off_mode_wire import (
     ON_WALK_WIRE_FIELD,
     copy_submission_open_fields,
@@ -39,6 +40,7 @@ from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
     get_row_run,
     get_tier_callbacks,
+    take_pending_rebuild,
 )
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
@@ -53,6 +55,10 @@ SCORES_TIER_SOLVE = "tier_solve"
 SCORES_TIER_SOLVE_PROFILE_INDEX = 1
 
 logger = logging.getLogger(__name__)
+
+# The scores epoch a tier step's ladder was claimed at, carried from its job
+# wire to its persist.
+CLAIM_EPOCH_WIRE_FIELD = "claimEpoch"
 
 SCORES_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
@@ -169,12 +175,19 @@ def build_scores_tier_solve_job_wire(
         return horwasp_skip
 
     backfill_earlier_turns = submission_open.backfill_earlier_turns
-    scores_epoch = SCORES_PERSISTENCE_POLICY.invalidation_generation(ctx, scope)
+    # The snapshot comes first: the claim epoch is formed from its revision, so
+    # a mask change after it moves the epoch past the claim's and the step is
+    # discarded, never labelled current with the old mask.
+    mask_snapshot = resolve_scores_services(ctx).mask_overrides.snapshot(
+        scope.game_id, export_scope.player_id
+    )
+    claim_epoch = scores_epoch(fleet_term(ctx, scope), mask_snapshot.revision)
     claim_ladder = partial(
         claim_tier_ladder,
         scope,
         execution_generation=execution_generation,
-        scores_epoch=scores_epoch,
+        scores_epoch=claim_epoch,
+        rebuild=LadderRebuild(user_override=mask_snapshot.user_override),
         is_execution_live=is_execution_live,
     )
     claim = claim_ladder()
@@ -234,6 +247,7 @@ def build_scores_tier_solve_job_wire(
         "turn": scope.turn,
         "playerId": scope.player_id,
         ON_WALK_WIRE_FIELD: submission_open.on_walk,
+        CLAIM_EPOCH_WIRE_FIELD: claim_epoch,
     }
 
 
@@ -336,7 +350,13 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
             emit_progress=lambda: None,
             emit_held_solutions=lambda: None,
         )
-    outcome = run_inference_tier_job(run, callbacks)
+    with run.tier_lock:
+        # First, before the tier job's cancel and segment checks, so an old
+        # ladder's exhausted segments cannot complete the row.
+        rebuild = take_pending_rebuild(run)
+        if rebuild is not None:
+            run.ladder = rebuild_tier_ladder(run.session, run.ladder, rebuild)
+        outcome = run_inference_tier_job(run, callbacks)
     return tier_job_outcome_to_step_result(run, outcome, job_wire)
 
 

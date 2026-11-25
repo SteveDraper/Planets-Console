@@ -51,8 +51,10 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(
     """A later row's tier-1 job must not wait behind an earlier row's tier-2+ jobs."""
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
-    reset_compute_worker_pool_for_tests(worker_count=1)
+    # The scheduler reset also replaces the compute worker pool, so it runs
+    # first and the one-worker pool this test needs is configured last.
     reset_inference_row_scheduler_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
     _patch_scores_dag_without_fleet_deps(monkeypatch)
     scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
@@ -122,8 +124,10 @@ def test_continuation_jobs_round_robin_across_rows(
 ):
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
-    reset_compute_worker_pool_for_tests(worker_count=1)
+    # The scheduler reset also replaces the compute worker pool, so it runs
+    # first and the one-worker pool this test needs is configured last.
     reset_inference_row_scheduler_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
     _patch_scores_dag_without_fleet_deps(monkeypatch)
     scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(

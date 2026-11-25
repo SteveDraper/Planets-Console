@@ -35,7 +35,12 @@ from api.compute.wire import DependencyOutputs
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id
-from tests.scores_ladder_helpers import durable_row_complete, ladder_scope, ladder_session
+from tests.scores_ladder_helpers import (
+    NO_OVERRIDE_REBUILD,
+    durable_row_complete,
+    ladder_scope,
+    ladder_session,
+)
 from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 GENERATION = 7
@@ -63,6 +68,7 @@ def _claimed(
         scope,
         execution_generation=generation,
         scores_epoch=epoch,
+        rebuild=NO_OVERRIDE_REBUILD,
         is_execution_live=live_execution,
     )
     return None if claim is None else claim.run
@@ -114,6 +120,7 @@ def test_a_registered_run_wins_over_the_detached_one(sample_turn, registry_run, 
         scope,
         execution_generation=generation,
         scores_epoch=EPOCH,
+        rebuild=NO_OVERRIDE_REBUILD,
         is_execution_live=live_execution,
     )
 

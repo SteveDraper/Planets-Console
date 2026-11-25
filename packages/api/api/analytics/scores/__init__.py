@@ -33,9 +33,6 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
-    from api.analytics.military_score_inference.hull_catalog_mask import (
-        ResolvedHullCatalogMask,
-    )
     from api.analytics.military_score_inference.inference_scheduler import (
         InferenceRowScheduler,
     )
@@ -115,7 +112,6 @@ def iter_scores_table_inference_stream(
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     reload_host_turn: Callable[[], TurnInfo] | None = None,
-    resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
     resolve_fleet_torp_resolution_for_player: Callable[[int], PriorTurnFleetTorpResolution]
     | None = None,
     export_services: Mapping[str, object] | None = None,
@@ -135,7 +131,6 @@ def iter_scores_table_inference_stream(
         perspective=perspective,
         load_scoreboard_turn=load_scoreboard_turn,
         reload_host_turn=reload_host_turn,
-        resolve_mask_for_player=resolve_mask_for_player,
         resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
         export_services=export_services,
         persistence=persistence,

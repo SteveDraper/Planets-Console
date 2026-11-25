@@ -39,6 +39,7 @@ from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.military_score_inference.tier_ladder import LadderRebuild
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
 from api.analytics.scores.export_services import resolve_scores_services
@@ -51,6 +52,9 @@ from api.compute.submission_open import SubmissionOpen
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id, perspective
+
+# A ladder rebuild under no user mask override, for tests that claim directly.
+NO_OVERRIDE_REBUILD = LadderRebuild(user_override=None)
 
 
 def ladder_session(sample_turn, player_id: int) -> InferenceRowStreamSession:

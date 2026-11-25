@@ -35,13 +35,14 @@ retired at the next claim instead.
 
 When a different RowRun holds the scope index (a reopened stream's run, or a
 stream's run at a hop a walk's background run was solving), the claim hands
-the unfinished ladder over: the stamped run's ``ladder_state`` and
-``orchestration`` move to the new run while the stamp still serves this node
-execution and scores epoch. Every other ``REGISTERED`` or ``DETACHED`` run for
-the scope is retired, and their ids are returned so the scheduler forgets
-them. A stamp is also released when its shell is dropped (retire-after-write,
-cancel, retire) and when the scores node completes or fails
-(:func:`release_tier_ladder_for_scope`).
+the unfinished ladder over: the stamped run's :class:`TierLadder` moves to the
+new run while the stamp still serves this node execution and scores epoch. A
+winner the serving stamp does not name, and that receives no hand-over, gets
+a pending ladder rebuild instead (:func:`take_pending_rebuild`). Every other
+``REGISTERED`` or ``DETACHED`` run for the scope is retired, and their ids
+are returned so the scheduler forgets them. A stamp is also released when its
+shell is dropped (retire-after-write, cancel, retire) and when the scores node
+completes or fails (:func:`release_tier_ladder_for_scope`).
 
 A node execution that ends by abort instead cancels the run its stamp names:
 ``CANCEL`` on a :class:`StampedLadderRun` releases the stamp and drops and
@@ -68,7 +69,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.military_score_inference.tier_ladder import TierLadder
+from api.analytics.military_score_inference.tier_ladder import LadderRebuild, TierLadder
 from api.analytics.scores.persist_decision import (
     PersistDecision,
     persist_decision_from_admission,
@@ -286,14 +287,15 @@ def claim_tier_ladder(
     *,
     execution_generation: int,
     scores_epoch: int,
+    rebuild: LadderRebuild,
     is_execution_live: Callable[[], bool],
 ) -> LadderClaim | None:
     """Choose the RowRun whose ladder serves this scores node execution, and stamp it.
 
-    One hold of the registry lock chooses the winner, hands an unfinished
-    ladder over to it, retires every other run for the scope and stamps the
-    winner, so a run registered concurrently is either seen here or survives
-    to win the next claim.
+    One hold of the registry lock chooses the winner, decides which ladder it
+    runs, retires every other run for the scope and stamps the winner, so a
+    run registered concurrently is either seen here or survives to win the
+    next claim.
 
     An execution that has ended claims nothing: when ``is_execution_live``
     is false inside the hold, the claim raises
@@ -304,31 +306,37 @@ def claim_tier_ladder(
     stamp the listener then cancels.
 
     The winner is the ``REGISTERED`` run indexed for the scope (see
-    :class:`ScopeIndexPolicy` for which run that is). With none, it
-    is the stamped run (normally ``DETACHED`` after its stream closed) while
-    the stamp serves this execution and scores epoch. When the serving stamp
-    names another run whose ladder is unfinished, that ladder
-    (``ladder_state`` and ``orchestration``) moves to the winner; a stale
-    stamp or a finished ladder is not inherited, so the winner keeps its own
-    fresh ladder. Every other ``REGISTERED`` or ``DETACHED`` run for the scope
-    is retired (the RETIRE side) and named in the claim.
+    :class:`ScopeIndexPolicy` for which run that is). With none, it is the
+    stamped run (normally ``DETACHED`` after its stream closed) while the
+    stamp serves this execution and scores epoch.
 
-    With no winner, a stale stamp is released (retiring its ``DETACHED``
-    shell) and None is returned: the caller admits, which does I/O outside
-    this lock, and claims again.
+    The winner runs its own ladder only when the serving stamp names it: that
+    ladder was claimed for this execution at this epoch. When the serving
+    stamp names another run whose ladder is unfinished, that ladder moves to
+    the winner as one :class:`TierLadder`, with the holder's pending rebuild.
+    Otherwise the winner gets ``rebuild`` as its pending rebuild, which the
+    next tier step applies before it solves: a fresh run, a run whose ladder a
+    stale stamp names (a new execution, or a moved epoch such as a hull mask
+    change), and a finished held ladder all restart from ``rebuild``'s mask.
+    ``rebuild`` and ``scores_epoch`` must come from one mask snapshot.
 
-    Hand-over holds only the registry lock and never takes a ``tier_lock``.
-    It relies on this invariant: a stamp that serves the current execution
-    names a run with no tier step in flight. Within one execution the node
-    runs one step at a time and the wire is built between steps. An aborted
-    execution's step may still be running, but that execution never serves
-    again: its listener cancels the run its stamp names, and a newer
-    execution's claim never treats its stamp as serving. A newer execution
-    may still stamp the same ``REGISTERED`` run (its stream's run, indexed for
-    the scope) while the aborted step runs; the two steps then serialise on
-    that run's ``tier_lock``, and the newer one continues the run's own
-    ladder at the same scores epoch. A late listener for the aborted
-    execution leaves that newer stamp alone.
+    Every other ``REGISTERED`` or ``DETACHED`` run for the scope is retired
+    (the RETIRE side) and named in the claim. With no winner, a stale stamp is
+    released (retiring its ``DETACHED`` shell) and None is returned: the
+    caller admits, which does I/O outside this lock, and claims again.
+
+    The claim holds only the registry lock and never takes a ``tier_lock``. A
+    hand-over relies on this invariant: a stamp that serves the current
+    execution names a run with no tier step in flight. Within one execution
+    the node runs one step at a time and the wire is built between steps. An
+    aborted execution's step may still be running, but that execution never
+    serves again: its listener cancels the run its stamp names, and a newer
+    execution's claim never treats its stamp as serving. A newer execution may
+    still claim the same ``REGISTERED`` run (its stream's run, indexed for the
+    scope) while the aborted step runs. It then gets a pending rebuild, and
+    its step, serialised behind the aborted one on the run's ``tier_lock``,
+    replaces whatever the aborted step wrote back. A late listener for the
+    aborted execution leaves that newer stamp alone.
     """
     scope_key = InferenceRowScope.from_root(scope)
     with _lock:
@@ -351,11 +359,13 @@ def claim_tier_ladder(
             if stamp is not None:
                 _release_ladder_stamp_locked(scope_key)
             return None
-        handed_over = (
-            serving_stamp is not None
-            and serving_stamp.run_id != winner.run_id
-            and _hand_over_unfinished_ladder_locked(_runs_by_id[serving_stamp.run_id], winner)
-        )
+        handed_over = False
+        if serving_stamp is None or serving_stamp.run_id != winner.run_id:
+            handed_over = serving_stamp is not None and _hand_over_unfinished_ladder_locked(
+                _runs_by_id[serving_stamp.run_id], winner
+            )
+            if not handed_over:
+                winner.pending_rebuild = rebuild
         _ladder_stamp_by_scope_key[scope_key] = TierLadderStamp(
             winner.run_id, execution_generation, scores_epoch
         )
@@ -373,11 +383,28 @@ def claim_tier_ladder(
 
 
 def _hand_over_unfinished_ladder_locked(holder: RowRun, winner: RowRun) -> bool:
-    """Move ``holder``'s ladder to ``winner`` unless it is finished. Caller holds ``_lock``."""
+    """Move ``holder``'s unfinished ladder and its pending rebuild to ``winner``.
+
+    Returns False, moving nothing, when the ladder is finished. Caller holds ``_lock``.
+    """
     if holder.ladder.ladder_state.ladder_complete:
         return False
     winner.ladder = holder.ladder
+    winner.pending_rebuild = holder.pending_rebuild
     return True
+
+
+def take_pending_rebuild(run: RowRun) -> LadderRebuild | None:
+    """Take and clear ``run``'s pending ladder rebuild, in one hold of the registry lock.
+
+    The scores tier step calls this under the run's ``tier_lock``; a claim
+    writes the field under the registry lock only, so the lock order is
+    ``tier_lock`` then the registry lock, never the reverse.
+    """
+    with _lock:
+        rebuild = run.pending_rebuild
+        run.pending_rebuild = None
+        return rebuild
 
 
 def release_tier_ladder_for_scope(stamped: StampedLadderRun) -> None:

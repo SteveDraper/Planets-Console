@@ -7,7 +7,7 @@ import threading
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.tier_ladder import TierLadder
+from api.analytics.military_score_inference.tier_ladder import LadderRebuild, TierLadder
 from api.streaming.table_stream.row_run_admission import RowRunPhase
 
 
@@ -30,6 +30,9 @@ class RowRun:
     def __init__(self, session: InferenceRowStreamSession, *, ladder: TierLadder) -> None:
         self.session = session
         self.ladder = ladder
+        # Written by a ladder claim under the registry lock; taken, through the
+        # registry, by the next tier step under ``tier_lock``.
+        self.pending_rebuild: LadderRebuild | None = None
         self.tier_lock = threading.RLock()
         self.phase: RowRunPhase = RowRunPhase.REGISTERED
 

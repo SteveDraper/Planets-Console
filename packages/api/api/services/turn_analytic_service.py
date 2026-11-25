@@ -400,13 +400,6 @@ class TurnAnalyticService:
         if not is_build_inference_available(turn):
             return iter(())
 
-        def resolve_mask_for_player(player_id: int):
-            return self._hull_catalog_masks.resolve_mask_for_player_on_turn(
-                turn,
-                game_id,
-                player_id,
-            )
-
         export_services = query_ctx.export_services
         load_turn = query_ctx.load_turn
 
@@ -436,7 +429,6 @@ class TurnAnalyticService:
             perspective=perspective,
             load_scoreboard_turn=load_turn,
             reload_host_turn=reload_host_turn,
-            resolve_mask_for_player=resolve_mask_for_player,
             resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
             export_services=export_services,
             persistence=self._inference_persistence,

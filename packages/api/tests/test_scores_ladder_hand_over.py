@@ -261,13 +261,11 @@ def test_a_reopen_after_a_non_durable_terminal_starts_a_fresh_ladder(ladder):
 
     ladder.close_stream()
     winner_id = ladder.open_stream().run_id
-    fresh_ladder = get_row_run(winner_id).ladder.ladder_state
     ladder.submit(force_fresh=True)
     assert ladder.orchestrator.nodes[ladder.scope].execution_generation > generation
     ladder.run_tier(CONTINUE)
 
     assert ladder.tier_steps == [(stamped_id, 0), (stamped_id, 1), (winner_id, 0)]
-    assert get_row_run(winner_id).ladder.ladder_state is fresh_ladder
     _assert_the_winner_alone_holds_the_scope(ladder, winner_id, (stamped_id,))
 
 

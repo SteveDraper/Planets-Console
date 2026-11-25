@@ -6,7 +6,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from api.analytics.export_context import AnalyticQueryContext
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     TierLadderRegistration,
@@ -61,7 +60,6 @@ class InferenceTableStreamController(
     perspective: int
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None
     reload_host_turn: Callable[[], TurnInfo] | None = None
-    resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None
     resolve_fleet_torp_resolution_for_player: (
         Callable[[int], PriorTurnFleetTorpResolution] | None
     ) = None
@@ -97,11 +95,6 @@ class InferenceTableStreamController(
         score = next((row for row in self.turn.scores if row.ownerid == player_id), None)
         if score is None:
             return None
-        resolved_mask = (
-            self.resolve_mask_for_player(player_id)
-            if self.resolve_mask_for_player is not None
-            else None
-        )
         fleet_resolution = (
             self.resolve_fleet_torp_resolution_for_player(player_id)
             if self.resolve_fleet_torp_resolution_for_player is not None
@@ -115,7 +108,6 @@ class InferenceTableStreamController(
             game_id=self.game_id,
             perspective=self.perspective,
             load_scoreboard_turn=self.load_scoreboard_turn,
-            resolved_mask=resolved_mask,
             fleet_torp_overlay=fleet_resolution.overlay,
             fleet_torp_input_status=fleet_resolution.input_status,
             prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
