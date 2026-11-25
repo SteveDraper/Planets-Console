@@ -37,6 +37,7 @@ from tests.fleet_player_scoped_gap_fill_helpers import (
     seed_provenance_snapshot,
     two_players_from_turn,
 )
+from tests.scores_exports_helpers import scores_export_context
 from tests.test_fleet_persistence import (
     _inference_materialization_for_fleet,
     _seed_scores_rows_for_all_players,
@@ -492,7 +493,6 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
         FleetInferenceSupport,
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.serialization.backfill_earlier_turns import (
         backfill_earlier_turns_document,
         backfill_earlier_turns_store_key,
@@ -537,7 +537,7 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
     )
 
     inference_persistence = InferenceRowPersistenceService(memory_backend)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     for turn_number in (111, 112):
         put_persisted_row(
             inference_persistence,

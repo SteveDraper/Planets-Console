@@ -36,7 +36,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
 )
 from api.analytics.military_score_inference.models import InferenceSolutionAction
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.analytics.scores.export_services import ScoresExportContext
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
@@ -49,6 +48,7 @@ from tests.scores_exports_helpers import (
     inference_target_player_id,
     perspective,
     schedule_row_with_ladder,
+    scores_export_context,
     ship_build_domain,
     ship_build_wire,
 )
@@ -131,7 +131,7 @@ def test_placeholder_rows_remain_unknown_when_inference_in_progress_with_no_solu
         turn,
         inference_materialization=_inference_materialization(
             FleetInferenceSupport(
-                scores_services=ScoresExportContext(
+                scores_services=scores_export_context(
                     persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
                 ),
             ),
@@ -207,7 +207,7 @@ def test_streaming_refine_updates_option_sets(sample_turn):
         ],
     )
     inference = FleetInferenceSupport(
-        scores_services=ScoresExportContext(
+        scores_services=scores_export_context(
             persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             scheduler=scheduler,
         ),
@@ -289,7 +289,7 @@ def test_refine_preserves_scoreboard_ship_id_bounds(sample_turn):
         ],
     )
     inference = FleetInferenceSupport(
-        scores_services=ScoresExportContext(
+        scores_services=scores_export_context(
             persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             scheduler=scheduler,
         ),
@@ -367,7 +367,7 @@ def test_refine_preserves_full_information_observation_option_set(sample_turn):
         ],
     )
     inference = FleetInferenceSupport(
-        scores_services=ScoresExportContext(
+        scores_services=scores_export_context(
             persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             scheduler=scheduler,
         ),
@@ -508,7 +508,7 @@ def test_refine_preserves_partial_observation_hull_and_fills_unknown_axes(sample
         ],
     )
     inference = FleetInferenceSupport(
-        scores_services=ScoresExportContext(
+        scores_services=scores_export_context(
             persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             scheduler=scheduler,
         ),
@@ -629,7 +629,7 @@ def test_refine_drops_option_sets_for_hulls_other_than_observed(sample_turn):
         ],
     )
     inference = FleetInferenceSupport(
-        scores_services=ScoresExportContext(
+        scores_services=scores_export_context(
             persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             scheduler=scheduler,
         ),
@@ -750,7 +750,7 @@ def test_streaming_refine_updates_freighter_option_sets(sample_turn):
         ],
     )
     inference = FleetInferenceSupport(
-        scores_services=ScoresExportContext(
+        scores_services=scores_export_context(
             persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             scheduler=scheduler,
         ),
@@ -815,7 +815,7 @@ def test_persisted_inference_refines_placeholders():
         ensure_fleet_baseline(628580, 1, turn),
         turn,
         inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            FleetInferenceSupport(scores_services=scores_export_context(persistence=persistence)),
             turn,
         ),
     )
@@ -862,7 +862,7 @@ def test_persisted_inference_refines_freighter_placeholders():
         ensure_fleet_baseline(628580, 1, turn),
         turn,
         inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            FleetInferenceSupport(scores_services=scores_export_context(persistence=persistence)),
             turn,
         ),
     )
@@ -921,7 +921,7 @@ def test_duplicate_combo_id_keeps_highest_solution_rank_weight():
         ensure_fleet_baseline(628580, 1, turn),
         turn,
         inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            FleetInferenceSupport(scores_services=scores_export_context(persistence=persistence)),
             turn,
         ),
     )
@@ -978,7 +978,7 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
         ensure_fleet_baseline(628580, 1, turn),
         turn,
         inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            FleetInferenceSupport(scores_services=scores_export_context(persistence=persistence)),
             turn,
         ),
     )
@@ -1037,7 +1037,7 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
     from api.analytics.fleet import ANALYTIC_ID, materialize_fleet
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 
-    scores_services = ScoresExportContext(
+    scores_services = scores_export_context(
         persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
         scheduler=scheduler,
     )
@@ -1132,7 +1132,7 @@ def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
         ensure_fleet_baseline(628580, 1, turn),
         turn,
         inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            FleetInferenceSupport(scores_services=scores_export_context(persistence=persistence)),
             turn,
         ),
     )
@@ -1251,7 +1251,7 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
         ensure_fleet_baseline(628580, 1, turn),
         turn,
         inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            FleetInferenceSupport(scores_services=scores_export_context(persistence=persistence)),
             turn,
         ),
     )
@@ -1301,7 +1301,7 @@ def test_accelerated_first_reliable_refines_without_scores_diagnostics():
         ensure_fleet_baseline(628580, 1, turn),
         turn,
         inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            FleetInferenceSupport(scores_services=scores_export_context(persistence=persistence)),
             turn,
         ),
     )
@@ -1359,7 +1359,7 @@ def test_accelerated_window_refine_when_intermediate_scoreboard_turn_missing():
         turn,
         inference_materialization=FleetInferenceMaterialization(
             inference=FleetInferenceSupport(
-                scores_services=ScoresExportContext(persistence=persistence)
+                scores_services=scores_export_context(persistence=persistence)
             ),
             load_turn=load_turn,
         ),

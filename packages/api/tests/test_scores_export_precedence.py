@@ -47,6 +47,7 @@ from tests.scores_exports_helpers import (
     inference_solution,
     minimal_scores_export_resolution_context,
     schedule_row_with_ladder,
+    scores_export_context,
     ship_build_wire,
     stream_scope_for_turn,
 )
@@ -512,7 +513,6 @@ def _held_scores_for_turn_two_from_turn_three_row(
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.export_types import ExportScope
     from api.analytics.options import TurnAnalyticsOptions
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.exports import held_scores_for_scope
     from api.services.inference_row_persistence_service import InferenceRowPersistenceService
     from api.storage.memory_asset import MemoryAssetBackend
@@ -539,7 +539,7 @@ def _held_scores_for_turn_two_from_turn_three_row(
         turn_two,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
-        export_services={"scores": ScoresExportContext(persistence=persistence)},
+        export_services={"scores": scores_export_context(persistence=persistence)},
         game_id=turn_two.game.id,
         perspective=turn_two.player.id,
     )

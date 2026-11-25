@@ -33,6 +33,7 @@ from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.file_storage_helpers import open_file_storage_backend
+from tests.scores_exports_helpers import scores_export_context
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -599,7 +600,6 @@ def test_legacy_v1_upgrade_enables_functional_backfill_without_diagnostics():
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.export_types import ExportScope
     from api.analytics.options import TurnAnalyticsOptions
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.exports import held_scores_for_scope
     from api.analytics.scores.host_turn_export import host_turn_targets_from_persisted_row
 
@@ -638,7 +638,7 @@ def test_legacy_v1_upgrade_enables_functional_backfill_without_diagnostics():
         turn_two,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
-        export_services={"scores": ScoresExportContext(persistence=persistence)},
+        export_services={"scores": scores_export_context(persistence=persistence)},
         game_id=turn_two.game.id,
         perspective=turn_two.player.id,
     )
@@ -665,7 +665,6 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
     )
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
         register_row_run,
@@ -689,7 +688,7 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
-        export_services={"scores": ScoresExportContext(persistence=persistence)},
+        export_services={"scores": scores_export_context(persistence=persistence)},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
     )
@@ -738,7 +737,6 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
         ScoresPersistencePolicy,
         tier_job_outcome_to_step_result,
     )
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
         register_row_run,
@@ -774,7 +772,7 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
-        export_services={"scores": ScoresExportContext(persistence=persistence)},
+        export_services={"scores": scores_export_context(persistence=persistence)},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
     )
@@ -813,7 +811,6 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     from api.analytics.military_score_inference.solver import STATUS_EXACT
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
         _detach_row_run,
@@ -848,7 +845,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
-        export_services={"scores": ScoresExportContext(persistence=persistence)},
+        export_services={"scores": scores_export_context(persistence=persistence)},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
     )

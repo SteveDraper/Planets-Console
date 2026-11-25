@@ -23,7 +23,6 @@ from api.analytics.fleet.fleet_table_stream_rows import (
 )
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
-    _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
@@ -41,6 +40,9 @@ from api.transport.fleet_table_stream import (
     fleet_complete_event,
     stream_fleet_table_ndjson,
 )
+
+from tests.fleet_table_stream_test_helpers import query_context_for_fleet_services
+from tests.scores_exports_helpers import scores_export_context
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -104,7 +106,7 @@ def _events_for_players(
         fleet_services=resolved_services,
         persistence=resolved_services.persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(resolved_services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(resolved_services, host_turn=sample_turn),
     )
     events: list[dict[str, object]] = []
     expected_players = set(player_ids)
@@ -147,7 +149,7 @@ def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn
     )
     player_ids = (player_id,)
 
-    query_context = _query_context_for_services(services, host_turn=sample_turn)
+    query_context = query_context_for_fleet_services(services, host_turn=sample_turn)
     first = iter_fleet_table_stream_events(
         sample_turn,
         player_ids,
@@ -236,7 +238,7 @@ def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample
         perspective=1,
         fleet_services=services,
         persistence=services.persistence,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
         stream_token=stream_token,
     )
     assert scheduled is not None
@@ -289,7 +291,7 @@ def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
             fleet_services=services,
             persistence=services.persistence,
             scheduler=scheduler,
-            query_context=_query_context_for_services(services, host_turn=sample_turn),
+            query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
         )
 
     lines: list[str] = []
@@ -515,7 +517,7 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
     )
     stream_token = scheduler.begin_scope(scope)
     try:
-        query_context = _query_context_for_services(services, host_turn=sample_turn)
+        query_context = query_context_for_fleet_services(services, host_turn=sample_turn)
         first = schedule_fleet_player_run(
             scheduler,
             turn=sample_turn,
@@ -573,7 +575,7 @@ def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch):
         submitted.append(session.run_id)
 
     monkeypatch.setattr(scheduler, "_submit_accepted_player_run", record_submit)
-    query_context = _query_context_for_services(services, host_turn=sample_turn)
+    query_context = query_context_for_fleet_services(services, host_turn=sample_turn)
 
     def open_run() -> FleetPlayerStreamSession:
         session = FleetPlayerStreamSession(
@@ -930,7 +932,6 @@ def test_concurrent_multi_player_materialization_completes(
         FleetInferenceSupport,
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.serialization.inference_row_persistence import PersistedInferenceRow
     from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
@@ -958,7 +959,7 @@ def test_concurrent_multi_player_materialization_completes(
         )
 
     inference_persistence = InferenceRowPersistenceService(memory_backend)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     # Stream/orchestrator scopes use perspective 1; turn_111.player.id may differ.
     for player_id in player_ids:
         put_persisted_row(

@@ -26,7 +26,6 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.persist_decision import PersistDecision
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
@@ -40,6 +39,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 from api.streaming.table_stream.row_run_admission import RowRunPhase
 
+from tests.scores_exports_helpers import scores_export_context
 from tests.scores_row_lifecycle_test_helpers import (
     _patch_scores_dag_without_fleet_deps,
     _session_for_player,
@@ -155,7 +155,7 @@ def _walk_session(
     session.query_context = replace(
         session.query_context,
         export_services={
-            SCORES_ANALYTIC_ID: ScoresExportContext(scheduler=scheduler, persistence=scores_rows)
+            SCORES_ANALYTIC_ID: scores_export_context(scheduler=scheduler, persistence=scores_rows)
         },
     )
     return session

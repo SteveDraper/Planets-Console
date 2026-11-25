@@ -16,6 +16,7 @@ from api.analytics.scores.tier_row_run_registry import get_row_run, new_tier_row
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.scores_exports_helpers import scores_export_context
 from tests.scores_row_lifecycle_test_helpers import (
     _session_for_player,
 )
@@ -33,7 +34,6 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
@@ -85,7 +85,7 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
             sample_turn,
             TurnAnalyticsOptions(),
             export_services={
-                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+                SCORES_ANALYTIC_ID: scores_export_context(persistence=persistence),
             },
             game_id=sample_turn.game.id,
             perspective=sample_turn.player.id,
@@ -184,7 +184,6 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
@@ -234,7 +233,7 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
             sample_turn,
             TurnAnalyticsOptions(),
             export_services={
-                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+                SCORES_ANALYTIC_ID: scores_export_context(persistence=persistence),
             },
             game_id=sample_turn.game.id,
             perspective=sample_turn.player.id,
@@ -267,7 +266,6 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
         decide_scores_row_persist,
@@ -292,7 +290,7 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
         sample_turn,
         TurnAnalyticsOptions(),
         export_services={
-            SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+            SCORES_ANALYTIC_ID: scores_export_context(persistence=persistence),
         },
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,

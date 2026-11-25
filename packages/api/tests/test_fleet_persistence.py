@@ -35,6 +35,7 @@ from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fleet_fixtures import legacy_fleet_ledgers_document
+from tests.scores_exports_helpers import scores_export_context
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -683,7 +684,6 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
         FleetInferenceSupport,
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
     from tests.scores_exports_helpers import ship_build_wire
@@ -699,7 +699,7 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
     def load_turn_fn(turn_number: int):
         return load_turn(turn_number)
 
-    scores_services = ScoresExportContext(
+    scores_services = scores_export_context(
         persistence=inference_persistence,
         scheduler=scheduler,
     )
@@ -1148,10 +1148,9 @@ def _inference_materialization_for_fleet(memory_backend, load_turn):
         FleetInferenceMaterialization,
         FleetInferenceSupport,
     )
-    from api.analytics.scores.export_services import ScoresExportContext
 
     inference_persistence = InferenceRowPersistenceService(memory_backend)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     return (
         inference_persistence,
         FleetInferenceMaterialization(

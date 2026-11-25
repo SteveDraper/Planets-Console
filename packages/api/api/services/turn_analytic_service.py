@@ -248,7 +248,7 @@ class TurnAnalyticService:
         game_id: int,
         perspective: int,
     ) -> dict[str, object]:
-        scores_services = self._scores_export_context(game_id, perspective)
+        scores_services = self._scores_export_context()
         return {
             SCORES_ANALYTIC_ID: scores_services,
             FLEET_ANALYTIC_ID: self._fleet_compute_services(
@@ -326,22 +326,11 @@ class TurnAnalyticService:
             ),
         )
 
-    def _scores_export_context(
-        self,
-        game_id: int,
-        perspective: int,
-    ) -> ScoresExportContext:
-        def resolve_hull_catalog_mask(turn: TurnInfo, player_id: int):
-            return self._hull_catalog_masks.resolve_mask_for_player_on_turn(
-                turn,
-                game_id,
-                player_id,
-            )
-
+    def _scores_export_context(self) -> ScoresExportContext:
         return ScoresExportContext(
+            mask_overrides=hull_mask_overrides_for(self._storage),
             persistence=self._inference_persistence,
             scheduler=self._inference_scheduler_instance(),
-            resolve_hull_catalog_mask=resolve_hull_catalog_mask,
         )
 
     def get_scores_row_inference(

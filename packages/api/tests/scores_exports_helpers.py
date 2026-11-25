@@ -23,11 +23,13 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_precedence import ScoresExportResolutionContext
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import EXPORT_CATALOG
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
+
+from tests.export_chain_test_fixtures import scores_export_context
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 GAME_ID = 628580
@@ -123,9 +125,9 @@ def scores_query_context(
     def load_turn(turn_number: int):
         return turns.get(turn_number)
 
-    scores_services = ScoresExportContext(persistence=persistence)
+    scores_services = scores_export_context(persistence=persistence)
     if scheduler is not None:
-        scores_services = ScoresExportContext(
+        scores_services = scores_export_context(
             persistence=persistence,
             scheduler=scheduler,
         )
@@ -149,12 +151,17 @@ def minimal_stream_query_context(
     game_id: int = GAME_ID,
     perspective: int = 1,
 ):
-    """Leader ctx for tests that admit a scores stream without factory wiring."""
+    """Leader ctx for tests that admit a scores stream without factory wiring.
+
+    It carries a scores bundle on a fresh memory backend, as the factory ctx
+    carries the backend's.
+    """
     return make_analytic_query_context(
         turn,
         TurnAnalyticsOptions(),
         game_id=game_id,
         perspective=perspective,
+        export_services={SCORES_ANALYTIC_ID: scores_export_context()},
         read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
 

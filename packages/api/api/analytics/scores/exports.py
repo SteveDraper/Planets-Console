@@ -105,7 +105,7 @@ def _scores_row_ensure_inputs(
     stream_scope = scores_inference_stream_scope(scope)
     stream_token = services.resolve_stream_token(stream_scope)
     score = next((row for row in turn.scores if row.ownerid == player_id), None)
-    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
+    resolved_mask = services.resolve_hull_catalog_mask(turn, scope.game_id, player_id)
     return ScoresRowEnsureInputs(
         player_id=player_id,
         score=score,
@@ -588,11 +588,10 @@ def build_scores_export_materialized_tree(
         tree["tierEmissions"] = tier_emissions
 
     if scope.player_id is not None:
-        resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
-        if resolved_mask is not None:
-            tree["hullCatalogMask"] = _hull_catalog_mask_branch(
-                resolved_mask.effective_enabled_hull_ids
-            )
+        resolved_mask = services.resolve_hull_catalog_mask(turn, scope.game_id, scope.player_id)
+        tree["hullCatalogMask"] = _hull_catalog_mask_branch(
+            resolved_mask.effective_enabled_hull_ids
+        )
 
     return tree
 

@@ -7,7 +7,7 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.fleet.constants import ANALYTIC_ID
 from api.analytics.fleet.fleet_table_player_run import (
     FleetLedgerWireProgressTracker,
@@ -26,7 +26,6 @@ from api.analytics.fleet.persistence import (
 )
 from api.analytics.fleet.serialization import persisted_fleet_ledger_from_json
 from api.analytics.fleet.types import PersistedFleetLedger
-from api.analytics.options import TurnAnalyticsOptions
 from api.compute.orchestrator import ComputeOrchestrator, ComputeRequest
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator
@@ -635,37 +634,6 @@ def publish_saved_host_turn_ledger(
         turn_number=turn_number,
         player_id=player_id,
         persisted=persisted,
-    )
-
-
-def _query_context_for_services(
-    fleet_services: FleetComputeServices,
-    *,
-    host_turn: TurnInfo,
-) -> AnalyticQueryContext:
-    """Build a query context from existing fleet services for tests.
-
-    Does not invent a login-backed ``ensure_turn``. Production admit must
-    receive the factory ctx from ``TurnAnalyticService``; tests that construct
-    services only call this helper explicitly at the test site.
-    """
-    from api.analytics.scores.export_services import ScoresExportContext
-    from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
-
-    export_services: dict[str, object] = {ANALYTIC_ID: fleet_services}
-    if fleet_services.inference_materialization is not None:
-        scores_services = fleet_services.inference_materialization.inference.scores_services
-    else:
-        scores_services = ScoresExportContext()
-    export_services[SCORES_ANALYTIC_ID] = scores_services
-    return make_analytic_query_context(
-        host_turn,
-        TurnAnalyticsOptions(),
-        load_turn=fleet_services.load_turn,
-        export_services=export_services,
-        game_id=fleet_services.game_id,
-        perspective=fleet_services.perspective,
-        read_backfill_earlier_turns=fleet_services.persistence.backfill_earlier_turns_enabled,
     )
 
 

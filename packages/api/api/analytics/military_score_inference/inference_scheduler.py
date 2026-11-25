@@ -768,8 +768,10 @@ def _query_context_for_session(
 
     Production streams pass the factory-built leader ctx on the session. This
     replaces only the scheduler-bound scores bundle. Admit raises if that ctx
-    is missing -- tests that never submit a DAG must attach a ctx at the test
-    site rather than reconstructing from the session bag here.
+    or its scores bundle is missing -- tests that never submit a DAG must attach
+    a ctx at the test site rather than reconstructing from the session bag here.
+    The bundle carries the backend's hull mask overrides, which only the ctx's
+    builder can supply.
     """
     from api.analytics.scores.export_services import ScoresExportContext
 
@@ -782,11 +784,12 @@ def _query_context_for_session(
 
     export_services = dict(ctx.export_services)
     injected_scores_services = export_services.get(SCORES_ANALYTIC_ID)
-    if isinstance(injected_scores_services, ScoresExportContext):
-        scores_services = replace(injected_scores_services, scheduler=scheduler)
-    else:
-        scores_services = ScoresExportContext(scheduler=scheduler)
-    export_services[SCORES_ANALYTIC_ID] = scores_services
+    if not isinstance(injected_scores_services, ScoresExportContext):
+        raise ValueError(
+            "scores table-stream admit requires a ScoresExportContext in the session's "
+            f"query context; got {type(injected_scores_services).__name__}"
+        )
+    export_services[SCORES_ANALYTIC_ID] = replace(injected_scores_services, scheduler=scheduler)
     return replace(ctx, export_services=export_services)
 
 

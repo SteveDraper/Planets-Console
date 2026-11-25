@@ -18,15 +18,10 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     controller_for_scope,
 )
+from api.analytics.scores.hull_mask_overrides import HullMaskOverrides
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.models.game import TurnInfo
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
-
-
-def _default_hull_catalog_mask_resolver(
-    turn: TurnInfo, player_id: int
-) -> ResolvedHullCatalogMask | None:
-    return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=None)
 
 
 def _default_stream_token_resolver(scope: InferenceStreamScope) -> str | None:
@@ -36,16 +31,26 @@ def _default_stream_token_resolver(scope: InferenceStreamScope) -> str | None:
 
 @dataclass(frozen=True)
 class ScoresExportContext:
-    """Inference services used by scores export ensure and materialization."""
+    """Inference services used by scores export ensure and materialization.
 
+    ``mask_overrides`` is the storage backend's one hull mask override store
+    (``hull_mask_overrides_for``). Its revision is part of the scores epoch, so
+    every bundle for a backend must carry that same instance.
+    """
+
+    mask_overrides: HullMaskOverrides = field(kw_only=True)
     scheduler: InferenceRowScheduler = field(default_factory=get_inference_row_scheduler)
-    resolve_hull_catalog_mask: Callable[[TurnInfo, int], ResolvedHullCatalogMask | None] = field(
-        default_factory=lambda: _default_hull_catalog_mask_resolver
-    )
     resolve_stream_token: Callable[[InferenceStreamScope], str | None] = field(
         default_factory=lambda: _default_stream_token_resolver
     )
     persistence: InferenceRowPersistenceService | None = None
+
+    def resolve_hull_catalog_mask(
+        self, turn: TurnInfo, game_id: int, player_id: int
+    ) -> ResolvedHullCatalogMask:
+        """The player's effective hull catalog mask on ``turn``, with their stored override."""
+        user_override = self.mask_overrides.snapshot(game_id, player_id).user_override
+        return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=user_override)
 
 
 def resolve_scores_services(ctx: AnalyticQueryContext) -> ScoresExportContext:

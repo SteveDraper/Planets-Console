@@ -28,6 +28,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.scores_exports_helpers import scores_export_context
 from tests.scores_row_lifecycle_test_helpers import (
     _patch_scores_dag_without_fleet_deps,
     _session_for_player,
@@ -202,7 +203,6 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
         get_persist_admission,
@@ -252,7 +252,7 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
             sample_turn,
             TurnAnalyticsOptions(),
             export_services={
-                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+                SCORES_ANALYTIC_ID: scores_export_context(persistence=persistence),
             },
             game_id=sample_turn.game.id,
             perspective=sample_turn.player.id,
@@ -285,7 +285,6 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores import tier_row_run_registry as reg
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
     from api.storage.memory_asset import MemoryAssetBackend
@@ -336,7 +335,7 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
             sample_turn,
             TurnAnalyticsOptions(),
             export_services={
-                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+                SCORES_ANALYTIC_ID: scores_export_context(persistence=persistence),
             },
             game_id=sample_turn.game.id,
             perspective=sample_turn.player.id,

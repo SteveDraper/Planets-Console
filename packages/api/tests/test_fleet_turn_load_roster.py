@@ -19,7 +19,6 @@ from api.analytics.fleet.fleet_table_stream_rows import (
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
     _node_complete_stream_events,
-    _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.military_estimate import fleet_ship_military_estimate_2x
@@ -33,6 +32,8 @@ from api.analytics.fleet.types import (
     FleetShipRecordFields,
     PersistedFleetLedger,
 )
+
+from tests.fleet_table_stream_test_helpers import query_context_for_fleet_services
 
 
 def _living_ships(turn, player_id: int):
@@ -258,7 +259,7 @@ def test_stream_yields_stored_ledger_without_running_the_chain(sample_turn, monk
         fleet_services=services,
         persistence=services.persistence,
         scheduler=FleetTableStreamScheduler(),
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     try:
         first = next(stream)

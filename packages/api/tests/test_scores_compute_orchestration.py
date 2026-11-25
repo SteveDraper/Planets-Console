@@ -55,7 +55,6 @@ from api.analytics.scores.compute_orchestration import (
     run_scores_tier_solve,
     tier_job_outcome_to_step_result,
 )
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
     _retire_row_run,
@@ -84,7 +83,7 @@ from tests.export_chain_test_fixtures import (
 )
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
-from tests.scores_exports_helpers import minimal_stream_query_context
+from tests.scores_exports_helpers import minimal_stream_query_context, scores_export_context
 from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 _FLEET_ANALYTIC_ID = "fleet"
@@ -231,7 +230,6 @@ def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
         build_scores_tier_solve_job_wire,
         run_scores_materialize,
     )
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
         get_row_run_for_scope,
         reset_tier_row_run_registry_for_tests,
@@ -246,7 +244,7 @@ def test_scores_tier_solve_wire_ensure_schedules_row_run_when_missing(
         sample_turn,
         TurnAnalyticsOptions(),
         export_services={
-            SCORES_ANALYTIC_ID: ScoresExportContext(
+            SCORES_ANALYTIC_ID: scores_export_context(
                 persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
                 scheduler=scheduler,
             )
@@ -1271,7 +1269,7 @@ def test_scores_persistence_policy_persist_delegates_to_inference_service(
     ctx = make_analytic_query_context(
         sample_turn,
         TurnAnalyticsOptions(),
-        export_services={SCORES_ANALYTIC_ID: ScoresExportContext(persistence=row_persistence)},
+        export_services={SCORES_ANALYTIC_ID: scores_export_context(persistence=row_persistence)},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
         read_backfill_earlier_turns=backfill_earlier_turns_disabled,
@@ -1332,7 +1330,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
         sample_turn,
         TurnAnalyticsOptions(),
         export_registry={**EXPORT_REGISTRY, "scores-tier-probe": tier_catalog},
-        export_services={SCORES_ANALYTIC_ID: ScoresExportContext()},
+        export_services={SCORES_ANALYTIC_ID: scores_export_context()},
         game_id=sample_turn.game.id,
         perspective=sample_turn.player.id,
         read_backfill_earlier_turns=backfill_earlier_turns_disabled,
@@ -1449,7 +1447,7 @@ def test_stream_query_context_plans_prior_turn_fleet_dependency(
     def load_turn(turn_number: int):
         return turns.get(turn_number)
 
-    scores_services = ScoresExportContext(
+    scores_services = scores_export_context(
         persistence=persistence,
         scheduler=scheduler,
     )
@@ -1534,6 +1532,30 @@ def test_query_context_for_session_requires_leader_ctx(sample_turn) -> None:
         turn_number=sample_turn.settings.turn,
     )
     with pytest.raises(ValueError, match="AnalyticQueryContext"):
+        _query_context_for_session(session, scheduler=scheduler)
+
+
+def test_query_context_for_session_requires_the_leaders_scores_bundle(sample_turn) -> None:
+    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+    score = sample_turn.scores[0]
+    leader_ctx = make_analytic_query_context(
+        sample_turn,
+        TurnAnalyticsOptions(),
+        load_turn=lambda _turn_number: sample_turn,
+        export_services={},
+        game_id=628580,
+        perspective=1,
+    )
+    session = InferenceRowStreamSession(
+        player_id=score.ownerid,
+        observation=build_inference_observation(score, sample_turn),
+        turn=sample_turn,
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+        query_context=leader_ctx,
+    )
+    with pytest.raises(ValueError, match="ScoresExportContext"):
         _query_context_for_session(session, scheduler=scheduler)
 
 

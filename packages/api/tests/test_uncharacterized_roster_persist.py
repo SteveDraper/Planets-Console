@@ -25,7 +25,12 @@ from api.transport.inference_stream_wire import (
 from tests.fixtures.military_score_inference import _observation, without_player_minefields
 from tests.fixtures.pp_gap_transfer import birds_row
 from tests.fixtures.ship_transfer_families import _singleton_unknown_hull_warship
-from tests.scores_exports_helpers import GAME_ID, inference_target_player_id, scores_query_context
+from tests.scores_exports_helpers import (
+    GAME_ID,
+    inference_target_player_id,
+    scores_export_context,
+    scores_query_context,
+)
 
 
 def _observation_from_row(row) -> InferenceObservation:
@@ -235,7 +240,6 @@ def test_uncharacterized_roster_persist_does_not_unique_fill_next_turn_sat_catal
     from api.analytics.military_score_inference.ship_transfer_families import (
         build_ship_transfer_catalog_fragment,
     )
-    from api.analytics.scores.export_services import ScoresExportContext
 
     from tests.fixtures.ship_transfer_families import _transfer_catalog_kwargs
     from tests.fleet_fixtures import ledger_for_player
@@ -279,7 +283,7 @@ def test_uncharacterized_roster_persist_does_not_unique_fill_next_turn_sat_catal
         ),
     )
     inference = FleetInferenceSupport(
-        scores_services=ScoresExportContext(persistence=persistence),
+        scores_services=scores_export_context(persistence=persistence),
     )
     held = inference.held_inference_for_scoreboard_turn(
         game_id=GAME_ID,

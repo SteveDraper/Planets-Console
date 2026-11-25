@@ -41,6 +41,7 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
 from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
+from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
@@ -222,6 +223,12 @@ class ShellLadder:
             complete_running_pool_step(self.orchestrator, self.scope, error=exc)
             return
         self.complete_tier(result_wire)
+
+    def change_mask(self) -> None:
+        """Save a hull mask override for the ladder's player, as the mask route does."""
+        resolve_scores_services(self.ctx).mask_overrides.change(
+            GAME_ID, self.player_id, frozenset({self.player_id})
+        )
 
     def persisted_summary(self) -> str | None:
         row = self.persistence.get_row(

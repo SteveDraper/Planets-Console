@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from functools import partial
 from typing import Any, assert_never
 
-from api.analytics.export_context import AnalyticQueryContext
+from api.analytics.export_context import AnalyticQueryContext, export_service_for
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.military_score_inference.durable_turn_evidence import (
@@ -30,7 +30,7 @@ from api.analytics.off_mode_wire import (
     copy_submission_open_fields,
     parse_off_mode_wire,
 )
-from api.analytics.scores.export_services import resolve_scores_services
+from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
 from api.analytics.scores.exports import stored_closed_horwasp_skip
 from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
@@ -40,6 +40,7 @@ from api.analytics.scores.tier_row_run_registry import (
     get_row_run,
     get_tier_callbacks,
 )
+from api.analytics.scores_assets import ANALYTIC_ID
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
 from api.compute.submission_open import SubmissionOpen
@@ -443,27 +444,58 @@ class ScoresPersistencePolicy:
         )
 
     def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
-        """Return prior-fleet turn epoch for this scores scope.
+        """Return the scores epoch: the fleet term plus the player's hull mask revision."""
+        return scores_epoch(fleet_term(ctx, scope), _hull_mask_revision(ctx, scope))
 
-        ``scores@N`` tracks ``fleet@(N-1)``'s turn-scoped generation only. Same-player
-        activity on other turns must not discard in-flight tier work.
-        """
-        export_scope = _export_scope_for_compute(scope)
-        if export_scope is None or export_scope.player_id is None:
-            return 0
-        if export_scope.turn <= 1:
-            return 0
 
-        fleet_services = lookup_fleet_compute_services(ctx)
-        if fleet_services is None:
-            return 0
+def scores_epoch(fleet_term: int, mask_revision: int) -> int:
+    """Combine the scores epoch's two terms.
 
-        return fleet_services.persistence.turn_invalidation_generation(
-            scope.game_id,
-            scope.perspective,
-            export_scope.player_id,
-            export_scope.turn - 1,
-        )
+    Both terms only increase, so their sum moves whenever either moves and
+    never returns to an earlier value. Callers compare epochs for equality only.
+    """
+    return fleet_term + mask_revision
+
+
+def fleet_term(ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
+    """The scores epoch's fleet term: ``fleet@(N-1)``'s turn-scoped generation.
+
+    ``scores@N`` tracks that one prior turn, so same-player fleet activity on
+    other turns does not discard in-flight tier work. It is 0 for a scope with
+    no prior turn (turn 1 is an admission skip) or no fleet services.
+    """
+    export_scope = _export_scope_for_compute(scope)
+    if export_scope is None or export_scope.player_id is None:
+        return 0
+    if export_scope.turn <= 1:
+        return 0
+
+    fleet_services = lookup_fleet_compute_services(ctx)
+    if fleet_services is None:
+        return 0
+
+    return fleet_services.persistence.turn_invalidation_generation(
+        scope.game_id,
+        scope.perspective,
+        export_scope.player_id,
+        export_scope.turn - 1,
+    )
+
+
+def _hull_mask_revision(ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
+    """The scores epoch's mask term: the player's hull mask revision.
+
+    A mask override applies at every turn and perspective, so this term has
+    no early return for the turn. It reads no storage and takes no lock: the
+    orchestrator reads epochs under its own lock. A context with no scores
+    bundle has no mask store and contributes 0.
+    """
+    if scope.player_id is None:
+        return 0
+    services = export_service_for(ctx, ANALYTIC_ID, ScoresExportContext)
+    if services is None:
+        return 0
+    return services.mask_overrides.revision(scope.game_id, scope.player_id)
 
 
 def _fleet_torp_input_status_for_persist(run_id: str) -> str | None:
