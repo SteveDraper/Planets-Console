@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 
 from api.analytics.military_score_inference.inference_turn_lookup import (
     parse_component_id_csv,
@@ -37,14 +38,21 @@ class ResolvedHullCatalogMask:
 
     ``user_enabled_hull_ids`` is the user override the mask was resolved from,
     as stored (not narrowed to the master catalog); None when there is none.
+    The effective set derives from it: the default set when there is no
+    override, else the override narrowed to the master catalog.
     """
 
     race_id: int
     race_name: str
     master_hull_ids: frozenset[int]
     default_enabled_hull_ids: frozenset[int]
-    effective_enabled_hull_ids: frozenset[int]
     user_enabled_hull_ids: frozenset[int] | None
+
+    @cached_property
+    def effective_enabled_hull_ids(self) -> frozenset[int]:
+        if self.user_enabled_hull_ids is None:
+            return self.default_enabled_hull_ids
+        return self.user_enabled_hull_ids & self.master_hull_ids
 
     @property
     def has_user_override(self) -> bool:
@@ -165,16 +173,10 @@ def resolve_hull_catalog_mask(
     race = race_by_id_or_none(turn, player.raceid)
     race_name = race.name if race is not None else "Unknown"
     master = master_hull_ids_for_race(turn, player.raceid)
-    default_enabled = default_enabled_hull_ids_for_player(turn, player_id)
-    if user_enabled_hull_ids is None:
-        effective = default_enabled
-    else:
-        effective = user_enabled_hull_ids & master
     return ResolvedHullCatalogMask(
         race_id=player.raceid,
         race_name=race_name,
         master_hull_ids=master,
-        default_enabled_hull_ids=default_enabled,
-        effective_enabled_hull_ids=effective,
+        default_enabled_hull_ids=default_enabled_hull_ids_for_player(turn, player_id),
         user_enabled_hull_ids=user_enabled_hull_ids,
     )

@@ -29,7 +29,9 @@ from api.analytics.military_score_inference.inference_stream_scope import Infere
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     get_inference_table_stream_registry,
 )
+from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.solver import STATUS_NO_EXACT_SOLUTION
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.compute.running_step import RunningStepDisposition
@@ -195,7 +197,15 @@ def test_a_kept_accelerated_split_step_restarts_its_segments_under_the_new_mask(
 
     def finish_the_first_segment(step_run: RowRun) -> None:
         orchestration = step_run.ladder.orchestration
-        orchestration.current_segment_index = 1
+        orchestration.record_segment_ladder_complete(
+            observation=orchestration.current_observation(),
+            result=InferenceResult(status=STATUS_NO_EXACT_SOLUTION, solutions=(), diagnostics={}),
+            catalog=None,
+            problem=None,
+            policy_steps_attempted=[],
+            step_diagnostics=[],
+        )
+        assert len(orchestration.segment_solves) == 1
         old_segments.append(orchestration)
 
     old_result = ladder.execute_tier(

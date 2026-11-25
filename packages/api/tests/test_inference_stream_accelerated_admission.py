@@ -316,8 +316,7 @@ def _hull_mask(*hull_ids: int) -> ResolvedHullCatalogMask:
         race_name="test",
         master_hull_ids=enabled,
         default_enabled_hull_ids=enabled,
-        effective_enabled_hull_ids=enabled,
-        user_enabled_hull_ids=frozenset(),
+        user_enabled_hull_ids=enabled,
     )
 
 

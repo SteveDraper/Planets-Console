@@ -281,14 +281,13 @@ def test_leftover_stays_on_row_not_assigned_onto_placeholder_ships():
     assert leftover_2x != military["militaryScoreDelta2xMax"] * military["count"]
 
 
-def _hull_mask(*, effective_enabled_hull_ids: frozenset[int]) -> ResolvedHullCatalogMask:
+def _hull_mask(*, enabled_hull_ids: frozenset[int]) -> ResolvedHullCatalogMask:
     return ResolvedHullCatalogMask(
         race_id=0,
         race_name="test",
-        master_hull_ids=effective_enabled_hull_ids,
-        default_enabled_hull_ids=effective_enabled_hull_ids,
-        effective_enabled_hull_ids=effective_enabled_hull_ids,
-        user_enabled_hull_ids=frozenset(),
+        master_hull_ids=enabled_hull_ids,
+        default_enabled_hull_ids=enabled_hull_ids,
+        user_enabled_hull_ids=enabled_hull_ids,
     )
 
 
@@ -317,7 +316,6 @@ def test_none_resolved_mask_keeps_default_hull_eligibility(sample_turn):
         race_name="test",
         master_hull_ids=default_ids,
         default_enabled_hull_ids=default_ids,
-        effective_enabled_hull_ids=default_ids,
         user_enabled_hull_ids=None,
     )
     unmasked = post_unsat_placeholders_from_turn(observation, sample_turn)
@@ -335,7 +333,7 @@ def test_resolved_mask_without_warships_omits_unknown_military(sample_turn):
     omitted = post_unsat_placeholders_from_turn(
         observation,
         sample_turn,
-        resolved_mask=_hull_mask(effective_enabled_hull_ids=frozenset()),
+        resolved_mask=_hull_mask(enabled_hull_ids=frozenset()),
     )
     assert _unknown_military(omitted) is None
     assert any(entry["id"] == GENERIC_FREIGHTER_COMBO_ID for entry in omitted)
@@ -354,7 +352,7 @@ def test_resolved_mask_excluding_warship_changes_envelope(sample_turn):
         post_unsat_placeholders_from_turn(
             observation,
             sample_turn,
-            resolved_mask=_hull_mask(effective_enabled_hull_ids=frozenset({warship_ids[0]})),
+            resolved_mask=_hull_mask(enabled_hull_ids=frozenset({warship_ids[0]})),
         )
     )
     assert narrowed is not None
@@ -385,7 +383,7 @@ def test_inference_payload_envelope_respects_resolved_mask(sample_turn):
         observation,
         sample_turn,
         problem,
-        resolved_mask=_hull_mask(effective_enabled_hull_ids=frozenset({warship_ids[0]})),
+        resolved_mask=_hull_mask(enabled_hull_ids=frozenset({warship_ids[0]})),
     )
     unmasked_military = _unknown_military(unmasked["placeholders"])
     masked_military = _unknown_military(masked["placeholders"])

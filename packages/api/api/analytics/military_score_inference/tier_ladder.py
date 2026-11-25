@@ -4,10 +4,11 @@ A ladder is the policy ladder state plus, for a row solved in accelerated
 segments (split or backfill), the segment orchestration that records each
 segment's solve. The two belong together: hand-over moves both to another
 run, and progress in one without the other would combine segments from
-different ladders. ``TierLadder`` is frozen, so the pairing changes only as a
-unit: a rebuild, a hand-over or the move to the next accelerated segment
-replaces the whole value. The ``ladder_state`` it holds is mutable, and tier
-steps and fleet resolution update it in place.
+different ladders. Both held parts are mutable: tier steps and fleet resolution
+update the ``ladder_state`` in place, and recording a finished segment
+updates the ``orchestration`` in place. ``TierLadder`` itself is frozen, so
+only the pairing changes as a unit: a rebuild, a hand-over or the move to the
+next accelerated segment installs a new pairing.
 """
 
 from __future__ import annotations
