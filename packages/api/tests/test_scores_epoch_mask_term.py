@@ -12,10 +12,12 @@ from __future__ import annotations
 import pytest
 from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.inference_row_runner import TierJobContinue
+from api.analytics.military_score_inference.tier_ladder import LadderRebuild
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.compute_orchestration import (
     SCORES_PERSISTENCE_POLICY,
     build_scores_tier_solve_job_wire,
+    run_scores_tier_solve,
 )
 from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
@@ -23,7 +25,7 @@ from api.compute import ComputeScope
 from api.compute.wire import DependencyOutputs
 
 from tests.scores_exports_helpers import GAME_ID, scores_export_context
-from tests.scores_ladder_helpers import durable_row_complete
+from tests.scores_ladder_helpers import durable_row_complete, scripted_tier_job
 from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
@@ -117,9 +119,22 @@ def test_a_reopen_after_a_mask_change_does_not_inherit_the_old_ladder(ladder):
     ladder.change_mask()
     wire = _build_wire(ladder)
 
+    winner = get_row_run(winner_id)
     assert wire["runId"] == winner_id
-    assert get_row_run(winner_id).ladder.ladder_state is fresh_ladder
+    assert winner.ladder.ladder_state is fresh_ladder
     assert fresh_ladder.next_step_index == 0
+    assert winner.pending_rebuild == LadderRebuild(user_override=ladder.changed_override)
+
+    seen: list = []
+    with scripted_tier_job(
+        TierJobContinue(),
+        on_tier_step=lambda run: seen.append((run.ladder, run.ladder.ladder_state.next_step_index)),
+    ):
+        run_scores_tier_solve(wire)
+
+    ((solved_on, tier_index),) = seen
+    assert tier_index == 0
+    assert solved_on.ladder_state.resolved_mask.user_enabled_hull_ids == ladder.changed_override
 
 
 def test_a_step_that_ran_across_a_mask_change_is_discarded_and_requeued(ladder):

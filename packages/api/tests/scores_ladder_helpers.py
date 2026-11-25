@@ -22,6 +22,7 @@ from unittest.mock import patch
 import pytest
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.hull_catalog_mask import resolve_hull_catalog_mask
 from api.analytics.military_score_inference.inference_row_runner import (
     TierJobContinue,
     TierJobOutcome,
@@ -201,15 +202,23 @@ class ShellLadder:
             self.stream_scope, (self.session,), stream_token=self.stream_token
         )
 
-    def execute_tier(self, outcome: TierJobOutcome | BaseException) -> object:
+    def execute_tier(
+        self,
+        outcome: TierJobOutcome | BaseException,
+        *,
+        on_tier_step: Callable[[RowRun], None] = lambda _run: None,
+    ) -> object:
         """Build and run the node's last submitted tier step on the worker.
 
-        Returns the step's result wire. The orchestrator has not taken it yet,
-        so nothing has persisted. A failing tier raises.
+        The tier job calls ``on_tier_step`` with its run, after any pending
+        ladder rebuild is applied. Returns the step's result wire. The
+        orchestrator has not taken it yet, so nothing has persisted. A failing
+        tier raises.
         """
 
         def record_tier_step(run: RowRun) -> None:
             self.tier_steps.append((run.run_id, run.ladder.ladder_state.next_step_index))
+            on_tier_step(run)
 
         with scripted_tier_job(outcome, on_tier_step=record_tier_step):
             work = self.submitted_work[-1]
@@ -219,19 +228,32 @@ class ShellLadder:
         """Hand an executed step's result back to the orchestrator, which persists it."""
         complete_running_pool_step(self.orchestrator, self.scope, result_wire=result_wire)
 
-    def run_tier(self, outcome: TierJobOutcome | BaseException) -> None:
+    def run_tier(
+        self,
+        outcome: TierJobOutcome | BaseException,
+        *,
+        on_tier_step: Callable[[RowRun], None] = lambda _run: None,
+    ) -> None:
         """Build and run the node's last submitted tier step, then hand the result back."""
         try:
-            result_wire = self.execute_tier(outcome)
+            result_wire = self.execute_tier(outcome, on_tier_step=on_tier_step)
         except Exception as exc:
             complete_running_pool_step(self.orchestrator, self.scope, error=exc)
             return
         self.complete_tier(result_wire)
 
+    @property
+    def changed_override(self) -> frozenset[int]:
+        """The hull mask user override ``change_mask`` saves: two hulls of the player's catalog."""
+        catalog = resolve_hull_catalog_mask(
+            self.sample_turn, self.player_id, user_enabled_hull_ids=None
+        ).master_hull_ids
+        return frozenset(sorted(catalog)[:2])
+
     def change_mask(self) -> None:
         """Save a hull mask override for the ladder's player, as the mask route does."""
         resolve_scores_services(self.ctx).mask_overrides.change(
-            GAME_ID, self.player_id, frozenset({self.player_id})
+            GAME_ID, self.player_id, self.changed_override
         )
 
     def persisted_summary(self) -> str | None:

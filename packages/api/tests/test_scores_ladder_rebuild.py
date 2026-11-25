@@ -94,7 +94,7 @@ def test_an_indexed_background_winner_with_no_serving_stamp_gets_a_rebuild(ladde
 
     winner = get_row_run(background.run_id)
     assert wire["runId"] == background.run_id
-    assert winner.pending_rebuild == LadderRebuild(user_override=frozenset({ladder.player_id}))
+    assert winner.pending_rebuild == LadderRebuild(user_override=ladder.changed_override)
 
 
 def test_a_new_execution_at_the_same_epoch_rebuilds_the_streams_own_ladder(ladder):
@@ -106,6 +106,29 @@ def test_a_new_execution_at_the_same_epoch_rebuilds_the_streams_own_ladder(ladde
     _build_wire(ladder, generation_offset=1)
 
     assert run.pending_rebuild == LadderRebuild(user_override=None)
+
+
+def test_a_mask_change_rebuilds_a_registered_runs_own_stamped_ladder_in_the_same_execution(
+    ladder,
+):
+    ladder.submit()
+    run_id = ladder.session.run_id
+    ladder.run_tier(TierJobContinue())
+    run = get_row_run(run_id)
+    stamped_ladder = run.ladder
+    assert stamped_ladder.ladder_state.resolved_mask.user_enabled_hull_ids is None
+    execution = ladder.orchestrator.nodes[ladder.scope].execution_generation
+
+    ladder.change_mask()
+    seen: list = []
+    ladder.run_tier(TierJobContinue(), on_tier_step=lambda step_run: seen.append(step_run.ladder))
+
+    assert ladder.orchestrator.nodes[ladder.scope].execution_generation == execution
+    assert ladder.tier_steps == [(run_id, 0), (run_id, 0)]
+    (rebuilt,) = seen
+    assert rebuilt is not stamped_ladder
+    assert rebuilt.ladder_state.resolved_mask.user_enabled_hull_ids == ladder.changed_override
+    assert run.session.resolved_mask is rebuilt.ladder_state.resolved_mask
 
 
 def test_a_stale_detached_run_is_replaced_by_an_admitted_run_with_a_rebuild(ladder):
