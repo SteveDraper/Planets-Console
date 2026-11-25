@@ -103,7 +103,12 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": session.run_id, "rowComplete": row_complete, "onWalk": False},
+            {
+                "runId": session.run_id,
+                "rowComplete": row_complete,
+                "onWalk": False,
+                "claimEpoch": 0,
+            },
         )
 
         stored = persistence.get_row(628580, 1, turn_number, player_id)
@@ -130,7 +135,12 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": cancelled.run_id, "rowComplete": row_complete, "onWalk": False},
+            {
+                "runId": cancelled.run_id,
+                "rowComplete": row_complete,
+                "onWalk": False,
+                "claimEpoch": 0,
+            },
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:
@@ -251,7 +261,12 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": session.run_id, "rowComplete": row_complete, "onWalk": False},
+            {
+                "runId": session.run_id,
+                "rowComplete": row_complete,
+                "onWalk": False,
+                "claimEpoch": 0,
+            },
         )
         stored = persistence.get_row(628580, 1, turn_number, player_id)
         assert stored is not None
@@ -309,7 +324,12 @@ def test_unknown_run_id_without_rowrun_or_resolution_refuses_persist(sample_turn
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": unknown_run_id, "rowComplete": row_complete, "onWalk": False},
+            {
+                "runId": unknown_run_id,
+                "rowComplete": row_complete,
+                "onWalk": False,
+                "claimEpoch": 0,
+            },
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:

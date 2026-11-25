@@ -36,7 +36,7 @@ from api.analytics.scores.exports import _persist_immediate_row_admission
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
-from tests.scores_exports_helpers import GAME_ID, scores_export_context
+from tests.scores_exports_helpers import ADMIT_EVERY_WRITE, GAME_ID, scores_export_context
 
 _API_ROOT = Path(__file__).resolve().parents[1] / "api"
 _MARK_READER_SOURCES = (
@@ -248,11 +248,12 @@ def test_both_write_paths_call_the_persist_stamp(
         persistence=persistence,
     )
 
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary="Best build",
         ),
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=1,
         host_turn=turn,
@@ -297,8 +298,9 @@ def test_live_durable_complete_reads_the_generation_persist_just_wrote(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="Best build",
     )
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         complete,
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=1,
         host_turn=turn,

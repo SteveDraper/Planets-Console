@@ -273,7 +273,12 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": session.run_id, "rowComplete": row_complete, "onWalk": False},
+            {
+                "runId": session.run_id,
+                "rowComplete": row_complete,
+                "onWalk": False,
+                "claimEpoch": 0,
+            },
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
         assert get_persist_admission(session.run_id) is PersistAdmission.ABSENT
@@ -356,7 +361,12 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": session.run_id, "rowComplete": row_complete, "onWalk": False},
+            {
+                "runId": session.run_id,
+                "rowComplete": row_complete,
+                "onWalk": False,
+                "claimEpoch": 0,
+            },
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:

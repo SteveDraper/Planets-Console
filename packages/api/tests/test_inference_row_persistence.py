@@ -706,7 +706,7 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
             turn=sample_turn.settings.turn,
             player_id=score.ownerid,
         ),
-        {"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
+        {"runId": run.run_id, "rowComplete": row_complete, "onWalk": False, "claimEpoch": 0},
     )
 
     stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
@@ -764,7 +764,7 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
                 summary="stopped",
             ),
         ),
-        {"runId": run.run_id, "onWalk": False},
+        {"runId": run.run_id, "onWalk": False, "claimEpoch": 0},
     )
     assert step_result.outcome == "persist"
 
@@ -863,7 +863,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
                 turn=sample_turn.settings.turn,
                 player_id=score.ownerid,
             ),
-            {"runId": run_id, "rowComplete": row_complete, "onWalk": False},
+            {"runId": run_id, "rowComplete": row_complete, "onWalk": False, "claimEpoch": 0},
         )
         stored = persistence.get_row(628580, 1, sample_turn.settings.turn, score.ownerid)
         assert stored is not None

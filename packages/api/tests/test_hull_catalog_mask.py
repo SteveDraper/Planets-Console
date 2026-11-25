@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from api.analytics.export_context import make_analytic_query_context
 from api.analytics.military_score_inference.hull_catalog_mask import (
     default_enabled_hull_ids_for_player,
     master_hull_ids_for_race,
@@ -11,7 +12,11 @@ from api.analytics.military_score_inference.hull_catalog_mask import (
     standard_settings_adjusted_basehulls,
     swaps_for_enabled_settings,
 )
+from api.analytics.options import TurnAnalyticsOptions
+from api.analytics.scores.compute_orchestration import SCORES_PERSISTENCE_POLICY
 from api.analytics.scores.hull_mask_overrides import hull_mask_overrides_for
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
+from api.compute import ComputeScope
 from api.serialization.turn import turn_info_from_json
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
@@ -130,6 +135,36 @@ def test_a_mask_change_through_one_service_stack_is_seen_through_another():
     assert overrides.revision(game_id, player_id) == 2
     seen = reader.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
     assert seen["hasUserOverride"] is False
+
+
+def test_a_mask_change_through_one_stack_moves_the_scores_epoch_another_stack_reads():
+    backend, game_id, perspective, turn_number, player_id = _fixture_backend_with_turn3()
+    writer = build_service_stack(backend).analytics
+    reader = build_service_stack(backend).analytics
+    turn = reader._turns.get_turn_info(game_id, perspective, turn_number)
+    ctx = make_analytic_query_context(
+        turn,
+        TurnAnalyticsOptions(),
+        export_services={SCORES_ANALYTIC_ID: reader._scores_export_context()},
+        game_id=game_id,
+        perspective=perspective,
+    )
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=game_id,
+        perspective=perspective + 1,
+        turn=turn_number + 4,
+        player_id=player_id,
+    )
+    before = SCORES_PERSISTENCE_POLICY.invalidation_generation(ctx, scope)
+    initial = writer._hull_catalog_masks.hull_catalog_mask_payload(
+        game_id, perspective, turn_number, player_id
+    )
+    subset = sorted(entry["hullId"] for entry in initial["masterCatalog"])[:2]
+
+    writer.put_inference_hull_catalog_mask(game_id, perspective, turn_number, player_id, subset)
+
+    assert SCORES_PERSISTENCE_POLICY.invalidation_generation(ctx, scope) == before + 1
 
 
 @pytest.mark.skipif(not P5_TURN6_PATH.is_file(), reason="local store only")

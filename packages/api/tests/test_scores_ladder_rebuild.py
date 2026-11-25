@@ -184,7 +184,7 @@ def test_a_pending_rebuild_is_applied_before_the_tier_job_runs(ladder):
     seen: list = []
 
     with _tier_job_spy(seen):
-        run_scores_tier_solve({"runId": run.run_id})
+        run_scores_tier_solve({"runId": run.run_id, "claimEpoch": 0})
 
     ((ladder_seen, mask_seen, pending_seen),) = seen
     assert ladder_seen is not old_ladder
@@ -203,7 +203,7 @@ def test_a_rebuild_replaces_a_write_back_made_by_an_older_step_holding_the_lock(
     with _tier_job_spy(seen):
         with run.tier_lock:
             newer_step = threading.Thread(
-                target=run_scores_tier_solve, args=({"runId": run.run_id},)
+                target=run_scores_tier_solve, args=({"runId": run.run_id, "claimEpoch": 0},)
             )
             newer_step.start()
             newer_step.join(timeout=0.2)

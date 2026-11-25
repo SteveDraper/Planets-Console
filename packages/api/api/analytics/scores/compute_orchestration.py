@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, assert_never
 
@@ -33,6 +35,7 @@ from api.analytics.off_mode_wire import (
 )
 from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
 from api.analytics.scores.exports import stored_closed_horwasp_skip
+from api.analytics.scores.hull_mask_overrides import HullMaskOverrides
 from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
@@ -44,10 +47,15 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.analytics.scores_assets import ANALYTIC_ID
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
-from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
+from api.compute.scope import (
+    ComputeScope,
+    ScopeKeySpec,
+    compute_scope_to_export_scope,
+    format_compute_scope_key,
+)
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs, StepResult
-from api.exceptions import ScoresTierOutcomeError, ValidationError
+from api.exceptions import DiscardedWorkRefused, ScoresTierOutcomeError, ValidationError
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 SCORES_MATERIALIZE = "materialize"
@@ -365,9 +373,48 @@ def _tier_persist_payload(
     row_complete: RowComplete,
     job_wire: Mapping[str, Any],
 ) -> dict[str, object]:
-    payload: dict[str, object] = {"runId": run.run_id, "rowComplete": row_complete}
+    payload: dict[str, object] = {
+        "runId": run.run_id,
+        "rowComplete": row_complete,
+        CLAIM_EPOCH_WIRE_FIELD: job_wire[CLAIM_EPOCH_WIRE_FIELD],
+    }
     copy_submission_open_fields(job_wire, payload)
     return payload
+
+
+@dataclass(frozen=True)
+class ClaimEpochPersistGuard:
+    """Admits a scores row write only while its ladder's claim epoch is current.
+
+    The orchestrator checks the epoch under its own lock, then releases it
+    before ``persist``. This guard checks again under the player's hull mask
+    key lock and holds that lock across the write, so a mask change lands
+    either before the check (and the write is refused) or after the write.
+    The fleet term is compared too, but fleet's generation lock is not held
+    across the write.
+    """
+
+    ctx: AnalyticQueryContext
+    scope: ComputeScope
+    claim_epoch: int
+    mask_overrides: HullMaskOverrides
+
+    @contextmanager
+    def admitted(self) -> Iterator[None]:
+        player_id = self.scope.player_id
+        if player_id is None:
+            raise ValueError("scores persist guard requires a concrete player scope")
+        with self.mask_overrides.hold(self.scope.game_id, player_id):
+            current = scores_epoch(
+                fleet_term(self.ctx, self.scope),
+                self.mask_overrides.revision(self.scope.game_id, player_id),
+            )
+            if current != self.claim_epoch:
+                raise DiscardedWorkRefused(
+                    f"scores persist refused for {format_compute_scope_key(self.scope)}: "
+                    f"claimed at scores epoch {self.claim_epoch}, now {current}"
+                )
+            yield
 
 
 class ScoresPersistencePolicy:
@@ -413,6 +460,12 @@ class ScoresPersistencePolicy:
             raise ValidationError(
                 f"scores persist result wire requires boolean {ON_WALK_WIRE_FIELD}"
             )
+        # The scores epoch the step's ladder was claimed at, carried from its job wire.
+        claim_epoch = result_wire.get(CLAIM_EPOCH_WIRE_FIELD)
+        if type(claim_epoch) is not int:
+            raise ValidationError(
+                f"scores persist result wire requires integer {CLAIM_EPOCH_WIRE_FIELD}"
+            )
 
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None or export_scope.player_id is None:
@@ -436,8 +489,14 @@ class ScoresPersistencePolicy:
                 apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run_id)
             return
 
-        services.persistence.persist_row_complete_for_scope(
+        services.persistence.persist_row_complete_guarded(
             row_complete,
+            guard=ClaimEpochPersistGuard(
+                ctx=ctx,
+                scope=scope,
+                claim_epoch=claim_epoch,
+                mask_overrides=services.mask_overrides,
+            ),
             game_id=export_scope.game_id,
             perspective=export_scope.perspective,
             host_turn=export_scope.turn,

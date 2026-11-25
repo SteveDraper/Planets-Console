@@ -26,6 +26,7 @@ from tests.fixtures.military_score_inference import _observation, without_player
 from tests.fixtures.pp_gap_transfer import birds_row
 from tests.fixtures.ship_transfer_families import _singleton_unknown_hull_warship
 from tests.scores_exports_helpers import (
+    ADMIT_EVERY_WRITE,
     GAME_ID,
     inference_target_player_id,
     scores_export_context,
@@ -55,8 +56,9 @@ def _persist_refusal(
     player_id: int,
     host_turn: int = 111,
 ) -> dict[str, object]:
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete_with_summary(result),
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=8,
         host_turn=host_turn,
@@ -156,7 +158,7 @@ def test_stream_complete_carries_roster_payload_without_solution_events(sample_t
 
 
 def test_uncharacterized_roster_does_not_start_mine_residual_sticky_prior(persistence):
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete_with_summary(
             InferenceResult(
                 status=STATUS_UNCHARACTERIZED_ROSTER,
@@ -165,6 +167,7 @@ def test_uncharacterized_roster_does_not_start_mine_residual_sticky_prior(persis
             ),
             summary=STATUS_UNCHARACTERIZED_ROSTER,
         ),
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=8,
         host_turn=110,
@@ -185,8 +188,9 @@ def test_export_exposes_roster_status_tagged_leftover_placeholders_and_signature
     )
     assert result is not None
     player_id = inference_target_player_id(sample_turn)
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete_with_summary(result),
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=sample_turn.player.id,
         host_turn=sample_turn.settings.turn,
@@ -445,7 +449,7 @@ def test_exact_persist_round_trips_departure_pins(persistence):
             ),
         ),
     )
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete_with_summary(
             InferenceResult(
                 status=STATUS_EXACT,
@@ -455,6 +459,7 @@ def test_exact_persist_round_trips_departure_pins(persistence):
             ),
             summary="exact",
         ),
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=8,
         host_turn=111,
@@ -470,11 +475,12 @@ def test_exact_persist_round_trips_departure_pins(persistence):
 def test_spec_only_exact_persist_omits_departure_pins(persistence):
     from api.analytics.military_score_inference.solver import STATUS_EXACT
 
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary="exact",
         ),
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=8,
         host_turn=111,
@@ -556,8 +562,9 @@ def test_exact_finalize_persists_admission_pins_without_readmitting(
     result, *_ = finalize_policy_ladder_result(state, observation, turn)
     assert result.status == STATUS_EXACT
     assert result.departure_pins == expected
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete_with_summary(result, summary="exact"),
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=8,
         host_turn=111,

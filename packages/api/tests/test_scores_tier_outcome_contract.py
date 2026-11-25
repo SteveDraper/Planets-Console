@@ -31,6 +31,7 @@ from api.exceptions import FleetScoresEvidenceOpenError, ScoresTierOutcomeError
 
 from tests.compute_lifecycle_records import record_lifecycle
 from tests.on_walk_helpers import fleet_persistence
+from tests.scores_exports_helpers import ADMIT_EVERY_WRITE
 from tests.scores_ladder_helpers import ShellLadder, durable_row_complete, scripted_tier_job
 from tests.walk_band_helpers import Walk, no_live_streams
 from tests.walk_stop_helpers import (
@@ -150,8 +151,9 @@ def test_fleet_finalizes_when_scores_skips_on_evidence_both_read_as_closed(
     recoveries = record_lifecycle(walk.orchestrator, RECOVERY_EVENT_KINDS)
     scores_item = _defer_the_baseline_fleet_hop_onto_scores(walk)
     scores_scope = scores_item.scope
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         durable_row_complete("closed by another writer").row_complete,
+        guard=ADMIT_EVERY_WRITE,
         game_id=scores_scope.game_id,
         perspective=scores_scope.perspective,
         host_turn=scores_scope.turn,

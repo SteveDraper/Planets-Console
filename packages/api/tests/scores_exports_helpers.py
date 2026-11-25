@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -33,6 +35,17 @@ from tests.export_chain_test_fixtures import scores_export_context
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 GAME_ID = 628580
+
+
+class AdmitEveryWrite:
+    """A scores persist guard that admits every write, for tests of row building."""
+
+    @contextmanager
+    def admitted(self) -> Iterator[None]:
+        yield
+
+
+ADMIT_EVERY_WRITE = AdmitEveryWrite()
 
 
 @pytest.fixture

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from typing import Protocol
 
 from api.analytics.export_context import AnalyticQueryContext
@@ -41,6 +42,14 @@ class OnRowPersistedCallback(Protocol):
         *,
         on_walk: bool,
     ) -> None: ...
+
+
+class ScoresPersistGuard(Protocol):
+    """Decides whether one scores row write is still current, and keeps it so while it lands."""
+
+    def admitted(self) -> AbstractContextManager[None]:
+        """Hold for the whole write; raise ``DiscardedWorkRefused`` on entry when stale."""
+        ...
 
 
 class InferenceRowPersistenceService:
@@ -229,10 +238,11 @@ class InferenceRowPersistenceService:
         prior = self.get_row(game_id, perspective, host_turn - 1, player_id)
         return prior is not None and prior.status == STATUS_MINE_SCORE_RESIDUAL
 
-    def persist_row_complete_for_scope(
+    def persist_row_complete_guarded(
         self,
         event: RowComplete,
         *,
+        guard: ScoresPersistGuard,
         game_id: int,
         perspective: int,
         host_turn: int,
@@ -241,23 +251,29 @@ class InferenceRowPersistenceService:
         query_context: AnalyticQueryContext | None = None,
         on_walk: bool,
     ) -> None:
-        """Write durable turn evidence from a RowComplete payload alone.
+        """Write durable turn evidence from a RowComplete payload, inside ``guard``'s hold.
 
-        ``on_walk`` is the producing execution's walk membership.
+        ``guard`` refuses a write whose producing work is no longer current
+        (raising ``DiscardedWorkRefused``), and otherwise holds what keeps it
+        current until the row is written. ``on_row_persisted`` runs after the
+        hold, with the producing execution's walk membership ``on_walk``.
         """
         status = event.wire_payload.status
         if not is_durable_turn_evidence_row_status(status):
             return
         wire_event = row_complete_to_complete_wire_event(event)
-        row = persisted_inference_row_from_wire_complete(
-            wire_event,
-            fleet_torp_input_status=fleet_torp_input_status,  # type: ignore[arg-type]
-        )
-        row = stamp_scoreboard_row_for_context(
-            row,
-            query_context,
-            game_id=game_id,
-            perspective=perspective,
-            player_id=player_id,
-        )
-        self.put_row(game_id, perspective, host_turn, player_id, row, on_walk=on_walk)
+        with guard.admitted():
+            row = persisted_inference_row_from_wire_complete(
+                wire_event,
+                fleet_torp_input_status=fleet_torp_input_status,  # type: ignore[arg-type]
+            )
+            row = stamp_scoreboard_row_for_context(
+                row,
+                query_context,
+                game_id=game_id,
+                perspective=perspective,
+                player_id=player_id,
+            )
+            self.put_row_without_notify(game_id, perspective, host_turn, player_id, row)
+        if self._on_row_persisted is not None:
+            self._on_row_persisted(game_id, perspective, host_turn, player_id, on_walk=on_walk)

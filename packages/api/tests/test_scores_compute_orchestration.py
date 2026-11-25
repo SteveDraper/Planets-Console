@@ -153,7 +153,7 @@ def test_retire_stale_run_preserves_replacement_scope_mapping(sample_turn) -> No
 
 def test_tier_job_outcome_mapping(sample_turn) -> None:
     run = _register_run(sample_turn)
-    job_wire = {"runId": run.run_id, "onWalk": True}
+    job_wire = {"runId": run.run_id, "onWalk": True, "claimEpoch": 0}
 
     continue_result = tier_job_outcome_to_step_result(run, TierJobContinue(), job_wire)
     assert continue_result.outcome == "continue"
@@ -1282,7 +1282,7 @@ def test_scores_persistence_policy_persist_delegates_to_inference_service(
     policy.persist(
         ctx,
         _scores_scope(sample_turn, run.session.player_id),
-        {"runId": run.run_id, "rowComplete": row_complete, "onWalk": False},
+        {"runId": run.run_id, "rowComplete": row_complete, "onWalk": False, "claimEpoch": 0},
     )
 
     stored = row_persistence.get_row(
@@ -1308,7 +1308,7 @@ def test_run_scores_tier_solve_returns_orchestrator_outcome(sample_turn) -> None
         "api.analytics.scores.compute_orchestration.run_inference_tier_job",
         return_value=outcome,
     ):
-        result = run_scores_tier_solve({"runId": run.run_id})
+        result = run_scores_tier_solve({"runId": run.run_id, "claimEpoch": 0})
 
     assert result.outcome == "persist"
 
@@ -1386,7 +1386,7 @@ def test_orchestrator_runs_registered_tier_solve_step(sample_turn) -> None:
             ComputeRequest(ctx=ctx, scope=scope, step_kind=SCORES_TIER_SOLVE),
         )
         assert submitted_scopes == [scope]
-        result_wire = run_scores_tier_solve({"runId": run.run_id, "onWalk": False})
+        result_wire = run_scores_tier_solve({"runId": run.run_id, "onWalk": False, "claimEpoch": 0})
         complete_running_pool_step(orchestrator, scope, result_wire=result_wire)
 
     assert handle.state == "complete", handle.error
