@@ -153,6 +153,10 @@ def test_a_late_end_of_a_replaced_stream_leaves_the_paused_successors_work(
     scheduler.accept_pending_run(successor_session.run_id)
 
     scheduler.detach_inference_stream(scope, (replaced_session,), stream_token=replaced_token)
+
+    assert scheduler.global_pause_status(scope)["paused"] is True
+    assert _pool_scopes(workerless_pool) == set()
+
     scheduler.resume_globally(scope)
 
     assert _pool_scopes(workerless_pool) == {_root_scope(sample_turn, 0)}
