@@ -101,7 +101,6 @@ def _claim_epoch_guard(ladder, claim_epoch: int) -> ClaimEpochPersistGuard:
         ctx=ladder.ctx,
         scope=ladder.scope,
         claim_epoch=claim_epoch,
-        mask_overrides=resolve_scores_services(ladder.ctx).mask_overrides,
     )
 
 

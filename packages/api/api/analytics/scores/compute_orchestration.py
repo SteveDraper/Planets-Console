@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, assert_never
 
-from api.analytics.export_context import AnalyticQueryContext, export_service_for
+from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope
 from api.analytics.fleet.injected_services import lookup_fleet_compute_services
 from api.analytics.military_score_inference.durable_turn_evidence import (
@@ -33,9 +33,8 @@ from api.analytics.off_mode_wire import (
     copy_submission_open_fields,
     parse_off_mode_wire,
 )
-from api.analytics.scores.export_services import ScoresExportContext, resolve_scores_services
+from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.exports import stored_closed_horwasp_skip
-from api.analytics.scores.hull_mask_overrides import HullMaskOverrides
 from api.analytics.scores.prior_fleet_resolution import resolve_prior_fleet_for_scores
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
@@ -45,7 +44,6 @@ from api.analytics.scores.tier_row_run_registry import (
     get_tier_callbacks,
     take_pending_rebuild,
 )
-from api.analytics.scores_assets import ANALYTIC_ID
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
 from api.compute.scope import (
     ComputeScope,
@@ -397,18 +395,12 @@ class ClaimEpochPersistGuard:
     ctx: AnalyticQueryContext
     scope: ComputeScope
     claim_epoch: int
-    mask_overrides: HullMaskOverrides
 
     @contextmanager
     def admitted(self) -> Iterator[None]:
-        player_id = self.scope.player_id
-        if player_id is None:
-            raise ValueError("scores persist guard requires a concrete player scope")
-        with self.mask_overrides.hold(self.scope.game_id, player_id):
-            current = scores_epoch(
-                fleet_term(self.ctx, self.scope),
-                self.mask_overrides.revision(self.scope.game_id, player_id),
-            )
+        mask_overrides = resolve_scores_services(self.ctx).mask_overrides
+        with mask_overrides.hold(self.scope.game_id, _scores_player_id(self.scope)):
+            current = current_scores_epoch(self.ctx, self.scope)
             if current != self.claim_epoch:
                 raise DiscardedWorkRefused(
                     f"scores persist refused for {format_compute_scope_key(self.scope)}: "
@@ -495,7 +487,6 @@ class ScoresPersistencePolicy:
                 ctx=ctx,
                 scope=scope,
                 claim_epoch=claim_epoch,
-                mask_overrides=services.mask_overrides,
             ),
             game_id=export_scope.game_id,
             perspective=export_scope.perspective,
@@ -523,8 +514,20 @@ class ScoresPersistencePolicy:
         )
 
     def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
-        """Return the scores epoch: the fleet term plus the player's hull mask revision."""
-        return scores_epoch(fleet_term(ctx, scope), _hull_mask_revision(ctx, scope))
+        return current_scores_epoch(ctx, scope)
+
+
+def current_scores_epoch(ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
+    """The scope's scores epoch now: the fleet term plus the player's hull mask revision.
+
+    The orchestrator's epoch check and the persist guard both read it here, so
+    a persist refused by the guard is one the orchestrator also sees as stale.
+    The mask revision is read without a lock; the orchestrator reads under its
+    own lock and the guard reads under the player's mask key lock.
+    """
+    mask_overrides = resolve_scores_services(ctx).mask_overrides
+    mask_revision = mask_overrides.revision(scope.game_id, _scores_player_id(scope))
+    return scores_epoch(fleet_term(ctx, scope), mask_revision)
 
 
 def scores_epoch(fleet_term: int, mask_revision: int) -> int:
@@ -561,20 +564,13 @@ def fleet_term(ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
     )
 
 
-def _hull_mask_revision(ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
-    """The scores epoch's mask term: the player's hull mask revision.
-
-    A mask override applies at every turn and perspective, so this term has
-    no early return for the turn. It reads no storage and takes no lock: the
-    orchestrator reads epochs under its own lock. A context with no scores
-    bundle has no mask store and contributes 0.
-    """
-    if scope.player_id is None:
-        return 0
-    services = export_service_for(ctx, ANALYTIC_ID, ScoresExportContext)
-    if services is None:
-        return 0
-    return services.mask_overrides.revision(scope.game_id, scope.player_id)
+def _scores_player_id(scope: ComputeScope) -> int:
+    """The concrete player a scores scope is keyed by (``SCORES_SCOPE_KEY_SPEC``)."""
+    if not isinstance(scope.player_id, int):
+        raise ValueError(
+            f"scores scope requires a concrete player: {format_compute_scope_key(scope)}"
+        )
+    return scope.player_id
 
 
 def _fleet_torp_input_status_for_persist(run_id: str) -> str | None:
