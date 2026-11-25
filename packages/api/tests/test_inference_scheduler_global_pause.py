@@ -1,5 +1,7 @@
 """Tests for global pause/resume on the inference row scheduler."""
 
+from dataclasses import replace
+
 import pytest
 from api.analytics.military_score_inference.actions import ActionCatalog
 from api.analytics.military_score_inference.analytic import build_inference_observation
@@ -412,9 +414,12 @@ def test_emit_held_solutions_snapshots_merged_list(sample_turn):
     scheduler.enqueue_tier_ladder(session)
     row_run = get_row_run(session.run_id)
     assert row_run is not None
-    row_run.ladder_state = PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1]))
-    row_run.ladder_state.catalog = ActionCatalog((), (), {})
-    row_run.ladder_state.merged_solutions = [
+    row_run.ladder = replace(
+        row_run.ladder,
+        ladder_state=PolicyLadderState(policy_steps=tuple(resolve_tier_policies(None)[:1])),
+    )
+    row_run.ladder.ladder_state.catalog = ActionCatalog((), (), {})
+    row_run.ladder.ladder_state.merged_solutions = [
         InferenceSolution(
             objective_value=10,
             actions=(InferenceSolutionAction(action_id="a1", label="Action A", count=1),),
@@ -428,7 +433,7 @@ def test_emit_held_solutions_snapshots_merged_list(sample_turn):
     assert len(event.solutions) == 1
     assert event.solutions[0].objective_value == 10
 
-    row_run.ladder_state.merged_solutions.append(
+    row_run.ladder.ladder_state.merged_solutions.append(
         InferenceSolution(
             objective_value=5,
             actions=(InferenceSolutionAction(action_id="a2", label="Action B", count=1),),

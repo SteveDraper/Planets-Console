@@ -150,14 +150,14 @@ def test_a_stream_reopened_mid_ladder_continues_the_ladder_under_its_own_run(lad
     stamped_id = ladder.session.run_id
     ladder.run_tier(CONTINUE)
     ladder.run_tier(CONTINUE)
-    stamped_ladder = get_row_run(stamped_id).ladder_state
+    stamped_ladder = get_row_run(stamped_id).ladder.ladder_state
 
     duplicate_ids = take_over(ladder)
     winner_id = ladder.session.run_id
     ladder.run_tier(CONTINUE)
 
     assert ladder.tier_steps == [(stamped_id, 0), (stamped_id, 1), (winner_id, 2)]
-    assert get_row_run(winner_id).ladder_state is stamped_ladder
+    assert get_row_run(winner_id).ladder.ladder_state is stamped_ladder
     _assert_the_winner_alone_holds_the_scope(ladder, winner_id, (stamped_id, *duplicate_ids))
 
     ladder.run_tier(durable_row_complete("continued by the reopened stream"))
@@ -261,13 +261,13 @@ def test_a_reopen_after_a_non_durable_terminal_starts_a_fresh_ladder(ladder):
 
     ladder.close_stream()
     winner_id = ladder.open_stream().run_id
-    fresh_ladder = get_row_run(winner_id).ladder_state
+    fresh_ladder = get_row_run(winner_id).ladder.ladder_state
     ladder.submit(force_fresh=True)
     assert ladder.orchestrator.nodes[ladder.scope].execution_generation > generation
     ladder.run_tier(CONTINUE)
 
     assert ladder.tier_steps == [(stamped_id, 0), (stamped_id, 1), (winner_id, 0)]
-    assert get_row_run(winner_id).ladder_state is fresh_ladder
+    assert get_row_run(winner_id).ladder.ladder_state is fresh_ladder
     _assert_the_winner_alone_holds_the_scope(ladder, winner_id, (stamped_id,))
 
 
@@ -278,7 +278,7 @@ def test_a_reopen_against_a_stale_stamp_starts_a_fresh_ladder(ladder, stale):
     ladder.run_tier(CONTINUE)
     ladder.close_stream()
     winner_id = ladder.open_stream().run_id
-    fresh_ladder = get_row_run(winner_id).ladder_state
+    fresh_ladder = get_row_run(winner_id).ladder.ladder_state
     generation = ladder.orchestrator.nodes[ladder.scope].execution_generation
     if stale == "node-replaced":
         generation += 1
@@ -297,7 +297,7 @@ def test_a_reopen_against_a_stale_stamp_starts_a_fresh_ladder(ladder, stale):
     )
 
     assert wire["runId"] == winner_id
-    assert get_row_run(winner_id).ladder_state is fresh_ladder
+    assert get_row_run(winner_id).ladder.ladder_state is fresh_ladder
     assert fresh_ladder.next_step_index == 0
     _assert_the_winner_alone_holds_the_scope(ladder, winner_id, (stamped_id,))
 
@@ -384,13 +384,13 @@ def test_a_stream_registered_while_the_wire_build_chooses_its_run_takes_the_ladd
 
     assert ladder.tier_runs[-1] == chosen_id
     assert decide_scores_row_persist(stream_id) == PersistDecision.allow(retire_after_write=False)
-    chosen_ladder = get_row_run(chosen_id).ladder_state
+    chosen_ladder = get_row_run(chosen_id).ladder.ladder_state
     tiers_run = len(ladder.tier_steps)
 
     ladder.run_tier(CONTINUE)
 
     assert ladder.tier_steps[-1] == (stream_id, tiers_run)
-    assert get_row_run(stream_id).ladder_state is chosen_ladder
+    assert get_row_run(stream_id).ladder.ladder_state is chosen_ladder
     _assert_the_winner_alone_holds_the_scope(ladder, stream_id, (chosen_id,))
 
 
@@ -484,8 +484,8 @@ def _hand_over_a_ladder_holding_solutions(ladder: ShellLadder) -> InferenceRowSt
     ladder.submit()
     stamped = get_row_run(ladder.session.run_id)
     ladder.run_tier(CONTINUE)
-    stamped.ladder_state.catalog = ActionCatalog((), (), {})
-    stamped.ladder_state.merged_solutions = [HELD_SOLUTION]
+    stamped.ladder.ladder_state.catalog = ActionCatalog((), (), {})
+    stamped.ladder.ladder_state.merged_solutions = [HELD_SOLUTION]
 
     ladder.close_stream()
     winner = ladder.open_stream()

@@ -309,12 +309,15 @@ def schedule_row_with_ladder(
     stream_scope = stream_scope_for_turn(sample_turn, game_id=game_id)
     run = scheduler.row_run_for_player(stream_scope, player_id)
     assert run is not None
-    run.ladder_state = PolicyLadderState(
-        policy_steps=(),
-        merged_solutions=merged_solutions,
-        last_status=last_status,
-        time_limited=time_limited,
-        ladder_complete=ladder_complete,
+    run.ladder = replace(
+        run.ladder,
+        ladder_state=PolicyLadderState(
+            policy_steps=(),
+            merged_solutions=merged_solutions,
+            last_status=last_status,
+            time_limited=time_limited,
+            ladder_complete=ladder_complete,
+        ),
     )
     return stream_scope
 

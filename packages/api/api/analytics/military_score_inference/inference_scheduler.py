@@ -569,10 +569,10 @@ class InferenceRowScheduler(
         row_run = self._adapter_row_run(session.run_id)
         if row_run is None:
             return False
-        state = row_run.ladder_state
+        state = row_run.ladder.ladder_state
         if state.catalog is None or not state.merged_solutions:
             return False
-        orchestration = row_run.orchestration
+        orchestration = row_run.ladder.orchestration
         segment_id: str | None = None
         if orchestration is not None:
             if not orchestration.should_emit_streaming_solutions():
@@ -601,7 +601,7 @@ class InferenceRowScheduler(
         row_run = self._adapter_row_run(session.run_id)
         if row_run is None:
             return
-        state = row_run.ladder_state
+        state = row_run.ladder.ladder_state
         if state.catalog is None:
             return
         session.event_queue.put(
@@ -617,7 +617,7 @@ class InferenceRowScheduler(
         row_run = self._adapter_row_run(session.run_id)
         if row_run is None:
             return
-        state = row_run.ladder_state
+        state = row_run.ladder.ladder_state
         if state.next_step_index >= len(state.policy_steps):
             return
         step = state.policy_steps[state.next_step_index]

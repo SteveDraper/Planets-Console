@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from api.analytics.military_score_inference.accelerated_start import (
     ACCEL_WINDOW_SEGMENT_ID,
@@ -192,7 +194,7 @@ def _admit_one_solution_during_a_tier(
     scheduler.enqueue_tier_ladder(session, orchestration=orchestration)
     run = get_row_run(session.run_id)
     assert run is not None
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
 
     solution = InferenceSolution(
         objective_value=20,
@@ -305,8 +307,8 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
 
     captured: list[float | None] = []
 
@@ -324,7 +326,7 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
         del state, observation, turn, time_limit_seconds, cancel_token, on_admitted
         del hang_fuse_seconds
         captured.append(search_effort_allowance)
-        run.ladder_state.ladder_complete = True
+        run.ladder.ladder_state.ladder_complete = True
 
     monkeypatch.setattr(
         "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
@@ -369,8 +371,8 @@ def test_segment_continuation_keeps_the_ladder_state_mask(
         resolved_mask=ladder_mask,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state(session)
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state(session))
 
     def fake_tier_step(state, *_args, **_kwargs) -> None:
         session.resolved_mask = _hull_mask(3)
@@ -391,7 +393,7 @@ def test_segment_continuation_keeps_the_ladder_state_mask(
     )
 
     assert isinstance(outcome, TierJobContinue)
-    assert run.ladder_state.resolved_mask is ladder_mask
+    assert run.ladder.ladder_state.resolved_mask is ladder_mask
 
 
 def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_turn) -> None:

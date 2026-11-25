@@ -150,7 +150,7 @@ def solutions_from_persisted_row(
 
 def _diagnostics_from_scheduler_ladder(scheduler_run: RowRun) -> dict[str, object] | None:
     """Build scores row inference diagnostics wire from live scheduler ladder state."""
-    ladder_state = scheduler_run.ladder_state
+    ladder_state = scheduler_run.ladder.ladder_state
     if (
         not ladder_state.last_diagnostics
         and ladder_state.catalog is None
@@ -187,7 +187,7 @@ def solutions_from_scheduler_run(
     scheduler_run: RowRun,
 ) -> tuple[list[dict[str, object]], dict[str, object] | None, int]:
     """Serialize solutions from live scheduler ladder state when present."""
-    ladder_state = scheduler_run.ladder_state
+    ladder_state = scheduler_run.ladder.ladder_state
     merged = ladder_state.merged_solutions
     return (
         solutions_from_domain(

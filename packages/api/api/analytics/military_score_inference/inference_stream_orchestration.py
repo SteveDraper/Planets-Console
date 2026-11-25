@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from api.analytics.fleet.types import CounterpartyFleetLoader, FleetShipRecord
 from api.analytics.military_score_inference.accelerated_start import (
@@ -142,6 +142,16 @@ class InferenceStreamOrchestration:
     backfill_target_host_turn: int | None = None
     backfill_source_turn_number: int | None = None
     resolved_mask: ResolvedHullCatalogMask | None = None
+
+    def restarted(self) -> InferenceStreamOrchestration:
+        """A copy with no segment solved yet: same path, scores, turns and segments."""
+        return replace(
+            self,
+            current_segment_index=0,
+            segment_solves=[],
+            combined_time_limited=False,
+            resolved_mask=None,
+        )
 
     @property
     def is_accelerated(self) -> bool:

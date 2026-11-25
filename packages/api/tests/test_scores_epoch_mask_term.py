@@ -112,13 +112,13 @@ def test_a_reopen_after_a_mask_change_does_not_inherit_the_old_ladder(ladder):
     ladder.run_tier(TierJobContinue())
     ladder.close_stream()
     winner_id = ladder.open_stream().run_id
-    fresh_ladder = get_row_run(winner_id).ladder_state
+    fresh_ladder = get_row_run(winner_id).ladder.ladder_state
 
     ladder.change_mask()
     wire = _build_wire(ladder)
 
     assert wire["runId"] == winner_id
-    assert get_row_run(winner_id).ladder_state is fresh_ladder
+    assert get_row_run(winner_id).ladder.ladder_state is fresh_ladder
     assert fresh_ladder.next_step_index == 0
 
 

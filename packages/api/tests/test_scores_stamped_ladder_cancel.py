@@ -320,13 +320,13 @@ def test_an_aborted_execution_hands_no_ladder_over(ladder):
     ladder.close_stream()
     aborted_generation = _abort(ladder)
     reopened = ladder.open_stream()
-    fresh_ladder = get_row_run(reopened.run_id).ladder_state
+    fresh_ladder = get_row_run(reopened.run_id).ladder.ladder_state
 
     ladder.submit(force_fresh=True)
     wire = ladder.submitted_work[-1].job_wire_for(ladder.scope)
 
     assert wire["runId"] == reopened.run_id
-    assert get_row_run(reopened.run_id).ladder_state is fresh_ladder
+    assert get_row_run(reopened.run_id).ladder.ladder_state is fresh_ladder
     assert fresh_ladder.next_step_index == 0
     assert get_row_run(detached_id) is None
     assert _stamp(ladder.scope).execution_generation != aborted_generation

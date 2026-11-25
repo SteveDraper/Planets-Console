@@ -612,7 +612,7 @@ def _tier_emissions_from_resolved(
     scheduler_run = resolved.snapshot.scheduler_run
     if scheduler_run is None:
         return None
-    step_diagnostics = scheduler_run.ladder_state.step_diagnostics
+    step_diagnostics = scheduler_run.ladder.ladder_state.step_diagnostics
     if not step_diagnostics:
         return None
     emissions = compact_tier_emissions_from_step_diagnostics(step_diagnostics)

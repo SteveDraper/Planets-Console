@@ -484,8 +484,8 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn)
     )
     run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
     assert run is not None
-    assert run.ladder_state is not None
-    run.ladder_state.last_diagnostics = {"source": "scheduler_ladder"}
+    assert run.ladder.ladder_state is not None
+    run.ladder.ladder_state.last_diagnostics = {"source": "scheduler_ladder"}
 
     snapshot = ScoresInferenceSnapshot(
         persisted_row=None,

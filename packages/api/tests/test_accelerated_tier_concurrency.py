@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 from api.analytics.military_score_inference.accelerated_start import (
     ACCEL_WINDOW_SEGMENT_ID,
@@ -101,8 +102,8 @@ def test_concurrent_shared_rowrun_accelerated_completes_without_raise(
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
 
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
@@ -151,8 +152,8 @@ def test_solve_context_raises_when_segments_exhausted(sample_turn) -> None:
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
 
     try:
         solve_context(run)
@@ -179,8 +180,8 @@ def test_run_inference_tier_job_idempotent_when_segments_exhausted(
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
         emit_progress=lambda: None,

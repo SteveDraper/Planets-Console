@@ -68,6 +68,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.tier_ladder import TierLadder
 from api.analytics.scores.persist_decision import (
     PersistDecision,
     persist_decision_from_admission,
@@ -232,7 +233,7 @@ def new_tier_row_run(
             turn_number=session.turn_number,
         ),
     )
-    return RowRun(session, ladder_state=ladder_state, orchestration=orchestration)
+    return RowRun(session, ladder=TierLadder(ladder_state, orchestration))
 
 
 def register_row_run(run: RowRun, *, scope_index: ScopeIndexPolicy) -> None:
@@ -373,11 +374,9 @@ def claim_tier_ladder(
 
 def _hand_over_unfinished_ladder_locked(holder: RowRun, winner: RowRun) -> bool:
     """Move ``holder``'s ladder to ``winner`` unless it is finished. Caller holds ``_lock``."""
-    ladder_state = holder.ladder_state
-    if ladder_state.ladder_complete:
+    if holder.ladder.ladder_state.ladder_complete:
         return False
-    winner.ladder_state = ladder_state
-    winner.orchestration = holder.orchestration
+    winner.ladder = holder.ladder
     return True
 
 

@@ -819,6 +819,6 @@ def test_new_tier_row_run_builds_hopeless_facts_from_session(sample_turn) -> Non
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    assert run.ladder_state.hopeless_context is not None
-    assert run.ladder_state.hopeless_context.planet_delta == score.planetchange
-    assert run.ladder_state.hopeless_context.starbase_delta == score.starbasechange
+    assert run.ladder.ladder_state.hopeless_context is not None
+    assert run.ladder.ladder_state.hopeless_context.planet_delta == score.planetchange
+    assert run.ladder.ladder_state.hopeless_context.starbase_delta == score.starbasechange

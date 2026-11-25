@@ -101,7 +101,7 @@ def scripted_tier_job(
         on_tier_step(run)
         if isinstance(outcome, BaseException):
             raise outcome
-        ladder_state = run.ladder_state
+        ladder_state = run.ladder.ladder_state
         if isinstance(outcome, TierJobContinue):
             ladder_state.next_step_index += 1
         else:
@@ -205,7 +205,7 @@ class ShellLadder:
         """
 
         def record_tier_step(run: RowRun) -> None:
-            self.tier_steps.append((run.run_id, run.ladder_state.next_step_index))
+            self.tier_steps.append((run.run_id, run.ladder.ladder_state.next_step_index))
 
         with scripted_tier_job(outcome, on_tier_step=record_tier_step):
             work = self.submitted_work[-1]

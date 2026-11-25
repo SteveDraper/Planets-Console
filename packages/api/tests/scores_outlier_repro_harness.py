@@ -293,7 +293,7 @@ def reproduce_admit_ship_outlier(
     probe.install()
     try:
         while True:
-            state = run.ladder_state
+            state = run.ladder.ladder_state
             if state is None or state.ladder_complete:
                 break
             if state.next_step_index > through_tier_index:
@@ -323,7 +323,7 @@ def reproduce_admit_ship_outlier(
                 break
     finally:
         probe.restore()
-    finished = run.ladder_state
+    finished = run.ladder.ladder_state
     if finished is not None:
         report.solution_action_ids = [
             tuple(action.action_id for action in solution.actions)

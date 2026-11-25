@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -177,8 +178,8 @@ def test_continuation_jobs_round_robin_across_rows(
     run_a = get_row_run(session_a.run_id)
     run_b = get_row_run(session_b.run_id)
     assert run_a is not None and run_b is not None
-    run_a.ladder_state = PolicyLadderState(policy_steps=short_ladder)
-    run_b.ladder_state = PolicyLadderState(policy_steps=short_ladder)
+    run_a.ladder = replace(run_a.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder))
+    run_b.ladder = replace(run_b.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder))
     scheduler.resume_globally(scope)
     gate.set()
 

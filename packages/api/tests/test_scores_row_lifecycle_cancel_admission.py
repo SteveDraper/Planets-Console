@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 
 from api.analytics.military_score_inference.inference_row_runner import (
     TierJobRowComplete,
@@ -110,7 +111,9 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
         scheduler.accept_pending_run(session.run_id)
         row_run = get_row_run(session.run_id)
         assert row_run is not None
-        row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)
+        row_run.ladder = replace(
+            row_run.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder)
+        )
 
         _wait_until(tier_step_started.is_set)
         scheduler.cancel_row_run(run_id := session.run_id)
@@ -417,7 +420,9 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
         scheduler.accept_pending_run(session.run_id)
         row_run = get_row_run(session.run_id)
         assert row_run is not None
-        row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)
+        row_run.ladder = replace(
+            row_run.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder)
+        )
 
         _wait_until(finalize_entered.is_set)
         scheduler.cancel_row_run(run_id := session.run_id)
