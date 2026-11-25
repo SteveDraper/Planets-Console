@@ -16,7 +16,6 @@ from api.analytics.military_score_inference.inference_row_runner import (
 )
 from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 from api.analytics.military_score_inference.row_run import RowRun
-from api.analytics.scores.compute_orchestration import build_scores_tier_solve_job_wire
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     ScopeIndexPolicy,
@@ -31,7 +30,6 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.compute import ComputeScope
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
-from api.compute.wire import DependencyOutputs
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id
@@ -41,7 +39,7 @@ from tests.scores_ladder_helpers import (
     ladder_scope,
     ladder_session,
 )
-from tests.submission_open_helpers import explicit_submission_open, live_execution
+from tests.submission_open_helpers import live_execution
 
 GENERATION = 7
 EPOCH = 0
@@ -228,14 +226,7 @@ def test_a_fleet_epoch_change_while_detached_takes_the_admit_path(ladder):
     ladder.ctx.export_services["fleet"].persistence.invalidate_player_ledgers_from_turn(
         GAME_ID, ladder.scope.perspective, ladder.scope.turn - 1, ladder.player_id
     )
-    wire = build_scores_tier_solve_job_wire(
-        ladder.scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=ladder.ctx,
-        submission_open=explicit_submission_open(),
-        execution_generation=ladder.orchestrator.nodes[ladder.scope].execution_generation,
-        is_execution_live=live_execution,
-    )
+    wire = ladder.build_wire()
 
     assert get_row_run(stream_run_id) is None
     assert wire["runId"] != stream_run_id
@@ -246,16 +237,8 @@ def test_a_replaced_node_does_not_resume_the_old_run(ladder):
     stream_run_id = ladder.session.run_id
     ladder.run_tier(TierJobContinue())
     ladder.close_stream()
-    old_generation = ladder.orchestrator.nodes[ladder.scope].execution_generation
 
-    wire = build_scores_tier_solve_job_wire(
-        ladder.scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=ladder.ctx,
-        submission_open=explicit_submission_open(),
-        execution_generation=old_generation + 1,
-        is_execution_live=live_execution,
-    )
+    wire = ladder.build_wire(generation_offset=1)
 
     assert get_row_run(stream_run_id) is None
     assert wire["runId"] != stream_run_id

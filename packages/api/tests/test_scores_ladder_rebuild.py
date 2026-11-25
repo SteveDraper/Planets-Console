@@ -16,34 +16,18 @@ from api.analytics.military_score_inference.inference_row_runner import TierJobC
 from api.analytics.military_score_inference.tier_ladder import LadderRebuild
 from api.analytics.scores import tier_row_run_registry
 from api.analytics.scores.compute_orchestration import (
-    build_scores_tier_solve_job_wire,
     fleet_term,
     run_scores_tier_solve,
     scores_epoch,
 )
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.tier_row_run_registry import get_row_run, take_pending_rebuild
-from api.compute.wire import DependencyOutputs
 
 from tests.scores_ladder_helpers import durable_row_complete
-from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
 LEFTOVER = LadderRebuild(user_override=frozenset({99}))
-
-
-def _build_wire(ladder, *, generation_offset: int = 0) -> dict:
-    return build_scores_tier_solve_job_wire(
-        ladder.scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=ladder.ctx,
-        submission_open=explicit_submission_open(),
-        execution_generation=(
-            ladder.orchestrator.nodes[ladder.scope].execution_generation + generation_offset
-        ),
-        is_execution_live=live_execution,
-    )
 
 
 def _mask_overrides(ladder):
@@ -60,7 +44,7 @@ def test_a_serving_stamp_on_the_winner_keeps_its_ladder_and_a_leftover_rebuild(l
     own_ladder = run.ladder
     run.pending_rebuild = LEFTOVER
 
-    _build_wire(ladder)
+    ladder.build_wire()
 
     assert run.ladder is own_ladder
     assert run.pending_rebuild is LEFTOVER
@@ -76,7 +60,7 @@ def test_a_hand_over_moves_the_holders_ladder_and_its_pending_rebuild(ladder):
     holder.pending_rebuild = LEFTOVER
     held_ladder = holder.ladder
 
-    _build_wire(ladder)
+    ladder.build_wire()
 
     winner = get_row_run(winner_id)
     assert winner.ladder is held_ladder
@@ -90,7 +74,7 @@ def test_an_indexed_background_winner_with_no_serving_stamp_gets_a_rebuild(ladde
     background = ladder.register_background_run()
     ladder.change_mask()
 
-    wire = _build_wire(ladder, generation_offset=1)
+    wire = ladder.build_wire(generation_offset=1)
 
     winner = get_row_run(background.run_id)
     assert wire["runId"] == background.run_id
@@ -103,7 +87,7 @@ def test_a_new_execution_at_the_same_epoch_rebuilds_the_streams_own_ladder(ladde
     run = get_row_run(ladder.session.run_id)
     assert run.pending_rebuild is None
 
-    _build_wire(ladder, generation_offset=1)
+    ladder.build_wire(generation_offset=1)
 
     assert run.pending_rebuild == LadderRebuild(user_override=None)
 
@@ -138,7 +122,7 @@ def test_a_stale_detached_run_is_replaced_by_an_admitted_run_with_a_rebuild(ladd
     ladder.close_stream()
     ladder.change_mask()
 
-    wire = _build_wire(ladder)
+    wire = ladder.build_wire()
 
     assert wire["runId"] != stream_run_id
     assert get_row_run(wire["runId"]).pending_rebuild is not None
@@ -162,7 +146,7 @@ def test_the_claim_epoch_comes_from_the_snapshot_read_before_it(ladder):
         return taken
 
     with patch.object(overrides, "snapshot", side_effect=snapshot_then_change):
-        wire = _build_wire(ladder)
+        wire = ladder.build_wire()
 
     assert wire["claimEpoch"] == epoch_at_snapshot
     assert get_row_run(wire["runId"]).pending_rebuild == LadderRebuild(user_override=None)

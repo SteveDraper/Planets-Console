@@ -16,17 +16,14 @@ from api.analytics.military_score_inference.tier_ladder import LadderRebuild
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.compute_orchestration import (
     SCORES_PERSISTENCE_POLICY,
-    build_scores_tier_solve_job_wire,
     run_scores_tier_solve,
 )
 from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeScope
-from api.compute.wire import DependencyOutputs
 
 from tests.scores_exports_helpers import GAME_ID, scores_export_context
 from tests.scores_ladder_helpers import durable_row_complete, scripted_tier_job
-from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
@@ -81,21 +78,6 @@ def test_a_mask_save_and_reset_move_the_epoch_at_every_turn_and_perspective(samp
     assert _epochs(ctx, OTHER_PLAYER_ID) == other_before
 
 
-def _build_wire(ladder, *, execution_generation: int | None = None) -> dict:
-    return build_scores_tier_solve_job_wire(
-        ladder.scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=ladder.ctx,
-        submission_open=explicit_submission_open(),
-        execution_generation=(
-            ladder.orchestrator.nodes[ladder.scope].execution_generation
-            if execution_generation is None
-            else execution_generation
-        ),
-        is_execution_live=live_execution,
-    )
-
-
 def test_a_mask_change_while_detached_takes_the_admit_path(ladder):
     ladder.submit()
     stream_run_id = ladder.session.run_id
@@ -103,7 +85,7 @@ def test_a_mask_change_while_detached_takes_the_admit_path(ladder):
     ladder.close_stream()
 
     ladder.change_mask()
-    wire = _build_wire(ladder)
+    wire = ladder.build_wire()
 
     assert get_row_run(stream_run_id) is None
     assert wire["runId"] != stream_run_id
@@ -117,7 +99,7 @@ def test_a_reopen_after_a_mask_change_does_not_inherit_the_old_ladder(ladder):
     fresh_ladder = get_row_run(winner_id).ladder.ladder_state
 
     ladder.change_mask()
-    wire = _build_wire(ladder)
+    wire = ladder.build_wire()
 
     winner = get_row_run(winner_id)
     assert wire["runId"] == winner_id

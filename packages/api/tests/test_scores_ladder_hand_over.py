@@ -50,10 +50,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
 )
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.scores import exports, tier_row_run_registry
-from api.analytics.scores.compute_orchestration import (
-    SCORES_PERSISTENCE_POLICY,
-    build_scores_tier_solve_job_wire,
-)
+from api.analytics.scores.compute_orchestration import SCORES_PERSISTENCE_POLICY
 from api.analytics.scores.persist_decision import PersistDecision
 from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
@@ -62,14 +59,12 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import reset_orchestrators_for_tests
-from api.compute.wire import DependencyOutputs
 from api.exceptions import ScoresTierOutcomeError
 from api.services.inference_invalidation_service import InferenceInvalidationService
 
 from tests.on_walk_helpers import fleet_persistence
 from tests.scores_exports_helpers import GAME_ID
 from tests.scores_ladder_helpers import ShellLadder, durable_row_complete
-from tests.submission_open_helpers import explicit_submission_open, live_execution
 
 CONTINUE = TierJobContinue()
 ABSENT = PersistDecision.refuse(should_retire=False)
@@ -277,22 +272,15 @@ def test_a_reopen_against_a_stale_stamp_starts_a_fresh_ladder(ladder, stale):
     ladder.close_stream()
     winner_id = ladder.open_stream().run_id
     fresh_ladder = get_row_run(winner_id).ladder.ladder_state
-    generation = ladder.orchestrator.nodes[ladder.scope].execution_generation
+    generation_offset = 0
     if stale == "node-replaced":
-        generation += 1
+        generation_offset = 1
     else:
         fleet_persistence(ladder.ctx).invalidate_player_ledgers_from_turn(
             GAME_ID, ladder.scope.perspective, ladder.scope.turn - 1, ladder.player_id
         )
 
-    wire = build_scores_tier_solve_job_wire(
-        ladder.scope,
-        dependency_outputs=DependencyOutputs(),
-        ctx=ladder.ctx,
-        submission_open=explicit_submission_open(),
-        execution_generation=generation,
-        is_execution_live=live_execution,
-    )
+    wire = ladder.build_wire(generation_offset=generation_offset)
 
     assert wire["runId"] == winner_id
     assert get_row_run(winner_id).ladder.ladder_state is fresh_ladder
