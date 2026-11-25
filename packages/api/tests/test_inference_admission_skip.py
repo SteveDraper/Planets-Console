@@ -55,6 +55,7 @@ from api.models.enums import PlayerStatus
 from api.models.player import Relation
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.scores_exports_helpers import ADMIT_EVERY_WRITE, GAME_ID, scores_query_context
 
 
@@ -487,7 +488,8 @@ def test_persist_rejects_non_durable_statuses(status, persistence) -> None:
 
 
 def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         GAME_ID,
         8,
         110,
@@ -499,10 +501,10 @@ def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is True
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         GAME_ID,
         8,
         110,
@@ -514,10 +516,10 @@ def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is False
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         GAME_ID,
         8,
         110,
@@ -529,10 +531,10 @@ def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is False
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         GAME_ID,
         8,
         110,
@@ -544,7 +546,6 @@ def test_mine_residual_sticky_prior_from_persisted_status(persistence) -> None:
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     assert persistence.has_mine_residual_sticky_prior(GAME_ID, 8, 111, 3) is False
 

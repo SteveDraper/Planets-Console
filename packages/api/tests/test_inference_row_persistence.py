@@ -32,6 +32,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.file_storage_helpers import open_file_storage_backend
 from tests.scores_exports_helpers import scores_export_context
 
@@ -63,7 +64,7 @@ def test_persistence_row_round_trip(persistence):
         diagnostics={"actionCatalog": {"shipBuildCombos": [{"comboId": "x"}] * 1000}},
         persistence_version=INFERENCE_ROW_PERSISTENCE_VERSION,
     )
-    persistence.put_row(628580, 1, 111, 8, row, on_walk=False)
+    persistence.put_row_without_notify(628580, 1, 111, 8, row)
     loaded = persistence.get_row(628580, 1, 111, 8)
     assert loaded is not None
     assert loaded.status == row.status
@@ -90,10 +91,10 @@ def test_row_keys_for_host_turn_is_empty_when_none_stored(persistence):
 
 
 def test_row_keys_for_host_turn_lists_that_turn_only(persistence):
-    persistence.put_row(628580, 1, 111, 9, _cached_row("nine"), on_walk=False)
-    persistence.put_row(628580, 1, 111, 8, _cached_row("eight"), on_walk=False)
-    persistence.put_row(628580, 1, 110, 7, _cached_row("prior"), on_walk=False)
-    persistence.put_row(628580, 2, 111, 8, _cached_row("other perspective"), on_walk=False)
+    seed_inference_row(persistence, 628580, 1, 111, 9, _cached_row("nine"))
+    seed_inference_row(persistence, 628580, 1, 111, 8, _cached_row("eight"))
+    seed_inference_row(persistence, 628580, 1, 110, 7, _cached_row("prior"))
+    seed_inference_row(persistence, 628580, 2, 111, 8, _cached_row("other perspective"))
 
     assert persistence.row_keys_for_host_turn(628580, 1, 111) == [
         persistence.row_store_key(628580, 1, 111, 8),
@@ -107,9 +108,9 @@ def test_row_keys_for_host_turn_lists_that_turn_only(persistence):
 def test_delete_host_turn_document_removes_player_files_and_shared_document(tmp_path):
     backend = open_file_storage_backend(tmp_path)
     persistence = InferenceRowPersistenceService(backend)
-    persistence.put_row(628580, 1, 111, 8, _cached_row(), on_walk=False)
-    persistence.put_row(628580, 1, 111, 9, _cached_row("other"), on_walk=False)
-    persistence.put_row(628580, 1, 110, 8, _cached_row("prior"), on_walk=False)
+    seed_inference_row(persistence, 628580, 1, 111, 8, _cached_row())
+    seed_inference_row(persistence, 628580, 1, 111, 9, _cached_row("other"))
+    seed_inference_row(persistence, 628580, 1, 110, 8, _cached_row("prior"))
     parent = persistence.host_turn_document_key(628580, 1, 111)
     backend.put(parent, {"leftover": True})
 
@@ -182,14 +183,13 @@ def test_put_row_without_notify_skips_on_row_persisted(persistence):
     persistence.put_row_without_notify(628580, 1, 111, 8, row)
     assert persistence.get_row(628580, 1, 111, 8) is not None
     assert notified == []
-    persistence.put_row(628580, 1, 111, 8, row, on_walk=False)
-    persistence.put_row(628580, 1, 111, 8, row, on_walk=True)
-    assert notified == [(628580, 1, 111, 8, False), (628580, 1, 111, 8, True)]
 
 
-def test_put_row_promotes_accelerated_segments_before_dropping_diagnostics(persistence):
+def test_put_row_without_notify_promotes_accelerated_segments_before_dropping_diagnostics(
+    persistence,
+):
     _, player_id, legacy_row = _legacy_v1_split_row_from_turn_three()
-    persistence.put_row(628580, 1, 3, player_id, legacy_row, on_walk=False)
+    persistence.put_row_without_notify(628580, 1, 3, player_id, legacy_row)
     raw = persistence._storage.get(persistence.row_store_key(628580, 1, 3, player_id))
     assert isinstance(raw, dict)
     assert "diagnostics" not in raw
@@ -368,7 +368,8 @@ def test_persisted_inference_row_round_trips_tier_emissions():
 
 
 def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persistence):
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         110,
@@ -380,9 +381,9 @@ def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persis
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         111,
@@ -394,7 +395,6 @@ def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persis
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     cleared = persistence.invalidate_for_turn_write(628580, 1, 111)
     assert cleared == {111, 110}
@@ -406,7 +406,8 @@ def test_stream_replays_persisted_row_without_scheduler_work(sample_turn, persis
     reset_inference_row_scheduler_for_tests()
     reset_inference_table_stream_registry_for_tests()
     player_id = sample_turn.scores[0].ownerid
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         sample_turn.settings.turn,
@@ -418,7 +419,6 @@ def test_stream_replays_persisted_row_without_scheduler_work(sample_turn, persis
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     scheduler = get_inference_row_scheduler()
     stream = iter_scores_table_inference_events(
@@ -440,7 +440,8 @@ def test_stream_replays_persisted_row_without_scheduler_work(sample_turn, persis
 def test_mask_change_deletes_persisted_row(memory_backend):
     persistence = InferenceRowPersistenceService(memory_backend)
     invalidation = InferenceInvalidationService(persistence)
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         111,
@@ -452,7 +453,6 @@ def test_mask_change_deletes_persisted_row(memory_backend):
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     invalidation.on_hull_mask_changed(628580, 1, 111, 8)
     assert persistence.get_row(628580, 1, 111, 8) is None
@@ -461,7 +461,8 @@ def test_mask_change_deletes_persisted_row(memory_backend):
 def test_recompute_clears_host_turn_document(memory_backend):
     _, _, _, _, analytics, _, _ = build_service_stack(memory_backend)
     persistence = InferenceRowPersistenceService(memory_backend)
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         111,
@@ -473,7 +474,6 @@ def test_recompute_clears_host_turn_document(memory_backend):
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     analytics.recompute_scores_inference(628580, 1, 111)
     assert persistence.get_row(628580, 1, 111, 8) is None
@@ -482,7 +482,8 @@ def test_recompute_clears_host_turn_document(memory_backend):
 def test_turn_store_invalidates_inference_persistence(memory_backend):
     _, turns, _, _, _, _, _ = build_service_stack(memory_backend)
     persistence = InferenceRowPersistenceService(memory_backend)
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         111,
@@ -494,7 +495,6 @@ def test_turn_store_invalidates_inference_persistence(memory_backend):
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
     with open(ASSETS_DIR / "turn_sample.json") as f:
         turns._store_turn_rst(628580, 1, 111, json.load(f))

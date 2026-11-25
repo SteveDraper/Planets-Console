@@ -20,6 +20,7 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 from tests.scores_exports_helpers import scores_export_context
 
@@ -89,7 +90,8 @@ def _ingest_with_persist_placeholders(
         freighterchange=freighterchange,
     )
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         111,
@@ -103,7 +105,6 @@ def _ingest_with_persist_placeholders(
             placeholders=placeholders,
             unexplained_military_delta_2x=22,
         ),
-        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),

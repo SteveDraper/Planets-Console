@@ -67,7 +67,7 @@ def _persist(persistence: InferenceRowPersistenceService, guard) -> None:
         perspective=PERSPECTIVE,
         host_turn=HOST_TURN,
         player_id=PLAYER_ID,
-        on_walk=False,
+        on_walk=True,
     )
 
 
@@ -87,13 +87,20 @@ def test_a_refusing_guard_writes_nothing_and_notifies_nothing():
 def test_an_admitted_write_lands_inside_the_hold_and_notifies_after_it():
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     guard = _RecordingGuard(admits=True)
-    persistence.on_row_persisted = lambda *_args, **_kwargs: guard.events.append("notify")
+    notified: list[tuple[int, int, int, int, bool]] = []
+
+    def on_row_persisted(game_id, perspective, host_turn, player_id, *, on_walk):
+        guard.events.append("notify")
+        notified.append((game_id, perspective, host_turn, player_id, on_walk))
+
+    persistence.on_row_persisted = on_row_persisted
 
     _persist(persistence, guard)
 
     stored = persistence.get_row(GAME_ID, PERSPECTIVE, HOST_TURN, PLAYER_ID)
     assert stored is not None and stored.status == STATUS_EXACT
     assert guard.events == ["enter", "exit", "notify"]
+    assert notified == [(GAME_ID, PERSPECTIVE, HOST_TURN, PLAYER_ID, True)]
 
 
 def _claim_epoch_guard(ladder, claim_epoch: int) -> ClaimEpochPersistGuard:

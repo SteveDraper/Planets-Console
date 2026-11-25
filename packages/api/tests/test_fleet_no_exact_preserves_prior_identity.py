@@ -46,6 +46,7 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.fleet_fixtures import ledger_for_player
 from tests.scores_exports_helpers import (
     inference_solution,
@@ -112,7 +113,8 @@ def _close_scores(
     persistence = inference.scores_services.persistence
     assert persistence is not None
     closed = list(solutions) if solutions is not None else []
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         game_perspective,
         turn.settings.turn,
@@ -124,7 +126,6 @@ def _close_scores(
             is_complete=True,
             solutions=closed,
         ),
-        on_walk=False,
     )
 
 

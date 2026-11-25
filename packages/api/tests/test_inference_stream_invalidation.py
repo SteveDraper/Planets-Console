@@ -45,6 +45,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.scores_exports_helpers import minimal_stream_query_context
 from tests.scores_row_lifecycle_test_helpers import _patch_scores_dag_without_fleet_deps
 
@@ -447,7 +448,8 @@ def test_recompute_reschedules_all_rows_while_table_stream_active_cases_1_and_2(
     _attach_active_table_stream(sample_turn, scheduler, player_ids)
     persistence = InferenceRowPersistenceService(memory_backend)
     for player_id in player_ids:
-        persistence.put_row(
+        seed_inference_row(
+            persistence,
             628580,
             1,
             turn_number,
@@ -459,7 +461,6 @@ def test_recompute_reschedules_all_rows_while_table_stream_active_cases_1_and_2(
                 is_complete=True,
                 solutions=[],
             ),
-            on_walk=False,
         )
 
     before = _run_ids_for_players(scheduler, player_ids)
@@ -530,7 +531,8 @@ def _seed_cached_rows(
     player_ids: tuple[int, ...],
 ) -> None:
     for player_id in player_ids:
-        persistence.put_row(
+        seed_inference_row(
+            persistence,
             628580,
             1,
             turn_number,
@@ -542,7 +544,6 @@ def _seed_cached_rows(
                 is_complete=True,
                 solutions=[],
             ),
-            on_walk=False,
         )
 
 

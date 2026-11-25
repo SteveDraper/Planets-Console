@@ -46,6 +46,30 @@ from api.storage.memory_asset import MemoryAssetBackend
 GAME_ID = 628580
 
 
+def seed_inference_row(
+    persistence: InferenceRowPersistenceService,
+    game_id: int,
+    perspective: int,
+    host_turn: int,
+    player_id: int,
+    row: PersistedInferenceRow,
+    *,
+    notify_on_walk: bool | None = None,
+) -> None:
+    """Write one scores row the way the raw write does.
+
+    Without ``notify_on_walk`` the row is storage state only. With it, the row
+    then reaches ``on_row_persisted`` as a producing execution's persist does
+    after its guard's hold, carrying that walk membership.
+    """
+    persistence.put_row_without_notify(game_id, perspective, host_turn, player_id, row)
+    if notify_on_walk is None:
+        return
+    on_row_persisted = persistence.on_row_persisted
+    assert on_row_persisted is not None, "notify_on_walk needs a wired on_row_persisted"
+    on_row_persisted(game_id, perspective, host_turn, player_id, on_walk=notify_on_walk)
+
+
 @dataclass(frozen=True)
 class ExportSeedContext:
     """Minimal context for ``seed_fleet_unwind_through``."""
@@ -165,7 +189,8 @@ def seed_fleet_unwind_through(
             raise RuntimeError(f"seed_fleet_unwind_through missing stored turn {turn_number}")
         seeded_turns[turn_number] = turn
         for row_player_id in player_ids:
-            scores_services.persistence.put_row(
+            seed_inference_row(
+                scores_services.persistence,
                 ctx.game_id,
                 ctx.perspective,
                 turn_number,
@@ -177,7 +202,6 @@ def seed_fleet_unwind_through(
                     is_complete=True,
                     solutions=[],
                 ),
-                on_walk=False,
             )
 
     floor = accelerated_ensure_floor(seeded_turns[last_seeded_turn].settings, last_seeded_turn)

@@ -108,26 +108,6 @@ class InferenceRowPersistenceService:
             return None
         return wire_complete_from_persisted_row(row)
 
-    def put_row(
-        self,
-        game_id: int,
-        perspective: int,
-        host_turn: int,
-        player_id: int,
-        row: PersistedInferenceRow,
-        *,
-        on_walk: bool,
-    ) -> None:
-        """Store one inference row a producing execution solved, then notify.
-
-        ``on_row_persisted`` receives ``on_walk``, the producing execution's
-        walk membership, so fleet invalidation classifies stamp versus bump
-        from it and clears ledgers from this host turn on a bump.
-        """
-        self.put_row_without_notify(game_id, perspective, host_turn, player_id, row)
-        if self._on_row_persisted is not None:
-            self._on_row_persisted(game_id, perspective, host_turn, player_id, on_walk=on_walk)
-
     def put_row_without_notify(
         self,
         game_id: int,
@@ -136,13 +116,14 @@ class InferenceRowPersistenceService:
         player_id: int,
         row: PersistedInferenceRow,
     ) -> None:
-        """Store one inference row without invoking ``on_row_persisted``.
+        """Store one inference row; the raw write, which never notifies.
 
-        For writes that carry no new scores evidence: first-write cheap
-        terminals (``no_prior_turn`` / ``player_not_found``) established during
-        ensure, which close materialization evidence without being a scores
-        refine that should abort an in-flight fleet gap-fill, and the upgrade
-        of a stored row on read.
+        ``persist_row_complete_guarded`` calls it inside its guard's hold and
+        tells ``on_row_persisted`` after the hold. Cheap terminals
+        (``no_prior_turn`` / ``player_not_found``) written during ensure, and
+        the upgrade of a stored row on read, call it without notifying: they
+        carry no new scores evidence, so they must not abort an in-flight fleet
+        gap-fill.
         """
         prepared, _ = upgrade_persisted_inference_row(row)
         self._storage.put(
@@ -256,7 +237,10 @@ class InferenceRowPersistenceService:
         ``guard`` refuses a write whose producing work is no longer current
         (raising ``DiscardedWorkRefused``), and otherwise holds what keeps it
         current until the row is written. ``on_row_persisted`` runs after the
-        hold, with the producing execution's walk membership ``on_walk``.
+        hold, with the producing execution's walk membership ``on_walk``, so
+        fleet invalidation classifies stamp versus bump from it and clears
+        ledgers from this host turn on a bump. This is the only write that
+        notifies.
         """
         status = event.wire_payload.status
         if not is_durable_turn_evidence_row_status(status):

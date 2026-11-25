@@ -51,6 +51,7 @@ from api.services.inference_invalidation_service import InferenceInvalidationSer
 from tests.export_chain_test_fixtures import (
     enable_backfill_earlier_turns,
     export_chain_query_context,
+    seed_inference_row,
 )
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
@@ -149,14 +150,14 @@ def test_on_fleet_snapshot_persisted_clears_scores_host_turn_document(
         solutions=[],
     )
     for host_turn in (110, 111):
-        persistence.put_row(game_id, persp, host_turn, player_id, row, on_walk=False)
+        seed_inference_row(persistence, game_id, persp, host_turn, player_id, row)
 
     invalidation.on_fleet_snapshot_persisted(game_id, persp, fleet_turn=110)
 
     assert persistence.get_row(game_id, persp, 111, player_id) is None
     assert persistence.get_row(game_id, persp, 110, player_id) is not None
 
-    persistence.put_row(game_id, persp, 111, player_id, row, on_walk=False)
+    seed_inference_row(persistence, game_id, persp, 111, player_id, row)
 
     try:
         scope = InferenceStreamScope(game_id=game_id, perspective=persp, turn_number=111)
@@ -391,7 +392,8 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
     _wire_fleet_scores_invalidation(inference_persistence, fleet_persistence, scheduler)
 
     for player_id in player_ids:
-        inference_persistence.put_row(
+        seed_inference_row(
+            inference_persistence,
             ctx.game_id,
             ctx.perspective,
             turn_number,
@@ -403,7 +405,6 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
                 is_complete=True,
                 solutions=[],
             ),
-            on_walk=False,
         )
 
     def resolve_fleet_torp_resolution_for_player(

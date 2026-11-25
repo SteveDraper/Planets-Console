@@ -41,6 +41,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 from api.transport.inference_stream_wire import inference_api_payload_to_wire_complete
 
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 from tests.inference_corpus.fixtures import load_turn_fixture
 from tests.scores_exports_helpers import (
@@ -783,7 +784,8 @@ def test_streaming_refine_updates_freighter_option_sets(sample_turn):
 def test_persisted_inference_refines_placeholders():
     turn = _turn_with_score_delta(turn_number=111, owner_id=8, shipchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         111,
@@ -809,7 +811,6 @@ def test_persisted_inference_refines_placeholders():
                 }
             ],
         ),
-        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -830,7 +831,8 @@ def test_persisted_inference_refines_placeholders():
 def test_persisted_inference_refines_freighter_placeholders():
     turn = _turn_with_score_delta(turn_number=111, owner_id=8, freighterchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         111,
@@ -856,7 +858,6 @@ def test_persisted_inference_refines_freighter_placeholders():
                 }
             ],
         ),
-        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -878,7 +879,8 @@ def test_persisted_inference_refines_freighter_placeholders():
 def test_duplicate_combo_id_keeps_highest_solution_rank_weight():
     turn = _turn_with_score_delta(turn_number=5, owner_id=8, shipchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         5,
@@ -915,7 +917,6 @@ def test_duplicate_combo_id_keeps_highest_solution_rank_weight():
                 },
             ],
         ),
-        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -935,7 +936,8 @@ def test_duplicate_combo_id_keeps_highest_solution_rank_weight():
 def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_product():
     turn = _turn_with_score_delta(turn_number=5, owner_id=8, shipchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         5,
@@ -972,7 +974,6 @@ def test_wire_output_uses_consistent_option_set_tuples_not_field_cartesian_produ
                 },
             ],
         ),
-        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -1042,7 +1043,8 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
         scheduler=scheduler,
     )
     assert scores_services.persistence is not None
-    scores_services.persistence.put_row(
+    seed_inference_row(
+        scores_services.persistence,
         turn.game.id,
         perspective(turn),
         turn.settings.turn,
@@ -1067,7 +1069,6 @@ def test_ephemeral_compute_services_refine_from_scheduler(sample_turn):
                 }
             ],
         ),
-        on_walk=False,
     )
     services = build_ephemeral_fleet_compute_services(
         turn,
@@ -1098,7 +1099,8 @@ def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
     """Generic freighter keeps hullId 0 sentinel; other zero component ids stay omitted."""
     turn = _turn_with_score_delta(turn_number=111, owner_id=8, freighterchange=1)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         111,
@@ -1126,7 +1128,6 @@ def test_generic_freighter_option_set_omits_zero_component_ids_on_wire():
                 }
             ],
         ),
-        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -1228,7 +1229,8 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     # Put may still receive wire diagnostics; persistence must promote accelerated
     # segments to host_turn_targets and drop the catalog before writing.
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         3,
@@ -1241,7 +1243,6 @@ def test_accelerated_first_reliable_refines_segment_option_sets_for_root():
             solutions=inference_payload["solutions"],
             diagnostics=inference_payload["diagnostics"],
         ),
-        on_walk=False,
     )
     stored = persistence.get_row(628580, 1, 3, player_id)
     assert stored is not None
@@ -1281,7 +1282,8 @@ def test_accelerated_first_reliable_refines_without_scores_diagnostics():
     host_turn_targets = list(host_turn_targets_from_wire_event(wire_complete))
     assert host_turn_targets
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         3,
@@ -1295,7 +1297,6 @@ def test_accelerated_first_reliable_refines_without_scores_diagnostics():
             diagnostics=None,
             host_turn_targets=host_turn_targets,
         ),
-        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
@@ -1331,7 +1332,8 @@ def test_accelerated_window_refine_when_intermediate_scoreboard_turn_missing():
     assert any(target.host_turn == 1 for target in host_turn_targets)
 
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         628580,
         1,
         3,
@@ -1345,7 +1347,6 @@ def test_accelerated_window_refine_when_intermediate_scoreboard_turn_missing():
             diagnostics=None,
             host_turn_targets=host_turn_targets,
         ),
-        on_walk=False,
     )
 
     def load_turn(turn_number: int):

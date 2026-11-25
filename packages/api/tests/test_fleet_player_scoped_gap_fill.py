@@ -30,6 +30,7 @@ from api.serialization.turn import turn_info_from_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.fleet_player_scoped_gap_fill_helpers import (
     ensure_fleet_export_gap_fill_context,
     require_turns,
@@ -325,7 +326,8 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
     # invalidate scores@112. scores@112 for Q stays incomplete (incident shape).
     _seed_scores_rows_for_all_players(inference_persistence, turn_111)
 
-    inference_persistence.put_row(
+    seed_inference_row(
+        inference_persistence,
         628580,
         1,
         112,
@@ -337,9 +339,9 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
-    inference_persistence.put_row(
+    seed_inference_row(
+        inference_persistence,
         628580,
         1,
         112,
@@ -351,7 +353,6 @@ def test_per_player_prior_turn_materializes_while_other_scores_inference_in_prog
             is_complete=False,
             solutions=[],
         ),
-        on_walk=False,
     )
 
     assert persistence.get_snapshot(628580, 1, 111) is None

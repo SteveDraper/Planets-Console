@@ -170,13 +170,13 @@ def test_probe_reports_prior_turn_work_without_running_ensure(sample_turn, persi
         patch(
             "api.analytics.scores.exports.schedule_inference_row",
         ) as mock_schedule,
-        patch.object(persistence, "put_row") as mock_put_row,
+        patch.object(persistence, "put_row_without_notify") as mock_row_write,
     ):
         probe = ctx.probe("scores", {"turn": 110, "player_id": player_id})
 
         mock_inference.assert_not_called()
         mock_schedule.assert_not_called()
-        mock_put_row.assert_not_called()
+        mock_row_write.assert_not_called()
 
     assert probe.status == "ok"
     missing = scores_missing_step(probe, turn=110, player_id=player_id)
@@ -210,7 +210,7 @@ def test_probe_reports_current_turn_work_without_scheduling(sample_turn, persist
 
 
 def test_ensure_prior_turn_schedules_inference_row_without_sync_solve(sample_turn, persistence):
-    """Historical ensure admits via schedule; never sync CP-SAT or put_row."""
+    """Historical ensure admits via schedule; never sync CP-SAT or a row write."""
     reset_inference_row_scheduler_for_tests()
     scheduler = InferenceRowScheduler(worker_count=0)
     ctx, scope, player_id, _, _ = prior_turn_ensure_context(
@@ -226,7 +226,7 @@ def test_ensure_prior_turn_schedules_inference_row_without_sync_solve(sample_tur
         patch(
             "api.analytics.scores.inference.get_scores_row_inference",
         ) as mock_inference,
-        patch.object(persistence, "put_row") as mock_put_row,
+        patch.object(persistence, "put_row_without_notify") as mock_row_write,
     ):
         assert (
             admit_scores_export_work(
@@ -235,7 +235,7 @@ def test_ensure_prior_turn_schedules_inference_row_without_sync_solve(sample_tur
             is True
         )
         mock_inference.assert_not_called()
-        mock_put_row.assert_not_called()
+        mock_row_write.assert_not_called()
 
     assert scheduler.row_run_for_player(stream_scope, player_id) is not None
     assert persistence.get_row(GAME_ID, perspective(sample_turn), 110, player_id) is None

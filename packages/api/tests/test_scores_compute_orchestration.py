@@ -1031,7 +1031,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
 
     with (
         patch("api.analytics.scores.inference.get_scores_row_inference") as mock_inference,
-        patch.object(persistence, "put_row") as mock_put_row,
+        patch.object(persistence, "put_row_without_notify") as mock_row_write,
     ):
         build_scores_materialize_job_wire(
             scope,
@@ -1040,7 +1040,7 @@ def test_historical_schedule_tier_solve_persists_via_scores_persistence_policy(
             submission_open=explicit_submission_open(),
         )
         mock_inference.assert_not_called()
-        mock_put_row.assert_not_called()
+        mock_row_write.assert_not_called()
 
     assert get_row_run_for_scope(scope) is not None
     assert persistence.get_row(GAME_ID, perspective(sample_turn), host_turn, player_id) is None

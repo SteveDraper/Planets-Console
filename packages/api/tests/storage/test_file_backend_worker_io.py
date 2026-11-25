@@ -30,6 +30,7 @@ from api.compute.wire import DependencyOutputs
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.file import FileStorageBackend
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.file_backend_io_accounting import (
     ANALYTIC_SIBLINGS,
     ANALYTICS_PREFIX,
@@ -220,7 +221,7 @@ def test_scores_persist_and_read_call_counts(tmp_path, sample_turn):
     row_key = persistence.row_store_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
 
     with count_file_backend_syscalls(counts):
-        persistence.put_row(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id, row, on_walk=False)
+        seed_inference_row(persistence, GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id, row)
 
     assert counts.protocol_counts() == {"get": 0, "put": 1, "list": 0, "delete": 0}
     assert counts.json_load_calls == 0

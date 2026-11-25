@@ -45,6 +45,7 @@ from api.serialization.uncharacterized_roster import (
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.fixtures.military_score_inference import _observation
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
 from tests.scores_exports_helpers import scores_export_context
@@ -98,7 +99,8 @@ def _persist_row(
     departure_pins: list[dict[str, object]] | None = None,
     host_turn_targets: list[HostTurnFunctionalTarget] | None = None,
 ) -> None:
-    persistence.put_row(
+    seed_inference_row(
+        persistence,
         _GAME_ID,
         _PERSPECTIVE,
         _HOST_TURN,
@@ -118,7 +120,6 @@ def _persist_row(
             departure_pins=departure_pins,
             host_turn_targets=host_turn_targets,
         ),
-        on_walk=False,
     )
 
 

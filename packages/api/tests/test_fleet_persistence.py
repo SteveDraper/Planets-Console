@@ -34,6 +34,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.export_chain_test_fixtures import seed_inference_row
 from tests.fleet_fixtures import legacy_fleet_ledgers_document
 from tests.scores_exports_helpers import scores_export_context
 
@@ -529,7 +530,8 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
         )
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
-    inference_persistence.put_row(
+    seed_inference_row(
+        inference_persistence,
         628580,
         1,
         111,
@@ -541,7 +543,7 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
+        notify_on_walk=False,
     )
     assert fleet_persistence.get_ledger(628580, 1, 111, 8) is not None
     assert fleet_persistence.get_ledger(628580, 1, 112, 8) is not None
@@ -745,7 +747,8 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
     )
     assert fleet_persistence.get_snapshot(628580, 1, 111) is not None
 
-    inference_persistence.put_row(
+    seed_inference_row(
+        inference_persistence,
         628580,
         1,
         111,
@@ -770,7 +773,7 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
                 }
             ],
         ),
-        on_walk=False,
+        notify_on_walk=False,
     )
     assert fleet_persistence.get_ledger(628580, 1, 111, 8) is not None
     assert not fleet_persistence.has_final_ledger(628580, 1, 111, 8)
@@ -1169,7 +1172,8 @@ def _seed_scores_rows_for_all_players(
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
     for player in iter_turn_players(turn):
-        inference_persistence.put_row(
+        seed_inference_row(
+            inference_persistence,
             628580,
             1,
             turn.settings.turn,
@@ -1181,7 +1185,6 @@ def _seed_scores_rows_for_all_players(
                 is_complete=True,
                 solutions=[],
             ),
-            on_walk=False,
         )
 
 
