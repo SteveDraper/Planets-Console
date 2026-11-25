@@ -3,44 +3,22 @@
 from __future__ import annotations
 
 from api.analytics.military_score_inference.hull_catalog_mask import (
+    ResolvedHullCatalogMask,
     hull_names_by_id,
     resolve_hull_catalog_mask,
 )
-from api.analytics.scores import ANALYTIC_ID as SCORES_ANALYTIC_ID
-from api.errors import NotFoundError, ValidationError
-from api.serialization.inference_hull_catalog import (
-    InferenceHullCatalogMaskOverride,
-    inference_hull_catalog_mask_override_from_json,
-    inference_hull_catalog_mask_override_to_json,
-)
+from api.analytics.scores.hull_mask_overrides import HullMaskOverrides
+from api.errors import ValidationError
+from api.models.game import TurnInfo
 from api.services.turn_load_service import TurnLoadService
-from api.storage.base import StorageBackend
-
-_INFERENCE_HULL_CATALOG_MASKS_KEY = "inference_hull_catalog_masks"
 
 
 class InferenceHullCatalogService:
-    def __init__(self, storage: StorageBackend, turns: TurnLoadService) -> None:
-        self._storage = storage
+    """Hull catalog mask payloads and edits; the stored overrides live in ``HullMaskOverrides``."""
+
+    def __init__(self, turns: TurnLoadService, mask_overrides: HullMaskOverrides) -> None:
         self._turns = turns
-
-    def _mask_store_key(self, game_id: int, player_id: int) -> str:
-        return (
-            f"games/{game_id}/analytics/{SCORES_ANALYTIC_ID}/"
-            f"{_INFERENCE_HULL_CATALOG_MASKS_KEY}/{player_id}"
-        )
-
-    def _load_user_override(self, game_id: int, player_id: int) -> frozenset[int] | None:
-        try:
-            data = self._storage.get(self._mask_store_key(game_id, player_id))
-        except NotFoundError:
-            return None
-        if data is None:
-            return None
-        if not isinstance(data, dict):
-            raise ValidationError("stored hull catalog mask override must be a JSON object")
-        override = inference_hull_catalog_mask_override_from_json(data)
-        return frozenset(override.enabled_hull_ids)
+        self._mask_overrides = mask_overrides
 
     def resolve_mask_for_player(
         self,
@@ -48,17 +26,17 @@ class InferenceHullCatalogService:
         perspective: int,
         turn_number: int,
         player_id: int,
-    ):
+    ) -> ResolvedHullCatalogMask:
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
         return self.resolve_mask_for_player_on_turn(turn, game_id, player_id)
 
     def resolve_mask_for_player_on_turn(
         self,
-        turn,
+        turn: TurnInfo,
         game_id: int,
         player_id: int,
-    ):
-        user_override = self._load_user_override(game_id, player_id)
+    ) -> ResolvedHullCatalogMask:
+        user_override = self._mask_overrides.snapshot(game_id, player_id).user_override
         return resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=user_override)
 
     def hull_catalog_mask_payload(
@@ -69,7 +47,7 @@ class InferenceHullCatalogService:
         player_id: int,
     ) -> dict[str, object]:
         turn = self._turns.get_turn_info(game_id, perspective, turn_number)
-        user_override = self._load_user_override(game_id, player_id)
+        user_override = self._mask_overrides.snapshot(game_id, player_id).user_override
         resolved = resolve_hull_catalog_mask(turn, player_id, user_enabled_hull_ids=user_override)
         names = hull_names_by_id(turn)
         master_entries = [
@@ -115,11 +93,7 @@ class InferenceHullCatalogService:
         invalid = [hull_id for hull_id in enabled_hull_ids if hull_id not in master]
         if invalid:
             raise ValidationError(f"hull ids not in race master catalog: {sorted(invalid)}")
-        override = InferenceHullCatalogMaskOverride(enabled_hull_ids=sorted(enabled_hull_ids))
-        self._storage.put(
-            self._mask_store_key(game_id, player_id),
-            inference_hull_catalog_mask_override_to_json(override),
-        )
+        self._mask_overrides.change(game_id, player_id, frozenset(enabled_hull_ids))
         return self.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
 
     def reset_user_mask(
@@ -129,9 +103,5 @@ class InferenceHullCatalogService:
         turn_number: int,
         player_id: int,
     ) -> dict[str, object]:
-        key = self._mask_store_key(game_id, player_id)
-        try:
-            self._storage.delete(key)
-        except NotFoundError:
-            pass
+        self._mask_overrides.change(game_id, player_id, None)
         return self.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)

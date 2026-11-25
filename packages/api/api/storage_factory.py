@@ -22,6 +22,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
 from api.analytics.military_score_inference.inference_table_stream_registry import (
     reset_inference_table_stream_registry_for_tests,
 )
+from api.analytics.scores.hull_mask_overrides import clear_hull_mask_overrides
 from api.analytics.scores.storage_migration import scores_inference_row_storage_migration
 from api.config import ApiConfig, get_config
 from api.services.stack import clear_process_service_stack
@@ -114,7 +115,7 @@ def get_storage() -> StorageBackend:
 
 
 def clear_backend_cache() -> None:
-    """Clear the cached backend, service stack, and analytic singletons.
+    """Clear the cached backend, service stack, hull mask overrides, and analytic singletons.
 
     Tests call this after a config change. Stream and scheduler singletons are
     process-wide, so this reset drops them with the backend.
@@ -122,6 +123,7 @@ def clear_backend_cache() -> None:
     global _backend_cache
     _backend_cache = None
     clear_process_service_stack()
+    clear_hull_mask_overrides()
     reset_inference_row_scheduler_for_tests()
     reset_inference_table_stream_registry_for_tests()
     reset_fleet_table_stream_scheduler_for_tests()

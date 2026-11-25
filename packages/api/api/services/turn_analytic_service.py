@@ -17,6 +17,7 @@ from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_A
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
+from api.analytics.scores.hull_mask_overrides import hull_mask_overrides_for
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.batch_compute import ensure_table_map_compute
 from api.compute.diagnostics import ShellContextKey, get_compute_diagnostics_controller
@@ -69,7 +70,9 @@ class TurnAnalyticService:
         if hull_catalog_masks is not None:
             self._hull_catalog_masks = hull_catalog_masks
         else:
-            self._hull_catalog_masks = InferenceHullCatalogService(storage, turns)
+            self._hull_catalog_masks = InferenceHullCatalogService(
+                turns, hull_mask_overrides_for(storage)
+            )
         if inference_persistence is not None:
             self._inference_persistence = inference_persistence
         else:

@@ -11,6 +11,7 @@ from api.analytics.military_score_inference.hull_catalog_mask import (
     standard_settings_adjusted_basehulls,
     swaps_for_enabled_settings,
 )
+from api.analytics.scores.hull_mask_overrides import hull_mask_overrides_for
 from api.serialization.turn import turn_info_from_json
 from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
@@ -95,6 +96,40 @@ def test_user_override_intersects_master(sample_turn):
     )
     assert 99999 not in resolved.effective_enabled_hull_ids
     assert resolved.has_user_override is True
+
+
+def _fixture_backend_with_turn3() -> tuple[MemoryAssetBackend, int, int, int, int]:
+    """Memory backend holding the corpus game info and turn 3 of perspective 1."""
+    backend = MemoryAssetBackend(initial={})
+    game_id = 628580
+    perspective = 1
+    turn_number = 3
+    backend.put(f"games/{game_id}/info", json.loads(FIXTURE_INFO_PATH.read_text()))
+    turn_json = json.loads(FIXTURE_TURN3_PATH.read_text())
+    backend.put(f"games/{game_id}/{perspective}/turns/{turn_number}", turn_json)
+    player_id = turn_json["scores"][0]["ownerid"]
+    return backend, game_id, perspective, turn_number, player_id
+
+
+def test_a_mask_change_through_one_service_stack_is_seen_through_another():
+    backend, game_id, perspective, turn_number, player_id = _fixture_backend_with_turn3()
+    writer = build_service_stack(backend).analytics._hull_catalog_masks
+    reader = build_service_stack(backend).analytics._hull_catalog_masks
+    initial = reader.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
+    subset = sorted(entry["hullId"] for entry in initial["masterCatalog"])[:2]
+    overrides = hull_mask_overrides_for(backend)
+
+    writer.put_user_mask(game_id, perspective, turn_number, player_id, subset)
+
+    assert overrides.revision(game_id, player_id) == 1
+    seen = reader.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
+    assert seen["userEnabledHullIds"] == subset
+
+    writer.reset_user_mask(game_id, perspective, turn_number, player_id)
+
+    assert overrides.revision(game_id, player_id) == 2
+    seen = reader.hull_catalog_mask_payload(game_id, perspective, turn_number, player_id)
+    assert seen["hasUserOverride"] is False
 
 
 @pytest.mark.skipif(not P5_TURN6_PATH.is_file(), reason="local store only")
