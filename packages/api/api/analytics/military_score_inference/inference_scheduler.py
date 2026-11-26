@@ -130,8 +130,8 @@ class InferenceRowScheduler(
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
         # Root scope and owning stream per run -- RowRun objects live in
-        # ``tier_row_run_registry``. Read through ``_run_ids_at_root_scope_locked``
-        # and ``_root_scopes_locked``.
+        # ``tier_row_run_registry``. Read through ``_run_ids_at_root_scope_locked``,
+        # ``_run_ids_owned_by_locked`` and ``_root_scopes_locked``.
         self._runs: dict[str, RunOwnership] = {}
         # Execution identity for cancel abort, captured after submit/wake *outside*
         # the scheduler lock. ``cancel_run`` must never call into the orchestrator
@@ -433,6 +433,12 @@ class InferenceRowScheduler(
     def _run_ids_at_root_scope_locked(self, root_scope: ComputeScope) -> list[str]:
         """Run ids scheduled at ``root_scope``. Caller holds ``self._lock``."""
         return [run_id for run_id, entry in self._runs.items() if entry.root_scope == root_scope]
+
+    def _run_ids_owned_by_locked(self, stream_token: str) -> list[str]:
+        """Run ids whose owning stream is ``stream_token``. Caller holds ``self._lock``."""
+        return [
+            run_id for run_id, entry in self._runs.items() if entry.owning_token == stream_token
+        ]
 
     def _root_scopes_locked(self) -> tuple[ComputeScope, ...]:
         """Every scheduled run's root scope. Caller holds ``self._lock``."""

@@ -95,10 +95,7 @@ class InferenceStreamTeardownMixin:
         """
         with self._lock:
             owns_scope = self._scope_guard.end_table_stream_locked(scope, stream_token)
-            owned_run_ids = [
-                run_id for run_id, entry in self._runs.items() if entry.owning_token == stream_token
-            ]
-            for run_id in owned_run_ids:
+            for run_id in self._run_ids_owned_by_locked(stream_token):
                 self._remove_run_locked(run_id, op=RowLifecycleOp.DETACH)
             self._release_stream_locked(stream_token)
             return owns_scope and self._clear_global_pause_locked()
