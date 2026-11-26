@@ -14,7 +14,6 @@ from api.analytics.fleet.chain import (
 )
 from api.analytics.fleet.exports import ensure_fleet_export
 from api.analytics.fleet.fleet_table_stream_scheduler import (
-    FleetTableStreamScheduler,
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.injected_services import FleetComputeServices
@@ -484,6 +483,7 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
     persistence,
     load_turn,
     memory_backend,
+    make_fleet_table_stream_scheduler,
 ):
     """Gap-fill M..N emits ledger_updated after each leg, then complete."""
     from api.analytics.fleet.held_solutions import (
@@ -555,7 +555,7 @@ def test_gap_fill_stream_emits_incremental_ledger_updates_before_complete(
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
     reset_compute_worker_pool_for_tests(worker_count=1)
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = FleetComputeServices(
         persistence=persistence,
         game_id=628580,

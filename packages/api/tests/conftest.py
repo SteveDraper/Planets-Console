@@ -181,7 +181,36 @@ def _isolate_fleet_table_stream_compute_state(
     reset_fleet_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
-    reset_fleet_table_stream_scheduler_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _reset_table_stream_scheduler_singletons(
+    _isolate_compute_orchestrator_singleton,
+    _isolate_fleet_table_stream_compute_state,
+):
+    """Reset each process table-stream scheduler the test instantiated.
+
+    A reset shuts the scheduler's off-lock runner down once its queued stream
+    ends have run, so no runner thread or posted end outlives the test. Every
+    other fixture that may still post tears down first: test-module and
+    requested fixtures are set up after this one, and the orchestrator and
+    fleet isolation fixtures are requested here so they tear down after it.
+    The fleet scheduler goes first since its stream ends may reach scores.
+    """
+    yield
+    from api.analytics.fleet.fleet_table_stream_scheduler import (
+        fleet_table_stream_scheduler_if_initialized,
+        reset_fleet_table_stream_scheduler_for_tests,
+    )
+    from api.analytics.military_score_inference.inference_scheduler import (
+        inference_row_scheduler_if_initialized,
+        reset_inference_row_scheduler_for_tests,
+    )
+
+    if fleet_table_stream_scheduler_if_initialized() is not None:
+        reset_fleet_table_stream_scheduler_for_tests()
+    if inference_row_scheduler_if_initialized() is not None:
+        reset_inference_row_scheduler_for_tests()
 
 
 # OR-Tools / inference-corpus integration tests excluded from `make ci` (see Makefile `test_api`).

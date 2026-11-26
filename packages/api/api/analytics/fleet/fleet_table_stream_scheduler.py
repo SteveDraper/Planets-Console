@@ -646,7 +646,7 @@ def publish_saved_host_turn_ledger(
     persisted: PersistedFleetLedger,
 ) -> None:
     """Tell an open roster that this turn's ledger file replaced turn-load rows."""
-    scheduler = _process_scheduler
+    scheduler = fleet_table_stream_scheduler_if_initialized()
     if scheduler is None:
         return
     scheduler.publish_saved_host_turn_ledger(
@@ -662,6 +662,11 @@ _process_scheduler: FleetTableStreamScheduler | None = None
 _process_scheduler_lock = threading.Lock()
 
 
+def fleet_table_stream_scheduler_if_initialized() -> FleetTableStreamScheduler | None:
+    """Return the process scheduler when already constructed (no lazy init)."""
+    return _process_scheduler
+
+
 def get_fleet_table_stream_scheduler() -> FleetTableStreamScheduler:
     global _process_scheduler
     with _process_scheduler_lock:
@@ -671,12 +676,12 @@ def get_fleet_table_stream_scheduler() -> FleetTableStreamScheduler:
 
 
 def reset_fleet_table_stream_scheduler_for_tests() -> None:
+    """Shut down and drop the process-wide scheduler (tests only)."""
     global _process_scheduler
     from api.compute.runtime import reset_orchestrators_for_tests
 
     with _process_scheduler_lock:
-        previous = _process_scheduler
-        if previous is not None:
-            previous.shutdown()
-        _process_scheduler = FleetTableStreamScheduler()
+        if _process_scheduler is not None:
+            _process_scheduler.shutdown()
+        _process_scheduler = None
     reset_orchestrators_for_tests()
