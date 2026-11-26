@@ -326,9 +326,10 @@ class FleetTableStreamScheduler:
     def shutdown(self) -> None:
         """Drop all stream state and unregister the orchestrator and ledger listeners.
 
-        Runs the queued stream ends and stops the off-lock runner first. Safe to
-        call more than once, and for test teardown after dropping a service
-        stack.
+        Runs the queued stream ends and stops the off-lock runner first; a
+        runner that outlives its shutdown wait is logged, and its remaining
+        ends run after the stream state is dropped. Safe to call more than
+        once, and for test teardown after dropping a service stack.
         """
         self.off_lock_runner.shutdown()
         with self._lock:

@@ -9,7 +9,7 @@ takes, so the ``finally`` must not take one. It posts the teardown to an
 ``post`` is safe in that context: it calls ``queue.SimpleQueue.put`` on a
 queue that lives as long as the runner, which is reentrant and never blocks.
 Work posted while no runner thread is alive (before the first start, or after
-the thread died) stays queued and runs once a thread is started.
+the thread stopped or died) stays queued and runs once a thread is started.
 """
 
 from __future__ import annotations
@@ -23,7 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 class _Stop:
-    """Tells the runner thread to exit."""
+    """Tells one runner thread to exit; any other thread that reads it skips it."""
+
+    def __init__(self, thread: threading.Thread) -> None:
+        self.thread = thread
 
 
 class _DrainMarker:
@@ -81,31 +84,39 @@ class OffLockRunner:
         return marker.reached.wait(timeout)
 
     def shutdown(self, *, timeout: float = 1.0) -> None:
-        """Run the queued work, then stop the runner thread and wait for it.
+        """Stop the runner thread once every item queued before the call has run.
 
-        Does nothing when no runner thread is alive. Called from posted work,
-        it stops the thread after the current item without waiting for it.
+        The stop is queued behind the backlog, so that backlog runs first; the
+        call waits up to ``timeout`` for the thread to exit and logs a warning
+        when it has not. Called from posted work, it queues the stop and returns
+        without waiting. Does nothing when no runner thread is alive.
+
+        The thread stays recorded until it exits, so ``ensure_started`` never
+        starts a second thread on the queue while it is still running.
         """
         with self._lifecycle_lock:
             thread = self._thread
-            self._thread = None
             if thread is None or not thread.is_alive():
                 return
+            self._items.put(_Stop(thread))
             if thread is threading.current_thread():
-                self._items.put(_Stop())
                 return
-            marker = _DrainMarker()
-            self._items.put(marker)
-            marker.reached.wait(timeout)
-            self._items.put(_Stop())
             thread.join(timeout)
+            if thread.is_alive():
+                logger.warning(
+                    "%s thread still running %.1fs after shutdown; it stops once its backlog runs",
+                    self._thread_name,
+                    timeout,
+                )
 
     def _run(self) -> None:
         try:
             while True:
                 item = self._items.get()
                 if isinstance(item, _Stop):
-                    return
+                    if item.thread is threading.current_thread():
+                        return
+                    continue
                 if isinstance(item, _DrainMarker):
                     item.reached.set()
                     continue

@@ -569,7 +569,8 @@ class InferenceRowScheduler(
 
         Runs the queued stream ends, then stops the off-lock runner, before
         unregistering the orchestrator callbacks, so a release still running
-        finishes against them.
+        finishes against them. A runner that outlives its shutdown wait is
+        logged, and its remaining ends run after the callbacks are gone.
         """
         self.off_lock_runner.shutdown()
         self._orchestrator_attachment.shutdown()

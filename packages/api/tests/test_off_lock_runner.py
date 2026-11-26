@@ -35,7 +35,11 @@ class _Recorder:
 
 
 def _runner_thread_alive() -> bool:
-    return any(thread.name == THREAD_NAME for thread in threading.enumerate())
+    return _live_runner_thread_count() > 0
+
+
+def _live_runner_thread_count() -> int:
+    return sum(1 for thread in threading.enumerate() if thread.name == THREAD_NAME)
 
 
 def _wait_until(condition) -> bool:
@@ -183,3 +187,65 @@ def test_shutdown_of_a_never_started_runner_returns_at_once() -> None:
     runner.shutdown(timeout=WAIT_SECONDS)
 
     assert runner.drain(timeout=WAIT_SECONDS) is True
+
+
+def test_a_timed_out_shutdown_keeps_the_thread_and_never_starts_a_second_consumer(
+    runner, caplog
+) -> None:
+    release = threading.Event()
+    recorder = _Recorder()
+    runner.ensure_started()
+    runner.post(lambda: release.wait(WAIT_SECONDS))
+
+    with caplog.at_level(logging.WARNING):
+        runner.shutdown(timeout=0.05)
+
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+    assert _runner_thread_alive()
+    runner.ensure_started()
+    assert _live_runner_thread_count() == 1
+
+    release.set()
+    assert _wait_until(lambda: not _runner_thread_alive())
+    runner.post(recorder.item("after-stop"))
+    runner.ensure_started()
+    assert recorder.wait_for(1)
+    assert _live_runner_thread_count() == 1
+
+
+def test_shutdown_from_posted_work_runs_the_backlog_on_the_same_single_thread(runner) -> None:
+    recorder = _Recorder()
+    counts_after_restart: list[int] = []
+
+    def shut_down_then_restart() -> None:
+        runner.shutdown(timeout=WAIT_SECONDS)
+        runner.ensure_started()
+        counts_after_restart.append(_live_runner_thread_count())
+
+    runner.post(shut_down_then_restart)
+    runner.post(recorder.item("backlog"))
+    runner.ensure_started()
+
+    assert recorder.wait_for(1)
+    assert counts_after_restart == [1]
+    assert {thread.name for thread in recorder.threads} == {THREAD_NAME}
+    assert _wait_until(lambda: not _runner_thread_alive())
+
+
+def test_a_stop_left_by_a_dead_thread_does_not_stop_the_next_thread(runner, caplog) -> None:
+    recorder = _Recorder()
+
+    def shut_down_then_die() -> None:
+        runner.shutdown(timeout=WAIT_SECONDS)
+        raise KeyboardInterrupt
+
+    with caplog.at_level(logging.ERROR):
+        runner.post(shut_down_then_die)
+        runner.ensure_started()
+        assert _wait_until(lambda: not _runner_thread_alive())
+
+    runner.ensure_started()
+    runner.post(recorder.item("resumed"))
+
+    assert recorder.wait_for(1)
+    assert _runner_thread_alive()
