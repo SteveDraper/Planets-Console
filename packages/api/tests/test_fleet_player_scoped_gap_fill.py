@@ -53,8 +53,6 @@ def _reset_inference_row_scheduler():
     )
 
     reset_inference_row_scheduler_for_tests()
-    yield
-    reset_inference_row_scheduler_for_tests()
 
 
 @pytest.fixture

@@ -695,7 +695,6 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
         reset_fleet_table_stream_registry_for_tests()
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
-        reset_fleet_table_stream_scheduler_for_tests()
 
     request.addfinalizer(cleanup)
 
@@ -804,7 +803,6 @@ def test_enqueue_player_run_does_not_hold_scheduler_lock_across_get_ledger(
         reset_fleet_table_stream_registry_for_tests()
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
-        reset_fleet_table_stream_scheduler_for_tests()
 
     request.addfinalizer(cleanup)
 

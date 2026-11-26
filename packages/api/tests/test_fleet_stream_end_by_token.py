@@ -57,41 +57,39 @@ def _install_run(
     return session
 
 
-def test_an_owner_end_cancels_every_run_and_discards_its_accepts() -> None:
-    scheduler = FleetTableStreamScheduler()
-    try:
-        scope = _stream_scope()
-        token = scheduler.begin_scope(scope)
-        accepted: list[str] = []
-        sessions = [_install_run(scheduler, player_id, accepted) for player_id in (3, 8)]
+def test_an_owner_end_cancels_every_run_and_discards_its_accepts(
+    make_fleet_table_stream_scheduler,
+) -> None:
+    scheduler = make_fleet_table_stream_scheduler()
+    scope = _stream_scope()
+    token = scheduler.begin_scope(scope)
+    accepted: list[str] = []
+    sessions = [_install_run(scheduler, player_id, accepted) for player_id in (3, 8)]
 
-        scheduler.end_table_stream(scope, token)
+    scheduler.end_table_stream(scope, token)
 
-        assert scheduler._runs == {}
-        assert all(session.cancel_token.is_cancelled() for session in sessions)
-        assert not scheduler.owns_table_stream(token)
-        for session in sessions:
-            scheduler._pending_accepts.accept(session.run_id)
-        assert accepted == []
-    finally:
-        scheduler.shutdown()
+    assert scheduler._runs == {}
+    assert all(session.cancel_token.is_cancelled() for session in sessions)
+    assert not scheduler.owns_table_stream(token)
+    for session in sessions:
+        scheduler._pending_accepts.accept(session.run_id)
+    assert accepted == []
 
 
-def test_a_replaced_streams_end_leaves_the_current_streams_runs() -> None:
-    scheduler = FleetTableStreamScheduler()
-    try:
-        scope = _stream_scope()
-        replaced = scheduler.begin_scope(scope)
-        current = scheduler.begin_scope(scope)
-        session = _install_run(scheduler, 3)
+def test_a_replaced_streams_end_leaves_the_current_streams_runs(
+    make_fleet_table_stream_scheduler,
+) -> None:
+    scheduler = make_fleet_table_stream_scheduler()
+    scope = _stream_scope()
+    replaced = scheduler.begin_scope(scope)
+    current = scheduler.begin_scope(scope)
+    session = _install_run(scheduler, 3)
 
-        scheduler.end_table_stream(scope, replaced)
+    scheduler.end_table_stream(scope, replaced)
 
-        assert session.run_id in scheduler._runs
-        assert not session.cancel_token.is_cancelled()
-        assert scheduler.owns_table_stream(current)
-    finally:
-        scheduler.shutdown()
+    assert session.run_id in scheduler._runs
+    assert not session.cancel_token.is_cancelled()
+    assert scheduler.owns_table_stream(current)
 
 
 def test_a_closed_streams_end_cancels_a_run_admitted_before_the_end_runs(
@@ -139,8 +137,10 @@ def test_a_closed_streams_end_cancels_a_run_admitted_before_the_end_runs(
     assert not scheduler.owns_table_stream(idle.stream_token)
 
 
-def test_shutdown_unregisters_the_ledger_listener_and_is_idempotent() -> None:
-    scheduler = FleetTableStreamScheduler()
+def test_shutdown_unregisters_the_ledger_listener_and_is_idempotent(
+    make_fleet_table_stream_scheduler,
+) -> None:
+    scheduler = make_fleet_table_stream_scheduler()
     listeners_with_scheduler = len(_ledger_write_listeners)
 
     scheduler.shutdown()

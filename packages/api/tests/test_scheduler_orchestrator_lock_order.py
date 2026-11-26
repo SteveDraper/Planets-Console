@@ -25,7 +25,6 @@ from api.analytics.fleet.fleet_table_stream_registry import (
 from api.analytics.fleet.fleet_table_stream_scheduler import FleetTableStreamScheduler
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -55,7 +54,6 @@ def _reset_process_compute_state():
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
     yield
-    reset_inference_row_scheduler_for_tests()
     reset_tier_row_run_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
@@ -75,9 +73,9 @@ def _listener_count(scheduler: FleetTableStreamScheduler) -> int:
 
 
 def test_fleet_listener_registers_once_outside_the_scheduler_lock(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, make_fleet_table_stream_scheduler
 ) -> None:
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     observed: dict[str, bool] = {}
     real_register = OrchestratorObservers.register_scope_outcome_listener
 
@@ -98,8 +96,10 @@ def test_fleet_listener_registers_once_outside_the_scheduler_lock(
     assert _listener_count(scheduler) == 1
 
 
-def test_fleet_preempt_and_end_return_while_orchestrator_condition_held() -> None:
-    scheduler = FleetTableStreamScheduler()
+def test_fleet_preempt_and_end_return_while_orchestrator_condition_held(
+    make_fleet_table_stream_scheduler,
+) -> None:
+    scheduler = make_fleet_table_stream_scheduler()
     scope = _fleet_scope()
     scheduler.begin_scope(scope)
     orchestrator = get_compute_orchestrator()
@@ -132,8 +132,10 @@ def test_fleet_preempt_and_end_return_while_orchestrator_condition_held() -> Non
     assert _listener_count(scheduler) == 1
 
 
-def test_scores_pause_gate_is_registered_once_and_follows_the_pause_flag() -> None:
-    scheduler = InferenceRowScheduler()
+def test_scores_pause_gate_is_registered_once_and_follows_the_pause_flag(
+    make_inference_scheduler,
+) -> None:
+    scheduler = make_inference_scheduler()
     scope = _scores_scope()
     token = scheduler.begin_scope(scope)
     orchestrator = get_compute_orchestrator()
@@ -155,8 +157,10 @@ def test_scores_pause_gate_is_registered_once_and_follows_the_pause_flag() -> No
     assert gate not in orchestrator.observers.dispatch_gates
 
 
-def test_scores_pause_rebinds_dispatch_gate_after_orchestrator_reset() -> None:
-    scheduler = InferenceRowScheduler()
+def test_scores_pause_rebinds_dispatch_gate_after_orchestrator_reset(
+    make_inference_scheduler,
+) -> None:
+    scheduler = make_inference_scheduler()
     scope = _scores_scope()
     scheduler.begin_scope(scope)
     reset_orchestrators_for_tests()
@@ -167,17 +171,14 @@ def test_scores_pause_rebinds_dispatch_gate_after_orchestrator_reset() -> None:
         scope=SimpleNamespace(analytic_id=SCORES_ANALYTIC_ID),
         profile_step_index=SCORES_TIER_SOLVE_PROFILE_INDEX,
     )
-    try:
-        assert orchestrator.observers.dispatch_gates.count(gate) == 1
-        assert gate(node) is False
-    finally:
-        scheduler.shutdown()
+    assert orchestrator.observers.dispatch_gates.count(gate) == 1
+    assert gate(node) is False
 
 
 def test_scores_pause_peek_leaves_scheduler_lock_free_and_detach_returns(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, make_inference_scheduler
 ) -> None:
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     scope = _scores_scope()
     token = scheduler.begin_scope(scope)
     orchestrator = get_compute_orchestrator()
@@ -241,7 +242,6 @@ def test_scores_pause_peek_leaves_scheduler_lock_free_and_detach_returns(
     finally:
         detach_go.set()
         worker.join(timeout=2)
-        scheduler.shutdown()
 
 
 def test_band_derivation_under_the_orchestrator_lock_reads_the_stream_registries_lock_free(

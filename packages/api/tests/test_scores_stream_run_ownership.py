@@ -109,12 +109,12 @@ def test_a_background_run_is_not_detached_by_a_stream(sample_turn) -> None:
     assert background.run_id in scheduler._runs
 
 
-def test_a_streams_detach_reports_whether_it_cleared_pause(sample_turn) -> None:
-    scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
+def test_a_streams_detach_reports_whether_it_cleared_pause(
+    sample_turn, make_inference_scheduler
+) -> None:
+    scheduler = make_inference_scheduler(defer_orchestrator_submit=True)
     scope = _scope(sample_turn)
     token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
-    try:
-        assert scheduler.detach_inference_stream(scope, stream_token=token) is True
-    finally:
-        scheduler.shutdown()
+
+    assert scheduler.detach_inference_stream(scope, stream_token=token) is True

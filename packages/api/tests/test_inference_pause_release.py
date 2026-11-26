@@ -44,7 +44,6 @@ def workerless_pool(monkeypatch: pytest.MonkeyPatch) -> Iterator[ComputeWorkerPo
     pool = reset_compute_worker_pool_for_tests(worker_count=0)
     _patch_scores_dag_without_fleet_deps(monkeypatch)
     yield pool
-    reset_inference_row_scheduler_for_tests()
 
 
 @pytest.fixture

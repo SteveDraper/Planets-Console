@@ -45,7 +45,6 @@ def _clean_registries() -> Iterator[None]:
     reset_inference_row_scheduler_for_tests()
     reset_inference_table_stream_registry_for_tests()
     yield
-    reset_inference_row_scheduler_for_tests()
     reset_inference_table_stream_registry_for_tests()
 
 

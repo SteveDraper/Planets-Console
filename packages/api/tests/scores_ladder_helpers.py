@@ -155,19 +155,24 @@ def scripted_tier_job(
 
 
 class ShellLadder:
-    """The shell scoreboard ladder for one player, opened through a live scores stream."""
+    """The shell scoreboard ladder for one player, opened through a live scores stream.
+
+    ``make_scheduler`` builds its scheduler: the ``make_inference_scheduler``
+    fixture, since the ladder ends its streams.
+    """
 
     def __init__(
         self,
         sample_turn,
         persistence,
+        make_scheduler: Callable[..., InferenceRowScheduler],
         *,
         on_held_solutions_updated: Callable[[InferenceRowStreamSession], None] | None = None,
     ) -> None:
         self.sample_turn = sample_turn
         self.player_id = inference_target_player_id(sample_turn)
         self.persistence = persistence
-        self.scheduler = InferenceRowScheduler(
+        self.scheduler = make_scheduler(
             defer_orchestrator_submit=True,
             on_held_solutions_updated=on_held_solutions_updated,
         )
@@ -313,8 +318,8 @@ class ShellLadder:
 
 
 @pytest.fixture
-def ladder(sample_turn, persistence) -> ShellLadder:
-    return ShellLadder(sample_turn, persistence)
+def ladder(sample_turn, persistence, make_inference_scheduler) -> ShellLadder:
+    return ShellLadder(sample_turn, persistence, make_inference_scheduler)
 
 
 @pytest.fixture

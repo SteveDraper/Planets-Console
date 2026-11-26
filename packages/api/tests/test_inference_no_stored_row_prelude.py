@@ -39,9 +39,11 @@ from tests.scores_exports_helpers import (
 from tests.table_stream_test_helpers import end_stream_inline
 
 
-def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> InferenceRowScheduler:
+def _install_workerless_scheduler(
+    monkeypatch: pytest.MonkeyPatch, make_inference_scheduler
+) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
 
     def _get_scheduler() -> InferenceRowScheduler:
         return scheduler
@@ -64,9 +66,10 @@ def test_no_stored_row_event_names_the_missing_scoreboard_row() -> None:
 def test_schedule_admission_yields_no_stored_row_before_deferred_submit(
     sample_turn,
     monkeypatch: pytest.MonkeyPatch,
+    make_inference_scheduler,
 ) -> None:
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(monkeypatch, make_inference_scheduler)
     submitted: list[str] = []
 
     def _record_submit(run_id: str) -> None:
@@ -181,9 +184,10 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
     persistence,
     memory_backend,
     monkeypatch: pytest.MonkeyPatch,
+    make_inference_scheduler,
 ) -> None:
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(monkeypatch, make_inference_scheduler)
     submitted: list[str] = []
     monkeypatch.setattr(
         scheduler,

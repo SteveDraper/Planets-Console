@@ -60,8 +60,10 @@ def _no_live_streams() -> Iterator[None]:
     yield from no_live_streams()
 
 
-def test_a_background_node_with_no_stream_fails_on_a_non_durable_terminal(sample_turn, persistence):
-    ladder = ShellLadder(sample_turn, persistence)
+def test_a_background_node_with_no_stream_fails_on_a_non_durable_terminal(
+    sample_turn, persistence, make_inference_scheduler
+):
+    ladder = ShellLadder(sample_turn, persistence, make_inference_scheduler)
     ladder.close_stream()
     background = ladder.register_background_run()
     ladder.submit()

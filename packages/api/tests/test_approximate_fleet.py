@@ -970,7 +970,6 @@ def test_saved_approximate_file_replaces_turn_load_rows() -> None:
     ledger_events = [event for event in events if event.get("type") == "ledger_updated"]
     assert ledger_events
     assert ledger_events[-1].get("replacesTurnLoad") is not False
-    reset_fleet_table_stream_scheduler_for_tests()
 
 
 def test_later_file_refresh_and_final_commit_fail_closed() -> None:

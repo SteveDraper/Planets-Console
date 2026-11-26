@@ -149,7 +149,6 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:
-        reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 
@@ -282,7 +281,6 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         assert stored is not None
         assert stored.summary == "detach-missing-run may persist"
     finally:
-        reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 

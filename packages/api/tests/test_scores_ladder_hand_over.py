@@ -83,7 +83,6 @@ def _clean_registries() -> Iterator[None]:
     reset_inference_table_stream_registry_for_tests()
     yield
     reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
     reset_orchestrators_for_tests()
     reset_inference_table_stream_registry_for_tests()
 
@@ -480,11 +479,14 @@ def _hand_over_a_ladder_holding_solutions(ladder: ShellLadder) -> InferenceRowSt
     return winner
 
 
-def test_the_winners_stream_gets_the_moved_ladders_held_solutions_once(sample_turn, persistence):
+def test_the_winners_stream_gets_the_moved_ladders_held_solutions_once(
+    sample_turn, persistence, make_inference_scheduler
+):
     evidence_updates: list[str] = []
     ladder = ShellLadder(
         sample_turn,
         persistence,
+        make_inference_scheduler,
         on_held_solutions_updated=lambda session: evidence_updates.append(session.run_id),
     )
 
@@ -497,12 +499,15 @@ def test_the_winners_stream_gets_the_moved_ladders_held_solutions_once(sample_tu
     assert evidence_updates == []
 
 
-def test_a_hand_over_moves_no_fleet_or_scores_epoch(sample_turn, persistence):
+def test_a_hand_over_moves_no_fleet_or_scores_epoch(
+    sample_turn, persistence, make_inference_scheduler
+):
     """T9: hand-over announces no inference evidence, so no fleet or scores epoch moves."""
     invalidations: list[InferenceInvalidationService] = []
     ladder = ShellLadder(
         sample_turn,
         persistence,
+        make_inference_scheduler,
         on_held_solutions_updated=lambda session: invalidations[0].on_inference_evidence_updated(
             session.game_id, session.perspective, session.turn_number, session.player_id
         ),

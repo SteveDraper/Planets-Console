@@ -267,9 +267,13 @@ _SLOW_TEST_NAMES = frozenset(
 def make_inference_scheduler():
     """Build ``InferenceRowScheduler``s that are shut down when the test ends.
 
-    A scheduler whose table stream connects starts its off-lock runner thread,
-    and stream ends posted to it run until it is shut down, so no runner or
-    late stream end outlives the test.
+    A test builds its scheduler here when it connects a table stream on it,
+    ends a stream on it (``end_table_stream``, directly or through a helper),
+    uses its off-lock runner, or shuts it down. A connect starts the off-lock
+    runner thread, and stream ends posted to it run until it is shut down, so
+    no runner or late stream end outlives the test. A scheduler the test only
+    passes as an argument or claims a scope on starts no thread and ends no
+    stream, so the test may build it directly.
     """
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 
@@ -289,7 +293,7 @@ def make_inference_scheduler():
 def make_fleet_table_stream_scheduler():
     """Build ``FleetTableStreamScheduler``s that are shut down when the test ends.
 
-    The fleet counterpart of ``make_inference_scheduler``.
+    The fleet counterpart of ``make_inference_scheduler``, under the same rule.
     """
     from api.analytics.fleet.fleet_table_stream_scheduler import FleetTableStreamScheduler
 
