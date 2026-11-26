@@ -42,11 +42,12 @@ class InferenceStreamTeardownMixin:
         """Claim the active table-stream scope and reset stream-owned scheduler state.
 
         ``begin_scope`` never detaches or cancels a run. A stream detaches its
-        own rows when it ends (``detach_inference_stream``, from the connect
-        ``finally``), so the replaced stream's rows stay ``REGISTERED`` until
-        then and background runs are never touched. On a same-scope preempt
-        the new stream registers its own row beside the old one; the scope's
-        next ladder stamp hands the ladder to the new row and retires the old.
+        own rows when it ends (``end_table_stream``, which the connect
+        ``finally`` posts to the off-lock runner), so the replaced stream's
+        rows stay ``REGISTERED`` until then and background runs are never
+        touched. On a same-scope preempt the new stream registers its own row
+        beside the old one; the scope's next ladder stamp hands the ladder to
+        the new row and retires the old.
 
         Under the scheduler lock it resets only stream-owned state. Every
         claim clears global pause. A scope change, including the first claim,
@@ -120,7 +121,7 @@ class InferenceStreamTeardownMixin:
     def cancel_run(self: InferenceRowScheduler, run_id: str) -> None:
         """Cancel one row run and abort its orchestrator scope when no sibling remains.
 
-        Unlike a stream's end (``detach_inference_stream``), which only detaches
+        Unlike a stream's end (``end_table_stream``), which only detaches
         its rows without cancelling solve work, cancel applies
         :func:`~api.analytics.scores.row_lifecycle.apply_scores_row_lifecycle`
         for ``RowLifecycleOp.CANCEL`` (token + compact cancel admission + stream

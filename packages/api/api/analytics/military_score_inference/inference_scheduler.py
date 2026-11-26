@@ -65,7 +65,6 @@ __all__ = [
 
 OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
 
-# The thread that releases global pause after a stream closes (see detach_inference_stream).
 # The thread that ends this scheduler's table streams and releases pause.
 SCORES_OFF_LOCK_THREAD_NAME = "scores-off-lock"
 

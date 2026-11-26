@@ -13,15 +13,14 @@ Extract a **thin shared framework** under `packages/api/api/streaming/table_stre
 | Module | Responsibility |
 |--------|----------------|
 | `multiplex.py` | Generic round-robin drain over per-row `event_queue`, `is_stream_active`, `wake_event`, terminal-type predicate |
-| `scope_guard.py` | `TableStreamScopeGuard` composed into both schedulers (`begin_scope`, `owns_table_stream`, `end_table_stream`) |
+| `scope_guard.py` | `TableStreamScopeGuard` composed into both schedulers (`begin_scope_locked`, `owns_table_stream_locked`, `end_table_stream_locked`, called under the scheduler lock); each scheduler exposes `begin_scope`, `owns_table_stream` and `end_table_stream`, which take its lock and call them |
 | `scheduler_orchestrator_attachment.py` | One scope-outcome listener per scheduler, plus an optional dispatch gate (scores pause). Registered once on the live process orchestrator, outside the scheduler lock. Stream begin, preempt, and end do not register or unregister these callbacks |
 | `registry.py` | Generic scope-keyed controller registry (attach/detach, in-place reschedule lookup). Publishes an immutable snapshot that readers take without a lock; writers compare-and-swap |
 | `controller_base.py` | Shared controller state (`pending_wire_events`, `wake_multiplex`, scheduled-row map); safe reschedule lock choreography (`reschedule_one` / `reschedule_all` / `install_admission_dispatch` -- never hold `stream_lock` across cancel, schedule, or orchestrator submit) |
 | `connect.py` | `TableStreamConnectPolicy` and `AdmissionDispatch` |
-| `scoped_connect.py` | `iter_table_stream_connect_with_scope`: claims the scope, runs admission and multiplex, and in its `finally` detaches the controller and posts the scheduler's `end_table_stream` to its off-lock runner |
+| `scoped_connect.py` | `iter_table_stream_connect_with_scope`: catalogs the registries (`registry_bootstrap`) before attach, outside every lock, starts the scheduler's off-lock runner, claims the scope, runs admission and multiplex, and in its `finally` detaches the controller and posts the scheduler's `end_table_stream` to its off-lock runner |
 | `stream_scheduler.py` | `TableStreamScheduler`: `begin_scope`, `end_table_stream(scope, token, /)`, `off_lock_runner` |
 | `off_lock_runner.py` | `OffLockRunner`: one thread per scheduler that runs posted stream ends in post order |
-| `scoped_connect.py` | `iter_table_stream_connect_with_scope`: catalogs the registries (`registry_bootstrap`) before attach, outside every lock, then begins the scheduler scope and connects |
 | `row_stream_resolution.py` | Analytic-independent row terminal FSM (`OPEN` / `SOFT_PROVISIONAL` / `HARD_TERMINAL` / `CANCELED`) plus `multiplex_closed` drain bit |
 | `row_stream_resolution_registry.py` | Process-wide FIFO-bounded resolution table; stores delivery state + `multiplex_closed` (not a public drain write API) |
 | `row_run_admission.py` | Generic stream-row vocabulary: retained-shell phase (`RowRunPhase`), registry-internal persist admission (`PersistAdmission`), lifecycle ops (`RowLifecycleOp`); detach≠cancel for any table-stream analytic -- not scores-private; multi-step tier DAG stays in `compute/` |
