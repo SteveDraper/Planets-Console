@@ -246,15 +246,11 @@ def iter_multiplexed_fleet_table_events(
 def cleanup_fleet_table_stream_sessions(
     scheduler: FleetTableStreamScheduler,
     scope: FleetTableStreamScope,
-    sessions: tuple[FleetPlayerStreamSession, ...],
     *,
     stream_token: str,
 ) -> None:
-    scheduler.end_fleet_table_stream(
-        scope,
-        sessions,
-        stream_token=stream_token,
-    )
+    """End the fleet table stream: drop its runs when it still owns the scope."""
+    scheduler.end_table_stream(scope, stream_token)
 
 
 def iter_fleet_table_stream_events(
@@ -317,7 +313,6 @@ def iter_fleet_table_stream_events(
         end_scope=lambda stream_token: cleanup_fleet_table_stream_sessions(
             resolved_scheduler,
             stream_scope,
-            (),
             stream_token=stream_token,
         ),
         policy_factory=policy_factory,

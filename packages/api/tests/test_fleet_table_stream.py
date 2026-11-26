@@ -194,7 +194,7 @@ def test_fleet_table_stream_reconnect_preempts_active_scope(sample_turn):
     assert not scheduler.owns_table_stream(first_token)
     assert scheduler.owns_table_stream(second_token)
 
-    scheduler.end_fleet_table_stream(scope, (), stream_token=second_token)
+    scheduler.end_table_stream(scope, second_token)
 
 
 def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample_turn):
@@ -250,7 +250,7 @@ def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample
     assert get_compute_orchestrator() is not None
     assert len(scheduler._stream_bindings) == 0
 
-    scheduler.end_fleet_table_stream(scope, (), stream_token=second_token)
+    scheduler.end_table_stream(scope, second_token)
 
 
 def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
@@ -545,11 +545,7 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
         assert first.session.run_id == second.session.run_id
         assert len(scheduler._runs) == 1
     finally:
-        scheduler.end_fleet_table_stream(
-            scope,
-            (),
-            stream_token=stream_token,
-        )
+        scheduler.end_table_stream(scope, stream_token)
 
 
 def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch):
@@ -605,7 +601,7 @@ def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch):
         scheduler.accept_pending_run(live.run_id)
         assert submitted == [live.run_id]
     finally:
-        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+        scheduler.end_table_stream(scope, stream_token)
 
 
 def test_enqueue_player_run_requires_query_context_to_submit(sample_turn):
@@ -643,7 +639,7 @@ def test_enqueue_player_run_requires_query_context_to_submit(sample_turn):
                 stream_token=stream_token,
             )
     finally:
-        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+        scheduler.end_table_stream(scope, stream_token)
 
 
 def test_tag_fleet_table_stream_event_adds_player_id():

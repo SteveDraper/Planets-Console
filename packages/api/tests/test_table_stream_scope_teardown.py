@@ -471,11 +471,7 @@ def test_fleet_policy_factory_failure_releases_scope_for_reconnect(
 
     stream = iter_table_stream_connect_with_scope(
         begin_scope=lambda: scheduler.begin_scope(stream_scope),
-        end_scope=lambda stream_token: scheduler.end_fleet_table_stream(
-            stream_scope,
-            (),
-            stream_token=stream_token,
-        ),
+        end_scope=lambda stream_token: scheduler.end_table_stream(stream_scope, stream_token),
         policy_factory=_failing_policy_factory,
         player_ids=(),
     )

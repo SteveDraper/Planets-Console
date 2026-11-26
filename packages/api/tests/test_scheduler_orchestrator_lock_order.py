@@ -92,7 +92,7 @@ def test_fleet_listener_registers_once_outside_the_scheduler_lock(
     scope = _fleet_scope()
     first = scheduler.begin_scope(scope)
     second = scheduler.begin_scope(scope)
-    scheduler.end_fleet_table_stream(scope, (), stream_token=second)
+    scheduler.end_table_stream(scope, second)
     assert first != second
     assert observed["scheduler_lock_free"] is True
     assert _listener_count(scheduler) == 1
@@ -110,7 +110,7 @@ def test_fleet_preempt_and_end_return_while_orchestrator_condition_held() -> Non
     def _preempt_and_end() -> None:
         assert orchestrator_held.wait(timeout=2)
         token = scheduler.begin_scope(scope)
-        scheduler.end_fleet_table_stream(scope, (), stream_token=token)
+        scheduler.end_table_stream(scope, token)
         finished.set()
 
     worker = threading.Thread(target=_preempt_and_end)

@@ -108,7 +108,7 @@ class FleetTableStreamScheduler:
         with self._lock:
             token = self._scope_guard.begin_scope_locked(
                 scope,
-                on_same_scope_preempt=self._preempt_active_table_stream_locked,
+                on_same_scope_preempt=self._drop_active_stream_state_locked,
                 on_scope_change=self._invalidate_retained_state_locked,
             )
         self._orchestrator_attachment.ensure_registered()
@@ -302,25 +302,29 @@ class FleetTableStreamScheduler:
             self._runs.pop(run_id, None)
             self._pending_accepts.discard(run_id)
 
-    def end_fleet_table_stream(
-        self,
-        scope: FleetTableStreamScope,
-        sessions: tuple[FleetPlayerStreamSession, ...],
-        *,
-        stream_token: str,
-    ) -> None:
-        """Drop one stream's runs and its query-context binding.
+    def end_table_stream(self, scope: FleetTableStreamScope, stream_token: str, /) -> None:
+        """End one stream: when it still owns the scope, drop every run and its binding.
 
-        Does not touch the orchestrator. Safe when the caller already holds the
-        orchestrator condition (generator ``finally`` during garbage collection).
+        Every fleet run belongs to the active stream (a preempt or scope change
+        drops all runs, and admission rejects any other token), so an owner end
+        cancels every run token, discards every pending accept and drops the
+        bindings. A stream that no longer owns the scope ends without touching
+        the current stream's state. Never calls into the orchestrator.
         """
         with self._lock:
-            self._scope_guard.end_table_stream_locked(scope, stream_token)
-            for session in sessions:
-                session.cancel_token.cancel()
-                self._runs.pop(session.run_id, None)
-                self._pending_accepts.discard(session.run_id)
-            self._stream_bindings.pop(stream_token, None)
+            if self._scope_guard.end_table_stream_locked(scope, stream_token):
+                self._drop_active_stream_state_locked()
+
+    def shutdown(self) -> None:
+        """Drop all stream state and unregister the orchestrator and ledger listeners.
+
+        Safe to call more than once, and for test teardown after dropping a
+        service stack.
+        """
+        with self._lock:
+            self._drop_active_stream_state_locked()
+        self._orchestrator_attachment.shutdown()
+        self._unregister_ledger_write()
 
     def publish_saved_host_turn_ledger(
         self,
@@ -437,7 +441,13 @@ class FleetTableStreamScheduler:
             if stream_events:
                 _wake_multiplex_for_session(session)
 
-    def _preempt_active_table_stream_locked(self) -> None:
+    def _drop_active_stream_state_locked(self) -> None:
+        """Cancel every run, drop every binding and discard every pending accept.
+
+        For a same-scope preempt, a scope change, an owner end and shutdown.
+        Leaves the scope guard and the scheduler-lived ledger subscription alone.
+        Caller holds ``self._lock``.
+        """
         run_ids = tuple(self._runs)
         for run in self._runs.values():
             run.session.cancel_token.cancel()
@@ -446,7 +456,7 @@ class FleetTableStreamScheduler:
         self._pending_accepts.discard_all(run_ids)
 
     def _invalidate_retained_state_locked(self) -> None:
-        self._preempt_active_table_stream_locked()
+        self._drop_active_stream_state_locked()
 
     def host_turn_ledger_sessions(
         self,
@@ -656,6 +666,6 @@ def reset_fleet_table_stream_scheduler_for_tests() -> None:
     with _process_scheduler_lock:
         previous = _process_scheduler
         if previous is not None:
-            previous._unregister_ledger_write()
+            previous.shutdown()
         _process_scheduler = FleetTableStreamScheduler()
     reset_orchestrators_for_tests()

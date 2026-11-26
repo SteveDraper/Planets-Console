@@ -98,6 +98,5 @@ class FleetTableStreamConnectPolicy:
         cleanup_fleet_table_stream_sessions(
             self.scheduler,
             self.stream_scope,
-            tuple(row.session for row in self.controller.current_scheduled_rows()),
             stream_token=self.stream_token,
         )
