@@ -358,12 +358,11 @@ def iter_multiplexed_inference_events(
 def cleanup_inference_stream_sessions(
     scheduler: InferenceRowScheduler,
     scope: InferenceStreamScope,
-    sessions: tuple[InferenceRowStreamSession, ...],
     *,
     stream_token: str,
 ) -> None:
-    """Detach row runs when the table stream ends."""
-    scheduler.detach_inference_stream(scope, sessions, stream_token=stream_token)
+    """Detach the stream's row runs when the table stream ends."""
+    scheduler.detach_inference_stream(scope, stream_token=stream_token)
 
 
 def iter_scores_table_inference_events(
@@ -429,7 +428,6 @@ def iter_scores_table_inference_events(
         end_scope=lambda stream_token: cleanup_inference_stream_sessions(
             resolved_scheduler,
             stream_scope,
-            (),
             stream_token=stream_token,
         ),
         policy_factory=policy_factory,

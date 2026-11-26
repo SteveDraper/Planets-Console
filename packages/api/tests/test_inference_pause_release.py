@@ -152,7 +152,7 @@ def test_a_late_end_of_a_replaced_stream_leaves_the_paused_successors_work(
     scheduler.enqueue_tier_ladder(successor_session, stream_token=successor_token)
     scheduler.accept_pending_run(successor_session.run_id)
 
-    scheduler.detach_inference_stream(scope, (replaced_session,), stream_token=replaced_token)
+    scheduler.detach_inference_stream(scope, stream_token=replaced_token)
 
     assert scheduler.global_pause_status(scope)["paused"] is True
     assert _pool_scopes(workerless_pool) == set()
@@ -179,7 +179,7 @@ def test_detach_discards_a_pending_accept(
     session = _session(sample_turn, persistence, scheduler, 0)
     scheduler.enqueue_tier_ladder(session, stream_token=token)
 
-    scheduler.detach_inference_stream(scope, (session,), stream_token=token)
+    scheduler.detach_inference_stream(scope, stream_token=token)
     scheduler.accept_pending_run(session.run_id)
 
     assert submitted == []
@@ -304,11 +304,11 @@ def test_a_close_while_paused_dispatches_the_gate_held_nodes(
     scope = stream_scope_for_turn(sample_turn)
     token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
-    session = _accepted_paused_row(sample_turn, persistence, scheduler, token)
+    _accepted_paused_row(sample_turn, persistence, scheduler, token)
     root_scope = _root_scope(sample_turn, 0)
     assert root_scope in get_compute_orchestrator().ready_scopes()
 
-    scheduler.detach_inference_stream(scope, (session,), stream_token=token)
+    scheduler.detach_inference_stream(scope, stream_token=token)
 
     assert _wait_until(lambda: _pool_scopes(workerless_pool) == {root_scope})
     assert root_scope not in get_compute_orchestrator().ready_scopes()
@@ -320,12 +320,12 @@ def test_a_close_while_the_orchestrator_lock_is_held_returns_and_releases_afterw
     scope = stream_scope_for_turn(sample_turn)
     token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
-    session = _accepted_paused_row(sample_turn, persistence, scheduler, token)
+    _accepted_paused_row(sample_turn, persistence, scheduler, token)
     root_scope = _root_scope(sample_turn, 0)
     orchestrator = get_compute_orchestrator()
     detach = threading.Thread(
         target=scheduler.detach_inference_stream,
-        args=(scope, (session,)),
+        args=(scope,),
         kwargs={"stream_token": token},
     )
 
@@ -351,9 +351,9 @@ def test_a_reopen_before_the_close_releases_gets_no_work_from_the_old_stream(
     scope = stream_scope_for_turn(sample_turn)
     closed_token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
-    closed_session = _accepted_paused_row(sample_turn, persistence, scheduler, closed_token)
+    _accepted_paused_row(sample_turn, persistence, scheduler, closed_token)
     held = _hold_waker_pass(scheduler, monkeypatch)
-    scheduler.detach_inference_stream(scope, (closed_session,), stream_token=closed_token)
+    scheduler.detach_inference_stream(scope, stream_token=closed_token)
     assert held.entered.wait(RELEASE_WAIT_SECONDS)
 
     reopened_token = scheduler.begin_scope(scope)
@@ -375,10 +375,10 @@ def test_shutdown_with_a_release_pending_registers_nothing_again(
     scope = stream_scope_for_turn(sample_turn)
     token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
-    session = _accepted_paused_row(sample_turn, persistence, scheduler, token)
+    _accepted_paused_row(sample_turn, persistence, scheduler, token)
     orchestrator = get_compute_orchestrator()
     held = _hold_waker_pass(scheduler, monkeypatch)
-    scheduler.detach_inference_stream(scope, (session,), stream_token=token)
+    scheduler.detach_inference_stream(scope, stream_token=token)
     assert held.entered.wait(RELEASE_WAIT_SECONDS)
 
     shutdown = threading.Thread(target=scheduler.shutdown)

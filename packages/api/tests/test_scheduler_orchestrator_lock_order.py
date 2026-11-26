@@ -148,7 +148,7 @@ def test_scores_pause_gate_is_registered_once_and_follows_the_pause_flag() -> No
     scheduler.pause_globally(scope)
     assert gate(node) is False
     assert orchestrator.observers.dispatch_gates.count(gate) == 1
-    scheduler.detach_inference_stream(scope, (), stream_token=token)
+    scheduler.detach_inference_stream(scope, stream_token=token)
     assert gate(node) is True
     assert orchestrator.observers.dispatch_gates.count(gate) == 1
     scheduler.shutdown()
@@ -201,7 +201,7 @@ def test_scores_pause_peek_leaves_scheduler_lock_free_and_detach_returns(
         scheduler.pause_globally(scope)
         pause_finished.set()
         assert detach_go.wait(timeout=2)
-        scheduler.detach_inference_stream(scope, (), stream_token=token)
+        scheduler.detach_inference_stream(scope, stream_token=token)
         finished.set()
 
     worker = threading.Thread(target=_pause_then_detach)

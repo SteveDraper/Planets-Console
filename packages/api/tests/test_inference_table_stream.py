@@ -148,7 +148,7 @@ def test_a_same_scope_reconnect_leaves_in_flight_rows_to_the_old_streams_end(sam
 
     for session in sessions:
         stamp_run_ladder(get_row_run(session.run_id))
-    scheduler.detach_inference_stream(scope, tuple(sessions), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, stream_token=stream_token)
     for session in sessions:
         # Detach must not cancel solve tokens (persist may still write).
         assert not session.cancel_token.is_cancelled()

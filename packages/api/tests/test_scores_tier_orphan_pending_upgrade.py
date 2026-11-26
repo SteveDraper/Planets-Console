@@ -7,6 +7,7 @@ import queue
 import pytest
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    RunOwnership,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
     RowComplete,
@@ -78,7 +79,7 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
-    scheduler._runs[run.run_id] = scope
+    scheduler._runs[run.run_id] = RunOwnership(scope, None)
 
     delivered: list[object] = []
     monkeypatch.setattr(
@@ -218,7 +219,7 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(sample_tur
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
     stream_token = scheduler.begin_scope(stream_scope)
-    scheduler._runs[run.run_id] = scope
+    scheduler._runs[run.run_id] = RunOwnership(scope, stream_token)
     controller = InferenceTableStreamController(
         scope=stream_scope,
         stream_token=stream_token,
@@ -295,7 +296,7 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(sample_tur
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
     stream_token = scheduler.begin_scope(stream_scope)
-    scheduler._runs[run.run_id] = scope
+    scheduler._runs[run.run_id] = RunOwnership(scope, None)
     controller = InferenceTableStreamController(
         scope=stream_scope,
         stream_token=stream_token,
@@ -358,7 +359,7 @@ def test_stale_scheduler_run_without_registry_still_finishes_stream(sample_turn)
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
     stream_token = scheduler.begin_scope(stream_scope)
     stale_run_id = "stale-run-without-registry"
-    scheduler._runs[stale_run_id] = scope
+    scheduler._runs[stale_run_id] = RunOwnership(scope, stream_token)
     controller = InferenceTableStreamController(
         scope=stream_scope,
         stream_token=stream_token,
@@ -417,7 +418,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
     stream_token = scheduler.begin_scope(stream_scope)
-    scheduler._runs[run.run_id] = scope
+    scheduler._runs[run.run_id] = RunOwnership(scope, None)
     controller = InferenceTableStreamController(
         scope=stream_scope,
         stream_token=stream_token,
@@ -548,7 +549,7 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
     stream_token = scheduler.begin_scope(stream_scope)
-    scheduler._runs[run.run_id] = scope
+    scheduler._runs[run.run_id] = RunOwnership(scope, None)
     controller = InferenceTableStreamController(
         scope=stream_scope,
         stream_token=stream_token,
@@ -601,7 +602,7 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
         summary="exact after force_fresh",
     )
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
-    scheduler._runs[run.run_id] = scope
+    scheduler._runs[run.run_id] = RunOwnership(scope, None)
     _set_scope_node(
         orchestrator,
         scope,
@@ -674,7 +675,7 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
 
     solved_run = new_tier_row_run(solved_session)
     register_row_run(solved_run, scope_index=ScopeIndexPolicy.TAKE)
-    scheduler._runs[solved_run.run_id] = scope
+    scheduler._runs[solved_run.run_id] = RunOwnership(scope, None)
     row_complete = row_complete_with_summary(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="exact after cancel",
@@ -705,7 +706,7 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
     assert completes[0].get("runId") == ui_session.run_id
     assert stream_drain.is_closed(ui_session.run_id)
 
-    scheduler._runs[solved_run.run_id] = scope
+    scheduler._runs[solved_run.run_id] = RunOwnership(scope, None)
     scheduler._on_orchestrator_scope_outcome(
         _outcome_snapshot(
             scope,

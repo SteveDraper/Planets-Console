@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    RunOwnership,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -64,12 +65,15 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
         row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                first_token,
             )
 
         second_token = scheduler.begin_scope(scope)
@@ -225,16 +229,19 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                stream_token,
             )
 
         stamp_run_ladder(row_run)
-        scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
+        scheduler.detach_inference_stream(scope, stream_token=stream_token)
         assert get_row_run(session.run_id) is row_run
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
         assert decide_scores_row_persist(session.run_id) == PersistDecision.allow(

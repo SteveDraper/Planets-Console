@@ -1155,7 +1155,7 @@ def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
     assert dispatch.scheduled is not None
     assert dispatch.scheduled.session.run_id == survivor.session.run_id
     assert not survivor.session.cancel_token.is_cancelled()
-    assert scheduler._runs[survivor.session.run_id] == scope
+    assert scheduler._runs[survivor.session.run_id].root_scope == scope
 
 
 def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monkeypatch):

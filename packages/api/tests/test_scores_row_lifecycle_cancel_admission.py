@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.inference_row_runner import (
 )
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    RunOwnership,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -170,12 +171,15 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
         session = _session_for_player(sample_turn, player_id=player_id)
         register_row_run(new_tier_row_run(session), scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                None,
             )
             scheduler._execution_generation_by_run_id[session.run_id] = 7
 
@@ -237,12 +241,15 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
         row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                None,
             )
 
         scheduler.cancel_run(session.run_id)
@@ -327,12 +334,15 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
         row_run = new_tier_row_run(session)
         reg.register_row_run(row_run, scope_index=reg.ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                None,
             )
 
         scheduler.cancel_run(session.run_id)
@@ -496,7 +506,7 @@ def test_cancel_run_uses_cached_generation_without_orch_lookup(sample_turn, monk
             submission_open=SubmissionOpen(),
         )
     with scheduler._lock:
-        scheduler._runs[session.run_id] = scope
+        scheduler._runs[session.run_id] = RunOwnership(scope, None)
         scheduler._execution_generation_by_run_id[session.run_id] = 7
 
     def forbid_generation_lookup(_scope: ComputeScope) -> int | None:

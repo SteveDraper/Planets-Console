@@ -291,7 +291,7 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     assert not scheduler.owns_table_stream(first_token)
     assert in_flight_session.run_id in scheduler._runs
 
-    scheduler.detach_inference_stream(scope, (in_flight_session,), stream_token=first_token)
+    scheduler.detach_inference_stream(scope, stream_token=first_token)
     # Detach drops the row without cancelling its solve token.
     assert not in_flight_session.cancel_token.is_cancelled()
     assert in_flight_session.run_id not in scheduler._runs
@@ -462,7 +462,7 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
         ),
         persistence=persistence,
     )
-    scheduler.detach_inference_stream(scope, (scheduled.session,), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, stream_token=stream_token)
 
     replay = iter_scores_table_inference_events(
         sample_turn,

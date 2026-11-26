@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    RunOwnership,
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
@@ -78,7 +79,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
-    scheduler._runs[run.run_id] = scope
+    scheduler._runs[run.run_id] = RunOwnership(scope, None)
 
     delivered: list[object] = []
     monkeypatch.setattr(
@@ -131,7 +132,7 @@ def test_peer_failure_does_not_retire_while_sibling_running(sample_turn, monkeyp
     )
 
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
-    scheduler._runs[run.run_id] = scope
+    scheduler._runs[run.run_id] = RunOwnership(scope, None)
 
     delivered: list[object] = []
     monkeypatch.setattr(

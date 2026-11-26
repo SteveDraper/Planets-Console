@@ -382,8 +382,4 @@ class InferenceTableStreamController(
 
     def end_stream(self, scheduler: InferenceRowScheduler) -> None:
         """Detach this stream's scheduler scope while in-flight work may finish."""
-        scheduler.detach_inference_stream(
-            self.scope,
-            tuple(row.session for row in self.current_scheduled_rows()),
-            stream_token=self.stream_token,
-        )
+        scheduler.detach_inference_stream(self.scope, stream_token=self.stream_token)

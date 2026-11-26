@@ -124,7 +124,7 @@ def end_shell(shell: Shell) -> None:
     """Run the shell's connect ``finally``: each stream ends and detaches its own rows."""
     scores_token = shell.scores_stream.stream_token
     get_inference_row_scheduler().detach_inference_stream(
-        shell.scores_scope, (), stream_token=scores_token
+        shell.scores_scope, stream_token=scores_token
     )
     detach_inference_table_stream(scores_token)
     detach_fleet_table_stream(shell.fleet_stream.stream_token)

@@ -248,9 +248,7 @@ class ShellLadder:
 
     def close_stream(self) -> None:
         """Run the stream's connect ``finally``: it detaches its own row."""
-        self.scheduler.detach_inference_stream(
-            self.stream_scope, (self.session,), stream_token=self.stream_token
-        )
+        self.scheduler.detach_inference_stream(self.stream_scope, stream_token=self.stream_token)
 
     def execute_tier(
         self,

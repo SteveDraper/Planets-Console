@@ -23,6 +23,7 @@ from api.analytics.military_score_inference.inference_row_runner import (
     TierJobRowComplete,
 )
 from api.analytics.military_score_inference.inference_scheduler import (
+    RunOwnership,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -571,7 +572,7 @@ def test_forget_runs_drops_only_the_retired_runs_scheduler_entries(ladder):
     ladder.close_stream()
     winner = ladder.open_stream()
     scheduler = ladder.scheduler
-    scheduler._runs[retired_id] = ladder.scope
+    scheduler._runs[retired_id] = RunOwnership(ladder.scope, None)
     scheduler._execution_generation_by_run_id[retired_id] = 3
     scheduler._execution_generation_by_run_id[winner.run_id] = 3
     accepted: list[str] = []
@@ -581,7 +582,7 @@ def test_forget_runs_drops_only_the_retired_runs_scheduler_entries(ladder):
 
     assert retired_id not in scheduler._runs
     assert retired_id not in scheduler._execution_generation_by_run_id
-    assert scheduler._runs[winner.run_id] == ladder.scope
+    assert scheduler._runs[winner.run_id].root_scope == ladder.scope
     assert scheduler._execution_generation_by_run_id[winner.run_id] == 3
     scheduler.accept_pending_run(retired_id)
     scheduler.accept_pending_run(winner.run_id)

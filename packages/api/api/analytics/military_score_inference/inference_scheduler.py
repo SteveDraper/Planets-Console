@@ -86,6 +86,19 @@ class TierLadderRegistration(Enum):
     SUBMIT_DEFERRED = "submit_deferred"
 
 
+@dataclass(frozen=True, slots=True)
+class RunOwnership:
+    """A scheduled run's orchestrator root scope and the stream that owns it.
+
+    ``owning_token`` is the stream token that owned the scope when the run
+    registered, or None for a background run. A stream end detaches exactly the
+    runs its token owns.
+    """
+
+    root_scope: ComputeScope
+    owning_token: str | None
+
+
 @dataclass(frozen=True)
 class GlobalPauseStatusInputs:
     """The scheduler-owned pause fields, read under the scheduler lock."""
@@ -115,8 +128,10 @@ class InferenceRowScheduler(
         if worker_count == 0:
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
-        # Scope index only -- RowRun objects live in ``tier_row_run_registry``.
-        self._runs: dict[str, ComputeScope] = {}
+        # Root scope and owning stream per run -- RowRun objects live in
+        # ``tier_row_run_registry``. Read through ``_run_ids_at_root_scope_locked``
+        # and ``_root_scopes_locked``.
+        self._runs: dict[str, RunOwnership] = {}
         # Execution identity for cancel abort, captured after submit/wake *outside*
         # the scheduler lock. ``cancel_run`` must never call into the orchestrator
         # while holding ``_lock`` (scheduler → orch nests ABBA with orch drain →
@@ -300,7 +315,7 @@ class InferenceRowScheduler(
             globally_paused=self._globally_paused,
             active_session_count=len(self._runs) if scope_matches else 0,
             active_scope=active_scope,
-            root_scopes=tuple(self._runs.values()),
+            root_scopes=self._root_scopes_locked(),
         )
 
     def _global_pause_status_from_inputs(
@@ -421,6 +436,14 @@ class InferenceRowScheduler(
         with self._lock:
             self._forget_runs_locked(run_ids)
 
+    def _run_ids_at_root_scope_locked(self, root_scope: ComputeScope) -> list[str]:
+        """Run ids scheduled at ``root_scope``. Caller holds ``self._lock``."""
+        return [run_id for run_id, entry in self._runs.items() if entry.root_scope == root_scope]
+
+    def _root_scopes_locked(self) -> tuple[ComputeScope, ...]:
+        """Every scheduled run's root scope. Caller holds ``self._lock``."""
+        return tuple(entry.root_scope for entry in self._runs.values())
+
     def _forget_runs_locked(self, run_ids: tuple[str, ...]) -> None:
         """The map side of :meth:`forget_runs`. Caller holds ``self._lock``."""
         for run_id in run_ids:
@@ -487,7 +510,7 @@ class InferenceRowScheduler(
             )
             self._register_tier_callbacks_for_run(row_run)
             root_scope = scores_root_scope_for_session(session)
-            self._runs[session.run_id] = root_scope
+            self._runs[session.run_id] = RunOwnership(root_scope, owning_token)
             if self._defer_orchestrator_submit:
                 return TierLadderRegistration.SUBMIT_DEFERRED
             if owning_token is not None:
@@ -718,9 +741,8 @@ class InferenceRowScheduler(
         if generation is None:
             return
         with self._lock:
-            for run_id, scope in self._runs.items():
-                if scope == root_scope:
-                    self._execution_generation_by_run_id[run_id] = generation
+            for run_id in self._run_ids_at_root_scope_locked(root_scope):
+                self._execution_generation_by_run_id[run_id] = generation
 
     def _pause_dispatch_gate(self, node: ComputeNodeRun) -> bool:
         from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
@@ -743,9 +765,7 @@ class InferenceRowScheduler(
     def _emit_work_accepted(self, root_scope: ComputeScope) -> None:
         with self._lock:
             sessions = []
-            for run_id, scope in self._runs.items():
-                if scope != root_scope:
-                    continue
+            for run_id in self._run_ids_at_root_scope_locked(root_scope):
                 row_run = self._adapter_row_run(run_id)
                 if row_run is None or row_run.session.cancel_token.is_cancelled():
                     continue

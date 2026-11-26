@@ -1583,4 +1583,4 @@ def test_enqueue_tier_ladder_requires_query_context_to_submit(sample_turn) -> No
         with pytest.raises(ValueError, match="AnalyticQueryContext"):
             scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
     finally:
-        scheduler.detach_inference_stream(scope, (), stream_token=stream_token)
+        scheduler.detach_inference_stream(scope, stream_token=stream_token)

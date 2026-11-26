@@ -101,9 +101,7 @@ class InferenceStreamScopeOutcomesMixin:
         sibling_still_active = self._scope_has_live_nonterminal_work(scope)
 
         with self._lock:
-            matching_run_ids = [
-                run_id for run_id, root_scope in self._runs.items() if root_scope == scope
-            ]
+            matching_run_ids = self._run_ids_at_root_scope_locked(scope)
             if wire_run_id is not None:
                 matching_run_ids = [run_id for run_id in matching_run_ids if run_id == wire_run_id]
 
