@@ -61,6 +61,7 @@ from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id, perspective
 from tests.submission_open_helpers import explicit_submission_open, live_execution
+from tests.table_stream_test_helpers import end_stream_inline
 
 # A ladder rebuild under no user mask override, for tests that claim directly.
 NO_OVERRIDE_REBUILD = LadderRebuild(user_override=None)
@@ -247,8 +248,8 @@ class ShellLadder:
         )
 
     def close_stream(self) -> None:
-        """Run the stream's connect ``finally``: it detaches its own row."""
-        self.scheduler.detach_inference_stream(self.stream_scope, stream_token=self.stream_token)
+        """End the stream as its off-lock runner would: detach its own row, then release pause."""
+        end_stream_inline(self.scheduler, self.stream_scope, self.stream_token)
 
     def execute_tier(
         self,

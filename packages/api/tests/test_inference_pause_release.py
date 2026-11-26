@@ -11,7 +11,6 @@ import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from functools import partial
 
 import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
@@ -35,6 +34,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 
 from tests.scores_exports_helpers import scores_query_context, stream_scope_for_turn
 from tests.scores_row_lifecycle_test_helpers import _patch_scores_dag_without_fleet_deps
+from tests.table_stream_test_helpers import IdleStream, connect_idle_stream, end_stream_inline
 
 
 @pytest.fixture
@@ -153,7 +153,7 @@ def test_a_late_end_of_a_replaced_stream_leaves_the_paused_successors_work(
     scheduler.enqueue_tier_ladder(successor_session, stream_token=successor_token)
     scheduler.accept_pending_run(successor_session.run_id)
 
-    scheduler.detach_inference_stream(scope, stream_token=replaced_token)
+    end_stream_inline(scheduler, scope, replaced_token)
 
     assert scheduler.global_pause_status(scope)["paused"] is True
     assert _pool_scopes(workerless_pool) == set()
@@ -246,7 +246,7 @@ def test_recompute_releases_pause_when_the_reschedule_raises(
     assert scheduler.global_pause_status(scope)["paused"] is False
 
 
-# --- A stream end releases pause on the scheduler's off-lock runner ---
+# --- A stream's connect close releases pause on the scheduler's off-lock runner ---
 
 RELEASE_WAIT_SECONDS = 2.0
 
@@ -258,12 +258,6 @@ def _wait_until(predicate, timeout: float = RELEASE_WAIT_SECONDS) -> bool:
             return True
         time.sleep(0.01)
     return predicate()
-
-
-def _post_stream_end(scheduler: InferenceRowScheduler, scope, token: str) -> None:
-    """Post the stream's end to the off-lock runner, as the connect ``finally`` does."""
-    scheduler.off_lock_runner.ensure_started()
-    scheduler.off_lock_runner.post(partial(scheduler.end_table_stream, scope, token))
 
 
 @dataclass(frozen=True)
@@ -305,40 +299,45 @@ def _accepted_paused_row(sample_turn, persistence, scheduler, token, player_inde
     return session
 
 
+def _open_paused_stream(scheduler: InferenceRowScheduler, scope) -> IdleStream:
+    """Open an idle stream at ``scope`` through the connect, then pause globally."""
+    opened = connect_idle_stream(scheduler, scope)
+    scheduler.pause_globally(scope)
+    return opened
+
+
 def test_a_close_while_paused_dispatches_the_gate_held_nodes(
     sample_turn, persistence, workerless_pool, scheduler
 ) -> None:
     scope = stream_scope_for_turn(sample_turn)
-    token = scheduler.begin_scope(scope)
-    scheduler.pause_globally(scope)
-    _accepted_paused_row(sample_turn, persistence, scheduler, token)
+    opened = _open_paused_stream(scheduler, scope)
+    _accepted_paused_row(sample_turn, persistence, scheduler, opened.stream_token)
     root_scope = _root_scope(sample_turn, 0)
     assert root_scope in get_compute_orchestrator().ready_scopes()
 
-    _post_stream_end(scheduler, scope, token)
+    opened.stream.close()
 
     assert scheduler.off_lock_runner.drain(timeout=RELEASE_WAIT_SECONDS)
     assert _pool_scopes(workerless_pool) == {root_scope}
     assert root_scope not in get_compute_orchestrator().ready_scopes()
 
 
-def test_an_end_posted_under_the_orchestrator_lock_returns_and_releases_afterwards(
+def test_a_close_under_the_orchestrator_lock_returns_and_releases_afterwards(
     sample_turn, persistence, workerless_pool, scheduler
 ) -> None:
     scope = stream_scope_for_turn(sample_turn)
-    token = scheduler.begin_scope(scope)
-    scheduler.pause_globally(scope)
-    _accepted_paused_row(sample_turn, persistence, scheduler, token)
+    opened = _open_paused_stream(scheduler, scope)
+    _accepted_paused_row(sample_turn, persistence, scheduler, opened.stream_token)
     root_scope = _root_scope(sample_turn, 0)
     orchestrator = get_compute_orchestrator()
-    post = threading.Thread(target=_post_stream_end, args=(scheduler, scope, token))
+    close = threading.Thread(target=opened.stream.close)
 
     with orchestrator._condition:
-        post.start()
-        post.join(RELEASE_WAIT_SECONDS)
-        post_returned_under_the_lock = not post.is_alive()
+        close.start()
+        close.join(RELEASE_WAIT_SECONDS)
+        close_returned_under_the_lock = not close.is_alive()
 
-    assert post_returned_under_the_lock
+    assert close_returned_under_the_lock
     assert scheduler.off_lock_runner.drain(timeout=RELEASE_WAIT_SECONDS)
     assert _pool_scopes(workerless_pool) == {root_scope}
 
@@ -353,11 +352,10 @@ def test_a_reopen_before_the_close_releases_gets_no_work_from_the_old_stream(
     WorkAccepted, its own.
     """
     scope = stream_scope_for_turn(sample_turn)
-    closed_token = scheduler.begin_scope(scope)
-    scheduler.pause_globally(scope)
-    _accepted_paused_row(sample_turn, persistence, scheduler, closed_token)
+    closed = _open_paused_stream(scheduler, scope)
+    _accepted_paused_row(sample_turn, persistence, scheduler, closed.stream_token)
     held = _hold_release_pass(scheduler, monkeypatch)
-    _post_stream_end(scheduler, scope, closed_token)
+    closed.stream.close()
     assert held.entered.wait(RELEASE_WAIT_SECONDS)
 
     reopened_token = scheduler.begin_scope(scope)
@@ -377,12 +375,11 @@ def test_shutdown_with_a_release_pending_registers_nothing_again(
     sample_turn, persistence, workerless_pool, scheduler, monkeypatch
 ) -> None:
     scope = stream_scope_for_turn(sample_turn)
-    token = scheduler.begin_scope(scope)
-    scheduler.pause_globally(scope)
-    _accepted_paused_row(sample_turn, persistence, scheduler, token)
+    opened = _open_paused_stream(scheduler, scope)
+    _accepted_paused_row(sample_turn, persistence, scheduler, opened.stream_token)
     orchestrator = get_compute_orchestrator()
     held = _hold_release_pass(scheduler, monkeypatch)
-    _post_stream_end(scheduler, scope, token)
+    opened.stream.close()
     assert held.entered.wait(RELEASE_WAIT_SECONDS)
 
     shutdown = threading.Thread(target=scheduler.shutdown)

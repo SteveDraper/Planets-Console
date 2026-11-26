@@ -37,12 +37,11 @@ from api.analytics.scores import tier_row_run_registry
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.registry import TableStreamRegistry
-from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 from api.streaming.table_stream.stream_scheduler import TableStreamScheduler
 
 from tests.scores_exports_helpers import GAME_ID, perspective
 from tests.scores_ladder_helpers import ladder_session
-from tests.table_stream_test_helpers import IdleConnectPolicy
+from tests.table_stream_test_helpers import IdleConnectPolicy, connect_idle_stream
 
 WAIT_SECONDS = 2.0
 # A stream end that runs inside the ``finally`` deadlocks the thread holding the
@@ -56,17 +55,6 @@ pytestmark = [
     pytest.mark.usefixtures("no_scores_row_runs"),
     pytest.mark.timeout(DEADLOCK_TIMEOUT_SECONDS, method="thread"),
 ]
-
-
-def _connect(scheduler: TableStreamScheduler, scope: object, policy: IdleConnectPolicy) -> Iterator:
-    stream = iter_table_stream_connect_with_scope(
-        scheduler=scheduler,
-        scope=scope,
-        policy_factory=lambda _token: policy,
-        player_ids=(),
-    )
-    assert next(stream) == {"type": "open"}
-    return stream
 
 
 def _close(stream: Iterator) -> Callable[[], None]:
@@ -227,7 +215,7 @@ def test_a_scores_stream_ends_while_its_thread_holds_a_teardown_lock(
         lambda: threading.current_thread().name,
     )
     policy = IdleConnectPolicy()
-    stream = _connect(scheduler, scope, policy)
+    stream = connect_idle_stream(scheduler, scope, policy).stream
     token = scheduler._scope_guard.active_table_stream_token
     stream_session = ladder_session(sample_turn, sample_turn.scores[0].ownerid)
     scheduler.enqueue_tier_ladder(stream_session, stream_token=token)
@@ -266,7 +254,7 @@ def test_a_reopen_before_the_old_streams_end_runs_keeps_the_new_stream(
     scheduler, scope = scores
     stream_ends = _record_stream_ends(monkeypatch, scheduler)
     runner_free = threading.Event()
-    stream = _connect(scheduler, scope, IdleConnectPolicy())
+    stream = connect_idle_stream(scheduler, scope).stream
     old_token = scheduler._scope_guard.active_table_stream_token
     old_session = ladder_session(sample_turn, sample_turn.scores[0].ownerid)
     scheduler.enqueue_tier_ladder(old_session, stream_token=old_token)
@@ -292,7 +280,9 @@ def test_a_reopen_before_the_old_streams_end_runs_keeps_the_new_stream(
 def test_a_raising_detach_still_posts_the_end(scores, monkeypatch) -> None:
     scheduler, scope = scores
     stream_ends = _record_stream_ends(monkeypatch, scheduler)
-    stream = _connect(scheduler, scope, IdleConnectPolicy(detach_error=RuntimeError("detach")))
+    stream = connect_idle_stream(
+        scheduler, scope, IdleConnectPolicy(detach_error=RuntimeError("detach"))
+    ).stream
     token = scheduler._scope_guard.active_table_stream_token
 
     with pytest.raises(RuntimeError, match="detach"):
@@ -342,7 +332,7 @@ def test_a_fleet_stream_ends_while_its_thread_holds_a_teardown_lock(
     scheduler, scope = fleet
     stream_ends = _record_stream_ends(monkeypatch, scheduler)
     policy = IdleConnectPolicy()
-    stream = _connect(scheduler, scope, policy)
+    stream = connect_idle_stream(scheduler, scope, policy).stream
     token = scheduler._scope_guard.active_table_stream_token
     session = _install_fleet_run(scheduler)
     locks = {

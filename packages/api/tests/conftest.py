@@ -35,11 +35,12 @@ from tests.fixtures.military_score_inference_prior_weights import (  # noqa: F40
 )
 from tests.observer_callback_guard import failing_on_observer_callback_errors
 
+# A plugin is listed before any plugin that imports it, so pytest rewrites its asserts.
 pytest_plugins = [
+    "tests.table_stream_test_helpers",
     "tests.scores_exports_helpers",
     "tests.scores_ladder_helpers",
     "tests.scores_outlier_repro_harness",
-    "tests.table_stream_test_helpers",
 ]
 
 

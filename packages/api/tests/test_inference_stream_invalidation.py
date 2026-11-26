@@ -96,7 +96,7 @@ def _end_open_table_stream(
 ) -> None:
     controller = controller_for_scope(scope)
     if controller is not None:
-        end_stream_inline(scheduler, controller)
+        end_stream_inline(scheduler, controller.scope, controller.stream_token)
 
 
 def _schedule_player_row(
@@ -360,7 +360,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
 
     def cleanup() -> None:
         if controller is not None:
-            end_stream_inline(scheduler, controller)
+            end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
 
@@ -939,7 +939,7 @@ def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
     assert fresher_run_id in scheduler._runs
     assert stale.session.run_id not in scheduler._runs
 
-    end_stream_inline(scheduler, controller)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
@@ -1004,7 +1004,7 @@ def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
     assert cancelled.session.run_id not in scheduler._runs
     assert replacement.session.run_id in scheduler._runs
 
-    end_stream_inline(scheduler, controller)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
@@ -1042,7 +1042,7 @@ def test_adopt_admission_rejects_cancelled_connect_run(
     assert controller.adopt_admission_scheduled_row(player_id, cancelled) is False
     assert player_id not in controller.scheduled_rows
 
-    end_stream_inline(scheduler, controller)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
@@ -1068,7 +1068,7 @@ def test_reschedule_row_with_running_node_does_not_deadlock(
 
     def cleanup() -> None:
         if controller is not None:
-            end_stream_inline(scheduler, controller)
+            end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
 
@@ -1155,7 +1155,7 @@ def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
 
     def cleanup() -> None:
         if controller is not None:
-            end_stream_inline(scheduler, controller)
+            end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
 
@@ -1248,7 +1248,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(
     )
     assert delivered == []
     assert not any(isinstance(e, RowFailed) for e in delivered)
-    end_stream_inline(scheduler, controller)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
@@ -1283,7 +1283,7 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
 
     def cleanup() -> None:
         if controller is not None:
-            end_stream_inline(scheduler, controller)
+            end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
 

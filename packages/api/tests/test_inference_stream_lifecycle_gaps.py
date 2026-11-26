@@ -377,7 +377,7 @@ def test_stream_disconnect_ends_before_worker_completes(
         )
     )
     assert controller is not None
-    end_stream_inline(scheduler, controller)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     thread.join(timeout=2.0)
 
     assert persistence.get_row(628580, 1, turn_number, target_player_id) is None

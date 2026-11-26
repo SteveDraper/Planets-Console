@@ -102,7 +102,7 @@ def _end_open_fleet_table_stream(
 ) -> None:
     controller = controller_for_scope(scope)
     if controller is not None:
-        end_stream_inline(scheduler, controller)
+        end_stream_inline(scheduler, controller.scope, controller.stream_token)
 
 
 def _wait_until(
@@ -691,7 +691,7 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
     controller.attach()
 
     def cleanup() -> None:
-        end_stream_inline(scheduler, controller)
+        end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_fleet_table_stream_registry_for_tests()
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)

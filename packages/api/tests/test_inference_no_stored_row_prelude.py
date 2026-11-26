@@ -124,7 +124,7 @@ def test_schedule_admission_yields_no_stored_row_before_deferred_submit(
     )
     assert empty_cached.wire_events == ()
 
-    end_stream_inline(scheduler, controller)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
@@ -287,5 +287,5 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
     assert success_run_id in submitted
     assert stream_drain.is_closed(success_run_id) is False
 
-    end_stream_inline(scheduler, controller)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()

@@ -9,7 +9,7 @@ persists.
 
 A ``Shell`` is one shell's fleet and scoreboard streams opened the way connect
 opens them: the scoreboard stream claims the scores scheduler scope first.
-``end_shell`` is that connect's ``finally``.
+``end_shell`` ends them the way their connects do, with the scheduler end inline.
 """
 
 from __future__ import annotations
@@ -60,6 +60,7 @@ from tests.off_mode_catch_up_helpers import FLEET_SCORES_REGISTRY, context_at_tu
 from tests.on_walk_helpers import fleet_persistence, shell_scope
 from tests.on_walk_live_helpers import LiveStream, attach_stream
 from tests.scores_exports_helpers import first_player_id, inference_target_player_id
+from tests.table_stream_test_helpers import end_stream_inline
 
 SHELL_TURN = 6
 WALK_TURNS = (3, 4, 5, 6)
@@ -121,13 +122,16 @@ def open_shell(ctx, player_id: int, *, perspective: int, turn: int) -> Shell:
 
 
 def end_shell(shell: Shell) -> None:
-    """Run the shell's connect ``finally``: each stream ends and detaches its own rows."""
+    """End the shell's streams as their connects do, with the scheduler end run inline.
+
+    Each stream detaches from its registry, then the scoreboard stream's
+    scheduler end runs as the scores off-lock runner would run it. The fleet
+    stream never claimed the fleet scheduler's scope, so it has no scheduler end.
+    """
     scores_token = shell.scores_stream.stream_token
-    get_inference_row_scheduler().detach_inference_stream(
-        shell.scores_scope, stream_token=scores_token
-    )
     detach_inference_table_stream(scores_token)
     detach_fleet_table_stream(shell.fleet_stream.stream_token)
+    end_stream_inline(get_inference_row_scheduler(), shell.scores_scope, scores_token)
 
 
 def _backfill_context_past_the_shell(

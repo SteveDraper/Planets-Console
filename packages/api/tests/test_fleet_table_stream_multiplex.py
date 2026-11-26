@@ -177,6 +177,6 @@ def test_fleet_connect_multiplexes_progress_across_players_before_complete(
     }
     assert progress_before_first_complete == set(player_ids)
 
-    end_stream_inline(scheduler, controller)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     thread.join(timeout=2.0)
     assert stream_closed.is_set()

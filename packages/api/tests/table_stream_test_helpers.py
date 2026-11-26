@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+from dataclasses import dataclass
 
 import pytest
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.off_lock_runner import OffLockRunner
+from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 from api.streaming.table_stream.stream_scheduler import TableStreamScheduler
 
 
-def end_stream_inline(scheduler: TableStreamScheduler, controller: object) -> None:
-    """End a controller's stream on the calling thread, as the off-lock runner would.
+def end_stream_inline[ScopeT](
+    scheduler: TableStreamScheduler[ScopeT], scope: ScopeT, stream_token: str
+) -> None:
+    """Run the scheduler's end of one stream on the calling thread, as its off-lock runner would.
 
-    For tests that drive a controller without a connect generator; the caller
-    must hold no lock the end takes.
+    For tests that open a stream without a connect generator; the caller must
+    hold no lock the end takes.
     """
-    scheduler.end_table_stream(controller.scope, controller.stream_token)
+    scheduler.end_table_stream(scope, stream_token)
 
 
 STREAM_END_WAIT_SECONDS = 2.0
@@ -50,6 +54,38 @@ class RecordingTableStreamScheduler:
 
     def shutdown(self) -> None:
         self.off_lock_runner.shutdown()
+
+
+@dataclass(frozen=True)
+class IdleStream:
+    """An idle table stream opened through the production connect, past its open event.
+
+    Closing ``stream`` runs the connect ``finally``, which posts the stream's end
+    to the scheduler's off-lock runner.
+    """
+
+    stream: Generator[dict[str, object]]
+    stream_token: str
+
+
+def connect_idle_stream[ScopeT](
+    scheduler: TableStreamScheduler[ScopeT],
+    scope: ScopeT,
+    policy: IdleConnectPolicy | None = None,
+) -> IdleStream:
+    """Open an idle stream at ``scope`` through ``iter_table_stream_connect_with_scope``."""
+    connect_policy = IdleConnectPolicy() if policy is None else policy
+    stream_tokens: list[str] = []
+
+    def policy_factory(stream_token: str) -> IdleConnectPolicy:
+        stream_tokens.append(stream_token)
+        return connect_policy
+
+    stream = iter_table_stream_connect_with_scope(
+        scheduler=scheduler, scope=scope, policy_factory=policy_factory, player_ids=()
+    )
+    assert next(stream) == {"type": "open"}
+    return IdleStream(stream=stream, stream_token=stream_tokens[0])
 
 
 class IdleConnectPolicy:

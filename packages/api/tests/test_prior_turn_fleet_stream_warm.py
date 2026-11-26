@@ -286,7 +286,7 @@ def _end_open_table_stream(
 ) -> None:
     controller = controller_for_scope(scope)
     if controller is not None:
-        end_stream_inline(scheduler, controller)
+        end_stream_inline(scheduler, controller.scope, controller.stream_token)
 
 
 def _host_turn_context(
