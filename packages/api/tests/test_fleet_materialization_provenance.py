@@ -22,14 +22,17 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.turn_roster import iter_turn_players
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
-from tests.scores_exports_helpers import inference_solution, schedule_row_with_ladder
+from tests.scores_exports_helpers import (
+    inference_solution,
+    schedule_row_with_ladder,
+    scores_export_context,
+)
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -75,7 +78,7 @@ def test_partial_scores_closure_persists_non_final_provenance(persistence, load_
     assert turn is not None
     player_id = turn.scores[0].ownerid
     inference_persistence = InferenceRowPersistenceService(persistence._storage)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     inference_materialization = FleetInferenceMaterialization(
         inference=FleetInferenceSupport(scores_services=scores_services),
         load_turn=load_turn,
@@ -128,7 +131,7 @@ def test_scheduler_row_run_persists_non_final_fleet_provenance(persistence, load
         merged_solutions=[inference_solution(objective_value=12)],
         game_id=628580,
     )
-    scores_services = ScoresExportContext(scheduler=scheduler, persistence=None)
+    scores_services = scores_export_context(scheduler=scheduler, persistence=None)
     inference_materialization = FleetInferenceMaterialization(
         inference=FleetInferenceSupport(scores_services=scores_services),
         load_turn=load_turn,
@@ -187,7 +190,7 @@ def test_complete_scores_closure_persists_final_provenance_when_prior_final(
 
     player_id = turn_one.scores[0].ownerid
     inference_persistence = InferenceRowPersistenceService(memory_backend)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     inference_materialization = FleetInferenceMaterialization(
         inference=FleetInferenceSupport(scores_services=scores_services),
         load_turn=load_turn,
@@ -228,7 +231,7 @@ def test_complete_scores_closure_persists_final_provenance_when_prior_final(
             if score.ownerid == player_id
         ],
     )
-    inference_persistence.put_row(
+    inference_persistence.put_row_without_notify(
         628580,
         1,
         2,
@@ -240,7 +243,6 @@ def test_complete_scores_closure_persists_final_provenance_when_prior_final(
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
 
     get_or_materialize_fleet_ledger_for_player(

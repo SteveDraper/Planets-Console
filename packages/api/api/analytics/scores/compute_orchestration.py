@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, assert_never
 
@@ -25,6 +27,7 @@ from api.analytics.military_score_inference.prior_turn_fleet_torp_overlay import
     PriorTurnFleetTorpResolution,
 )
 from api.analytics.military_score_inference.row_run import RowRun
+from api.analytics.military_score_inference.tier_ladder import LadderRebuild, rebuild_tier_ladder
 from api.analytics.off_mode_wire import (
     ON_WALK_WIRE_FIELD,
     copy_submission_open_fields,
@@ -39,12 +42,18 @@ from api.analytics.scores.tier_row_run_registry import (
     decide_scores_row_persist,
     get_row_run,
     get_tier_callbacks,
+    take_pending_rebuild,
 )
 from api.compute.profile import AnalyticComputeProfile, ComputeStepSpec
-from api.compute.scope import ComputeScope, ScopeKeySpec, compute_scope_to_export_scope
+from api.compute.scope import (
+    ComputeScope,
+    ScopeKeySpec,
+    compute_scope_to_export_scope,
+    format_compute_scope_key,
+)
 from api.compute.submission_open import SubmissionOpen
 from api.compute.wire import DependencyOutputs, StepResult
-from api.exceptions import ScoresTierOutcomeError, ValidationError
+from api.exceptions import DiscardedWorkRefused, ScoresTierOutcomeError, ValidationError
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
 
 SCORES_MATERIALIZE = "materialize"
@@ -52,6 +61,10 @@ SCORES_TIER_SOLVE = "tier_solve"
 SCORES_TIER_SOLVE_PROFILE_INDEX = 1
 
 logger = logging.getLogger(__name__)
+
+# The scores epoch a tier step's ladder was claimed at, carried from its job
+# wire to its persist.
+CLAIM_EPOCH_WIRE_FIELD = "claimEpoch"
 
 SCORES_SCOPE_KEY_SPEC = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
 
@@ -79,7 +92,7 @@ def _apply_fleet_resolution_to_row_run(
     session.fleet_torp_input_status = resolution.input_status
     session.prior_fleet_max_tech_by_axis = resolution.prior_fleet_max_tech_for_admission()
     session.prior_fleet_records = resolution.records
-    ladder_state = run.ladder_state
+    ladder_state = run.ladder.ladder_state
     ladder_state.fleet_torp_overlay = resolution.overlay
     ladder_state.prior_fleet_max_tech_by_axis = session.prior_fleet_max_tech_by_axis
     ladder_state.prior_fleet_records = resolution.records
@@ -168,12 +181,19 @@ def build_scores_tier_solve_job_wire(
         return horwasp_skip
 
     backfill_earlier_turns = submission_open.backfill_earlier_turns
-    scores_epoch = SCORES_PERSISTENCE_POLICY.invalidation_generation(ctx, scope)
+    # The snapshot comes first: the claim epoch is formed from its revision, so
+    # a mask change after it moves the epoch past the claim's and the step is
+    # discarded, never labelled current with the old mask.
+    mask_snapshot = resolve_scores_services(ctx).mask_overrides.snapshot(
+        scope.game_id, export_scope.player_id
+    )
+    claim_epoch = scores_epoch(fleet_term(ctx, scope), mask_snapshot.revision)
     claim_ladder = partial(
         claim_tier_ladder,
         scope,
         execution_generation=execution_generation,
-        scores_epoch=scores_epoch,
+        scores_epoch=claim_epoch,
+        rebuild=LadderRebuild(user_override=mask_snapshot.user_override),
         is_execution_live=is_execution_live,
     )
     claim = claim_ladder()
@@ -233,6 +253,7 @@ def build_scores_tier_solve_job_wire(
         "turn": scope.turn,
         "playerId": scope.player_id,
         ON_WALK_WIRE_FIELD: submission_open.on_walk,
+        CLAIM_EPOCH_WIRE_FIELD: claim_epoch,
     }
 
 
@@ -335,7 +356,13 @@ def run_scores_tier_solve(job_wire: dict[str, Any]) -> StepResult:
             emit_progress=lambda: None,
             emit_held_solutions=lambda: None,
         )
-    outcome = run_inference_tier_job(run, callbacks)
+    with run.tier_lock:
+        # First, before the tier job's cancel and segment checks, so an old
+        # ladder's exhausted segments cannot complete the row.
+        rebuild = take_pending_rebuild(run)
+        if rebuild is not None:
+            run.ladder = rebuild_tier_ladder(run.session, run.ladder, rebuild)
+        outcome = run_inference_tier_job(run, callbacks)
     return tier_job_outcome_to_step_result(run, outcome, job_wire)
 
 
@@ -344,9 +371,45 @@ def _tier_persist_payload(
     row_complete: RowComplete,
     job_wire: Mapping[str, Any],
 ) -> dict[str, object]:
+    """Build the persist payload for a row complete from its job wire.
+
+    A wire without a claim epoch (the tier-solve probe never claims) leaves it
+    off the payload, so persist rejects it.
+    """
     payload: dict[str, object] = {"runId": run.run_id, "rowComplete": row_complete}
+    if CLAIM_EPOCH_WIRE_FIELD in job_wire:
+        payload[CLAIM_EPOCH_WIRE_FIELD] = job_wire[CLAIM_EPOCH_WIRE_FIELD]
     copy_submission_open_fields(job_wire, payload)
     return payload
+
+
+@dataclass(frozen=True)
+class ClaimEpochPersistGuard:
+    """Admits a scores row write only while its ladder's claim epoch is current.
+
+    The orchestrator checks the epoch under its own lock, then releases it
+    before ``persist``. This guard checks again under the player's hull mask
+    key lock and holds that lock across the write, so a mask change lands
+    either before the check (and the write is refused) or after the write.
+    The fleet term is compared too, but fleet's generation lock is not held
+    across the write.
+    """
+
+    ctx: AnalyticQueryContext
+    scope: ComputeScope
+    claim_epoch: int
+
+    @contextmanager
+    def admitted(self) -> Iterator[None]:
+        mask_overrides = resolve_scores_services(self.ctx).mask_overrides
+        with mask_overrides.hold(self.scope.game_id, _scores_player_id(self.scope)):
+            current = current_scores_epoch(self.ctx, self.scope)
+            if current != self.claim_epoch:
+                raise DiscardedWorkRefused(
+                    f"scores persist refused for {format_compute_scope_key(self.scope)}: "
+                    f"claimed at scores epoch {self.claim_epoch}, now {current}"
+                )
+            yield
 
 
 class ScoresPersistencePolicy:
@@ -392,6 +455,12 @@ class ScoresPersistencePolicy:
             raise ValidationError(
                 f"scores persist result wire requires boolean {ON_WALK_WIRE_FIELD}"
             )
+        # The scores epoch the step's ladder was claimed at, carried from its job wire.
+        claim_epoch = result_wire.get(CLAIM_EPOCH_WIRE_FIELD)
+        if type(claim_epoch) is not int:
+            raise ValidationError(
+                f"scores persist result wire requires integer {CLAIM_EPOCH_WIRE_FIELD}"
+            )
 
         export_scope = _export_scope_for_compute(scope)
         if export_scope is None or export_scope.player_id is None:
@@ -415,8 +484,13 @@ class ScoresPersistencePolicy:
                 apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run_id)
             return
 
-        services.persistence.persist_row_complete_for_scope(
+        services.persistence.persist_row_complete_guarded(
             row_complete,
+            guard=ClaimEpochPersistGuard(
+                ctx=ctx,
+                scope=scope,
+                claim_epoch=claim_epoch,
+            ),
             game_id=export_scope.game_id,
             perspective=export_scope.perspective,
             host_turn=export_scope.turn,
@@ -443,27 +517,63 @@ class ScoresPersistencePolicy:
         )
 
     def invalidation_generation(self, ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
-        """Return prior-fleet turn epoch for this scores scope.
+        return current_scores_epoch(ctx, scope)
 
-        ``scores@N`` tracks ``fleet@(N-1)``'s turn-scoped generation only. Same-player
-        activity on other turns must not discard in-flight tier work.
-        """
-        export_scope = _export_scope_for_compute(scope)
-        if export_scope is None or export_scope.player_id is None:
-            return 0
-        if export_scope.turn <= 1:
-            return 0
 
-        fleet_services = lookup_fleet_compute_services(ctx)
-        if fleet_services is None:
-            return 0
+def current_scores_epoch(ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
+    """The scope's scores epoch now: the fleet term plus the player's hull mask revision.
 
-        return fleet_services.persistence.turn_invalidation_generation(
-            scope.game_id,
-            scope.perspective,
-            export_scope.player_id,
-            export_scope.turn - 1,
+    The orchestrator's epoch check and the persist guard both read it here, so
+    a persist refused by the guard is one the orchestrator also sees as stale.
+    The mask revision is read without a lock; the orchestrator reads under its
+    own lock and the guard reads under the player's mask key lock.
+    """
+    mask_overrides = resolve_scores_services(ctx).mask_overrides
+    mask_revision = mask_overrides.revision(scope.game_id, _scores_player_id(scope))
+    return scores_epoch(fleet_term(ctx, scope), mask_revision)
+
+
+def scores_epoch(fleet_term: int, mask_revision: int) -> int:
+    """Combine the scores epoch's two terms.
+
+    Both terms only increase, so their sum moves whenever either moves and
+    never returns to an earlier value. Callers compare epochs for equality only.
+    """
+    return fleet_term + mask_revision
+
+
+def fleet_term(ctx: AnalyticQueryContext, scope: ComputeScope) -> int:
+    """The scores epoch's fleet term: ``fleet@(N-1)``'s turn-scoped generation.
+
+    ``scores@N`` tracks that one prior turn, so same-player fleet activity on
+    other turns does not discard in-flight tier work. It is 0 for a scope with
+    no prior turn (turn 1 is an admission skip) or no fleet services.
+    """
+    export_scope = _export_scope_for_compute(scope)
+    if export_scope is None or export_scope.player_id is None:
+        return 0
+    if export_scope.turn <= 1:
+        return 0
+
+    fleet_services = lookup_fleet_compute_services(ctx)
+    if fleet_services is None:
+        return 0
+
+    return fleet_services.persistence.turn_invalidation_generation(
+        scope.game_id,
+        scope.perspective,
+        export_scope.player_id,
+        export_scope.turn - 1,
+    )
+
+
+def _scores_player_id(scope: ComputeScope) -> int:
+    """The concrete player a scores scope is keyed by (``SCORES_SCOPE_KEY_SPEC``)."""
+    if not isinstance(scope.player_id, int):
+        raise ValueError(
+            f"scores scope requires a concrete player: {format_compute_scope_key(scope)}"
         )
+    return scope.player_id
 
 
 def _fleet_torp_input_status_for_persist(run_id: str) -> str | None:

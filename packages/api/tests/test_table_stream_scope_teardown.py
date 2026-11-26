@@ -10,7 +10,6 @@ from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_s
 from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
-    _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.injected_services import FleetComputeServices
@@ -27,6 +26,8 @@ from api.analytics.military_score_inference.inference_table_stream_controller im
 )
 from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
+
+from tests.fleet_table_stream_test_helpers import query_context_for_fleet_services
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -239,7 +240,7 @@ def test_fleet_empty_player_ids_releases_scope_for_reconnect(
         fleet_services=services,
         persistence=persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     first.close()
 
@@ -253,7 +254,7 @@ def test_fleet_empty_player_ids_releases_scope_for_reconnect(
         fleet_services=services,
         persistence=persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     try:
         events = list(second)
@@ -298,7 +299,7 @@ def test_fleet_schedule_failed_releases_scope_for_reconnect(
         fleet_services=services,
         persistence=persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     list(stream)
     assert not scheduler._scope_guard.has_active_table_stream
@@ -311,7 +312,7 @@ def test_fleet_schedule_failed_releases_scope_for_reconnect(
         fleet_services=services,
         persistence=persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     try:
         list(replacement)
@@ -373,7 +374,7 @@ def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
                 fleet_services=services,
                 persistence=persistence,
                 scheduler=scheduler,
-                query_context=_query_context_for_services(services, host_turn=sample_turn),
+                query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
             )
             list(preempting_stream)
         return original_resolve(*args, **kwargs)
@@ -391,7 +392,7 @@ def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
         fleet_services=services,
         persistence=persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     list(stream)
 
@@ -408,7 +409,7 @@ def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
         fleet_services=services,
         persistence=persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     try:
         list(replacement)
@@ -492,7 +493,7 @@ def test_fleet_policy_factory_failure_releases_scope_for_reconnect(
         fleet_services=services,
         persistence=persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     try:
         assert list(replacement) == []

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,14 +25,27 @@ from api.analytics.military_score_inference.models import (
 from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_precedence import ScoresExportResolutionContext
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import EXPORT_CATALOG
+from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.export_chain_test_fixtures import scores_export_context
+
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 GAME_ID = 628580
+
+
+class AdmitEveryWrite:
+    """A scores persist guard that admits every write, for tests of row building."""
+
+    @contextmanager
+    def admitted(self) -> Iterator[None]:
+        yield
+
+
+ADMIT_EVERY_WRITE = AdmitEveryWrite()
 
 
 @pytest.fixture
@@ -123,9 +138,9 @@ def scores_query_context(
     def load_turn(turn_number: int):
         return turns.get(turn_number)
 
-    scores_services = ScoresExportContext(persistence=persistence)
+    scores_services = scores_export_context(persistence=persistence)
     if scheduler is not None:
-        scores_services = ScoresExportContext(
+        scores_services = scores_export_context(
             persistence=persistence,
             scheduler=scheduler,
         )
@@ -149,12 +164,17 @@ def minimal_stream_query_context(
     game_id: int = GAME_ID,
     perspective: int = 1,
 ):
-    """Leader ctx for tests that admit a scores stream without factory wiring."""
+    """Leader ctx for tests that admit a scores stream without factory wiring.
+
+    It carries a scores bundle on a fresh memory backend, as the factory ctx
+    carries the backend's.
+    """
     return make_analytic_query_context(
         turn,
         TurnAnalyticsOptions(),
         game_id=game_id,
         perspective=perspective,
+        export_services={SCORES_ANALYTIC_ID: scores_export_context()},
         read_backfill_earlier_turns=backfill_earlier_turns_disabled,
     )
 
@@ -302,12 +322,15 @@ def schedule_row_with_ladder(
     stream_scope = stream_scope_for_turn(sample_turn, game_id=game_id)
     run = scheduler.row_run_for_player(stream_scope, player_id)
     assert run is not None
-    run.ladder_state = PolicyLadderState(
-        policy_steps=(),
-        merged_solutions=merged_solutions,
-        last_status=last_status,
-        time_limited=time_limited,
-        ladder_complete=ladder_complete,
+    run.ladder = replace(
+        run.ladder,
+        ladder_state=PolicyLadderState(
+            policy_steps=(),
+            merged_solutions=merged_solutions,
+            last_status=last_status,
+            time_limited=time_limited,
+            ladder_complete=ladder_complete,
+        ),
     )
     return stream_scope
 
@@ -328,13 +351,12 @@ def put_persisted_row(
     perspective under test differs (e.g. fleet streams hard-code perspective 1
     while the sample turn's logged-in player is another id), pass it explicitly.
     """
-    persistence.put_row(
+    persistence.put_row_without_notify(
         game_id,
         perspective_id if perspective_id is not None else perspective(sample_turn),
         host_turn if host_turn is not None else sample_turn.settings.turn,
         player_id,
         row,
-        on_walk=False,
     )
 
 

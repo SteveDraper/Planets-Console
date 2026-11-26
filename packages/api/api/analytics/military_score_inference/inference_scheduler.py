@@ -569,10 +569,10 @@ class InferenceRowScheduler(
         row_run = self._adapter_row_run(session.run_id)
         if row_run is None:
             return False
-        state = row_run.ladder_state
+        state = row_run.ladder.ladder_state
         if state.catalog is None or not state.merged_solutions:
             return False
-        orchestration = row_run.orchestration
+        orchestration = row_run.ladder.orchestration
         segment_id: str | None = None
         if orchestration is not None:
             if not orchestration.should_emit_streaming_solutions():
@@ -601,7 +601,7 @@ class InferenceRowScheduler(
         row_run = self._adapter_row_run(session.run_id)
         if row_run is None:
             return
-        state = row_run.ladder_state
+        state = row_run.ladder.ladder_state
         if state.catalog is None:
             return
         session.event_queue.put(
@@ -617,7 +617,7 @@ class InferenceRowScheduler(
         row_run = self._adapter_row_run(session.run_id)
         if row_run is None:
             return
-        state = row_run.ladder_state
+        state = row_run.ladder.ladder_state
         if state.next_step_index >= len(state.policy_steps):
             return
         step = state.policy_steps[state.next_step_index]
@@ -768,8 +768,10 @@ def _query_context_for_session(
 
     Production streams pass the factory-built leader ctx on the session. This
     replaces only the scheduler-bound scores bundle. Admit raises if that ctx
-    is missing -- tests that never submit a DAG must attach a ctx at the test
-    site rather than reconstructing from the session bag here.
+    or its scores bundle is missing -- tests that never submit a DAG must attach
+    a ctx at the test site rather than reconstructing from the session bag here.
+    The bundle carries the backend's hull mask overrides, which only the ctx's
+    builder can supply.
     """
     from api.analytics.scores.export_services import ScoresExportContext
 
@@ -782,11 +784,12 @@ def _query_context_for_session(
 
     export_services = dict(ctx.export_services)
     injected_scores_services = export_services.get(SCORES_ANALYTIC_ID)
-    if isinstance(injected_scores_services, ScoresExportContext):
-        scores_services = replace(injected_scores_services, scheduler=scheduler)
-    else:
-        scores_services = ScoresExportContext(scheduler=scheduler)
-    export_services[SCORES_ANALYTIC_ID] = scores_services
+    if not isinstance(injected_scores_services, ScoresExportContext):
+        raise ValueError(
+            "scores table-stream admit requires a ScoresExportContext in the session's "
+            f"query context; got {type(injected_scores_services).__name__}"
+        )
+    export_services[SCORES_ANALYTIC_ID] = replace(injected_scores_services, scheduler=scheduler)
     return replace(ctx, export_services=export_services)
 
 

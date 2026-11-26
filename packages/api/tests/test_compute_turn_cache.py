@@ -19,7 +19,6 @@ from api.analytics.fleet.types import (
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.registration import TurnAnalyticRegistration
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import (
     AnalyticComputeProfile,
@@ -40,6 +39,7 @@ from tests.compute_orchestrator_fixtures import (
 )
 from tests.export_chain_test_fixtures import enable_backfill_earlier_turns
 from tests.fixtures.export_framework.harness import build_stored_turn_chain
+from tests.scores_exports_helpers import scores_export_context
 from tests.submission_open_helpers import explicit_submission_open
 
 _ROW_SCOPE_KEY = ScopeKeySpec(axes=("perspective", "turn", "player_id"))
@@ -104,7 +104,7 @@ def test_fleet_observation_job_wire_omits_turn(sample_turn) -> None:
         load_turn=fleet_services.load_turn,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_export_context(),
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
@@ -145,7 +145,7 @@ def test_observation_job_wire_does_not_embed_the_stored_prior(sample_turn) -> No
         load_turn=fleet_services.load_turn,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_export_context(),
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
@@ -300,7 +300,7 @@ def test_orchestrator_dag_plan_and_wire_build_share_turn_cache(sample_turn) -> N
         load_turn=counting_load,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_export_context(),
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
@@ -341,7 +341,7 @@ def test_pool_fleet_observation_leg_does_not_fill_worker_turn_cache(sample_turn)
     stored_turns = build_stored_turn_chain(sample_turn, through_turn=2)
     player_id = next(row.ownerid for row in sample_turn.scores)
     inference_persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     # Durable closed scores@2 lets finalization refine; observation has no scores ENSURE edge.
     put_persisted_row(
         inference_persistence,

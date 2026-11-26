@@ -47,6 +47,7 @@ from tests.scores_exports_helpers import (
     inference_solution,
     minimal_scores_export_resolution_context,
     schedule_row_with_ladder,
+    scores_export_context,
     ship_build_wire,
     stream_scope_for_turn,
 )
@@ -483,8 +484,8 @@ def test_scheduler_branch_surfaces_ladder_diagnostics_from_snapshot(sample_turn)
     )
     run = scheduler.row_run_for_player(stream_scope_for_turn(sample_turn), player_id)
     assert run is not None
-    assert run.ladder_state is not None
-    run.ladder_state.last_diagnostics = {"source": "scheduler_ladder"}
+    assert run.ladder.ladder_state is not None
+    run.ladder.ladder_state.last_diagnostics = {"source": "scheduler_ladder"}
 
     snapshot = ScoresInferenceSnapshot(
         persisted_row=None,
@@ -512,7 +513,6 @@ def _held_scores_for_turn_two_from_turn_three_row(
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.export_types import ExportScope
     from api.analytics.options import TurnAnalyticsOptions
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.exports import held_scores_for_scope
     from api.services.inference_row_persistence_service import InferenceRowPersistenceService
     from api.storage.memory_asset import MemoryAssetBackend
@@ -526,7 +526,7 @@ def _held_scores_for_turn_two_from_turn_three_row(
         scores=[replace(score, turn=2) for score in turn_two.scores],
     )
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(628580, 1, 3, player_id, persisted_row, on_walk=False)
+    persistence.put_row_without_notify(628580, 1, 3, player_id, persisted_row)
 
     def load_turn(turn_number: int):
         if turn_number == 2:
@@ -539,7 +539,7 @@ def _held_scores_for_turn_two_from_turn_three_row(
         turn_two,
         TurnAnalyticsOptions(),
         load_turn=load_turn,
-        export_services={"scores": ScoresExportContext(persistence=persistence)},
+        export_services={"scores": scores_export_context(persistence=persistence)},
         game_id=turn_two.game.id,
         perspective=turn_two.player.id,
     )

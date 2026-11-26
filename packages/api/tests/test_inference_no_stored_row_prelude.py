@@ -27,12 +27,15 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
     reset_inference_table_stream_registry_for_tests,
 )
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.scores.export_services import ScoresExportContext
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.streaming.table_stream import stream_drain
 from api.transport.inference_stream import inference_no_stored_row_event
 
-from tests.scores_exports_helpers import GAME_ID, minimal_stream_query_context
+from tests.scores_exports_helpers import (
+    GAME_ID,
+    minimal_stream_query_context,
+    scores_export_context,
+)
 
 
 def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> InferenceRowScheduler:
@@ -167,7 +170,7 @@ def _context_with_marks(
                     sample_turn if turn_number == sample_turn.settings.turn else None
                 ),
             ),
-            "scores": ScoresExportContext(persistence=persistence),
+            "scores": scores_export_context(persistence=persistence),
         },
     )
 
@@ -192,7 +195,7 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
     skip_player, success_player = player_ids[:2]
     turn = sample_turn.settings.turn
     perspective = sample_turn.player.id
-    persistence.put_row(
+    persistence.put_row_without_notify(
         GAME_ID,
         perspective,
         turn,
@@ -204,9 +207,8 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
-    persistence.put_row(
+    persistence.put_row_without_notify(
         GAME_ID,
         perspective,
         turn,
@@ -218,7 +220,6 @@ def test_force_schedule_while_a_row_is_stored_paints_that_row_and_keeps_the_run(
             is_complete=True,
             solutions=[{"objectiveValue": 1, "actions": []}],
         ),
-        on_walk=False,
     )
 
     scope = InferenceStreamScope(

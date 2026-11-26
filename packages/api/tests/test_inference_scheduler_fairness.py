@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
@@ -50,8 +51,10 @@ def test_tier_one_jobs_run_before_continuations_from_other_rows(
     """A later row's tier-1 job must not wait behind an earlier row's tier-2+ jobs."""
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
-    reset_compute_worker_pool_for_tests(worker_count=1)
+    # The scheduler reset also replaces the compute worker pool, so it runs
+    # first and the one-worker pool this test needs is configured last.
     reset_inference_row_scheduler_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
     _patch_scores_dag_without_fleet_deps(monkeypatch)
     scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
@@ -121,8 +124,10 @@ def test_continuation_jobs_round_robin_across_rows(
 ):
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
-    reset_compute_worker_pool_for_tests(worker_count=1)
+    # The scheduler reset also replaces the compute worker pool, so it runs
+    # first and the one-worker pool this test needs is configured last.
     reset_inference_row_scheduler_for_tests()
+    reset_compute_worker_pool_for_tests(worker_count=1)
     _patch_scores_dag_without_fleet_deps(monkeypatch)
     scheduler = make_inference_scheduler()
     scope = InferenceStreamScope(
@@ -177,8 +182,8 @@ def test_continuation_jobs_round_robin_across_rows(
     run_a = get_row_run(session_a.run_id)
     run_b = get_row_run(session_b.run_id)
     assert run_a is not None and run_b is not None
-    run_a.ladder_state = PolicyLadderState(policy_steps=short_ladder)
-    run_b.ladder_state = PolicyLadderState(policy_steps=short_ladder)
+    run_a.ladder = replace(run_a.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder))
+    run_b.ladder = replace(run_b.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder))
     scheduler.resume_globally(scope)
     gate.set()
 

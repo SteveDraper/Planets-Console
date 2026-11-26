@@ -17,6 +17,7 @@ from api.analytics.homeworld_locator.constants import ANALYTIC_ID as HOMEWORLD_A
 from api.analytics.homeworld_locator.persistence import HomeworldLocatorPersistenceService
 from api.analytics.registry import dispatch_turn_analytic
 from api.analytics.scores.export_services import ScoresExportContext
+from api.analytics.scores.hull_mask_overrides import hull_mask_overrides_for
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.batch_compute import ensure_table_map_compute
 from api.compute.diagnostics import ShellContextKey, get_compute_diagnostics_controller
@@ -69,7 +70,9 @@ class TurnAnalyticService:
         if hull_catalog_masks is not None:
             self._hull_catalog_masks = hull_catalog_masks
         else:
-            self._hull_catalog_masks = InferenceHullCatalogService(storage, turns)
+            self._hull_catalog_masks = InferenceHullCatalogService(
+                turns, hull_mask_overrides_for(storage)
+            )
         if inference_persistence is not None:
             self._inference_persistence = inference_persistence
         else:
@@ -245,7 +248,7 @@ class TurnAnalyticService:
         game_id: int,
         perspective: int,
     ) -> dict[str, object]:
-        scores_services = self._scores_export_context(game_id, perspective)
+        scores_services = self._scores_export_context()
         return {
             SCORES_ANALYTIC_ID: scores_services,
             FLEET_ANALYTIC_ID: self._fleet_compute_services(
@@ -323,22 +326,11 @@ class TurnAnalyticService:
             ),
         )
 
-    def _scores_export_context(
-        self,
-        game_id: int,
-        perspective: int,
-    ) -> ScoresExportContext:
-        def resolve_hull_catalog_mask(turn: TurnInfo, player_id: int):
-            return self._hull_catalog_masks.resolve_mask_for_player_on_turn(
-                turn,
-                game_id,
-                player_id,
-            )
-
+    def _scores_export_context(self) -> ScoresExportContext:
         return ScoresExportContext(
+            mask_overrides=hull_mask_overrides_for(self._storage),
             persistence=self._inference_persistence,
             scheduler=self._inference_scheduler_instance(),
-            resolve_hull_catalog_mask=resolve_hull_catalog_mask,
         )
 
     def get_scores_row_inference(
@@ -408,13 +400,6 @@ class TurnAnalyticService:
         if not is_build_inference_available(turn):
             return iter(())
 
-        def resolve_mask_for_player(player_id: int):
-            return self._hull_catalog_masks.resolve_mask_for_player_on_turn(
-                turn,
-                game_id,
-                player_id,
-            )
-
         export_services = query_ctx.export_services
         load_turn = query_ctx.load_turn
 
@@ -444,7 +429,6 @@ class TurnAnalyticService:
             perspective=perspective,
             load_scoreboard_turn=load_turn,
             reload_host_turn=reload_host_turn,
-            resolve_mask_for_player=resolve_mask_for_player,
             resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
             export_services=export_services,
             persistence=self._inference_persistence,

@@ -50,6 +50,7 @@ from api.streaming.table_stream.row_run_admission import (
 
 from tests.scores_exports_helpers import inference_target_player_id
 from tests.scores_ladder_helpers import (
+    NO_OVERRIDE_REBUILD,
     ShellLadder,
     durable_row_complete,
     ladder_scope,
@@ -87,7 +88,11 @@ def registry_run(sample_turn) -> tuple[RowRun, ComputeScope]:
 
 def _claim(scope: ComputeScope, *, generation: int = GENERATION) -> RowRun | None:
     claim = claim_tier_ladder(
-        scope, execution_generation=generation, scores_epoch=EPOCH, is_execution_live=live_execution
+        scope,
+        execution_generation=generation,
+        scores_epoch=EPOCH,
+        rebuild=NO_OVERRIDE_REBUILD,
+        is_execution_live=live_execution,
     )
     return None if claim is None else claim.run
 
@@ -142,6 +147,7 @@ def test_a_claim_for_an_ended_execution_changes_nothing(
             scope,
             execution_generation=generation,
             scores_epoch=EPOCH,
+            rebuild=NO_OVERRIDE_REBUILD,
             is_execution_live=_ended,
         )
 
@@ -285,6 +291,7 @@ def test_cancelling_the_stamped_run_leaves_the_listener_only_its_stamp(ladder, m
             "runId": stamped.run_id,
             "rowComplete": durable_row_complete("late persist after cancel").row_complete,
             "onWalk": False,
+            "claimEpoch": 0,
         },
     )
 
@@ -320,13 +327,13 @@ def test_an_aborted_execution_hands_no_ladder_over(ladder):
     ladder.close_stream()
     aborted_generation = _abort(ladder)
     reopened = ladder.open_stream()
-    fresh_ladder = get_row_run(reopened.run_id).ladder_state
+    fresh_ladder = get_row_run(reopened.run_id).ladder.ladder_state
 
     ladder.submit(force_fresh=True)
     wire = ladder.submitted_work[-1].job_wire_for(ladder.scope)
 
     assert wire["runId"] == reopened.run_id
-    assert get_row_run(reopened.run_id).ladder_state is fresh_ladder
+    assert get_row_run(reopened.run_id).ladder.ladder_state is fresh_ladder
     assert fresh_ladder.next_step_index == 0
     assert get_row_run(detached_id) is None
     assert _stamp(ladder.scope).execution_generation != aborted_generation
@@ -352,7 +359,9 @@ def test_a_late_listener_leaves_a_run_restamped_for_the_next_execution(ladder):
 def test_reusing_a_registered_run_across_executions_waits_on_its_tier_lock(ladder, monkeypatch):
     """The next execution's step on the same run starts after the aborted one's step ends.
 
-    It carries that run's own ladder progress, stamped at the same scores epoch.
+    No stamp serves the new execution, so its claim gives the run a pending
+    rebuild at the same scores epoch: the step replaces whatever the aborted
+    step wrote back and starts the ladder again from its first tier.
     """
     aborted_step_started = threading.Event()
     release_aborted_step = threading.Event()
@@ -394,4 +403,4 @@ def test_reusing_a_registered_run_across_executions_waits_on_its_tier_lock(ladde
     assert blocked_on_tier_lock
     assert next_wire["runId"] == run_id
     assert _stamp(ladder.scope).scores_epoch == aborted_stamp.scores_epoch
-    assert tier_indexes == [1, 2]
+    assert tier_indexes == [1, 0]

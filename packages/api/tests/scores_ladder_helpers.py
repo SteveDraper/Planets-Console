@@ -22,6 +22,7 @@ from unittest.mock import patch
 import pytest
 from api.analytics.fleet import REGISTRATION as FLEET_REGISTRATION
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.hull_catalog_mask import resolve_hull_catalog_mask
 from api.analytics.military_score_inference.inference_row_runner import (
     TierJobContinue,
     TierJobOutcome,
@@ -39,17 +40,27 @@ from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.solver import STATUS_EXACT
+from api.analytics.military_score_inference.tier_ladder import LadderRebuild
 from api.analytics.scores import REGISTRATION as SCORES_REGISTRATION
-from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE
+from api.analytics.scores.compute_orchestration import (
+    SCORES_TIER_SOLVE,
+    build_scores_tier_solve_job_wire,
+)
+from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
 from api.compute.pools import PoolStepWork
 from api.compute.submission_open import SubmissionOpen
+from api.compute.wire import DependencyOutputs
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id, perspective
+from tests.submission_open_helpers import explicit_submission_open, live_execution
+
+# A ladder rebuild under no user mask override, for tests that claim directly.
+NO_OVERRIDE_REBUILD = LadderRebuild(user_override=None)
 
 
 def ladder_session(sample_turn, player_id: int) -> InferenceRowStreamSession:
@@ -100,7 +111,7 @@ def scripted_tier_job(
         on_tier_step(run)
         if isinstance(outcome, BaseException):
             raise outcome
-        ladder_state = run.ladder_state
+        ladder_state = run.ladder.ladder_state
         if isinstance(outcome, TierJobContinue):
             ladder_state.next_step_index += 1
         else:
@@ -190,21 +201,46 @@ class ShellLadder:
         )
         assert self.orchestrator.nodes[self.scope].state == "running"
 
+    def build_wire(self, *, generation_offset: int = 0) -> dict:
+        """Build the scores tier job wire for the ladder's scope, as the orchestrator does.
+
+        The wire carries the node's execution generation plus ``generation_offset``;
+        an offset of one stands for a node replaced since the ladder's last step.
+        """
+        return build_scores_tier_solve_job_wire(
+            self.scope,
+            dependency_outputs=DependencyOutputs(),
+            ctx=self.ctx,
+            submission_open=explicit_submission_open(),
+            execution_generation=(
+                self.orchestrator.nodes[self.scope].execution_generation + generation_offset
+            ),
+            is_execution_live=live_execution,
+        )
+
     def close_stream(self) -> None:
         """Run the stream's connect ``finally``: it detaches its own row."""
         self.scheduler.detach_inference_stream(
             self.stream_scope, (self.session,), stream_token=self.stream_token
         )
 
-    def execute_tier(self, outcome: TierJobOutcome | BaseException) -> object:
+    def execute_tier(
+        self,
+        outcome: TierJobOutcome | BaseException,
+        *,
+        on_tier_step: Callable[[RowRun], None] = lambda _run: None,
+    ) -> object:
         """Build and run the node's last submitted tier step on the worker.
 
-        Returns the step's result wire. The orchestrator has not taken it yet,
-        so nothing has persisted. A failing tier raises.
+        The tier job calls ``on_tier_step`` with its run, after any pending
+        ladder rebuild is applied. Returns the step's result wire. The
+        orchestrator has not taken it yet, so nothing has persisted. A failing
+        tier raises.
         """
 
         def record_tier_step(run: RowRun) -> None:
-            self.tier_steps.append((run.run_id, run.ladder_state.next_step_index))
+            self.tier_steps.append((run.run_id, run.ladder.ladder_state.next_step_index))
+            on_tier_step(run)
 
         with scripted_tier_job(outcome, on_tier_step=record_tier_step):
             work = self.submitted_work[-1]
@@ -214,14 +250,33 @@ class ShellLadder:
         """Hand an executed step's result back to the orchestrator, which persists it."""
         complete_running_pool_step(self.orchestrator, self.scope, result_wire=result_wire)
 
-    def run_tier(self, outcome: TierJobOutcome | BaseException) -> None:
+    def run_tier(
+        self,
+        outcome: TierJobOutcome | BaseException,
+        *,
+        on_tier_step: Callable[[RowRun], None] = lambda _run: None,
+    ) -> None:
         """Build and run the node's last submitted tier step, then hand the result back."""
         try:
-            result_wire = self.execute_tier(outcome)
+            result_wire = self.execute_tier(outcome, on_tier_step=on_tier_step)
         except Exception as exc:
             complete_running_pool_step(self.orchestrator, self.scope, error=exc)
             return
         self.complete_tier(result_wire)
+
+    @property
+    def changed_override(self) -> frozenset[int]:
+        """The hull mask user override ``change_mask`` saves: two hulls of the player's catalog."""
+        catalog = resolve_hull_catalog_mask(
+            self.sample_turn, self.player_id, user_enabled_hull_ids=None
+        ).master_hull_ids
+        return frozenset(sorted(catalog)[:2])
+
+    def change_mask(self) -> None:
+        """Save a hull mask override for the ladder's player, as the mask route does."""
+        resolve_scores_services(self.ctx).mask_overrides.change(
+            GAME_ID, self.player_id, self.changed_override
+        )
 
     def persisted_summary(self) -> str | None:
         row = self.persistence.get_row(

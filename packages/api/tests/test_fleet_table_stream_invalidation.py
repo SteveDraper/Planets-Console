@@ -18,7 +18,6 @@ from api.analytics.fleet.fleet_table_stream_registry import (
 from api.analytics.fleet.fleet_table_stream_rows import iter_fleet_table_stream_events
 from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
-    _query_context_for_services,
     reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
@@ -35,6 +34,8 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 from api.transport.fleet_table_stream import fleet_complete_event
 
+from tests.fleet_table_stream_test_helpers import query_context_for_fleet_services
+from tests.scores_exports_helpers import scores_export_context
 from tests.table_stream_lock_helpers import assert_lock_not_held, assert_stream_lock_not_held
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -160,7 +161,6 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
         FleetInferenceSupport,
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
     from tests.scores_exports_helpers import put_persisted_row
@@ -170,7 +170,7 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     inference_persistence = InferenceRowPersistenceService(memory_backend)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     for player_id in player_ids:
         put_persisted_row(
             inference_persistence,
@@ -249,7 +249,7 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
         fleet_services=services,
         persistence=fleet_persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     events: list[dict[str, object]] = []
     stream_closed = threading.Event()
@@ -330,7 +330,6 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
         FleetInferenceSupport,
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
     from tests.scores_exports_helpers import put_persisted_row
@@ -340,7 +339,7 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     inference_persistence = InferenceRowPersistenceService(memory_backend)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     for player_id in player_ids:
         put_persisted_row(
             inference_persistence,
@@ -419,7 +418,7 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
         fleet_services=services,
         persistence=fleet_persistence,
         scheduler=scheduler,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
 
     def consume_stream() -> None:
@@ -477,7 +476,6 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
         FleetInferenceSupport,
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
     from tests.scores_exports_helpers import put_persisted_row
@@ -488,7 +486,7 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
     player_ids = (player_id,)
     turn_number = sample_turn.settings.turn
     inference_persistence = InferenceRowPersistenceService(memory_backend)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     put_persisted_row(
         inference_persistence,
         sample_turn,
@@ -559,7 +557,7 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
         perspective=1,
         fleet_services=services,
         persistence=fleet_persistence,
-        query_context=_query_context_for_services(services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
 
     def consume_stream() -> None:
@@ -675,7 +673,7 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
         scheduler=scheduler,
         fleet_services=fleet_services,
         persistence=persistence,
-        query_context=_query_context_for_services(fleet_services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(fleet_services, host_turn=sample_turn),
     )
     controller.attach()
 
@@ -836,7 +834,7 @@ def test_enqueue_player_run_does_not_hold_scheduler_lock_across_get_ledger(
         session,
         fleet_services=fleet_services,
         persistence=persistence,
-        query_context=_query_context_for_services(fleet_services, host_turn=sample_turn),
+        query_context=query_context_for_fleet_services(fleet_services, host_turn=sample_turn),
         stream_token=stream_token,
     )
     assert result is session

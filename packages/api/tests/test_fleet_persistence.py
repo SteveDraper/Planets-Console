@@ -35,6 +35,7 @@ from api.services.stack import build_service_stack
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fleet_fixtures import legacy_fleet_ledgers_document
+from tests.scores_exports_helpers import scores_export_context
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -528,7 +529,7 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
         )
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
-    inference_persistence.put_row(
+    inference_persistence.put_row_without_notify(
         628580,
         1,
         111,
@@ -540,8 +541,8 @@ def test_inference_evidence_updated_preserves_other_players_ledgers(memory_backe
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
+    inference_persistence.on_row_persisted(628580, 1, 111, 8, on_walk=False)
     assert fleet_persistence.get_ledger(628580, 1, 111, 8) is not None
     assert fleet_persistence.get_ledger(628580, 1, 112, 8) is not None
     assert fleet_persistence.has_final_ledger(628580, 1, 111, 8) is False
@@ -683,7 +684,6 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
         FleetInferenceSupport,
     )
     from api.analytics.military_score_inference.solver import STATUS_EXACT
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
     from tests.scores_exports_helpers import ship_build_wire
@@ -699,7 +699,7 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
     def load_turn_fn(turn_number: int):
         return load_turn(turn_number)
 
-    scores_services = ScoresExportContext(
+    scores_services = scores_export_context(
         persistence=inference_persistence,
         scheduler=scheduler,
     )
@@ -745,7 +745,7 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
     )
     assert fleet_persistence.get_snapshot(628580, 1, 111) is not None
 
-    inference_persistence.put_row(
+    inference_persistence.put_row_without_notify(
         628580,
         1,
         111,
@@ -770,8 +770,8 @@ def test_inference_row_persisted_invalidates_cached_fleet_for_refinement(
                 }
             ],
         ),
-        on_walk=False,
     )
+    inference_persistence.on_row_persisted(628580, 1, 111, 8, on_walk=False)
     assert fleet_persistence.get_ledger(628580, 1, 111, 8) is not None
     assert not fleet_persistence.has_final_ledger(628580, 1, 111, 8)
     other_player_ids = [
@@ -1148,10 +1148,9 @@ def _inference_materialization_for_fleet(memory_backend, load_turn):
         FleetInferenceMaterialization,
         FleetInferenceSupport,
     )
-    from api.analytics.scores.export_services import ScoresExportContext
 
     inference_persistence = InferenceRowPersistenceService(memory_backend)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(persistence=inference_persistence)
     return (
         inference_persistence,
         FleetInferenceMaterialization(
@@ -1170,7 +1169,7 @@ def _seed_scores_rows_for_all_players(
     from api.serialization.inference_row_persistence import PersistedInferenceRow
 
     for player in iter_turn_players(turn):
-        inference_persistence.put_row(
+        inference_persistence.put_row_without_notify(
             628580,
             1,
             turn.settings.turn,
@@ -1182,7 +1181,6 @@ def _seed_scores_rows_for_all_players(
                 is_complete=True,
                 solutions=[],
             ),
-            on_walk=False,
         )
 
 

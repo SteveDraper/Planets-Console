@@ -220,7 +220,7 @@ def test_scores_persist_and_read_call_counts(tmp_path, sample_turn):
     row_key = persistence.row_store_key(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id)
 
     with count_file_backend_syscalls(counts):
-        persistence.put_row(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id, row, on_walk=False)
+        persistence.put_row_without_notify(GAME_ID, PERSPECTIVE, TURN_NUMBER, player_id, row)
 
     assert counts.protocol_counts() == {"get": 0, "put": 1, "list": 0, "delete": 0}
     assert counts.json_load_calls == 0

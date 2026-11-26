@@ -12,7 +12,6 @@ from api.analytics.military_score_inference.post_unsat_placeholders import (
 )
 from api.analytics.military_score_inference.ship_build_combos import GENERIC_FREIGHTER_COMBO_ID
 from api.analytics.military_score_inference.solver import STATUS_MODERATE_RESIDUAL
-from api.analytics.scores.export_services import ScoresExportContext
 from api.concepts.hulls import (
     GENERIC_FREIGHTER_SENTINEL_HULL_ID,
     UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID,
@@ -22,6 +21,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
+from tests.scores_exports_helpers import scores_export_context
 
 _ENVELOPE_MIN_2X = 232
 _ENVELOPE_MAX_2X = 2180
@@ -89,7 +89,7 @@ def _ingest_with_persist_placeholders(
         freighterchange=freighterchange,
     )
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
-    persistence.put_row(
+    persistence.put_row_without_notify(
         628580,
         1,
         111,
@@ -103,13 +103,12 @@ def _ingest_with_persist_placeholders(
             placeholders=placeholders,
             unexplained_military_delta_2x=22,
         ),
-        on_walk=False,
     )
     snapshot = apply_fleet_turn_delta(
         ensure_fleet_baseline(628580, 1, turn),
         turn,
         inference_materialization=_inference_materialization(
-            FleetInferenceSupport(scores_services=ScoresExportContext(persistence=persistence)),
+            FleetInferenceSupport(scores_services=scores_export_context(persistence=persistence)),
             turn,
         ),
     )

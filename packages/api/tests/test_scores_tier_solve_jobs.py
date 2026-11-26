@@ -11,6 +11,7 @@ from api.analytics.scores.tier_solve_jobs import time_scores_tier_solve_jobs
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.inference_corpus.manifest import FIXTURES_ROOT
+from tests.scores_ladder_helpers import durable_row_complete, scripted_tier_job
 
 CORPUS_GAME_ID = 628580
 CORPUS_PERSPECTIVE = 1
@@ -75,3 +76,19 @@ def test_the_probe_raises_when_its_row_run_is_gone(monkeypatch):
             turn_number=CORPUS_TURN,
             player_id=CORPUS_PLAYER_ID,
         )
+
+
+def test_the_probe_reports_persist_when_its_tier_completes_the_row():
+    reset_tier_row_run_registry_for_tests()
+    storage = _seed_corpus_backend()
+
+    with scripted_tier_job(durable_row_complete("probe row")):
+        timing = time_scores_tier_solve_jobs(
+            storage,
+            game_id=CORPUS_GAME_ID,
+            perspective=CORPUS_PERSPECTIVE,
+            turn_number=CORPUS_TURN,
+            player_id=CORPUS_PLAYER_ID,
+        )
+
+    assert timing.to_probe_json()["stepOutcome"] == "persist"

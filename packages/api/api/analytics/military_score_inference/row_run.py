@@ -4,42 +4,38 @@ from __future__ import annotations
 
 import threading
 
-from api.analytics.military_score_inference.inference_stream_orchestration import (
-    InferenceStreamOrchestration,
-)
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
 )
-from api.analytics.military_score_inference.policy_ladder_state import PolicyLadderState
+from api.analytics.military_score_inference.tier_ladder import LadderRebuild, TierLadder
 from api.streaming.table_stream.row_run_admission import RowRunPhase
 
 
 class RowRun:
-    """One scoreboard row's ladder state and stream orchestration.
+    """One scoreboard row's tier ladder and the stream session it reports to.
 
     ``tier_lock`` serializes ``run_inference_tier_job`` so duplicate concurrent
-    ``tier_solve`` dispatches (cross-binding) cannot race ``orchestration``
-    segment indexes or ladder state.
+    ``tier_solve`` dispatches (cross-binding) cannot race the ladder's segment
+    indexes or ladder state.
 
     Shell phase (``RowRunPhase``) is the generic table-stream retained-shell
     vocabulary from :mod:`api.streaming.table_stream.row_run_admission`.
 
-    A run always has a ladder. Production builds runs through
+    A run always has a ladder (:class:`TierLadder`), replaced as a whole value.
+    Production builds runs through
     :func:`api.analytics.scores.tier_row_run_registry.new_tier_row_run`, which
-    seeds the ladder from the session. ``orchestration`` is None for a row that
-    solves one segment (no accelerated split or backfill).
+    seeds the ladder from the session. On the orchestrated path that ladder is
+    a placeholder: the run's first ladder claim replaces it, by hand-over or by
+    a pending rebuild. The tier-solve probe, which never claims, solves it as
+    seeded.
     """
 
-    def __init__(
-        self,
-        session: InferenceRowStreamSession,
-        *,
-        ladder_state: PolicyLadderState,
-        orchestration: InferenceStreamOrchestration | None = None,
-    ) -> None:
+    def __init__(self, session: InferenceRowStreamSession, *, ladder: TierLadder) -> None:
         self.session = session
-        self.ladder_state = ladder_state
-        self.orchestration = orchestration
+        self.ladder = ladder
+        # Written by a ladder claim under the registry lock; taken, through the
+        # registry, by the next tier step under ``tier_lock``.
+        self.pending_rebuild: LadderRebuild | None = None
         self.tier_lock = threading.RLock()
         self.phase: RowRunPhase = RowRunPhase.REGISTERED
 

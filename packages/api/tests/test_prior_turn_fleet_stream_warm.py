@@ -149,14 +149,14 @@ def test_on_fleet_snapshot_persisted_clears_scores_host_turn_document(
         solutions=[],
     )
     for host_turn in (110, 111):
-        persistence.put_row(game_id, persp, host_turn, player_id, row, on_walk=False)
+        persistence.put_row_without_notify(game_id, persp, host_turn, player_id, row)
 
     invalidation.on_fleet_snapshot_persisted(game_id, persp, fleet_turn=110)
 
     assert persistence.get_row(game_id, persp, 111, player_id) is None
     assert persistence.get_row(game_id, persp, 110, player_id) is not None
 
-    persistence.put_row(game_id, persp, 111, player_id, row, on_walk=False)
+    persistence.put_row_without_notify(game_id, persp, 111, player_id, row)
 
     try:
         scope = InferenceStreamScope(game_id=game_id, perspective=persp, turn_number=111)
@@ -391,7 +391,7 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
     _wire_fleet_scores_invalidation(inference_persistence, fleet_persistence, scheduler)
 
     for player_id in player_ids:
-        inference_persistence.put_row(
+        inference_persistence.put_row_without_notify(
             ctx.game_id,
             ctx.perspective,
             turn_number,
@@ -403,7 +403,6 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
                 is_complete=True,
                 solutions=[],
             ),
-            on_walk=False,
         )
 
     def resolve_fleet_torp_resolution_for_player(

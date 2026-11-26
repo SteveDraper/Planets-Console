@@ -72,9 +72,9 @@ def test_new_tier_row_run_seeds_its_ladder_and_keeps_the_orchestration(sample_tu
     run = new_tier_row_run(session, orchestration=orchestration)
 
     assert run.session is session
-    assert run.orchestration is orchestration
-    assert run.ladder_state.resolved_mask is session.resolved_mask
-    assert run.ladder_state.ladder_complete is False
+    assert run.ladder.orchestration is orchestration
+    assert run.ladder.ladder_state.resolved_mask is session.resolved_mask
+    assert run.ladder.ladder_state.ladder_complete is False
 
 
 @pytest.mark.parametrize("module", _ROW_STATUS_MODULES, ids=lambda module: module.__name__)

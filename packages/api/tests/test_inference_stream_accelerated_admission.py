@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from api.analytics.military_score_inference.accelerated_start import (
     ACCEL_WINDOW_SEGMENT_ID,
@@ -49,41 +51,7 @@ from api.transport.inference_stream_wire import (
     row_complete_to_complete_wire_event,
 )
 
-
-def _accel_window_segment() -> AcceleratedInferenceSegment:
-    return AcceleratedInferenceSegment(
-        segment_id=ACCEL_WINDOW_SEGMENT_ID,
-        host_turn=1,
-        military_delta_2x=110,
-        warship_delta=0,
-        freighter_delta=1,
-        priority_point_delta=0,
-    )
-
-
-def _reported_host_turn_segment() -> AcceleratedInferenceSegment:
-    return AcceleratedInferenceSegment(
-        segment_id=REPORTED_HOST_TURN_SEGMENT_ID,
-        host_turn=2,
-        military_delta_2x=20,
-        warship_delta=1,
-        freighter_delta=0,
-        priority_point_delta=0,
-    )
-
-
-def _accelerated_split_orchestration(
-    sample_turn,
-) -> InferenceStreamOrchestration:
-    score = sample_turn.scores[0]
-    return InferenceStreamOrchestration(
-        path=InferencePath.ACCELERATED_SPLIT,
-        row_score=score,
-        row_turn=sample_turn,
-        solve_score=score,
-        solve_turn=sample_turn,
-        segments=(_accel_window_segment(), _reported_host_turn_segment()),
-    )
+from tests.accelerated_segment_helpers import accelerated_split_orchestration
 
 
 def test_new_ladder_state_uses_full_k_per_segment() -> None:
@@ -107,14 +75,14 @@ def test_new_ladder_state_builds_hopeless_facts_from_session(sample_turn) -> Non
 
 
 def test_should_emit_streaming_solutions_false_for_accel_window_segment(sample_turn) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
 
     assert orchestration.current_segment().segment_id == ACCEL_WINDOW_SEGMENT_ID
     assert orchestration.should_emit_streaming_solutions() is False
 
 
 def test_should_emit_streaming_solutions_true_for_reported_host_turn_segment(sample_turn) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
     orchestration.current_segment_index = 1
 
     assert orchestration.current_segment().segment_id == REPORTED_HOST_TURN_SEGMENT_ID
@@ -178,7 +146,7 @@ def _admit_one_solution_during_a_tier(
             turn_number=sample_turn.settings.turn,
         )
     )
-    orchestration = _accelerated_split_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
     orchestration.current_segment_index = segment_index
     score = sample_turn.scores[0]
     session = InferenceRowStreamSession(
@@ -192,7 +160,7 @@ def _admit_one_solution_during_a_tier(
     scheduler.enqueue_tier_ladder(session, orchestration=orchestration)
     run = get_row_run(session.run_id)
     assert run is not None
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
 
     solution = InferenceSolution(
         objective_value=20,
@@ -294,7 +262,7 @@ def test_an_admission_in_the_reported_host_turn_segment_streams_its_held_solutio
 
 
 def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkeypatch) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
     score = sample_turn.scores[0]
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -305,8 +273,8 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
 
     captured: list[float | None] = []
 
@@ -324,7 +292,7 @@ def test_run_inference_tier_job_uses_stream_tier_time_budget(sample_turn, monkey
         del state, observation, turn, time_limit_seconds, cancel_token, on_admitted
         del hang_fuse_seconds
         captured.append(search_effort_allowance)
-        run.ladder_state.ladder_complete = True
+        run.ladder.ladder_state.ladder_complete = True
 
     monkeypatch.setattr(
         "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
@@ -348,8 +316,7 @@ def _hull_mask(*hull_ids: int) -> ResolvedHullCatalogMask:
         race_name="test",
         master_hull_ids=enabled,
         default_enabled_hull_ids=enabled,
-        effective_enabled_hull_ids=enabled,
-        has_user_override=True,
+        user_enabled_hull_ids=enabled,
     )
 
 
@@ -357,7 +324,7 @@ def _hull_mask(*hull_ids: int) -> ResolvedHullCatalogMask:
 def test_segment_continuation_keeps_the_ladder_state_mask(
     sample_turn, monkeypatch, ladder_mask
 ) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
     score = sample_turn.scores[0]
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -369,8 +336,8 @@ def test_segment_continuation_keeps_the_ladder_state_mask(
         resolved_mask=ladder_mask,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state(session)
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state(session))
 
     def fake_tier_step(state, *_args, **_kwargs) -> None:
         session.resolved_mask = _hull_mask(3)
@@ -391,7 +358,7 @@ def test_segment_continuation_keeps_the_ladder_state_mask(
     )
 
     assert isinstance(outcome, TierJobContinue)
-    assert run.ladder_state.resolved_mask is ladder_mask
+    assert run.ladder.ladder_state.resolved_mask is ladder_mask
 
 
 def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_turn) -> None:
@@ -415,7 +382,7 @@ def test_accelerated_backfill_unavailable_stream_skip_has_no_diagnostics(sample_
 def test_finish_ladder_segment_returns_the_row_complete_only_on_the_last_segment(
     sample_turn,
 ) -> None:
-    orchestration = _accelerated_split_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
 
     first = orchestration.finish_ladder_segment(
         new_ladder_state(), orchestration.current_observation(), sample_turn

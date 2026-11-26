@@ -13,7 +13,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
-from api.analytics.scores.export_services import ScoresExportContext
 
 from tests.scores_exports_helpers import (
     GAME_ID,
@@ -21,6 +20,7 @@ from tests.scores_exports_helpers import (
     inference_solution,
     perspective,
     schedule_row_with_ladder,
+    scores_export_context,
 )
 
 
@@ -72,7 +72,7 @@ def test_scheduler_row_run_does_not_close_turn_evidence(sample_turn):
         player_id,
         merged_solutions=[inference_solution(objective_value=12)],
     )
-    scores_services = ScoresExportContext(scheduler=scheduler, persistence=None)
+    scores_services = scores_export_context(scheduler=scheduler, persistence=None)
     turn_number = sample_turn.settings.turn
     perspective_id = perspective(sample_turn)
 

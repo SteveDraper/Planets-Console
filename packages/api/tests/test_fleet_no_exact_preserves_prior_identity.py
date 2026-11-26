@@ -39,7 +39,6 @@ from api.analytics.military_score_inference.solver import (
     STATUS_NO_EXACT_SOLUTION,
 )
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.scope import ComputeScope
 from api.compute.wire import DependencyOutputs
@@ -52,6 +51,7 @@ from tests.scores_exports_helpers import (
     inference_solution,
     perspective,
     schedule_row_with_ladder,
+    scores_export_context,
     ship_build_domain,
     ship_build_wire,
 )
@@ -93,7 +93,7 @@ def _turn_for_player(
 
 def _inference_support(scheduler: InferenceRowScheduler) -> FleetInferenceSupport:
     return FleetInferenceSupport(
-        scores_services=ScoresExportContext(
+        scores_services=scores_export_context(
             persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             scheduler=scheduler,
         ),
@@ -112,7 +112,7 @@ def _close_scores(
     persistence = inference.scores_services.persistence
     assert persistence is not None
     closed = list(solutions) if solutions is not None else []
-    persistence.put_row(
+    persistence.put_row_without_notify(
         628580,
         game_perspective,
         turn.settings.turn,
@@ -124,7 +124,6 @@ def _close_scores(
             is_complete=True,
             solutions=closed,
         ),
-        on_walk=False,
     )
 
 

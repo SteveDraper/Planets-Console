@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from api.analytics.export_context import AnalyticQueryContext, make_analytic_query_context
 from api.analytics.fleet.chain import (
@@ -25,6 +26,7 @@ from api.analytics.military_score_inference.inference_scheduler import Inference
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.options import TurnAnalyticsOptions
 from api.analytics.scores.export_services import ScoresExportContext
+from api.analytics.scores.hull_mask_overrides import hull_mask_overrides_for
 from api.analytics.turn_roster import iter_turn_players
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
 from api.errors import NotFoundError
@@ -39,6 +41,7 @@ from api.services.game_service import GameService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.services.turn_load_service import TurnLoadService
 from api.storage.base import StorageBackend
+from api.storage.memory_asset import MemoryAssetBackend
 
 GAME_ID = 628580
 
@@ -51,6 +54,18 @@ class ExportSeedContext:
     perspective: int
     load_turn: Callable[[int], object | None]
     export_services: Mapping[str, object]
+
+
+def scores_export_context(
+    *, storage: StorageBackend | None = None, **fields: Any
+) -> ScoresExportContext:
+    """A scores export bundle whose hull mask overrides live on ``storage``.
+
+    With no ``storage``, the overrides live on a fresh memory backend, so no
+    test shares mask revisions with another.
+    """
+    backend = storage if storage is not None else MemoryAssetBackend(initial={})
+    return ScoresExportContext(mask_overrides=hull_mask_overrides_for(backend), **fields)
 
 
 def enable_backfill_earlier_turns(ctx) -> None:
@@ -80,9 +95,9 @@ def export_chain_query_context(
     def load_turn(turn_number: int):
         return turns.get(turn_number)
 
-    scores_services = ScoresExportContext(persistence=persistence)
+    scores_services = scores_export_context(persistence=persistence)
     if scheduler is not None:
-        scores_services = ScoresExportContext(
+        scores_services = scores_export_context(
             persistence=persistence,
             scheduler=scheduler,
         )
@@ -150,7 +165,7 @@ def seed_fleet_unwind_through(
             raise RuntimeError(f"seed_fleet_unwind_through missing stored turn {turn_number}")
         seeded_turns[turn_number] = turn
         for row_player_id in player_ids:
-            scores_services.persistence.put_row(
+            scores_services.persistence.put_row_without_notify(
                 ctx.game_id,
                 ctx.perspective,
                 turn_number,
@@ -162,7 +177,6 @@ def seed_fleet_unwind_through(
                     is_complete=True,
                     solutions=[],
                 ),
-                on_walk=False,
             )
 
     floor = accelerated_ensure_floor(seeded_turns[last_seeded_turn].settings, last_seeded_turn)
@@ -221,7 +235,7 @@ def seed_storage_analytics_fixture(
 
     inference_persistence = InferenceRowPersistenceService(storage)
     fleet_persistence = FleetSnapshotPersistenceService(storage)
-    scores_services = ScoresExportContext(persistence=inference_persistence)
+    scores_services = scores_export_context(storage=storage, persistence=inference_persistence)
     fleet_services = FleetComputeServices(
         persistence=fleet_persistence,
         game_id=game_id,

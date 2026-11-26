@@ -447,7 +447,7 @@ def test_recompute_reschedules_all_rows_while_table_stream_active_cases_1_and_2(
     _attach_active_table_stream(sample_turn, scheduler, player_ids)
     persistence = InferenceRowPersistenceService(memory_backend)
     for player_id in player_ids:
-        persistence.put_row(
+        persistence.put_row_without_notify(
             628580,
             1,
             turn_number,
@@ -459,7 +459,6 @@ def test_recompute_reschedules_all_rows_while_table_stream_active_cases_1_and_2(
                 is_complete=True,
                 solutions=[],
             ),
-            on_walk=False,
         )
 
     before = _run_ids_for_players(scheduler, player_ids)
@@ -530,7 +529,7 @@ def _seed_cached_rows(
     player_ids: tuple[int, ...],
 ) -> None:
     for player_id in player_ids:
-        persistence.put_row(
+        persistence.put_row_without_notify(
             628580,
             1,
             turn_number,
@@ -542,7 +541,6 @@ def _seed_cached_rows(
                 is_complete=True,
                 solutions=[],
             ),
-            on_walk=False,
         )
 
 

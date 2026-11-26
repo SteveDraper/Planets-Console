@@ -9,7 +9,6 @@ from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.export_types import ExportScope, PathPrefixScopeRule
 from api.analytics.exports.catalog import AnalyticExportCatalog
 from api.analytics.exports.meta_wire import build_export_meta_branch
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_admission import (
     admission_skip_complete_event,
     is_build_inference_available,
@@ -88,7 +87,6 @@ class ScoresRowEnsureInputs:
 
     player_id: int
     score: Score | None
-    resolved_mask: ResolvedHullCatalogMask | None
     stream_scope: InferenceStreamScope
     stream_token: str | None
 
@@ -105,11 +103,9 @@ def _scores_row_ensure_inputs(
     stream_scope = scores_inference_stream_scope(scope)
     stream_token = services.resolve_stream_token(stream_scope)
     score = next((row for row in turn.scores if row.ownerid == player_id), None)
-    resolved_mask = services.resolve_hull_catalog_mask(turn, player_id)
     return ScoresRowEnsureInputs(
         player_id=player_id,
         score=score,
-        resolved_mask=resolved_mask,
         stream_scope=stream_scope,
         stream_token=stream_token,
     )
@@ -385,7 +381,6 @@ def _ensure_admit_inference_row(
         game_id=scope.game_id,
         perspective=scope.perspective,
         load_scoreboard_turn=ctx.load_turn,
-        resolved_mask=inputs.resolved_mask,
         fleet_torp_overlay=fleet_resolution.overlay,
         fleet_torp_input_status=fleet_resolution.input_status,
         prior_fleet_max_tech_by_axis=fleet_resolution.prior_fleet_max_tech_for_admission(),
@@ -588,11 +583,10 @@ def build_scores_export_materialized_tree(
         tree["tierEmissions"] = tier_emissions
 
     if scope.player_id is not None:
-        resolved_mask = services.resolve_hull_catalog_mask(turn, scope.player_id)
-        if resolved_mask is not None:
-            tree["hullCatalogMask"] = _hull_catalog_mask_branch(
-                resolved_mask.effective_enabled_hull_ids
-            )
+        resolved_mask = services.mask_overrides.effective_mask(turn, scope.game_id, scope.player_id)
+        tree["hullCatalogMask"] = _hull_catalog_mask_branch(
+            resolved_mask.effective_enabled_hull_ids
+        )
 
     return tree
 
@@ -613,7 +607,7 @@ def _tier_emissions_from_resolved(
     scheduler_run = resolved.snapshot.scheduler_run
     if scheduler_run is None:
         return None
-    step_diagnostics = scheduler_run.ladder_state.step_diagnostics
+    step_diagnostics = scheduler_run.ladder.ladder_state.step_diagnostics
     if not step_diagnostics:
         return None
     emissions = compact_tier_emissions_from_step_diagnostics(step_diagnostics)

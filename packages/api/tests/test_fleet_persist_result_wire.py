@@ -33,7 +33,6 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.options import TurnAnalyticsOptions
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.scope import ComputeScope
 from api.compute.wire import DependencyOutputs
@@ -45,6 +44,7 @@ from tests.scores_exports_helpers import (
     inference_solution,
     perspective,
     schedule_row_with_ladder,
+    scores_export_context,
     ship_build_domain,
     ship_build_wire,
 )
@@ -95,7 +95,7 @@ def _phase1_persisted_with_placeholders(turn, *, player_id: int, game_perspectiv
 
 def _inference_support(scheduler: InferenceRowScheduler) -> FleetInferenceSupport:
     return FleetInferenceSupport(
-        scores_services=ScoresExportContext(
+        scores_services=scores_export_context(
             persistence=InferenceRowPersistenceService(MemoryAssetBackend(initial={})),
             scheduler=scheduler,
         ),
@@ -121,7 +121,7 @@ def _close_scores_turn_evidence(
     persistence = inference.scores_services.persistence
     assert persistence is not None
     closed_solutions = list(solutions) if solutions is not None else []
-    persistence.put_row(
+    persistence.put_row_without_notify(
         628580,
         game_perspective,
         turn.settings.turn,
@@ -133,7 +133,6 @@ def _close_scores_turn_evidence(
             is_complete=True,
             solutions=closed_solutions,
         ),
-        on_walk=False,
     )
 
 
@@ -208,7 +207,7 @@ def test_persist_writes_refined_option_sets_onto_result_wire(sample_turn):
         load_turn=fleet_services.load_turn,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_export_context(),
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
@@ -329,7 +328,7 @@ def test_persist_publishes_non_zero_evidence_generation_on_result_wire(sample_tu
         load_turn=fleet_services.load_turn,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_export_context(),
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
@@ -436,7 +435,7 @@ def test_observation_persist_keeps_option_sets_from_the_stored_prior(sample_turn
         load_turn=fleet_services.load_turn,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_export_context(),
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
@@ -511,7 +510,7 @@ def test_empty_prior_dependency_wire_falls_back_to_persistence(sample_turn):
         load_turn=fleet_services.load_turn,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_export_context(),
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
@@ -590,7 +589,7 @@ def test_persist_refuses_when_scores_turn_evidence_open(sample_turn):
         load_turn=fleet_services.load_turn,
         export_services={
             _FLEET_ANALYTIC_ID: fleet_services,
-            SCORES_ANALYTIC_ID: ScoresExportContext(),
+            SCORES_ANALYTIC_ID: scores_export_context(),
         },
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,

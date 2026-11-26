@@ -47,6 +47,8 @@ from api.compute.scope import ComputeScope
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.scores_exports_helpers import ADMIT_EVERY_WRITE
+
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
 
@@ -119,8 +121,9 @@ def _persist_session_row(
     session: InferenceRowStreamSession,
     row_complete: RowComplete,
 ) -> None:
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete,
+        guard=ADMIT_EVERY_WRITE,
         game_id=session.game_id,
         perspective=session.perspective,
         host_turn=session.turn_number,

@@ -760,11 +760,11 @@ def test_stream_tier_job_surfaces_military_sat_refused_without_sat(sample_turn, 
         prior_fleet_records=(_singleton_unknown_hull_warship(),),
     )
     run = new_tier_row_run(session)
-    run.ladder_state = new_ladder_state(session)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state(session))
     outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
     assert isinstance(outcome, TierJobRowComplete)
     assert outcome.row_complete.result.status == STATUS_UNCHARACTERIZED_ROSTER
-    assert outcome.row_complete.result is run.ladder_state.refused_result
+    assert outcome.row_complete.result is run.ladder.ladder_state.refused_result
     assert outcome.row_complete.result.leftover is not None
     assert outcome.row_complete.wire_payload.is_complete is True
     assert sat_calls == []
@@ -813,12 +813,12 @@ def test_stream_sat_refuse_does_not_continue_accelerated_segments(sample_turn, m
         prior_fleet_records=(_singleton_unknown_hull_warship(),),
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state(session)
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state(session))
     outcome = run_inference_tier_job(run, _quiet_tier_job_callbacks())
     assert isinstance(outcome, TierJobRowComplete)
     assert outcome.row_complete.result.status == STATUS_UNCHARACTERIZED_ROSTER
-    assert outcome.row_complete.result is run.ladder_state.refused_result
+    assert outcome.row_complete.result is run.ladder.ladder_state.refused_result
     assert outcome.row_complete.result.leftover is not None
     assert outcome.row_complete.wire_payload.is_complete is True
     assert orchestration.segment_solves == []

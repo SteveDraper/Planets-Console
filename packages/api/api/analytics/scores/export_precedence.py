@@ -326,7 +326,7 @@ def _search_status_from_scheduler(
 ) -> SearchStatus:
     if globally_paused:
         return "paused"
-    ladder_state = scheduler_run.ladder_state
+    ladder_state = scheduler_run.ladder.ladder_state
     if ladder_state.last_status == STATUS_STOPPED:
         return "stopped"
     if ladder_state.time_limited:

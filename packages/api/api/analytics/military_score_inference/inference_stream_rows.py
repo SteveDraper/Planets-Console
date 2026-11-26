@@ -13,7 +13,6 @@ from api.analytics.military_score_inference.durable_turn_evidence import (
     is_durable_turn_evidence_row_status,
 )
 from api.analytics.military_score_inference.fleet_torp_overlay import FleetTorpOverlay
-from api.analytics.military_score_inference.hull_catalog_mask import ResolvedHullCatalogMask
 from api.analytics.military_score_inference.inference_admission import (
     admission_skip_complete_event,
     is_build_inference_available,
@@ -240,7 +239,6 @@ def schedule_inference_row(
     game_id: int,
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
-    resolved_mask: ResolvedHullCatalogMask | None = None,
     fleet_torp_overlay: FleetTorpOverlay | None = None,
     fleet_torp_input_status: FleetTorpInputStatus | None = None,
     prior_fleet_max_tech_by_axis: dict[str, int] | None = None,
@@ -251,6 +249,11 @@ def schedule_inference_row(
     persistence: InferenceRowPersistenceService | None = None,
 ) -> RegisteredInferenceRow:
     """Build one inference row session and register its RowRun.
+
+    The session carries no hull mask: the RowRun's first ladder claim gives it
+    a pending rebuild from the claim's mask snapshot, and the tier step that
+    applies it sets ``session.resolved_mask``. The ladder registered here is a
+    placeholder that rebuild replaces.
 
     ``enqueue_tier_ladder`` decides stream ownership and the result carries
     that decision. Nothing is submitted here: for a ``STREAM_BOUND`` row the
@@ -277,7 +280,6 @@ def schedule_inference_row(
         load_scoreboard_turn=load_scoreboard_turn,
         export_services=export_services if export_services is not None else {},
         query_context=query_context,
-        resolved_mask=resolved_mask,
         fleet_torp_overlay=fleet_torp_overlay,
         fleet_torp_input_status=fleet_torp_input_status,
         prior_fleet_max_tech_by_axis=prior_fleet_max_tech_by_axis,
@@ -372,7 +374,6 @@ def iter_scores_table_inference_events(
     perspective: int,
     load_scoreboard_turn: Callable[[int], TurnInfo | None] | None = None,
     reload_host_turn: Callable[[], TurnInfo] | None = None,
-    resolve_mask_for_player: Callable[[int], ResolvedHullCatalogMask | None] | None = None,
     resolve_fleet_torp_resolution_for_player: Callable[[int], PriorTurnFleetTorpResolution]
     | None = None,
     export_services: Mapping[str, object] | None = None,
@@ -411,7 +412,6 @@ def iter_scores_table_inference_events(
             perspective=perspective,
             load_scoreboard_turn=load_scoreboard_turn,
             reload_host_turn=reload_host_turn,
-            resolve_mask_for_player=resolve_mask_for_player,
             resolve_fleet_torp_resolution_for_player=resolve_fleet_torp_resolution_for_player,
             export_services=export_services if export_services is not None else {},
             persistence=persistence,

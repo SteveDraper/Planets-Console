@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 
 from api.analytics.military_score_inference.inference_row_runner import (
     TierJobRowComplete,
@@ -28,6 +29,7 @@ from api.compute.submission_open import SubmissionOpen
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 from api.storage.memory_asset import MemoryAssetBackend
 
+from tests.scores_exports_helpers import scores_export_context
 from tests.scores_row_lifecycle_test_helpers import (
     _patch_scores_dag_without_fleet_deps,
     _session_for_player,
@@ -109,7 +111,9 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
         scheduler.accept_pending_run(session.run_id)
         row_run = get_row_run(session.run_id)
         assert row_run is not None
-        row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)
+        row_run.ladder = replace(
+            row_run.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder)
+        )
 
         _wait_until(tier_step_started.is_set)
         scheduler.cancel_row_run(run_id := session.run_id)
@@ -202,7 +206,6 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
     from api.analytics.export_context import make_analytic_query_context
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores.tier_row_run_registry import (
         ScopeIndexPolicy,
         get_persist_admission,
@@ -252,7 +255,7 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
             sample_turn,
             TurnAnalyticsOptions(),
             export_services={
-                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+                SCORES_ANALYTIC_ID: scores_export_context(persistence=persistence),
             },
             game_id=sample_turn.game.id,
             perspective=sample_turn.player.id,
@@ -270,7 +273,12 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": session.run_id, "rowComplete": row_complete, "onWalk": False},
+            {
+                "runId": session.run_id,
+                "rowComplete": row_complete,
+                "onWalk": False,
+                "claimEpoch": 0,
+            },
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
         assert get_persist_admission(session.run_id) is PersistAdmission.ABSENT
@@ -285,7 +293,6 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores import tier_row_run_registry as reg
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
-    from api.analytics.scores.export_services import ScoresExportContext
     from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
     from api.compute.scope import ComputeScope
     from api.storage.memory_asset import MemoryAssetBackend
@@ -336,7 +343,7 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
             sample_turn,
             TurnAnalyticsOptions(),
             export_services={
-                SCORES_ANALYTIC_ID: ScoresExportContext(persistence=persistence),
+                SCORES_ANALYTIC_ID: scores_export_context(persistence=persistence),
             },
             game_id=sample_turn.game.id,
             perspective=sample_turn.player.id,
@@ -354,7 +361,12 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
                 turn=turn_number,
                 player_id=player_id,
             ),
-            {"runId": session.run_id, "rowComplete": row_complete, "onWalk": False},
+            {
+                "runId": session.run_id,
+                "rowComplete": row_complete,
+                "onWalk": False,
+                "claimEpoch": 0,
+            },
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:
@@ -418,7 +430,9 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
         scheduler.accept_pending_run(session.run_id)
         row_run = get_row_run(session.run_id)
         assert row_run is not None
-        row_run.ladder_state = PolicyLadderState(policy_steps=short_ladder)
+        row_run.ladder = replace(
+            row_run.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder)
+        )
 
         _wait_until(finalize_entered.is_set)
         scheduler.cancel_row_run(run_id := session.run_id)

@@ -35,7 +35,6 @@ from api.analytics.military_score_inference.uncharacterized_roster_types import 
     ExactSetPinRecord,
     PlaceholderDeparture,
 )
-from api.analytics.scores.export_services import ScoresExportContext
 from api.concepts.hulls import UNKNOWN_MILITARY_SHIP_SENTINEL_HULL_ID
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.uncharacterized_roster import (
@@ -48,6 +47,7 @@ from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.fixtures.military_score_inference import _observation
 from tests.fleet_fixtures import ledger_for_player, single_ship_turn
+from tests.scores_exports_helpers import scores_export_context
 
 _GAME_ID = 628580
 _PERSPECTIVE = 1
@@ -98,7 +98,7 @@ def _persist_row(
     departure_pins: list[dict[str, object]] | None = None,
     host_turn_targets: list[HostTurnFunctionalTarget] | None = None,
 ) -> None:
-    persistence.put_row(
+    persistence.put_row_without_notify(
         _GAME_ID,
         _PERSPECTIVE,
         _HOST_TURN,
@@ -118,7 +118,6 @@ def _persist_row(
             departure_pins=departure_pins,
             host_turn_targets=host_turn_targets,
         ),
-        on_walk=False,
     )
 
 
@@ -135,7 +134,7 @@ def _apply_fleet(
         turn,
         inference_materialization=FleetInferenceMaterialization(
             inference=FleetInferenceSupport(
-                scores_services=ScoresExportContext(persistence=persistence),
+                scores_services=scores_export_context(persistence=persistence),
             ),
             load_turn=lambda _turn_number: turn,
         ),

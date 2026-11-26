@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
-from api.analytics.military_score_inference.accelerated_start import (
-    ACCEL_WINDOW_SEGMENT_ID,
-    REPORTED_HOST_TURN_SEGMENT_ID,
-    AcceleratedInferenceSegment,
-)
 from api.analytics.military_score_inference.analytic import build_inference_observation
-from api.analytics.military_score_inference.inference_path import InferencePath
 from api.analytics.military_score_inference.inference_row_runner import (
     InferenceTierJobCallbacks,
     TierJobRowComplete,
@@ -19,7 +14,6 @@ from api.analytics.military_score_inference.inference_row_runner import (
     solve_context,
 )
 from api.analytics.military_score_inference.inference_stream_orchestration import (
-    InferenceStreamOrchestration,
     new_ladder_state,
 )
 from api.analytics.military_score_inference.inference_stream_session import (
@@ -29,34 +23,7 @@ from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.tier_row_run_registry import new_tier_row_run
 
-
-def _two_segment_orchestration(sample_turn) -> InferenceStreamOrchestration:
-    score = sample_turn.scores[0]
-    return InferenceStreamOrchestration(
-        path=InferencePath.ACCELERATED_SPLIT,
-        row_score=score,
-        row_turn=sample_turn,
-        solve_score=score,
-        solve_turn=sample_turn,
-        segments=(
-            AcceleratedInferenceSegment(
-                segment_id=ACCEL_WINDOW_SEGMENT_ID,
-                host_turn=1,
-                military_delta_2x=110,
-                warship_delta=0,
-                freighter_delta=1,
-                priority_point_delta=0,
-            ),
-            AcceleratedInferenceSegment(
-                segment_id=REPORTED_HOST_TURN_SEGMENT_ID,
-                host_turn=2,
-                military_delta_2x=20,
-                warship_delta=1,
-                freighter_delta=0,
-                priority_point_delta=0,
-            ),
-        ),
-    )
+from tests.accelerated_segment_helpers import accelerated_split_orchestration
 
 
 def _stub_instant_ladder(monkeypatch) -> None:
@@ -91,7 +58,7 @@ def test_concurrent_shared_rowrun_accelerated_completes_without_raise(
     """Duplicate concurrent tier_solve on one RowRun must serialize and complete."""
     _stub_instant_ladder(monkeypatch)
     score = sample_turn.scores[0]
-    orchestration = _two_segment_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
         observation=build_inference_observation(score, sample_turn),
@@ -101,8 +68,8 @@ def test_concurrent_shared_rowrun_accelerated_completes_without_raise(
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
 
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
@@ -140,7 +107,7 @@ def test_concurrent_shared_rowrun_accelerated_completes_without_raise(
 
 def test_solve_context_raises_when_segments_exhausted(sample_turn) -> None:
     score = sample_turn.scores[0]
-    orchestration = _two_segment_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
     orchestration.current_segment_index = len(orchestration.segments)
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -151,8 +118,8 @@ def test_solve_context_raises_when_segments_exhausted(sample_turn) -> None:
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
 
     try:
         solve_context(run)
@@ -168,7 +135,7 @@ def test_run_inference_tier_job_idempotent_when_segments_exhausted(
 ) -> None:
     _stub_instant_ladder(monkeypatch)
     score = sample_turn.scores[0]
-    orchestration = _two_segment_orchestration(sample_turn)
+    orchestration = accelerated_split_orchestration(sample_turn, sample_turn.scores[0])
     orchestration.current_segment_index = len(orchestration.segments)
     session = InferenceRowStreamSession(
         player_id=score.ownerid,
@@ -179,8 +146,8 @@ def test_run_inference_tier_job_idempotent_when_segments_exhausted(
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    run.orchestration = orchestration
-    run.ladder_state = new_ladder_state()
+    run.ladder = replace(run.ladder, orchestration=orchestration)
+    run.ladder = replace(run.ladder, ladder_state=new_ladder_state())
     callbacks = InferenceTierJobCallbacks(
         emit_tier_started_progress=lambda: None,
         emit_progress=lambda: None,

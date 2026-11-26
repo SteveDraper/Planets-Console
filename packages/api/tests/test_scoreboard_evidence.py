@@ -32,12 +32,11 @@ from api.analytics.scoreboard_evidence import (
     annotate_scoreboard_paint,
     stamp_scoreboard_row_for_context,
 )
-from api.analytics.scores.export_services import ScoresExportContext
 from api.analytics.scores.exports import _persist_immediate_row_admission
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
 
-from tests.scores_exports_helpers import GAME_ID
+from tests.scores_exports_helpers import ADMIT_EVERY_WRITE, GAME_ID, scores_export_context
 
 _API_ROOT = Path(__file__).resolve().parents[1] / "api"
 _MARK_READER_SOURCES = (
@@ -59,7 +58,7 @@ def _dead_complete() -> dict[str, object]:
 
 
 def _stored_skip(persistence: InferenceRowPersistenceService, *, turn: int, player_id: int) -> None:
-    persistence.put_row(
+    persistence.put_row_without_notify(
         GAME_ID,
         1,
         turn,
@@ -71,7 +70,6 @@ def _stored_skip(persistence: InferenceRowPersistenceService, *, turn: int, play
             is_complete=True,
             solutions=[],
         ),
-        on_walk=False,
     )
 
 
@@ -94,7 +92,7 @@ def _context_with_mark(storage, turn, *, player_id: int, mark: int, persistence)
                 perspective=1,
                 load_turn=lambda turn_number: turn if turn_number == turn.settings.turn else None,
             ),
-            "scores": ScoresExportContext(persistence=persistence),
+            "scores": scores_export_context(persistence=persistence),
         },
     )
 
@@ -249,11 +247,12 @@ def test_both_write_paths_call_the_persist_stamp(
         persistence=persistence,
     )
 
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         row_complete_with_summary(
             InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
             summary="Best build",
         ),
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=1,
         host_turn=turn,
@@ -262,7 +261,7 @@ def test_both_write_paths_call_the_persist_stamp(
         on_walk=False,
     )
     _persist_immediate_row_admission(
-        ScoresExportContext(persistence=persistence),
+        scores_export_context(persistence=persistence),
         ExportScope(game_id=GAME_ID, perspective=1, turn=turn, player_id=immediate_player),
         ImmediateRowAdmission(events=(_dead_complete(),)),
         query_context=context,
@@ -298,8 +297,9 @@ def test_live_durable_complete_reads_the_generation_persist_just_wrote(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="Best build",
     )
-    persistence.persist_row_complete_for_scope(
+    persistence.persist_row_complete_guarded(
         complete,
+        guard=ADMIT_EVERY_WRITE,
         game_id=GAME_ID,
         perspective=1,
         host_turn=turn,

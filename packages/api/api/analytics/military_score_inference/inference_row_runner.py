@@ -26,6 +26,7 @@ from api.analytics.military_score_inference.row_complete_factory import (
 )
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.military_score_inference.search_effort import stream_row_search_effort
+from api.analytics.military_score_inference.tier_ladder import TierLadder
 from api.models.game import TurnInfo
 
 
@@ -64,7 +65,7 @@ class InferenceTierJobCallbacks:
 
 
 def solve_context(run: RowRun) -> tuple[InferenceObservation, TurnInfo]:
-    orchestration = run.orchestration
+    orchestration = run.ladder.orchestration
     if orchestration is not None:
         return orchestration.current_observation(), orchestration.current_solve_turn()
     return run.session.observation, run.session.turn
@@ -75,8 +76,8 @@ def _session_solve_context(run: RowRun) -> tuple[InferenceObservation, TurnInfo]
 
 
 def build_stopped_row_complete(run: RowRun) -> RowComplete:
-    orchestration = run.orchestration
-    state = run.ladder_state
+    orchestration = run.ladder.orchestration
+    state = run.ladder.ladder_state
     if orchestration is not None and orchestration.current_segment() is None:
         exhausted = orchestration.exhausted_segments_row_complete()
         if exhausted is not None:
@@ -100,7 +101,7 @@ def _outcome_when_accelerated_segments_exhausted(
     observation, turn = _session_solve_context(run)
     return TierJobRowComplete(
         row_complete=row_complete_stopped(
-            ladder_state=run.ladder_state,
+            ladder_state=run.ladder.ladder_state,
             observation=observation,
             turn=turn,
         )
@@ -121,7 +122,7 @@ def _outcome_after_ladder_complete(
     if orchestration is not None:
         segment_row_complete = orchestration.finish_ladder_segment(state, observation, turn)
         if segment_row_complete is None:
-            run.ladder_state = continue_ladder_state(state, run.session)
+            run.ladder = TierLadder(continue_ladder_state(state, run.session), orchestration)
             return TierJobContinue()
         return TierJobRowComplete(row_complete=segment_row_complete)
 
@@ -153,7 +154,7 @@ def run_inference_tier_job(
 
     Holds ``run.tier_lock`` for the whole job so duplicate concurrent dispatches
     serialize on shared orchestration / ladder state. The runner is the only
-    code that advances ``run.ladder_state`` to the next accelerated segment, and
+    code that moves ``run.ladder`` on to the next accelerated segment, and
     it does so under that lock before returning :class:`TierJobContinue`. When
     accelerated segments are already exhausted, returns an idempotent terminal
     outcome instead of raising.
@@ -170,8 +171,8 @@ def _run_inference_tier_job_locked(
     if session.cancel_token.is_cancelled():
         return TierJobRowComplete(row_complete=build_stopped_row_complete(run))
 
-    state = run.ladder_state
-    orchestration = run.orchestration
+    state = run.ladder.ladder_state
+    orchestration = run.ladder.orchestration
     if orchestration is not None and orchestration.current_segment() is None:
         return _outcome_when_accelerated_segments_exhausted(run, orchestration)
 

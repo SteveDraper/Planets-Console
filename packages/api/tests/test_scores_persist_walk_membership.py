@@ -80,7 +80,7 @@ def _wire_classification(ladder: ShellLadder) -> None:
 
 def _abort_before_the_row_is_written(ladder: ShellLadder, monkeypatch) -> None:
     """Abort the ladder node after the persist was admitted and before its row is written."""
-    write_row = ladder.persistence.put_row
+    write_row = ladder.persistence.put_row_without_notify
 
     def abort_then_write(*args, **kwargs) -> None:
         node = ladder.orchestrator.nodes[ladder.scope]
@@ -91,7 +91,7 @@ def _abort_before_the_row_is_written(ladder: ShellLadder, monkeypatch) -> None:
         )
         write_row(*args, **kwargs)
 
-    monkeypatch.setattr(ladder.persistence, "put_row", abort_then_write)
+    monkeypatch.setattr(ladder.persistence, "put_row_without_notify", abort_then_write)
 
 
 def _persist_payload(ladder: ShellLadder, *, on_walk: bool) -> dict[str, object]:
