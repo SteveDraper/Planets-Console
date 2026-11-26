@@ -11,6 +11,7 @@ from __future__ import annotations
 import gc
 import threading
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 
 import pytest
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
@@ -27,6 +28,9 @@ from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.military_score_inference.inference_scheduler import (
     SCORES_OFF_LOCK_THREAD_NAME,
     InferenceRowScheduler,
+)
+from api.analytics.military_score_inference.inference_stream_domain_events import (
+    GlobalPauseChanged,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.scores import tier_row_run_registry
@@ -110,9 +114,54 @@ def _end_while_holding(lock_context: Callable[[], object], end: Callable[[], Non
         with lock_context():
             end()
 
-    thread = threading.Thread(target=holder, daemon=True)
+    thread = threading.Thread(target=holder, name="lock-holder", daemon=True)
     thread.start()
     thread.join()
+
+
+def _record_calls[RecordT](
+    monkeypatch: pytest.MonkeyPatch,
+    target: object,
+    method_name: str,
+    describe: Callable[..., RecordT],
+) -> list[RecordT]:
+    """Wrap ``target.method_name`` to record ``describe(*args)`` per call, then delegate."""
+    calls: list[RecordT] = []
+    method = getattr(target, method_name)
+
+    def recording(*args: object) -> object:
+        calls.append(describe(*args))
+        return method(*args)
+
+    monkeypatch.setattr(target, method_name, recording)
+    return calls
+
+
+@dataclass(frozen=True)
+class _StreamEnd:
+    thread_name: str
+    stream_token: str
+    active_token_at_start: str | None
+
+
+def _record_stream_ends(
+    monkeypatch: pytest.MonkeyPatch, scheduler: TableStreamScheduler
+) -> list[_StreamEnd]:
+    """Record the thread, token and the scope's active token of each ``end_table_stream``.
+
+    A reentrant lock lets an end that runs on the thread holding it return, so
+    only the thread the end ran on shows whether it left the ending thread.
+    """
+    return _record_calls(
+        monkeypatch,
+        scheduler,
+        "end_table_stream",
+        lambda _scope, stream_token: _StreamEnd(
+            thread_name=threading.current_thread().name,
+            stream_token=stream_token,
+            active_token_at_start=scheduler._scope_guard.active_table_stream_token,
+        ),
+    )
 
 
 # --- scores -------------------------------------------------------------------
@@ -127,14 +176,25 @@ def scores(sample_turn, make_inference_scheduler):
     return scheduler, scope
 
 
-def _scores_locks(scheduler: InferenceRowScheduler, session) -> dict[str, Callable[[], object]]:
+def _scores_locks(
+    scheduler: InferenceRowScheduler, background_session
+) -> dict[str, Callable[[], object]]:
     return {
         "scheduler lock": lambda: scheduler._lock,
         "row-run registry lock": lambda: tier_row_run_registry._lock,
         "pending accepts lock": lambda: scheduler._pending_accepts._lock,
-        "session event queue mutex": lambda: session.event_queue.mutex,
+        "session event queue mutex": lambda: background_session.event_queue.mutex,
         "orchestrator condition": lambda: get_compute_orchestrator()._condition,
     }
+
+
+def _global_pause_events(session) -> list[bool]:
+    events = []
+    while not session.event_queue.empty():
+        event = session.event_queue.get_nowait()
+        if isinstance(event, GlobalPauseChanged):
+            events.append(event.paused)
+    return events
 
 
 @pytest.mark.parametrize(
@@ -148,65 +208,90 @@ def _scores_locks(scheduler: InferenceRowScheduler, session) -> dict[str, Callab
     ],
 )
 @pytest.mark.parametrize("ending", sorted(ENDINGS))
+@pytest.mark.parametrize("is_paused", [False, True], ids=["running", "paused"])
 def test_a_scores_stream_ends_while_its_thread_holds_a_teardown_lock(
-    scores, sample_turn, lock_name, ending
+    scores, sample_turn, monkeypatch, lock_name, ending, is_paused
 ) -> None:
+    """The end runs once, on the runner, whichever of its locks the ending thread holds.
+
+    A background run outlives the stream, so a paused stream's end puts
+    ``globalPause=false`` on that run's event queue and then runs one dispatch
+    pass on the orchestrator: the paused cases take every lock in the matrix.
+    """
     scheduler, scope = scores
+    stream_ends = _record_stream_ends(monkeypatch, scheduler)
+    dispatch_threads = _record_calls(
+        monkeypatch,
+        scheduler,
+        "_dispatch_after_pause_cleared",
+        lambda: threading.current_thread().name,
+    )
     policy = IdleConnectPolicy()
     stream = _connect(scheduler, scope, policy)
     token = scheduler._scope_guard.active_table_stream_token
-    session = ladder_session(sample_turn, sample_turn.scores[0].ownerid)
-    scheduler.enqueue_tier_ladder(session, stream_token=token)
+    stream_session = ladder_session(sample_turn, sample_turn.scores[0].ownerid)
+    scheduler.enqueue_tier_ladder(stream_session, stream_token=token)
+    background_session = ladder_session(sample_turn, sample_turn.scores[1].ownerid)
+    scheduler.enqueue_tier_ladder(background_session)
+    if is_paused:
+        scheduler.pause_globally(scope)
     end = ENDINGS[ending](stream)
     del stream
 
-    _end_while_holding(_scores_locks(scheduler, session)[lock_name], end)
+    _end_while_holding(_scores_locks(scheduler, background_session)[lock_name], end)
 
     assert scheduler.off_lock_runner.drain(timeout=WAIT_SECONDS)
+    assert stream_ends == [_StreamEnd(SCORES_OFF_LOCK_THREAD_NAME, token, token)]
     assert policy.detached
     assert not scheduler.owns_table_stream(token)
-    assert session.run_id not in scheduler._runs
+    assert stream_session.run_id not in scheduler._runs
+    assert background_session.run_id in scheduler._runs
+    assert scheduler._globally_paused is False
+    if is_paused:
+        assert _global_pause_events(background_session) == [True, False]
+        assert dispatch_threads == [SCORES_OFF_LOCK_THREAD_NAME]
+    else:
+        assert _global_pause_events(background_session) == []
+        assert dispatch_threads == []
 
 
-def test_a_paused_scores_stream_end_releases_on_the_runner(scores, monkeypatch) -> None:
+def test_a_reopen_before_the_old_streams_end_runs_keeps_the_new_stream(
+    scores, sample_turn, monkeypatch
+) -> None:
+    """The old stream's end runs after the new stream claims the scope.
+
+    It detaches only the old stream's run, and leaves the new stream's run,
+    ownership and pause in place.
+    """
     scheduler, scope = scores
-    stream = _connect(scheduler, scope, IdleConnectPolicy())
-    scheduler.pause_globally(scope)
-    release_threads: list[str] = []
-    monkeypatch.setattr(
-        scheduler,
-        "_dispatch_after_pause_cleared",
-        lambda: release_threads.append(threading.current_thread().name),
-    )
-
-    stream.close()
-
-    assert scheduler.off_lock_runner.drain(timeout=WAIT_SECONDS)
-    assert scheduler.global_pause_status(scope)["paused"] is False
-    assert release_threads == [SCORES_OFF_LOCK_THREAD_NAME]
-
-
-def test_a_reopen_before_the_old_streams_end_runs_keeps_the_new_stream(scores) -> None:
-    scheduler, scope = scores
+    stream_ends = _record_stream_ends(monkeypatch, scheduler)
     runner_free = threading.Event()
     stream = _connect(scheduler, scope, IdleConnectPolicy())
     old_token = scheduler._scope_guard.active_table_stream_token
+    old_session = ladder_session(sample_turn, sample_turn.scores[0].ownerid)
+    scheduler.enqueue_tier_ladder(old_session, stream_token=old_token)
     scheduler.pause_globally(scope)
     scheduler.off_lock_runner.post(lambda: runner_free.wait(WAIT_SECONDS))
 
     stream.close()
     new_token = scheduler.begin_scope(scope)
+    new_session = ladder_session(sample_turn, sample_turn.scores[1].ownerid)
+    scheduler.enqueue_tier_ladder(new_session, stream_token=new_token)
     scheduler.pause_globally(scope)
     runner_free.set()
 
     assert scheduler.off_lock_runner.drain(timeout=WAIT_SECONDS)
     assert old_token != new_token
+    assert stream_ends == [_StreamEnd(SCORES_OFF_LOCK_THREAD_NAME, old_token, new_token)]
+    assert old_session.run_id not in scheduler._runs
+    assert new_session.run_id in scheduler._runs
     assert scheduler.owns_table_stream(new_token)
     assert scheduler.global_pause_status(scope)["paused"] is True
 
 
-def test_a_raising_detach_still_posts_the_end(scores) -> None:
+def test_a_raising_detach_still_posts_the_end(scores, monkeypatch) -> None:
     scheduler, scope = scores
+    stream_ends = _record_stream_ends(monkeypatch, scheduler)
     stream = _connect(scheduler, scope, IdleConnectPolicy(detach_error=RuntimeError("detach")))
     token = scheduler._scope_guard.active_table_stream_token
 
@@ -214,6 +299,7 @@ def test_a_raising_detach_still_posts_the_end(scores) -> None:
         stream.close()
 
     assert scheduler.off_lock_runner.drain(timeout=WAIT_SECONDS)
+    assert stream_ends == [_StreamEnd(SCORES_OFF_LOCK_THREAD_NAME, token, token)]
     assert not scheduler.owns_table_stream(token)
 
 
@@ -242,14 +328,19 @@ def _install_fleet_run(scheduler: FleetTableStreamScheduler) -> FleetPlayerStrea
 
 
 @pytest.mark.parametrize(
-    "lock_name",
-    ["scheduler lock", "pending accepts lock", "cancel token lock", "orchestrator condition"],
+    "lock_name", ["scheduler lock", "pending accepts lock", "cancel token lock"]
 )
 @pytest.mark.parametrize("ending", sorted(ENDINGS))
 def test_a_fleet_stream_ends_while_its_thread_holds_a_teardown_lock(
-    fleet, lock_name, ending
+    fleet, monkeypatch, lock_name, ending
 ) -> None:
+    """The end runs once, on the runner, whichever of its locks the ending thread holds.
+
+    A fleet end never calls into the orchestrator, so the matrix holds only the
+    locks the end takes.
+    """
     scheduler, scope = fleet
+    stream_ends = _record_stream_ends(monkeypatch, scheduler)
     policy = IdleConnectPolicy()
     stream = _connect(scheduler, scope, policy)
     token = scheduler._scope_guard.active_table_stream_token
@@ -258,7 +349,6 @@ def test_a_fleet_stream_ends_while_its_thread_holds_a_teardown_lock(
         "scheduler lock": lambda: scheduler._lock,
         "pending accepts lock": lambda: scheduler._pending_accepts._lock,
         "cancel token lock": lambda: session.cancel_token._cancelled._cond,
-        "orchestrator condition": lambda: get_compute_orchestrator()._condition,
     }
     end = ENDINGS[ending](stream)
     del stream
@@ -266,11 +356,11 @@ def test_a_fleet_stream_ends_while_its_thread_holds_a_teardown_lock(
     _end_while_holding(locks[lock_name], end)
 
     assert scheduler.off_lock_runner.drain(timeout=WAIT_SECONDS)
+    assert stream_ends == [_StreamEnd(FLEET_OFF_LOCK_THREAD_NAME, token, token)]
     assert policy.detached
     assert not scheduler.owns_table_stream(token)
     assert session.run_id not in scheduler._runs
     assert session.cancel_token.is_cancelled()
-    assert scheduler.off_lock_runner._thread.name == FLEET_OFF_LOCK_THREAD_NAME
 
 
 # --- shared -------------------------------------------------------------------
