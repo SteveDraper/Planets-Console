@@ -46,7 +46,8 @@ def apply_scores_row_lifecycle(
     ``_mark_stamped_row_run_cancelled`` / ``_retire_row_run`` from adapters --
     go through this command.
 
-    ``DETACH`` (run id) -- ``REGISTERED`` → ``DETACHED``; keep ``ALLOW``; no seal / token.
+    ``DETACH`` (run id) -- ``REGISTERED`` → ``DETACHED`` and keep ``ALLOW`` while the
+    scope's ladder stamp names the run; otherwise the RETIRE side. No seal / token.
     ``CANCEL`` -- drop shell + ``CANCEL_DENY`` + :func:`stream_drain.seal_canceled`
     + the shell's session cancel token. A run id names the run directly; a
     :class:`StampedLadderRun` names the run the scope's ladder stamp holds for

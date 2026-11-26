@@ -4,7 +4,9 @@ Owns scores ``RowRun`` shells and compact persist admission. Types
 (``RowRunPhase``, ``PersistAdmission``) are generic stream-row vocabulary from
 :mod:`api.streaming.table_stream.row_run_admission` -- not scores-private.
 
-Retained shells use ``RowRunPhase`` (``REGISTERED`` / ``DETACHED`` only).
+Retained shells use ``RowRunPhase`` (``REGISTERED`` / ``DETACHED`` only). Detach keeps
+a shell, as ``DETACHED``, only while the scope's ladder stamp names it; any
+other run is retired at detach.
 Cancel drops the shell immediately and records compact cancelled admission
 keyed by scores scope so ``PersistAdmission.CANCEL_DENY`` still denies late
 persist. A later ``REGISTERED`` for the same scope supersedes that cancelled
@@ -480,17 +482,30 @@ def _persist_admission_locked(run_id: str) -> PersistAdmission:
 def _detach_row_run(run_id: str) -> None:
     """Registry-private DETACH side. Public API: ``apply_scores_row_lifecycle``.
 
-    Transition ``REGISTERED`` → ``DETACHED``; clear scope index; keep by id.
-    Detach must not destroy admission state: late persist still finds the shell.
-    A tier ladder stamp stays, so the scope's next ``tier_solve`` continuation
-    can resume this run. No-op when missing or already cancelled (compact).
-    ``DETACHED`` stays ``DETACHED``.
+    A run the scope's ladder stamp names goes ``REGISTERED`` → ``DETACHED``: its
+    scope index is cleared and the shell is kept by id, so a late persist still
+    finds it and the scope's next ``tier_solve`` continuation can resume or
+    hand over its ladder. The stamp keeps it whether or not the stamp still
+    serves: a stale stamp is released, retiring the shell, at the scope's next
+    claim.
+
+    Any other run is retired (the RETIRE side). Only a stamped run can have a
+    step in flight or a persist to come: the claim stamps a run before its
+    step runs, and the stamp is released only when the node completes or
+    fails, after any persist.
+
+    No-op when missing or already cancelled (compact). ``DETACHED`` stays
+    ``DETACHED``.
     """
     with _lock:
         if run_id in _cancelled_admissions:
             return
         run = _runs_by_id.get(run_id)
         if run is None:
+            return
+        stamp = _ladder_stamp_by_scope_key.get(InferenceRowScope.from_session(run.session))
+        if stamp is None or stamp.run_id != run_id:
+            _retire_row_run_locked(run_id)
             return
         run.phase = RowRunPhase.DETACHED
         _clear_scope_index_locked(run)

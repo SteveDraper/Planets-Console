@@ -33,7 +33,8 @@ class PersistDecision:
     not retire.
     ``retire_after_write`` -- only meaningful on allow: retire the retained
     shell after a successful durable write (``DETACHED`` late persist). Live
-    ``REGISTERED`` shells stay until stream finalize retires them.
+    ``REGISTERED`` shells stay; their stream's end detaches them, which retires
+    any run no ladder stamp names.
     """
 
     allowed: bool

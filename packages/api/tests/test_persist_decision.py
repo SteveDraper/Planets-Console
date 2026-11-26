@@ -29,6 +29,8 @@ from api.analytics.scores.tier_row_run_registry import (
 )
 from api.streaming.table_stream.row_run_admission import PersistAdmission, RowRunPhase
 
+from tests.scores_ladder_helpers import stamp_run_ladder
+
 
 def _session(sample_turn, *, player_id: int | None = None) -> InferenceRowStreamSession:
     if player_id is None:
@@ -94,6 +96,7 @@ def test_persist_decision_table(sample_turn) -> None:
         assert decide_scores_row_persist(cancelled.run_id) == PersistDecision.refuse(
             should_retire=False
         )
+        stamp_run_ladder(detached)
         _detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
         assert get_persist_admission(detached.run_id) is PersistAdmission.ALLOW
@@ -193,6 +196,7 @@ def test_cancel_churn_does_not_drop_registered_or_detached_shells(sample_turn) -
 
         detached = new_tier_row_run(_session(sample_turn, player_id=players[1]))
         register_row_run(detached, scope_index=ScopeIndexPolicy.TAKE)
+        stamp_run_ladder(detached)
         _detach_row_run(detached.run_id)
 
         for _ in range(4):
