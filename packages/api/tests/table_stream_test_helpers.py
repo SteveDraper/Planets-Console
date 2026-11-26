@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import pytest
@@ -30,6 +31,24 @@ STREAM_END_WAIT_SECONDS = 2.0
 def wait_for_stream_ends(scheduler: TableStreamScheduler) -> None:
     """Wait until every stream end posted to the scheduler's off-lock runner has run."""
     assert scheduler.off_lock_runner.drain(timeout=STREAM_END_WAIT_SECONDS)
+
+
+@contextmanager
+def holding_off_lock_runner(scheduler: TableStreamScheduler) -> Iterator[None]:
+    """Keep the scheduler's off-lock runner busy for the block, then run what it posted.
+
+    A stream closed inside the block has posted its end, which has not run
+    when the block's later statements do. On exit the runner is freed and the
+    block's stream ends have run. The runner thread must already be started
+    (a connect starts it).
+    """
+    runner_free = threading.Event()
+    scheduler.off_lock_runner.post(lambda: runner_free.wait(STREAM_END_WAIT_SECONDS))
+    try:
+        yield
+    finally:
+        runner_free.set()
+    wait_for_stream_ends(scheduler)
 
 
 class RecordingTableStreamScheduler:

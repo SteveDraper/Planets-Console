@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from api.analytics.fleet.compute_services import build_ephemeral_fleet_compute_services
 from api.analytics.fleet.constants import ANALYTIC_ID as FLEET_ANALYTIC_ID
 from api.analytics.fleet.fleet_table_player_run import (
     FleetLedgerWireProgressTracker,
@@ -16,6 +17,9 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 from api.analytics.fleet.persistence import _ledger_write_listeners
 from api.compute.scope import ComputeScope
+
+from tests.fleet_table_stream_test_helpers import query_context_for_fleet_services
+from tests.table_stream_test_helpers import connect_idle_stream, holding_off_lock_runner
 
 GAME_ID = 628580
 PERSPECTIVE = 1
@@ -88,6 +92,51 @@ def test_a_replaced_streams_end_leaves_the_current_streams_runs() -> None:
         assert scheduler.owns_table_stream(current)
     finally:
         scheduler.shutdown()
+
+
+def test_a_closed_streams_end_cancels_a_run_admitted_before_the_end_runs(
+    sample_turn, make_fleet_table_stream_scheduler, monkeypatch
+) -> None:
+    """A reschedule between the connect ``finally`` and the runner's end is the stream's run.
+
+    The closed stream owns its scope until its end runs, so the run is
+    admitted for it, and the end cancels and drops it; its accept then submits nothing.
+    """
+    scheduler = make_fleet_table_stream_scheduler()
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        scheduler,
+        "_submit_accepted_player_run",
+        lambda _binding, _scope, session: submitted.append(session.run_id),
+    )
+    scope = _stream_scope()
+    services = build_ephemeral_fleet_compute_services(
+        sample_turn, game_id=GAME_ID, perspective=PERSPECTIVE
+    )
+    idle = connect_idle_stream(scheduler, scope)
+    rescheduled = FleetPlayerStreamSession(
+        player_id=sample_turn.scores[0].ownerid,
+        turn=sample_turn,
+        game_id=GAME_ID,
+        perspective=PERSPECTIVE,
+    )
+
+    with holding_off_lock_runner(scheduler):
+        idle.stream.close()
+        admitted = scheduler.enqueue_player_run(
+            rescheduled,
+            fleet_services=services,
+            persistence=services.persistence,
+            query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
+            stream_token=idle.stream_token,
+        )
+        assert admitted is rescheduled
+
+    assert rescheduled.cancel_token.is_cancelled()
+    assert rescheduled.run_id not in scheduler._runs
+    scheduler.accept_pending_run(rescheduled.run_id)
+    assert submitted == []
+    assert not scheduler.owns_table_stream(idle.stream_token)
 
 
 def test_shutdown_unregisters_the_ledger_listener_and_is_idempotent() -> None:
