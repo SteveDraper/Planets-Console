@@ -20,7 +20,6 @@ from api.analytics.fleet.fleet_table_stream_scheduler import (
     FleetTableStreamScheduler,
     _FleetPlayerOrchestratorRun,
     get_fleet_table_stream_scheduler,
-    reset_fleet_table_stream_scheduler_for_tests,
 )
 from api.analytics.fleet.persistence import FleetSnapshotPersistenceService
 from api.analytics.fleet.types import (
@@ -143,14 +142,6 @@ def _put(
         persisted,
         defer_ledger_persisted_notification=True,
     )
-
-
-def setup_function() -> None:
-    reset_fleet_table_stream_scheduler_for_tests()
-
-
-def teardown_function() -> None:
-    reset_fleet_table_stream_scheduler_for_tests()
 
 
 def test_successful_host_turn_write_ends_the_ledger_write_signal() -> None:

@@ -6,7 +6,6 @@ import json
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
@@ -23,7 +22,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
-from api.analytics.scores.tier_row_run_registry import get_row_run_phase
+from api.analytics.scores.tier_row_run_registry import get_row_run, get_row_run_phase
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun
 from api.compute.scope import ComputeScope
@@ -32,6 +31,8 @@ from api.streaming.table_stream.row_run_admission import RowRunPhase
 from api.transport.inference_stream import (
     stream_inference_ndjson,
 )
+
+from tests.scores_ladder_helpers import stamp_run_ladder
 
 
 def _session_for_player(sample_turn, *, player_id: int) -> InferenceRowStreamSession:
@@ -115,9 +116,11 @@ def test_table_stream_reconnect_via_ndjson_transport(sample_turn):
     assert json.loads(lines[0]) == {"type": "globalPause", "paused": False}
 
 
-def test_a_same_scope_reconnect_leaves_in_flight_rows_to_the_old_streams_end(sample_turn):
+def test_a_same_scope_reconnect_leaves_in_flight_rows_to_the_old_streams_end(
+    sample_turn, make_inference_scheduler
+):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -144,7 +147,9 @@ def test_a_same_scope_reconnect_leaves_in_flight_rows_to_the_old_streams_end(sam
     for session in sessions:
         assert get_row_run_phase(session.run_id) is RowRunPhase.REGISTERED
 
-    scheduler.detach_inference_stream(scope, tuple(sessions), stream_token=stream_token)
+    for session in sessions:
+        stamp_run_ladder(get_row_run(session.run_id))
+    scheduler.detach_inference_stream(scope, stream_token=stream_token)
     for session in sessions:
         # Detach must not cancel solve tokens (persist may still write).
         assert not session.cancel_token.is_cancelled()

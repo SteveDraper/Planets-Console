@@ -21,10 +21,10 @@ pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 
 
 @pytest.fixture
-def background_ladder(sample_turn, persistence) -> Iterator[ShellLadder]:
+def background_ladder(sample_turn, persistence, make_inference_scheduler) -> Iterator[ShellLadder]:
     """A scores node with no stream, on the process orchestrator ``cancel_run`` aborts."""
     reset_orchestrators_for_tests()
-    ladder = ShellLadder(sample_turn, persistence)
+    ladder = ShellLadder(sample_turn, persistence, make_inference_scheduler)
     compute_runtime._process_orchestrator = ladder.orchestrator
     ladder.close_stream()
     ladder.submit()

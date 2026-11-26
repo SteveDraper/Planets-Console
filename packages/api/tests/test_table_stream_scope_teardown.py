@@ -28,6 +28,7 @@ from api.streaming.table_stream.connect import AdmissionDispatch
 from api.streaming.table_stream.scoped_connect import iter_table_stream_connect_with_scope
 
 from tests.fleet_table_stream_test_helpers import query_context_for_fleet_services
+from tests.table_stream_test_helpers import wait_for_stream_ends
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -51,9 +52,11 @@ def memory_backend():
     return backend
 
 
-def _install_scores_scheduler(monkeypatch: pytest.MonkeyPatch) -> InferenceRowScheduler:
+def _install_scores_scheduler(
+    monkeypatch: pytest.MonkeyPatch, make_inference_scheduler
+) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
 
     def _get_scheduler() -> InferenceRowScheduler:
         return scheduler
@@ -69,14 +72,16 @@ def _install_scores_scheduler(monkeypatch: pytest.MonkeyPatch) -> InferenceRowSc
     return scheduler
 
 
-def _install_fleet_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:
+def _install_fleet_scheduler(
+    monkeypatch: pytest.MonkeyPatch, make_fleet_table_stream_scheduler
+) -> FleetTableStreamScheduler:
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
 
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
 
     def _get_scheduler() -> FleetTableStreamScheduler:
         return scheduler
@@ -88,8 +93,10 @@ def _install_fleet_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStrea
     return scheduler
 
 
-def test_scores_empty_player_ids_releases_scope_for_reconnect(sample_turn, monkeypatch):
-    scheduler = _install_scores_scheduler(monkeypatch)
+def test_scores_empty_player_ids_releases_scope_for_reconnect(
+    sample_turn, monkeypatch, make_inference_scheduler
+):
+    scheduler = _install_scores_scheduler(monkeypatch, make_inference_scheduler)
 
     first = iter_scores_table_inference_events(
         sample_turn,
@@ -101,6 +108,7 @@ def test_scores_empty_player_ids_releases_scope_for_reconnect(sample_turn, monke
     assert next(first) == {"type": "globalPause", "paused": False}
     first.close()
 
+    wait_for_stream_ends(scheduler)
     assert not scheduler._scope_guard.has_active_table_stream
 
     second = iter_scores_table_inference_events(
@@ -117,8 +125,10 @@ def test_scores_empty_player_ids_releases_scope_for_reconnect(sample_turn, monke
         second.close()
 
 
-def test_scores_schedule_failed_releases_scope_for_reconnect(sample_turn, monkeypatch):
-    scheduler = _install_scores_scheduler(monkeypatch)
+def test_scores_schedule_failed_releases_scope_for_reconnect(
+    sample_turn, monkeypatch, make_inference_scheduler
+):
+    scheduler = _install_scores_scheduler(monkeypatch, make_inference_scheduler)
     player_id = sample_turn.scores[0].ownerid
 
     def _failing_dispatch(
@@ -143,6 +153,7 @@ def test_scores_schedule_failed_releases_scope_for_reconnect(sample_turn, monkey
     )
     events = list(stream)
     assert events[0] == {"type": "globalPause", "paused": False}
+    wait_for_stream_ends(scheduler)
     assert not scheduler._scope_guard.has_active_table_stream
 
     replacement = iter_scores_table_inference_events(
@@ -159,10 +170,9 @@ def test_scores_schedule_failed_releases_scope_for_reconnect(sample_turn, monkey
 
 
 def test_scores_lost_ownership_mid_connect_releases_scope_for_reconnect(
-    sample_turn,
-    monkeypatch,
+    sample_turn, monkeypatch, make_inference_scheduler
 ):
-    scheduler = _install_scores_scheduler(monkeypatch)
+    scheduler = _install_scores_scheduler(monkeypatch, make_inference_scheduler)
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:3])
     admission_calls = 0
     original_resolve = InferenceTableStreamController.resolve_row_admission
@@ -205,6 +215,7 @@ def test_scores_lost_ownership_mid_connect_releases_scope_for_reconnect(
     assert preempting_stream is not None
     preempting_stream.close()
 
+    wait_for_stream_ends(scheduler)
     assert not scheduler._scope_guard.has_active_table_stream
 
     replacement = iter_scores_table_inference_events(
@@ -221,11 +232,9 @@ def test_scores_lost_ownership_mid_connect_releases_scope_for_reconnect(
 
 
 def test_fleet_empty_player_ids_releases_scope_for_reconnect(
-    sample_turn,
-    monkeypatch,
-    persistence,
+    sample_turn, monkeypatch, persistence, make_fleet_table_stream_scheduler
 ):
-    scheduler = _install_fleet_scheduler(monkeypatch)
+    scheduler = _install_fleet_scheduler(monkeypatch, make_fleet_table_stream_scheduler)
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -244,6 +253,7 @@ def test_fleet_empty_player_ids_releases_scope_for_reconnect(
     )
     first.close()
 
+    wait_for_stream_ends(scheduler)
     assert not scheduler._scope_guard.has_active_table_stream
 
     second = iter_fleet_table_stream_events(
@@ -264,13 +274,11 @@ def test_fleet_empty_player_ids_releases_scope_for_reconnect(
 
 
 def test_fleet_schedule_failed_releases_scope_for_reconnect(
-    sample_turn,
-    monkeypatch,
-    persistence,
+    sample_turn, monkeypatch, persistence, make_fleet_table_stream_scheduler
 ):
     from api.analytics.fleet.fleet_table_stream_controller import FleetTableStreamController
 
-    scheduler = _install_fleet_scheduler(monkeypatch)
+    scheduler = _install_fleet_scheduler(monkeypatch, make_fleet_table_stream_scheduler)
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -302,6 +310,7 @@ def test_fleet_schedule_failed_releases_scope_for_reconnect(
         query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     list(stream)
+    wait_for_stream_ends(scheduler)
     assert not scheduler._scope_guard.has_active_table_stream
 
     replacement = iter_fleet_table_stream_events(
@@ -321,16 +330,14 @@ def test_fleet_schedule_failed_releases_scope_for_reconnect(
 
 
 def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
-    sample_turn,
-    monkeypatch,
-    persistence,
+    sample_turn, monkeypatch, persistence, make_fleet_table_stream_scheduler
 ):
     from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
     from api.analytics.fleet.fleet_table_stream_rows import resolve_player_stream_admission
     from api.analytics.fleet.types import FleetMaterializationProvenance, PersistedFleetLedger
     from api.analytics.turn_roster import iter_turn_players
 
-    scheduler = _install_fleet_scheduler(monkeypatch)
+    scheduler = _install_fleet_scheduler(monkeypatch, make_fleet_table_stream_scheduler)
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -399,6 +406,7 @@ def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
     assert preempting_stream is not None
     preempting_stream.close()
 
+    wait_for_stream_ends(scheduler)
     assert not scheduler._scope_guard.has_active_table_stream
 
     replacement = iter_fleet_table_stream_events(
@@ -417,26 +425,25 @@ def test_fleet_lost_ownership_mid_connect_releases_scope_for_reconnect(
         replacement.close()
 
 
-def test_scores_policy_factory_failure_releases_scope_for_reconnect(sample_turn, monkeypatch):
-    scheduler = _install_scores_scheduler(monkeypatch)
+def test_scores_policy_factory_failure_releases_scope_for_reconnect(
+    sample_turn, monkeypatch, make_inference_scheduler
+):
+    scheduler = _install_scores_scheduler(monkeypatch, make_inference_scheduler)
     stream_scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=111)
 
     def _failing_policy_factory(_stream_token: str):
         raise RuntimeError("policy construction failed")
 
     stream = iter_table_stream_connect_with_scope(
-        begin_scope=lambda: scheduler.begin_scope(stream_scope),
-        end_scope=lambda stream_token: scheduler.detach_inference_stream(
-            stream_scope,
-            (),
-            stream_token=stream_token,
-        ),
+        scheduler=scheduler,
+        scope=stream_scope,
         policy_factory=_failing_policy_factory,
         player_ids=(),
     )
     with pytest.raises(RuntimeError, match="policy construction failed"):
         next(stream)
 
+    wait_for_stream_ends(scheduler)
     assert not scheduler._scope_guard.has_active_table_stream
 
     replacement = iter_scores_table_inference_events(
@@ -453,13 +460,11 @@ def test_scores_policy_factory_failure_releases_scope_for_reconnect(sample_turn,
 
 
 def test_fleet_policy_factory_failure_releases_scope_for_reconnect(
-    sample_turn,
-    monkeypatch,
-    persistence,
+    sample_turn, monkeypatch, persistence, make_fleet_table_stream_scheduler
 ):
     from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
 
-    scheduler = _install_fleet_scheduler(monkeypatch)
+    scheduler = _install_fleet_scheduler(monkeypatch, make_fleet_table_stream_scheduler)
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -471,18 +476,15 @@ def test_fleet_policy_factory_failure_releases_scope_for_reconnect(
         raise RuntimeError("policy construction failed")
 
     stream = iter_table_stream_connect_with_scope(
-        begin_scope=lambda: scheduler.begin_scope(stream_scope),
-        end_scope=lambda stream_token: scheduler.end_fleet_table_stream(
-            stream_scope,
-            (),
-            stream_token=stream_token,
-        ),
+        scheduler=scheduler,
+        scope=stream_scope,
         policy_factory=_failing_policy_factory,
         player_ids=(),
     )
     with pytest.raises(RuntimeError, match="policy construction failed"):
         next(stream)
 
+    wait_for_stream_ends(scheduler)
     assert not scheduler._scope_guard.has_active_table_stream
 
     replacement = iter_fleet_table_stream_events(

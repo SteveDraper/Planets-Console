@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    RunOwnership,
 )
 from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
@@ -63,7 +64,7 @@ def readmitted(sample_turn, monkeypatch):
         execution_generation=READMITTED_EXECUTION,
     )
     scheduler = InferenceRowScheduler(defer_orchestrator_submit=True)
-    scheduler._runs[new_run.run_id] = scope
+    scheduler._runs[new_run.run_id] = RunOwnership(scope, None)
     delivered: list[object] = []
     monkeypatch.setattr(
         "api.analytics.military_score_inference.inference_stream_resolution."

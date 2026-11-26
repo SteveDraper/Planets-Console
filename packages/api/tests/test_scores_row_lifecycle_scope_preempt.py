@@ -9,7 +9,7 @@ pass for the nodes the gate held.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
@@ -50,10 +50,9 @@ PERSPECTIVE = 1
 
 
 @pytest.fixture
-def scheduler(make_inference_scheduler) -> Iterator[InferenceRowScheduler]:
+def scheduler(make_inference_scheduler) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
-    yield make_inference_scheduler()
-    reset_inference_row_scheduler_for_tests()
+    return make_inference_scheduler()
 
 
 def _stream_scope(sample_turn, *, turn_offset: int = 0) -> InferenceStreamScope:

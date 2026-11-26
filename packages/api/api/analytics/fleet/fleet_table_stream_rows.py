@@ -243,20 +243,6 @@ def iter_multiplexed_fleet_table_events(
     )
 
 
-def cleanup_fleet_table_stream_sessions(
-    scheduler: FleetTableStreamScheduler,
-    scope: FleetTableStreamScope,
-    sessions: tuple[FleetPlayerStreamSession, ...],
-    *,
-    stream_token: str,
-) -> None:
-    scheduler.end_fleet_table_stream(
-        scope,
-        sessions,
-        stream_token=stream_token,
-    )
-
-
 def iter_fleet_table_stream_events(
     turn: TurnInfo,
     player_ids: tuple[int, ...],
@@ -313,13 +299,8 @@ def iter_fleet_table_stream_events(
         )
 
     yield from iter_table_stream_connect_with_scope(
-        begin_scope=lambda: resolved_scheduler.begin_scope(stream_scope),
-        end_scope=lambda stream_token: cleanup_fleet_table_stream_sessions(
-            resolved_scheduler,
-            stream_scope,
-            (),
-            stream_token=stream_token,
-        ),
+        scheduler=resolved_scheduler,
+        scope=stream_scope,
         policy_factory=policy_factory,
         player_ids=player_ids,
     )

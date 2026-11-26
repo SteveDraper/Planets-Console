@@ -23,6 +23,7 @@ from api.analytics.military_score_inference.inference_row_runner import (
     TierJobRowComplete,
 )
 from api.analytics.military_score_inference.inference_scheduler import (
+    RunOwnership,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_domain_events import (
@@ -82,7 +83,6 @@ def _clean_registries() -> Iterator[None]:
     reset_inference_table_stream_registry_for_tests()
     yield
     reset_tier_row_run_registry_for_tests()
-    reset_inference_row_scheduler_for_tests()
     reset_orchestrators_for_tests()
     reset_inference_table_stream_registry_for_tests()
 
@@ -479,11 +479,14 @@ def _hand_over_a_ladder_holding_solutions(ladder: ShellLadder) -> InferenceRowSt
     return winner
 
 
-def test_the_winners_stream_gets_the_moved_ladders_held_solutions_once(sample_turn, persistence):
+def test_the_winners_stream_gets_the_moved_ladders_held_solutions_once(
+    sample_turn, persistence, make_inference_scheduler
+):
     evidence_updates: list[str] = []
     ladder = ShellLadder(
         sample_turn,
         persistence,
+        make_inference_scheduler,
         on_held_solutions_updated=lambda session: evidence_updates.append(session.run_id),
     )
 
@@ -496,12 +499,15 @@ def test_the_winners_stream_gets_the_moved_ladders_held_solutions_once(sample_tu
     assert evidence_updates == []
 
 
-def test_a_hand_over_moves_no_fleet_or_scores_epoch(sample_turn, persistence):
+def test_a_hand_over_moves_no_fleet_or_scores_epoch(
+    sample_turn, persistence, make_inference_scheduler
+):
     """T9: hand-over announces no inference evidence, so no fleet or scores epoch moves."""
     invalidations: list[InferenceInvalidationService] = []
     ladder = ShellLadder(
         sample_turn,
         persistence,
+        make_inference_scheduler,
         on_held_solutions_updated=lambda session: invalidations[0].on_inference_evidence_updated(
             session.game_id, session.perspective, session.turn_number, session.player_id
         ),
@@ -571,7 +577,7 @@ def test_forget_runs_drops_only_the_retired_runs_scheduler_entries(ladder):
     ladder.close_stream()
     winner = ladder.open_stream()
     scheduler = ladder.scheduler
-    scheduler._runs[retired_id] = ladder.scope
+    scheduler._runs[retired_id] = RunOwnership(ladder.scope, None)
     scheduler._execution_generation_by_run_id[retired_id] = 3
     scheduler._execution_generation_by_run_id[winner.run_id] = 3
     accepted: list[str] = []
@@ -581,7 +587,7 @@ def test_forget_runs_drops_only_the_retired_runs_scheduler_entries(ladder):
 
     assert retired_id not in scheduler._runs
     assert retired_id not in scheduler._execution_generation_by_run_id
-    assert scheduler._runs[winner.run_id] == ladder.scope
+    assert scheduler._runs[winner.run_id].root_scope == ladder.scope
     assert scheduler._execution_generation_by_run_id[winner.run_id] == 3
     scheduler.accept_pending_run(retired_id)
     scheduler.accept_pending_run(winner.run_id)

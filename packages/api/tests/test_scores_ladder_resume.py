@@ -85,12 +85,12 @@ def test_a_detached_run_resumes_for_the_same_node_execution_and_epoch(registry_r
     assert _claimed(scope) is run
 
 
-def test_a_run_detached_before_its_ladder_started_does_not_resume(registry_run):
+def test_a_run_detached_before_its_ladder_started_is_retired_and_does_not_resume(registry_run):
     run, scope = registry_run
     _detach_row_run(run.run_id)
 
+    assert get_row_run(run.run_id) is None
     assert _claimed(scope) is None
-    assert get_row_run(run.run_id) is run
 
 
 @pytest.mark.parametrize(

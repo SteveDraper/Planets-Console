@@ -125,9 +125,11 @@ def _events_for_players(
     return events
 
 
-def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn):
+def test_fleet_table_stream_early_close_releases_scope_for_reconnect(
+    sample_turn, make_fleet_table_stream_scheduler
+):
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -179,9 +181,11 @@ def test_fleet_table_stream_early_close_releases_scope_for_reconnect(sample_turn
         second.close()
 
 
-def test_fleet_table_stream_reconnect_preempts_active_scope(sample_turn):
+def test_fleet_table_stream_reconnect_preempts_active_scope(
+    sample_turn, make_fleet_table_stream_scheduler
+):
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     scope = FleetTableStreamScope(
         game_id=628580,
         perspective=1,
@@ -194,17 +198,19 @@ def test_fleet_table_stream_reconnect_preempts_active_scope(sample_turn):
     assert not scheduler.owns_table_stream(first_token)
     assert scheduler.owns_table_stream(second_token)
 
-    scheduler.end_fleet_table_stream(scope, (), stream_token=second_token)
+    scheduler.end_table_stream(scope, second_token)
 
 
-def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample_turn):
+def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(
+    sample_turn, make_fleet_table_stream_scheduler
+):
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import get_compute_orchestrator, reset_orchestrators_for_tests
 
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -250,12 +256,14 @@ def test_fleet_table_stream_reconnect_preempt_releases_orchestrator_cache(sample
     assert get_compute_orchestrator() is not None
     assert len(scheduler._stream_bindings) == 0
 
-    scheduler.end_fleet_table_stream(scope, (), stream_token=second_token)
+    scheduler.end_table_stream(scope, second_token)
 
 
-def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
+def test_fleet_table_stream_reconnect_via_ndjson_transport(
+    sample_turn, make_fleet_table_stream_scheduler
+):
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     scope = FleetTableStreamScope(
         game_id=628580,
         perspective=1,
@@ -305,9 +313,11 @@ def test_fleet_table_stream_reconnect_via_ndjson_transport(sample_turn):
     assert not scheduler.owns_table_stream(first_token)
 
 
-def test_cached_final_ledger_replays_terminal_events_without_scheduling(sample_turn):
+def test_cached_final_ledger_replays_terminal_events_without_scheduling(
+    sample_turn, make_fleet_table_stream_scheduler
+):
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -410,9 +420,11 @@ def test_initial_wire_before_ledger_shapes_cached_host_turn(sample_turn, persist
     assert result.player_name == expected_name
 
 
-def test_multi_player_stream_emits_tagged_terminal_events(sample_turn):
+def test_multi_player_stream_emits_tagged_terminal_events(
+    sample_turn, make_fleet_table_stream_scheduler
+):
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -447,9 +459,11 @@ def test_multi_player_stream_emits_tagged_terminal_events(sample_turn):
     assert complete_player_ids == set(player_ids)
 
 
-def test_player_event_ordering_provenance_before_complete(sample_turn):
+def test_player_event_ordering_provenance_before_complete(
+    sample_turn, make_fleet_table_stream_scheduler
+):
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -485,12 +499,12 @@ def test_player_event_ordering_provenance_before_complete(sample_turn):
     assert provenance_index < complete_index
 
 
-def test_schedule_dedupes_in_flight_player_runs(sample_turn):
+def test_schedule_dedupes_in_flight_player_runs(sample_turn, make_fleet_table_stream_scheduler):
     reset_fleet_table_stream_scheduler_for_tests()
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
     reset_compute_worker_pool_for_tests(worker_count=0)
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -545,18 +559,16 @@ def test_schedule_dedupes_in_flight_player_runs(sample_turn):
         assert first.session.run_id == second.session.run_id
         assert len(scheduler._runs) == 1
     finally:
-        scheduler.end_fleet_table_stream(
-            scope,
-            (),
-            stream_token=stream_token,
-        )
+        scheduler.end_table_stream(scope, stream_token)
 
 
-def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch):
+def test_cancel_before_accept_does_not_submit(
+    sample_turn, monkeypatch, make_fleet_table_stream_scheduler
+):
     from api.analytics.fleet.fleet_table_player_run import FleetPlayerStreamSession
 
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -605,16 +617,18 @@ def test_cancel_before_accept_does_not_submit(sample_turn, monkeypatch):
         scheduler.accept_pending_run(live.run_id)
         assert submitted == [live.run_id]
     finally:
-        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+        scheduler.end_table_stream(scope, stream_token)
 
 
-def test_enqueue_player_run_requires_query_context_to_submit(sample_turn):
+def test_enqueue_player_run_requires_query_context_to_submit(
+    sample_turn, make_fleet_table_stream_scheduler
+):
     from api.analytics.fleet.fleet_table_player_run import FleetPlayerStreamSession
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
     reset_compute_worker_pool_for_tests(worker_count=0)
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = build_ephemeral_fleet_compute_services(
         sample_turn,
         game_id=628580,
@@ -643,7 +657,7 @@ def test_enqueue_player_run_requires_query_context_to_submit(sample_turn):
                 stream_token=stream_token,
             )
     finally:
-        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+        scheduler.end_table_stream(scope, stream_token)
 
 
 def test_tag_fleet_table_stream_event_adds_player_id():
@@ -678,6 +692,7 @@ def test_drain_available_multiplex_events_returns_queued_events_without_blocking
 def test_orchestrator_node_complete_emits_complete_after_progress_when_session_cancelled(
     persistence,
     load_turn,
+    make_fleet_table_stream_scheduler,
 ):
     """A cancelled session still receives complete after successful gap-fill."""
     from api.analytics.fleet.chain import ensure_fleet_baseline_for_player
@@ -688,7 +703,6 @@ def test_orchestrator_node_complete_emits_complete_after_progress_when_session_c
         _initial_wire_before_ledger,
     )
     from api.analytics.fleet.fleet_table_stream_scheduler import (
-        FleetTableStreamScheduler,
         _FleetPlayerOrchestratorRun,
     )
     from api.analytics.fleet.serialization import persisted_fleet_ledger_to_json
@@ -740,7 +754,7 @@ def test_orchestrator_node_complete_emits_complete_after_progress_when_session_c
         turn=112,
         player_id=player_id,
     )
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     scheduler._runs[session.run_id] = _FleetPlayerOrchestratorRun(
         session=session,
         host_turn_number=112,
@@ -770,6 +784,7 @@ def test_orchestrator_node_complete_emits_complete_after_progress_when_session_c
 def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
     persistence,
     load_turn,
+    make_fleet_table_stream_scheduler,
 ):
     """Satisfaction short-circuit ``{}`` must not emit fleet materialization error."""
     from api.analytics.export_context import make_analytic_query_context
@@ -781,7 +796,6 @@ def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
         _initial_wire_before_ledger,
     )
     from api.analytics.fleet.fleet_table_stream_scheduler import (
-        FleetTableStreamScheduler,
         _FleetPlayerOrchestratorRun,
         _FleetStreamOrchestratorBinding,
     )
@@ -840,7 +854,7 @@ def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
         game_id=fleet_services.game_id,
         perspective=fleet_services.perspective,
     )
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     scheduler._stream_bindings["tok"] = _FleetStreamOrchestratorBinding(
         orchestrator=None,  # type: ignore[arg-type]
         query_context=ctx,
@@ -877,7 +891,10 @@ def test_orchestrator_empty_complete_reloads_final_ledger_from_persistence(
     ],
 )
 def test_a_failed_fleet_node_on_a_rows_chain_paints_an_error_unless_it_was_aborted(
-    load_turn, error, paints_error
+    load_turn,
+    error,
+    paints_error,
+    make_fleet_table_stream_scheduler,
 ):
     """An abort is not a row error: whoever ended the node reschedules the row."""
     from api.analytics.fleet.constants import ANALYTIC_ID
@@ -895,7 +912,7 @@ def test_a_failed_fleet_node_on_a_rows_chain_paints_an_error_unless_it_was_abort
     root_scope = ComputeScope(
         analytic_id=ANALYTIC_ID, game_id=628580, perspective=1, turn=112, player_id=player_id
     )
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     scheduler._runs[session.run_id] = _FleetPlayerOrchestratorRun(
         session=session,
         host_turn_number=112,
@@ -924,6 +941,7 @@ def test_concurrent_multi_player_materialization_completes(
     persistence,
     load_turn,
     memory_backend,
+    make_fleet_table_stream_scheduler,
 ):
     # Anchor at turn 110: empty persistence with ephemeral turn_chain_through(111)
     # forces a cold-start gap-fill of turns 1..111 per player (111 legs x 3 players).
@@ -981,7 +999,7 @@ def test_concurrent_multi_player_materialization_completes(
     from api.compute.pools import reset_compute_worker_pool_for_tests
 
     reset_compute_worker_pool_for_tests(worker_count=2)
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     services = FleetComputeServices(
         persistence=persistence,
         game_id=628580,

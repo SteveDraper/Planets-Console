@@ -26,7 +26,6 @@ from api.analytics.military_score_inference.inference_api_payload import (
     STATUS_VIEWPOINT_OWNER,
 )
 from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
@@ -286,9 +285,11 @@ def test_skip_complete_has_status_and_summary_only(sample_turn) -> None:
     assert "diagnostics" not in event
 
 
-def test_skip_rows_never_enqueue_tier_ladder(sample_turn, monkeypatch) -> None:
+def test_skip_rows_never_enqueue_tier_ladder(
+    sample_turn, monkeypatch, make_inference_scheduler
+) -> None:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     enqueued: list[object] = []
     monkeypatch.setattr(
         scheduler,
@@ -309,9 +310,11 @@ def test_skip_rows_never_enqueue_tier_ladder(sample_turn, monkeypatch) -> None:
     assert enqueued == []
 
 
-def test_stealth_does_not_start_stream_or_tier_solve(sample_turn, monkeypatch) -> None:
+def test_stealth_does_not_start_stream_or_tier_solve(
+    sample_turn, monkeypatch, make_inference_scheduler
+) -> None:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     enqueued: list[object] = []
     monkeypatch.setattr(
         scheduler,
@@ -336,9 +339,11 @@ def test_stealth_does_not_start_stream_or_tier_solve(sample_turn, monkeypatch) -
     assert enqueued == []
 
 
-def test_stealth_ensure_does_not_schedule(sample_turn, persistence) -> None:
+def test_stealth_ensure_does_not_schedule(
+    sample_turn, persistence, make_inference_scheduler
+) -> None:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     stealth = replace(
         sample_turn,
         settings=replace(sample_turn.settings, stealthmode=True),
@@ -382,9 +387,11 @@ def test_stealth_ensure_does_not_schedule(sample_turn, persistence) -> None:
     )
 
 
-def test_admit_scores_export_persists_skip_immediate_admission(sample_turn, persistence) -> None:
+def test_admit_scores_export_persists_skip_immediate_admission(
+    sample_turn, persistence, make_inference_scheduler
+) -> None:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     owner_id = sample_turn.player.id
     ctx = scores_query_context(
         sample_turn,

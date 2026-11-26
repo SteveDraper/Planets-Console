@@ -47,7 +47,10 @@ from api.analytics.scores.compute_orchestration import (
     build_scores_tier_solve_job_wire,
 )
 from api.analytics.scores.export_services import resolve_scores_services
-from api.analytics.scores.tier_row_run_registry import reset_tier_row_run_registry_for_tests
+from api.analytics.scores.tier_row_run_registry import (
+    claim_tier_ladder,
+    reset_tier_row_run_registry_for_tests,
+)
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute import ComputeOrchestrator, ComputeRequest, ComputeScope, build_compute_registry
 from api.compute.pools import PoolStepWork
@@ -58,9 +61,35 @@ from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.export_chain_test_fixtures import export_chain_query_context
 from tests.scores_exports_helpers import GAME_ID, inference_target_player_id, perspective
 from tests.submission_open_helpers import explicit_submission_open, live_execution
+from tests.table_stream_test_helpers import end_stream_inline
 
 # A ladder rebuild under no user mask override, for tests that claim directly.
 NO_OVERRIDE_REBUILD = LadderRebuild(user_override=None)
+
+
+def stamp_run_ladder(run: RowRun, *, execution_generation: int = 1) -> None:
+    """Claim ``run``'s ladder for one node execution, as a tier wire build does.
+
+    The run must be the scope's indexed ``REGISTERED`` run. Stamped, it models a
+    row whose ladder is in use, which a stream end keeps ``DETACHED`` for resume
+    and late persist.
+    """
+    session = run.session
+    scope = ComputeScope(
+        analytic_id=SCORES_ANALYTIC_ID,
+        game_id=session.game_id,
+        perspective=session.perspective,
+        turn=session.turn_number,
+        player_id=session.player_id,
+    )
+    claim = claim_tier_ladder(
+        scope,
+        execution_generation=execution_generation,
+        scores_epoch=0,
+        rebuild=NO_OVERRIDE_REBUILD,
+        is_execution_live=lambda: True,
+    )
+    assert claim is not None and claim.run is run
 
 
 def ladder_session(sample_turn, player_id: int) -> InferenceRowStreamSession:
@@ -126,19 +155,24 @@ def scripted_tier_job(
 
 
 class ShellLadder:
-    """The shell scoreboard ladder for one player, opened through a live scores stream."""
+    """The shell scoreboard ladder for one player, opened through a live scores stream.
+
+    ``make_scheduler`` builds its scheduler: the ``make_inference_scheduler``
+    fixture, since the ladder ends its streams.
+    """
 
     def __init__(
         self,
         sample_turn,
         persistence,
+        make_scheduler: Callable[..., InferenceRowScheduler],
         *,
         on_held_solutions_updated: Callable[[InferenceRowStreamSession], None] | None = None,
     ) -> None:
         self.sample_turn = sample_turn
         self.player_id = inference_target_player_id(sample_turn)
         self.persistence = persistence
-        self.scheduler = InferenceRowScheduler(
+        self.scheduler = make_scheduler(
             defer_orchestrator_submit=True,
             on_held_solutions_updated=on_held_solutions_updated,
         )
@@ -219,10 +253,8 @@ class ShellLadder:
         )
 
     def close_stream(self) -> None:
-        """Run the stream's connect ``finally``: it detaches its own row."""
-        self.scheduler.detach_inference_stream(
-            self.stream_scope, (self.session,), stream_token=self.stream_token
-        )
+        """End the stream as its off-lock runner would: detach its own row, then release pause."""
+        end_stream_inline(self.scheduler, self.stream_scope, self.stream_token)
 
     def execute_tier(
         self,
@@ -286,8 +318,8 @@ class ShellLadder:
 
 
 @pytest.fixture
-def ladder(sample_turn, persistence) -> ShellLadder:
-    return ShellLadder(sample_turn, persistence)
+def ladder(sample_turn, persistence, make_inference_scheduler) -> ShellLadder:
+    return ShellLadder(sample_turn, persistence, make_inference_scheduler)
 
 
 @pytest.fixture

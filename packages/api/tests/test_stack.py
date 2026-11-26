@@ -115,5 +115,4 @@ def test_clear_backend_cache_resets_analytic_singletons():
         clear_backend_cache()
         assert inference_row_scheduler_if_initialized() is None
     finally:
-        reset_inference_row_scheduler_for_tests()
         clear_process_service_stack()

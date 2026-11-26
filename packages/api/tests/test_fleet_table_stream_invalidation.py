@@ -37,6 +37,7 @@ from api.transport.fleet_table_stream import fleet_complete_event
 from tests.fleet_table_stream_test_helpers import query_context_for_fleet_services
 from tests.scores_exports_helpers import scores_export_context
 from tests.table_stream_lock_helpers import assert_lock_not_held, assert_stream_lock_not_held
+from tests.table_stream_test_helpers import end_stream_inline
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -62,7 +63,9 @@ def parsed_mine_stock_asset():
     load_mine_stock_for_category(GameCategory.STANDARD)
 
 
-def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:
+def _install_workerless_scheduler(
+    monkeypatch: pytest.MonkeyPatch, make_fleet_table_stream_scheduler
+) -> FleetTableStreamScheduler:
     from api.analytics.military_score_inference.inference_scheduler import (
         reset_inference_row_scheduler_for_tests,
     )
@@ -73,7 +76,7 @@ def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTable
     reset_compute_worker_pool_for_tests(worker_count=1)
     reset_inference_row_scheduler_for_tests()
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
 
     def _get_scheduler() -> FleetTableStreamScheduler:
         return scheduler
@@ -99,7 +102,7 @@ def _end_open_fleet_table_stream(
 ) -> None:
     controller = controller_for_scope(scope)
     if controller is not None:
-        controller.end_stream(scheduler)
+        end_stream_inline(scheduler, controller.scope, controller.stream_token)
 
 
 def _wait_until(
@@ -154,6 +157,7 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_fleet_table_stream_scheduler,
 ):
     """All-cached replay: evidence invalidation reschedules on the open stream."""
     from api.analytics.fleet.held_solutions import (
@@ -166,7 +170,9 @@ def test_all_cached_replay_keeps_stream_open_for_evidence_invalidation_integrati
     from tests.scores_exports_helpers import put_persisted_row
 
     reset_fleet_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_fleet_table_stream_scheduler=make_fleet_table_stream_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     inference_persistence = InferenceRowPersistenceService(memory_backend)
@@ -323,6 +329,7 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_fleet_table_stream_scheduler,
 ):
     """Integration: invalidation while iter_fleet_table_stream_events multiplex is active."""
     from api.analytics.fleet.held_solutions import (
@@ -335,7 +342,9 @@ def test_evidence_invalidation_reschedules_player_on_open_stream_integration(
     from tests.scores_exports_helpers import put_persisted_row
 
     reset_fleet_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_fleet_table_stream_scheduler=make_fleet_table_stream_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     inference_persistence = InferenceRowPersistenceService(memory_backend)
@@ -463,6 +472,7 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_fleet_table_stream_scheduler,
 ):
     """Scores evidence update must rematerialize a fleet node already complete on the DAG.
 
@@ -481,7 +491,9 @@ def test_scores_evidence_invalidation_rematerializes_orchestrator_completed_flee
     from tests.scores_exports_helpers import put_persisted_row
 
     reset_fleet_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_fleet_table_stream_scheduler=make_fleet_table_stream_scheduler
+    )
     player_id = sample_turn.scores[0].ownerid
     player_ids = (player_id,)
     turn_number = sample_turn.settings.turn
@@ -625,6 +637,7 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
     monkeypatch,
     memory_backend,
     request,
+    make_fleet_table_stream_scheduler,
 ):
     """Schedule under stream_lock must not re-enter reschedule via invalidation.
 
@@ -648,7 +661,7 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
     reset_fleet_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     persistence = FleetSnapshotPersistenceService(memory_backend)
     ephemeral = build_ephemeral_fleet_compute_services(
         sample_turn,
@@ -678,11 +691,10 @@ def test_reschedule_player_does_not_deadlock_when_schedule_reenters_invalidation
     controller.attach()
 
     def cleanup() -> None:
-        controller.end_stream(scheduler)
+        end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_fleet_table_stream_registry_for_tests()
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
-        reset_fleet_table_stream_scheduler_for_tests()
 
     request.addfinalizer(cleanup)
 
@@ -745,6 +757,7 @@ def test_enqueue_player_run_does_not_hold_scheduler_lock_across_get_ledger(
     monkeypatch,
     memory_backend,
     request,
+    make_fleet_table_stream_scheduler,
 ) -> None:
     """Persistence deep-copy must not run under fleet scheduler ``_lock``.
 
@@ -767,7 +780,7 @@ def test_enqueue_player_run_does_not_hold_scheduler_lock_across_get_ledger(
     reset_fleet_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     persistence = FleetSnapshotPersistenceService(memory_backend)
     ephemeral = build_ephemeral_fleet_compute_services(
         sample_turn,
@@ -786,11 +799,10 @@ def test_enqueue_player_run_does_not_hold_scheduler_lock_across_get_ledger(
     stream_token = scheduler.begin_scope(scope)
 
     def cleanup() -> None:
-        scheduler.end_fleet_table_stream(scope, (), stream_token=stream_token)
+        scheduler.end_table_stream(scope, stream_token)
         reset_fleet_table_stream_registry_for_tests()
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
-        reset_fleet_table_stream_scheduler_for_tests()
 
     request.addfinalizer(cleanup)
 

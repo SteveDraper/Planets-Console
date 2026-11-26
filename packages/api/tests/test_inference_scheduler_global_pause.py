@@ -318,7 +318,7 @@ def test_begin_scope_preempts_stale_stream_for_same_scope(sample_turn):
     # The preempted stream's rows stay until that stream's own end detaches them.
     assert scheduler.global_pause_status(scope)["activeSessionCount"] == 1
 
-    scheduler.detach_inference_stream(scope, (session,), stream_token=first_token)
+    scheduler.detach_inference_stream(scope, stream_token=first_token)
     assert not session.cancel_token.is_cancelled()
     assert session.run_id not in scheduler._runs
     assert scheduler.global_pause_status(scope)["activeSessionCount"] == 0
@@ -335,7 +335,7 @@ def test_begin_scope_succeeds_after_detach_inference_stream(sample_turn):
     session = _session_for_turn(sample_turn)
     stream_token = scheduler.begin_scope(scope)
     scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
-    scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, stream_token=stream_token)
 
     scheduler.begin_scope(scope)
 
@@ -362,7 +362,7 @@ def test_detach_inference_stream_leaves_runs_running_and_clears_global_pause(
     assert scheduler.global_pause_status(scope)["paused"] is True
     assert scheduler.global_pause_status(scope)["activeSessionCount"] == 1
 
-    scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, stream_token=stream_token)
 
     status = scheduler.global_pause_status(scope)
     assert status["paused"] is False
@@ -389,7 +389,7 @@ def test_stale_detach_inference_stream_does_not_clear_replacement_stream(sample_
     scheduler._scope_guard._has_active_table_stream = True
     scheduler.enqueue_tier_ladder(new_session, stream_token=new_token)
 
-    scheduler.detach_inference_stream(scope, (old_session,), stream_token=old_token)
+    scheduler.detach_inference_stream(scope, stream_token=old_token)
 
     status = scheduler.global_pause_status(scope)
     assert status["activeSessionCount"] == 1
@@ -397,7 +397,7 @@ def test_stale_detach_inference_stream_does_not_clear_replacement_stream(sample_
     assert not old_session.cancel_token.is_cancelled()
     assert not new_session.cancel_token.is_cancelled()
 
-    scheduler.detach_inference_stream(scope, (new_session,), stream_token=new_token)
+    scheduler.detach_inference_stream(scope, stream_token=new_token)
     assert scheduler.global_pause_status(scope)["activeSessionCount"] == 0
 
 

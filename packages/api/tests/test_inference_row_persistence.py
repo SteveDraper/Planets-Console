@@ -34,6 +34,7 @@ from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.file_storage_helpers import open_file_storage_backend
 from tests.scores_exports_helpers import scores_export_context
+from tests.scores_ladder_helpers import stamp_run_ladder
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -830,6 +831,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     )
     run = new_tier_row_run(session)
     register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    stamp_run_ladder(run)
     run_id = run.run_id
     _detach_row_run(run_id)
     assert get_row_run_phase(run_id) is RowRunPhase.DETACHED

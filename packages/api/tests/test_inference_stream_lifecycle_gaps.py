@@ -48,6 +48,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.scores_exports_helpers import ADMIT_EVERY_WRITE
+from tests.table_stream_test_helpers import end_stream_inline
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -98,9 +99,11 @@ def _scheduled_row(sample_turn, *, player_id: int) -> ScheduledInferenceRow:
     )
 
 
-def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> InferenceRowScheduler:
+def _install_workerless_scheduler(
+    monkeypatch: pytest.MonkeyPatch, make_inference_scheduler
+) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
 
     def _get_scheduler() -> InferenceRowScheduler:
         return scheduler
@@ -242,6 +245,7 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Reconnect preempts the prior stream so a duplicate connect can proceed.
 
@@ -249,7 +253,9 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     detaches them.
     """
     persistence = InferenceRowPersistenceService(memory_backend)
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -291,7 +297,7 @@ def test_stream_reconnect_preempts_first_connection_while_rows_compute(
     assert not scheduler.owns_table_stream(first_token)
     assert in_flight_session.run_id in scheduler._runs
 
-    scheduler.detach_inference_stream(scope, (in_flight_session,), stream_token=first_token)
+    scheduler.detach_inference_stream(scope, stream_token=first_token)
     # Detach drops the row without cancelling its solve token.
     assert not in_flight_session.cancel_token.is_cancelled()
     assert in_flight_session.run_id not in scheduler._runs
@@ -333,10 +339,13 @@ def test_stream_disconnect_ends_before_worker_completes(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Disconnect may end delivery before a worker has produced a terminal."""
     persistence = InferenceRowPersistenceService(memory_backend)
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     target_player_id = player_ids[1]
@@ -368,7 +377,7 @@ def test_stream_disconnect_ends_before_worker_completes(
         )
     )
     assert controller is not None
-    controller.end_stream(scheduler)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     thread.join(timeout=2.0)
 
     assert persistence.get_row(628580, 1, turn_number, target_player_id) is None
@@ -435,10 +444,13 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Reconnect path serves cached terminal state when persistence already holds the row."""
     persistence = InferenceRowPersistenceService(memory_backend)
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_id = sample_turn.scores[0].ownerid
     turn_number = sample_turn.settings.turn
 
@@ -462,7 +474,7 @@ def test_persisted_row_replays_on_new_stream_without_scheduler_work(
         ),
         persistence=persistence,
     )
-    scheduler.detach_inference_stream(scope, (scheduled.session,), stream_token=stream_token)
+    scheduler.detach_inference_stream(scope, stream_token=stream_token)
 
     replay = iter_scores_table_inference_events(
         sample_turn,
@@ -486,6 +498,7 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Regression: durable exact must still NDJSON-complete an open scores stream.
 
@@ -497,7 +510,9 @@ def test_open_stream_receives_complete_after_persist_when_scheduled_rows_empty(
     """
     reset_inference_table_stream_registry_for_tests()
     persistence = InferenceRowPersistenceService(memory_backend)
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_id = sample_turn.scores[0].ownerid
     turn_number = sample_turn.settings.turn
     scope = InferenceStreamScope(game_id=628580, perspective=1, turn_number=turn_number)

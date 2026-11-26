@@ -12,6 +12,7 @@ from api.analytics.military_score_inference.inference_row_runner import (
 )
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    RunOwnership,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -44,91 +45,88 @@ def test_cancelled_tier_job_does_not_persist_after_run_removed(sample_turn, monk
     _patch_scores_dag_without_fleet_deps(monkeypatch)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     scheduler = InferenceRowScheduler()
-    try:
-        scope = InferenceStreamScope(
-            game_id=628580,
-            perspective=1,
-            turn_number=sample_turn.settings.turn,
-        )
-        stream_token = scheduler.begin_scope(scope)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
 
-        tier_step_started = threading.Event()
-        tier_step_gate = threading.Event()
+    tier_step_started = threading.Event()
+    tier_step_gate = threading.Event()
 
-        outcome_computed = threading.Event()
-        release_outcome = threading.Event()
+    outcome_computed = threading.Event()
+    release_outcome = threading.Event()
 
-        short_ladder = resolve_tier_policies(None)[:1]
+    short_ladder = resolve_tier_policies(None)[:1]
 
-        def fake_tier_step(
-            state: PolicyLadderState,
-            observation,
-            turn,
-            *,
-            time_limit_seconds=None,
-            cancel_token=None,
-            on_admitted=None,
-            **_budget,
-        ) -> None:
-            tier_step_started.set()
-            tier_step_gate.wait(timeout=2.0)
-            state.policy_steps_attempted.append(state.policy_steps[state.next_step_index].id)
-            state.next_step_index += 1
-            state.ladder_complete = True
+    def fake_tier_step(
+        state: PolicyLadderState,
+        observation,
+        turn,
+        *,
+        time_limit_seconds=None,
+        cancel_token=None,
+        on_admitted=None,
+        **_budget,
+    ) -> None:
+        tier_step_started.set()
+        tier_step_gate.wait(timeout=2.0)
+        state.policy_steps_attempted.append(state.policy_steps[state.next_step_index].id)
+        state.next_step_index += 1
+        state.ladder_complete = True
 
-        real_run_inference_tier_job = run_inference_tier_job
+    real_run_inference_tier_job = run_inference_tier_job
 
-        def gated_run_inference_tier_job(run, callbacks):
-            real_run_inference_tier_job(run, callbacks)
-            outcome = TierJobRowComplete(
-                row_complete=row_complete_with_summary(
-                    InferenceResult(
-                        status=STATUS_NO_EXACT_SOLUTION,
-                        solutions=(),
-                        diagnostics={},
-                    ),
-                    summary="zombie tier result",
+    def gated_run_inference_tier_job(run, callbacks):
+        real_run_inference_tier_job(run, callbacks)
+        outcome = TierJobRowComplete(
+            row_complete=row_complete_with_summary(
+                InferenceResult(
+                    status=STATUS_NO_EXACT_SOLUTION,
+                    solutions=(),
+                    diagnostics={},
                 ),
-            )
-            outcome_computed.set()
-            release_outcome.wait(timeout=2.0)
-            return outcome
-
-        monkeypatch.setattr(
-            "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
-            fake_tier_step,
+                summary="zombie tier result",
+            ),
         )
-        monkeypatch.setattr(
-            "api.analytics.scores.compute_orchestration.run_inference_tier_job",
-            gated_run_inference_tier_job,
-        )
+        outcome_computed.set()
+        release_outcome.wait(timeout=2.0)
+        return outcome
 
-        player_id = sample_turn.scores[0].ownerid
-        session = _session_for_player(sample_turn, player_id=player_id)
-        turn_number = sample_turn.settings.turn
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
+        fake_tier_step,
+    )
+    monkeypatch.setattr(
+        "api.analytics.scores.compute_orchestration.run_inference_tier_job",
+        gated_run_inference_tier_job,
+    )
 
-        scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
-        scheduler.accept_pending_run(session.run_id)
-        row_run = get_row_run(session.run_id)
-        assert row_run is not None
-        row_run.ladder = replace(
-            row_run.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder)
-        )
+    player_id = sample_turn.scores[0].ownerid
+    session = _session_for_player(sample_turn, player_id=player_id)
+    turn_number = sample_turn.settings.turn
 
-        _wait_until(tier_step_started.is_set)
-        scheduler.cancel_row_run(run_id := session.run_id)
-        persistence.delete_row(628580, 1, turn_number, player_id)
-        tier_step_gate.set()
+    scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
+    scheduler.accept_pending_run(session.run_id)
+    row_run = get_row_run(session.run_id)
+    assert row_run is not None
+    row_run.ladder = replace(
+        row_run.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder)
+    )
 
-        _wait_until(outcome_computed.is_set)
+    _wait_until(tier_step_started.is_set)
+    scheduler.cancel_row_run(run_id := session.run_id)
+    persistence.delete_row(628580, 1, turn_number, player_id)
+    tier_step_gate.set()
 
-        release_outcome.set()
-        time.sleep(0.1)
+    _wait_until(outcome_computed.is_set)
 
-        assert persistence.get_row(628580, 1, turn_number, player_id) is None
-        assert run_id not in scheduler._runs
-    finally:
-        reset_inference_row_scheduler_for_tests()
+    release_outcome.set()
+    time.sleep(0.1)
+
+    assert persistence.get_row(628580, 1, turn_number, player_id) is None
+    assert run_id not in scheduler._runs
 
 
 def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
@@ -170,12 +168,15 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
         session = _session_for_player(sample_turn, player_id=player_id)
         register_row_run(new_tier_row_run(session), scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                None,
             )
             scheduler._execution_generation_by_run_id[session.run_id] = 7
 
@@ -193,7 +194,6 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
         assert resolution.state is RowStreamResolutionState.CANCELED
         assert session.run_id not in scheduler._runs
     finally:
-        reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 
@@ -237,12 +237,15 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
         row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                None,
             )
 
         scheduler.cancel_run(session.run_id)
@@ -283,7 +286,6 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
         assert get_persist_admission(session.run_id) is PersistAdmission.ABSENT
     finally:
-        reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 
@@ -327,12 +329,15 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
         row_run = new_tier_row_run(session)
         reg.register_row_run(row_run, scope_index=reg.ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                None,
             )
 
         scheduler.cancel_run(session.run_id)
@@ -370,7 +375,6 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:
-        reset_inference_row_scheduler_for_tests()
         reg.reset_tier_row_run_registry_for_tests()
         reset_stream_resolution_registry_for_tests()
 
@@ -382,70 +386,67 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
     _patch_scores_dag_without_fleet_deps(monkeypatch)
     persistence = InferenceRowPersistenceService(MemoryAssetBackend(initial={}))
     scheduler = InferenceRowScheduler()
-    try:
-        scope = InferenceStreamScope(
-            game_id=628580,
-            perspective=1,
-            turn_number=sample_turn.settings.turn,
-        )
-        stream_token = scheduler.begin_scope(scope)
+    scope = InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+    stream_token = scheduler.begin_scope(scope)
 
-        finalize_entered = threading.Event()
-        finalize_gate = threading.Event()
-        original_finalize = InferenceRowScheduler._finalize_row_run
+    finalize_entered = threading.Event()
+    finalize_gate = threading.Event()
+    original_finalize = InferenceRowScheduler._finalize_row_run
 
-        def gated_finalize(self, session):
-            finalize_entered.set()
-            finalize_gate.wait(timeout=2.0)
-            original_finalize(self, session)
+    def gated_finalize(self, session):
+        finalize_entered.set()
+        finalize_gate.wait(timeout=2.0)
+        original_finalize(self, session)
 
-        monkeypatch.setattr(InferenceRowScheduler, "_finalize_row_run", gated_finalize)
+    monkeypatch.setattr(InferenceRowScheduler, "_finalize_row_run", gated_finalize)
 
-        short_ladder = resolve_tier_policies(None)[:1]
+    short_ladder = resolve_tier_policies(None)[:1]
 
-        def fast_tier_step(
-            state: PolicyLadderState,
-            observation,
-            turn,
-            *,
-            time_limit_seconds=None,
-            cancel_token=None,
-            on_admitted=None,
-            **_budget,
-        ) -> None:
-            state.policy_steps_attempted.append(state.policy_steps[state.next_step_index].id)
-            state.next_step_index += 1
-            state.ladder_complete = True
+    def fast_tier_step(
+        state: PolicyLadderState,
+        observation,
+        turn,
+        *,
+        time_limit_seconds=None,
+        cancel_token=None,
+        on_admitted=None,
+        **_budget,
+    ) -> None:
+        state.policy_steps_attempted.append(state.policy_steps[state.next_step_index].id)
+        state.next_step_index += 1
+        state.ladder_complete = True
 
-        monkeypatch.setattr(
-            "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
-            fast_tier_step,
-        )
+    monkeypatch.setattr(
+        "api.analytics.military_score_inference.inference_row_runner.run_policy_ladder_tier_step",
+        fast_tier_step,
+    )
 
-        player_id = sample_turn.scores[0].ownerid
-        session = _session_for_player(sample_turn, player_id=player_id)
-        turn_number = sample_turn.settings.turn
+    player_id = sample_turn.scores[0].ownerid
+    session = _session_for_player(sample_turn, player_id=player_id)
+    turn_number = sample_turn.settings.turn
 
-        scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
-        scheduler.accept_pending_run(session.run_id)
-        row_run = get_row_run(session.run_id)
-        assert row_run is not None
-        row_run.ladder = replace(
-            row_run.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder)
-        )
+    scheduler.enqueue_tier_ladder(session, stream_token=stream_token)
+    scheduler.accept_pending_run(session.run_id)
+    row_run = get_row_run(session.run_id)
+    assert row_run is not None
+    row_run.ladder = replace(
+        row_run.ladder, ladder_state=PolicyLadderState(policy_steps=short_ladder)
+    )
 
-        _wait_until(finalize_entered.is_set)
-        scheduler.cancel_row_run(run_id := session.run_id)
-        persistence.delete_row(628580, 1, turn_number, player_id)
-        finalize_gate.set()
+    _wait_until(finalize_entered.is_set)
+    scheduler.cancel_row_run(run_id := session.run_id)
+    persistence.delete_row(628580, 1, turn_number, player_id)
+    finalize_gate.set()
 
-        _wait_until(lambda: run_id not in scheduler._runs, timeout_seconds=3.0)
-        time.sleep(0.05)
+    _wait_until(lambda: run_id not in scheduler._runs, timeout_seconds=3.0)
+    time.sleep(0.05)
 
-        assert persistence.get_row(628580, 1, turn_number, player_id) is None
-        assert run_id not in scheduler._runs
-    finally:
-        reset_inference_row_scheduler_for_tests()
+    assert persistence.get_row(628580, 1, turn_number, player_id) is None
+    assert run_id not in scheduler._runs
 
 
 def test_cancel_run_uses_cached_generation_without_orch_lookup(sample_turn, monkeypatch, request):
@@ -469,7 +470,6 @@ def test_cancel_run_uses_cached_generation_without_orch_lookup(sample_turn, monk
     scheduler = InferenceRowScheduler()
 
     def cleanup() -> None:
-        reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
@@ -496,7 +496,7 @@ def test_cancel_run_uses_cached_generation_without_orch_lookup(sample_turn, monk
             submission_open=SubmissionOpen(),
         )
     with scheduler._lock:
-        scheduler._runs[session.run_id] = scope
+        scheduler._runs[session.run_id] = RunOwnership(scope, None)
         scheduler._execution_generation_by_run_id[session.run_id] = 7
 
     def forbid_generation_lookup(_scope: ComputeScope) -> int | None:

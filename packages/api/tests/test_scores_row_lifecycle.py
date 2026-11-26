@@ -30,6 +30,8 @@ from api.streaming.table_stream.row_stream_resolution_registry import (
     reset_stream_resolution_registry_for_tests,
 )
 
+from tests.scores_ladder_helpers import stamp_run_ladder
+
 
 def _session(sample_turn) -> InferenceRowStreamSession:
     score = sample_turn.scores[0]
@@ -72,6 +74,8 @@ def test_apply_scores_row_lifecycle_detach(sample_turn) -> None:
     try:
         run = new_tier_row_run(_session(sample_turn))
         register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+
+        stamp_run_ladder(run)
 
         apply_scores_row_lifecycle(RowLifecycleOp.DETACH, run.run_id)
 

@@ -355,17 +355,6 @@ def iter_multiplexed_inference_events(
     )
 
 
-def cleanup_inference_stream_sessions(
-    scheduler: InferenceRowScheduler,
-    scope: InferenceStreamScope,
-    sessions: tuple[InferenceRowStreamSession, ...],
-    *,
-    stream_token: str,
-) -> None:
-    """Detach row runs when the table stream ends."""
-    scheduler.detach_inference_stream(scope, sessions, stream_token=stream_token)
-
-
 def iter_scores_table_inference_events(
     turn: TurnInfo,
     player_ids: tuple[int, ...],
@@ -425,13 +414,8 @@ def iter_scores_table_inference_events(
         )
 
     yield from iter_table_stream_connect_with_scope(
-        begin_scope=lambda: resolved_scheduler.begin_scope(stream_scope),
-        end_scope=lambda stream_token: cleanup_inference_stream_sessions(
-            resolved_scheduler,
-            stream_scope,
-            (),
-            stream_token=stream_token,
-        ),
+        scheduler=resolved_scheduler,
+        scope=stream_scope,
         policy_factory=policy_factory,
         player_ids=player_ids,
     )

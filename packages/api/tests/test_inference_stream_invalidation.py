@@ -47,6 +47,7 @@ from api.storage.memory_asset import MemoryAssetBackend
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.scores_exports_helpers import minimal_stream_query_context
 from tests.scores_row_lifecycle_test_helpers import _patch_scores_dag_without_fleet_deps
+from tests.table_stream_test_helpers import end_stream_inline
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -61,9 +62,11 @@ def memory_backend():
     return backend
 
 
-def _install_workerless_scheduler(monkeypatch: pytest.MonkeyPatch) -> InferenceRowScheduler:
+def _install_workerless_scheduler(
+    monkeypatch: pytest.MonkeyPatch, make_inference_scheduler
+) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
 
     def _get_scheduler() -> InferenceRowScheduler:
         return scheduler
@@ -93,7 +96,7 @@ def _end_open_table_stream(
 ) -> None:
     controller = controller_for_scope(scope)
     if controller is not None:
-        controller.end_stream(scheduler)
+        end_stream_inline(scheduler, controller.scope, controller.stream_token)
 
 
 def _schedule_player_row(
@@ -262,10 +265,13 @@ def test_mask_change_reschedules_in_flight_row_while_table_stream_active_case_3(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Case 3 backend: mask change cancels and reschedules one in-flight row."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     assert len(player_ids) == 2
 
@@ -296,10 +302,13 @@ def test_mask_change_reschedules_completed_row_while_table_stream_active_case_4(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Case 4 backend: mask change reschedules a completed row on an open stream."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
 
     _active_stream, scheduled_rows, _wake = _attach_active_table_stream(
@@ -338,6 +347,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     sample_turn,
     monkeypatch,
     request,
+    make_inference_scheduler,
 ):
     from api.compute.pools import reset_compute_worker_pool_for_tests
     from api.compute.runtime import reset_orchestrators_for_tests
@@ -345,12 +355,12 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     reset_inference_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     controller: InferenceTableStreamController | None = None
 
     def cleanup() -> None:
         if controller is not None:
-            controller.end_stream(scheduler)
+            end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
 
@@ -437,10 +447,13 @@ def test_recompute_reschedules_all_rows_while_table_stream_active_cases_1_and_2(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Cases 1/2 backend: recompute clears persistence and reschedules every open-stream row."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
 
@@ -476,10 +489,13 @@ def test_mask_change_integration_via_table_stream_generator_case_3(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Integration: invalidation while iter_scores_table_inference_events multiplex is active."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     persistence = InferenceRowPersistenceService(memory_backend)
@@ -548,10 +564,13 @@ def test_all_cached_replay_keeps_stream_open_for_mask_invalidation_case_4_integr
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """After every row replays from cache, mask change still reschedules on the open stream."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     persistence = InferenceRowPersistenceService(memory_backend)
@@ -629,10 +648,13 @@ def test_all_cached_replay_keeps_stream_open_for_recompute_cases_1_and_2_integra
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """After every row replays from cache, recompute reschedules all rows on the open stream."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     persistence = InferenceRowPersistenceService(memory_backend)
@@ -681,10 +703,13 @@ def test_turn_invalidation_reschedule_skips_immediate_path_players(
     first_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Turn invalidation full reschedule must not enqueue tier jobs for immediate-path rows."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in first_turn.scores[:2])
     turn_number = first_turn.settings.turn
     persistence = InferenceRowPersistenceService(memory_backend)
@@ -737,10 +762,13 @@ def test_turn_stored_reschedule_uses_refreshed_host_turn(
     sample_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Reschedule after turn invalidation must use refreshed host turn from storage."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
     target_player_id = player_ids[0]
@@ -808,10 +836,13 @@ def test_recompute_force_schedules_immediate_path_players(
     first_turn,
     monkeypatch,
     memory_backend,
+    make_inference_scheduler,
 ):
     """Skip-set rows stay immediate even on explicit recompute; never ``tier_solve``."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = tuple(row.ownerid for row in first_turn.scores[:2])
     turn_number = first_turn.settings.turn
 
@@ -850,6 +881,7 @@ def test_recompute_force_schedules_immediate_path_players(
 def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
     sample_turn,
     monkeypatch,
+    make_inference_scheduler,
 ):
     """Connect admission must not drop the stream when reschedule wins the race.
 
@@ -859,7 +891,9 @@ def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
     from api.analytics.military_score_inference.inference_stream_rows import ScheduleRowAdmission
 
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_id = sample_turn.scores[0].ownerid
     scope = _stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope)
@@ -905,19 +939,22 @@ def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
     assert fresher_run_id in scheduler._runs
     assert stale.session.run_id not in scheduler._runs
 
-    controller.end_stream(scheduler)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
 def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
     sample_turn,
     monkeypatch,
+    make_inference_scheduler,
 ):
     """If invalidation cancels the connect-enqueued run with no replacement, reschedule."""
     from api.analytics.military_score_inference.inference_stream_rows import ScheduleRowAdmission
 
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_id = sample_turn.scores[0].ownerid
     scope = _stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope)
@@ -967,16 +1004,19 @@ def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
     assert cancelled.session.run_id not in scheduler._runs
     assert replacement.session.run_id in scheduler._runs
 
-    controller.end_stream(scheduler)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
 def test_adopt_admission_rejects_cancelled_connect_run(
     sample_turn,
     monkeypatch,
+    make_inference_scheduler,
 ):
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_id = sample_turn.scores[0].ownerid
     scope = _stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope)
@@ -1002,11 +1042,13 @@ def test_adopt_admission_rejects_cancelled_connect_run(
     assert controller.adopt_admission_scheduled_row(player_id, cancelled) is False
     assert player_id not in controller.scheduled_rows
 
-    controller.end_stream(scheduler)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
-def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeypatch, request):
+def test_reschedule_row_with_running_node_does_not_deadlock(
+    sample_turn, monkeypatch, request, make_inference_scheduler
+):
     """Cancel/abort must not re-enter stream_lock via node-complete delivery.
 
     Production hang: fleet ledger persist -> reschedule_player (held stream_lock) ->
@@ -1021,12 +1063,12 @@ def test_reschedule_row_with_running_node_does_not_deadlock(sample_turn, monkeyp
     reset_inference_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     controller: InferenceTableStreamController | None = None
 
     def cleanup() -> None:
         if controller is not None:
-            controller.end_stream(scheduler)
+            end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
 
@@ -1093,6 +1135,7 @@ def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
     sample_turn,
     monkeypatch,
     request,
+    make_inference_scheduler,
 ):
     """Cancelling a duplicate schedule must not fail the survivor's running node.
 
@@ -1107,12 +1150,12 @@ def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
     reset_inference_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     controller: InferenceTableStreamController | None = None
 
     def cleanup() -> None:
         if controller is not None:
-            controller.end_stream(scheduler)
+            end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
 
@@ -1155,10 +1198,12 @@ def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
     assert dispatch.scheduled is not None
     assert dispatch.scheduled.session.run_id == survivor.session.run_id
     assert not survivor.session.cancel_token.is_cancelled()
-    assert scheduler._runs[survivor.session.run_id] == scope
+    assert scheduler._runs[survivor.session.run_id].root_scope == scope
 
 
-def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monkeypatch):
+def test_cancel_abort_failure_does_not_deliver_stream_terminal(
+    sample_turn, monkeypatch, make_inference_scheduler
+):
     """Intentional cancel aborts must not RowFailed the open multiplex session."""
     from api.analytics.military_score_inference.inference_stream_domain_events import RowFailed
     from api.compute.errors import ComputeScopeAbortedError
@@ -1166,7 +1211,9 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
     from api.compute.scope import ComputeScope
 
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_workerless_scheduler(monkeypatch)
+    scheduler = _install_workerless_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler
+    )
     player_ids = (sample_turn.scores[0].ownerid,)
     controller, scheduled_rows, _wake = _attach_active_table_stream(
         sample_turn,
@@ -1201,7 +1248,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(sample_turn, monk
     )
     assert delivered == []
     assert not any(isinstance(e, RowFailed) for e in delivered)
-    controller.end_stream(scheduler)
+    end_stream_inline(scheduler, controller.scope, controller.stream_token)
     reset_inference_table_stream_registry_for_tests()
 
 
@@ -1210,6 +1257,7 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
     monkeypatch,
     memory_backend,
     request,
+    make_inference_scheduler,
 ):
     """Canceller that still needs the row must force_fresh_replace after abort.
 
@@ -1230,12 +1278,12 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
     reset_inference_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=0)
-    scheduler = InferenceRowScheduler()
+    scheduler = make_inference_scheduler()
     controller: InferenceTableStreamController | None = None
 
     def cleanup() -> None:
         if controller is not None:
-            controller.end_stream(scheduler)
+            end_stream_inline(scheduler, controller.scope, controller.stream_token)
         reset_orchestrators_for_tests()
         reset_compute_worker_pool_for_tests(worker_count=1)
 

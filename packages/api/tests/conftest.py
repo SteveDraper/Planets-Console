@@ -35,7 +35,9 @@ from tests.fixtures.military_score_inference_prior_weights import (  # noqa: F40
 )
 from tests.observer_callback_guard import failing_on_observer_callback_errors
 
+# A plugin is listed before any plugin that imports it, so pytest rewrites its asserts.
 pytest_plugins = [
+    "tests.table_stream_test_helpers",
     "tests.scores_exports_helpers",
     "tests.scores_ladder_helpers",
     "tests.scores_outlier_repro_harness",
@@ -180,7 +182,36 @@ def _isolate_fleet_table_stream_compute_state(
     reset_fleet_table_stream_registry_for_tests()
     reset_orchestrators_for_tests()
     reset_compute_worker_pool_for_tests(worker_count=1)
-    reset_fleet_table_stream_scheduler_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _reset_table_stream_scheduler_singletons(
+    _isolate_compute_orchestrator_singleton,
+    _isolate_fleet_table_stream_compute_state,
+):
+    """Reset each process table-stream scheduler the test instantiated.
+
+    A reset shuts the scheduler's off-lock runner down once its queued stream
+    ends have run, so no runner thread or posted end outlives the test. Every
+    other fixture that may still post tears down first: test-module and
+    requested fixtures are set up after this one, and the orchestrator and
+    fleet isolation fixtures are requested here so they tear down after it.
+    The fleet scheduler goes first since its stream ends may reach scores.
+    """
+    yield
+    from api.analytics.fleet.fleet_table_stream_scheduler import (
+        fleet_table_stream_scheduler_if_initialized,
+        reset_fleet_table_stream_scheduler_for_tests,
+    )
+    from api.analytics.military_score_inference.inference_scheduler import (
+        inference_row_scheduler_if_initialized,
+        reset_inference_row_scheduler_for_tests,
+    )
+
+    if fleet_table_stream_scheduler_if_initialized() is not None:
+        reset_fleet_table_stream_scheduler_for_tests()
+    if inference_row_scheduler_if_initialized() is not None:
+        reset_inference_row_scheduler_for_tests()
 
 
 # OR-Tools / inference-corpus integration tests excluded from `make ci` (see Makefile `test_api`).
@@ -236,8 +267,13 @@ _SLOW_TEST_NAMES = frozenset(
 def make_inference_scheduler():
     """Build ``InferenceRowScheduler``s that are shut down when the test ends.
 
-    A scheduler that pauses starts a pause-release waker thread, which keeps the
-    scheduler alive until it is shut down.
+    A test builds its scheduler here when it connects a table stream on it,
+    ends a stream on it (``end_table_stream``, directly or through a helper),
+    uses its off-lock runner, or shuts it down. A connect starts the off-lock
+    runner thread, and stream ends posted to it run until it is shut down, so
+    no runner or late stream end outlives the test. A scheduler the test only
+    passes as an argument or claims a scope on starts no thread and ends no
+    stream, so the test may build it directly.
     """
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 
@@ -245,6 +281,26 @@ def make_inference_scheduler():
 
     def make(**kwargs) -> InferenceRowScheduler:
         scheduler = InferenceRowScheduler(**kwargs)
+        built.append(scheduler)
+        return scheduler
+
+    yield make
+    for scheduler in built:
+        scheduler.shutdown()
+
+
+@pytest.fixture
+def make_fleet_table_stream_scheduler():
+    """Build ``FleetTableStreamScheduler``s that are shut down when the test ends.
+
+    The fleet counterpart of ``make_inference_scheduler``, under the same rule.
+    """
+    from api.analytics.fleet.fleet_table_stream_scheduler import FleetTableStreamScheduler
+
+    built: list[FleetTableStreamScheduler] = []
+
+    def make() -> FleetTableStreamScheduler:
+        scheduler = FleetTableStreamScheduler()
         built.append(scheduler)
         return scheduler
 

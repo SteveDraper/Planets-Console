@@ -3,9 +3,10 @@
 Fleet and scores both attach to the process orchestrator the same way: one
 scope-outcome listener, plus an optional dispatch gate, registered once per
 live orchestrator. Stream begin, preempt, and end only mutate scheduler maps.
-They do not register or unregister these callbacks, including from a generator
-``finally`` that may already hold the orchestrator condition. Work such a
-``finally`` needs from the orchestrator goes through an ``OffLockWaker``.
+They do not register or unregister these callbacks. A table stream's end runs
+on its scheduler's off-lock runner, never in the connect generator's
+``finally``, which may run on a thread that already holds the orchestrator
+condition.
 """
 
 from __future__ import annotations

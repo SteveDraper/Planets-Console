@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from api.analytics.military_score_inference.inference_scheduler import (
     InferenceRowScheduler,
+    RunOwnership,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -17,6 +18,7 @@ from api.services.inference_row_persistence_service import InferenceRowPersisten
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.scores_exports_helpers import scores_export_context
+from tests.scores_ladder_helpers import stamp_run_ladder
 from tests.scores_row_lifecycle_test_helpers import (
     _session_for_player,
 )
@@ -63,12 +65,15 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
         row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                first_token,
             )
 
         second_token = scheduler.begin_scope(scope)
@@ -144,7 +149,6 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
         )
         assert persistence.get_row(628580, 1, turn_number, player_id) is None
     finally:
-        reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 
@@ -179,6 +183,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
 
         detached = new_tier_row_run(_session_for_player(sample_turn, player_id=players[1]))
         register_row_run(detached, scope_index=ScopeIndexPolicy.TAKE)
+        stamp_run_ladder(detached)
         _detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
         # Cross-scope detach must not clear another scope's cancelled refuse.
@@ -223,15 +228,19 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         row_run = new_tier_row_run(session)
         register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
         with scheduler._lock:
-            scheduler._runs[session.run_id] = ComputeScope(
-                analytic_id=SCORES_ANALYTIC_ID,
-                game_id=628580,
-                perspective=1,
-                turn=turn_number,
-                player_id=player_id,
+            scheduler._runs[session.run_id] = RunOwnership(
+                ComputeScope(
+                    analytic_id=SCORES_ANALYTIC_ID,
+                    game_id=628580,
+                    perspective=1,
+                    turn=turn_number,
+                    player_id=player_id,
+                ),
+                stream_token,
             )
 
-        scheduler.detach_inference_stream(scope, (session,), stream_token=stream_token)
+        stamp_run_ladder(row_run)
+        scheduler.detach_inference_stream(scope, stream_token=stream_token)
         assert get_row_run(session.run_id) is row_run
         assert get_row_run_phase(session.run_id) is RowRunPhase.DETACHED
         assert decide_scores_row_persist(session.run_id) == PersistDecision.allow(
@@ -272,7 +281,6 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         assert stored is not None
         assert stored.summary == "detach-missing-run may persist"
     finally:
-        reset_inference_row_scheduler_for_tests()
         reset_tier_row_run_registry_for_tests()
 
 

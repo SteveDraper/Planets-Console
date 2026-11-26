@@ -45,7 +45,6 @@ def _clean_registries() -> Iterator[None]:
     reset_inference_row_scheduler_for_tests()
     reset_inference_table_stream_registry_for_tests()
     yield
-    reset_inference_row_scheduler_for_tests()
     reset_inference_table_stream_registry_for_tests()
 
 
@@ -111,7 +110,7 @@ def test_an_owning_stream_token_binds_the_run(sample_turn, monkeypatch):
 
     assert registration is TierLadderRegistration.STREAM_BOUND
     assert remembered == []
-    assert submitted == [scheduler._runs[session.run_id]]
+    assert submitted == [scheduler._runs[session.run_id].root_scope]
 
 
 def test_no_stream_registers_a_background_run_and_remembers_its_scope(sample_turn, monkeypatch):
@@ -122,7 +121,7 @@ def test_no_stream_registers_a_background_run_and_remembers_its_scope(sample_tur
     registration = scheduler.enqueue_tier_ladder(session)
 
     assert registration is TierLadderRegistration.BACKGROUND
-    assert remembered == [scheduler._runs[session.run_id]]
+    assert remembered == [scheduler._runs[session.run_id].root_scope]
 
 
 @pytest.mark.parametrize("is_stream_paused", [False, True], ids=["running", "paused"])
@@ -142,7 +141,7 @@ def test_no_token_registers_a_background_run_while_a_stream_at_another_turn_is_a
     scheduler.accept_pending_run(session.run_id)
 
     assert registration is TierLadderRegistration.BACKGROUND
-    assert remembered == [scheduler._runs[session.run_id]]
+    assert remembered == [scheduler._runs[session.run_id].root_scope]
     assert scheduler._stream_bindings == {}
     assert submitted == []
 
@@ -163,7 +162,7 @@ def test_a_paused_streams_run_is_stream_bound_and_its_accept_submits(
 
     assert registration is TierLadderRegistration.STREAM_BOUND
     assert remembered == []
-    assert submitted == [scheduler._runs[session.run_id]]
+    assert submitted == [scheduler._runs[session.run_id].root_scope]
 
 
 @pytest.mark.parametrize("is_stream_first", [True, False], ids=["stream-first", "background-first"])
@@ -237,7 +236,7 @@ def test_connect_admission_that_loses_the_scope_registers_one_background_run(
     assert run.phase is RowRunPhase.REGISTERED
     assert list(scheduler._runs) == [run.run_id]
     assert controller.scheduled_rows == {}
-    assert remembered == [scheduler._runs[run.run_id]]
+    assert remembered == [scheduler._runs[run.run_id].root_scope]
     scheduler.accept_pending_run(run.run_id)
     assert submitted == []
 

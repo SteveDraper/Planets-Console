@@ -48,7 +48,7 @@ from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.compute.orchestrator import ComputeNodeRun, ComputeOrchestrator, ComputeRequest
 from api.compute.scope import ComputeScope
 from api.errors import ValidationError
-from api.streaming.table_stream.off_lock_waker import OffLockWaker
+from api.streaming.table_stream.off_lock_runner import OffLockRunner
 from api.streaming.table_stream.pending_accepts import PendingAccepts
 from api.streaming.table_stream.scheduler_orchestrator_attachment import (
     SchedulerOrchestratorAttachment,
@@ -65,8 +65,8 @@ __all__ = [
 
 OnHeldSolutionsUpdatedCallback = Callable[[InferenceRowStreamSession], None]
 
-# The thread that releases global pause after a stream closes (see detach_inference_stream).
-PAUSE_RELEASE_THREAD_NAME = "scores-pause-release"
+# The thread that ends this scheduler's table streams and releases pause.
+SCORES_OFF_LOCK_THREAD_NAME = "scores-off-lock"
 
 
 class TierLadderRegistration(Enum):
@@ -84,6 +84,19 @@ class TierLadderRegistration(Enum):
     # diagnostics): the run is registered, taking the scope index as stream
     # ownership decides, and nothing is bound, accepted or woken.
     SUBMIT_DEFERRED = "submit_deferred"
+
+
+@dataclass(frozen=True, slots=True)
+class RunOwnership:
+    """A scheduled run's orchestrator root scope and the stream that owns it.
+
+    ``owning_token`` is the stream token that owned the scope when the run
+    registered, or None for a background run. A stream end detaches exactly the
+    runs its token owns.
+    """
+
+    root_scope: ComputeScope
+    owning_token: str | None
 
 
 @dataclass(frozen=True)
@@ -115,8 +128,10 @@ class InferenceRowScheduler(
         if worker_count == 0:
             defer_orchestrator_submit = True
         self._defer_orchestrator_submit = defer_orchestrator_submit
-        # Scope index only -- RowRun objects live in ``tier_row_run_registry``.
-        self._runs: dict[str, ComputeScope] = {}
+        # Root scope and owning stream per run -- RowRun objects live in
+        # ``tier_row_run_registry``. Read through ``_run_ids_at_root_scope_locked``,
+        # ``_run_ids_owned_by_locked`` and ``_root_scopes_locked``.
+        self._runs: dict[str, RunOwnership] = {}
         # Execution identity for cancel abort, captured after submit/wake *outside*
         # the scheduler lock. ``cancel_run`` must never call into the orchestrator
         # while holding ``_lock`` (scheduler → orch nests ABBA with orch drain →
@@ -128,15 +143,11 @@ class InferenceRowScheduler(
         self._lock = threading.RLock()
         self._scope_guard = TableStreamScopeGuard[InferenceStreamScope]()
         self._stream_bindings: dict[str, InferenceStreamOrchestratorBinding] = {}
-        # Read without the lock by the pause dispatch gate. Only ``pause_globally``
-        # sets it, and it starts the pause-release waker first, so every clear
-        # can release. Every clear goes through ``_clear_global_pause_locked``.
+        # Read without the lock by the pause dispatch gate. Every clear goes
+        # through ``_clear_global_pause_locked``.
         self._globally_paused = False
-        # Releases pause for a stream close, which must not call the orchestrator.
-        self._pause_release_waker = OffLockWaker(
-            self._dispatch_after_pause_cleared,
-            thread_name=PAUSE_RELEASE_THREAD_NAME,
-        )
+        # Runs each table stream's end, posted by its connect ``finally``.
+        self.off_lock_runner = OffLockRunner(thread_name=SCORES_OFF_LOCK_THREAD_NAME)
         self._pending_accepts = PendingAccepts()
         # Listener and pause gate are scheduler-lifetime. Do not register here:
         # ``get_inference_row_scheduler`` holds ``_scheduler_lock`` across
@@ -300,7 +311,7 @@ class InferenceRowScheduler(
             globally_paused=self._globally_paused,
             active_session_count=len(self._runs) if scope_matches else 0,
             active_scope=active_scope,
-            root_scopes=tuple(self._runs.values()),
+            root_scopes=self._root_scopes_locked(),
         )
 
     def _global_pause_status_from_inputs(
@@ -355,14 +366,11 @@ class InferenceRowScheduler(
 
         The pause gate is installed on the live process orchestrator before this
         takes the scheduler lock, so a replaced orchestrator still honors pause.
-        The pause-release waker is started here too, outside every lock, so a
-        stream close can release pause without calling the orchestrator.
-        Both run before the scope check; a rejected pause leaves them in place,
-        which is harmless because the gate holds nothing and the waker runs
-        nothing until pause is set.
+        It runs before the scope check; a rejected pause leaves it in place,
+        which is harmless because the gate holds nothing until pause is set. A
+        stream's end releases pause on the scheduler's off-lock runner.
         """
         self._orchestrator_attachment.ensure_registered()
-        self._pause_release_waker.ensure_started()
         with self._lock:
             self._require_active_stream_for_scope_locked(scope)
             already_paused = self._globally_paused
@@ -420,6 +428,20 @@ class InferenceRowScheduler(
         """
         with self._lock:
             self._forget_runs_locked(run_ids)
+
+    def _run_ids_at_root_scope_locked(self, root_scope: ComputeScope) -> list[str]:
+        """Run ids scheduled at ``root_scope``. Caller holds ``self._lock``."""
+        return [run_id for run_id, entry in self._runs.items() if entry.root_scope == root_scope]
+
+    def _run_ids_owned_by_locked(self, stream_token: str) -> list[str]:
+        """Run ids whose owning stream is ``stream_token``. Caller holds ``self._lock``."""
+        return [
+            run_id for run_id, entry in self._runs.items() if entry.owning_token == stream_token
+        ]
+
+    def _root_scopes_locked(self) -> tuple[ComputeScope, ...]:
+        """Every scheduled run's root scope. Caller holds ``self._lock``."""
+        return tuple(entry.root_scope for entry in self._runs.values())
 
     def _forget_runs_locked(self, run_ids: tuple[str, ...]) -> None:
         """The map side of :meth:`forget_runs`. Caller holds ``self._lock``."""
@@ -487,7 +509,7 @@ class InferenceRowScheduler(
             )
             self._register_tier_callbacks_for_run(row_run)
             root_scope = scores_root_scope_for_session(session)
-            self._runs[session.run_id] = root_scope
+            self._runs[session.run_id] = RunOwnership(root_scope, owning_token)
             if self._defer_orchestrator_submit:
                 return TierLadderRegistration.SUBMIT_DEFERRED
             if owning_token is not None:
@@ -550,10 +572,12 @@ class InferenceRowScheduler(
     def shutdown(self) -> None:
         """Reset adapter state; safe for test teardown after dropping a service stack.
 
-        Stops the pause-release waker before unregistering the orchestrator
-        callbacks, so a release still running finishes against them.
+        Runs the queued stream ends, then stops the off-lock runner, before
+        unregistering the orchestrator callbacks, so a release still running
+        finishes against them. A runner that outlives its shutdown wait is
+        logged, and its remaining ends run after the callbacks are gone.
         """
-        self._pause_release_waker.shutdown()
+        self.off_lock_runner.shutdown()
         self._orchestrator_attachment.shutdown()
         with self._lock:
             self._invalidate_retained_state_locked()
@@ -718,9 +742,8 @@ class InferenceRowScheduler(
         if generation is None:
             return
         with self._lock:
-            for run_id, scope in self._runs.items():
-                if scope == root_scope:
-                    self._execution_generation_by_run_id[run_id] = generation
+            for run_id in self._run_ids_at_root_scope_locked(root_scope):
+                self._execution_generation_by_run_id[run_id] = generation
 
     def _pause_dispatch_gate(self, node: ComputeNodeRun) -> bool:
         from api.analytics.scores.compute_orchestration import SCORES_TIER_SOLVE_PROFILE_INDEX
@@ -743,9 +766,7 @@ class InferenceRowScheduler(
     def _emit_work_accepted(self, root_scope: ComputeScope) -> None:
         with self._lock:
             sessions = []
-            for run_id, scope in self._runs.items():
-                if scope != root_scope:
-                    continue
+            for run_id in self._run_ids_at_root_scope_locked(root_scope):
                 row_run = self._adapter_row_run(run_id)
                 if row_run is None or row_run.session.cancel_token.is_cancelled():
                     continue
