@@ -7,7 +7,12 @@ requires-python = ">=3.14"
 dependencies = ["server"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0", "httpx>=0.27.0", "ruff>=0.8.0"]
+dev = [
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+    "ruff>=0.8.0",
+    "pytest-timeout>=2.4.0",
+]
 package = ["pyinstaller>=6.15.0"]
 
 [tool.uv.workspace]

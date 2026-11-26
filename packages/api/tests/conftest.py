@@ -39,6 +39,7 @@ pytest_plugins = [
     "tests.scores_exports_helpers",
     "tests.scores_ladder_helpers",
     "tests.scores_outlier_repro_harness",
+    "tests.table_stream_test_helpers",
 ]
 
 
@@ -236,8 +237,9 @@ _SLOW_TEST_NAMES = frozenset(
 def make_inference_scheduler():
     """Build ``InferenceRowScheduler``s that are shut down when the test ends.
 
-    A scheduler that pauses starts a pause-release waker thread, which keeps the
-    scheduler alive until it is shut down.
+    A scheduler whose table stream connects starts its off-lock runner thread,
+    and stream ends posted to it run until it is shut down, so no runner or
+    late stream end outlives the test.
     """
     from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
 
@@ -245,6 +247,26 @@ def make_inference_scheduler():
 
     def make(**kwargs) -> InferenceRowScheduler:
         scheduler = InferenceRowScheduler(**kwargs)
+        built.append(scheduler)
+        return scheduler
+
+    yield make
+    for scheduler in built:
+        scheduler.shutdown()
+
+
+@pytest.fixture
+def make_fleet_table_stream_scheduler():
+    """Build ``FleetTableStreamScheduler``s that are shut down when the test ends.
+
+    The fleet counterpart of ``make_inference_scheduler``.
+    """
+    from api.analytics.fleet.fleet_table_stream_scheduler import FleetTableStreamScheduler
+
+    built: list[FleetTableStreamScheduler] = []
+
+    def make() -> FleetTableStreamScheduler:
+        scheduler = FleetTableStreamScheduler()
         built.append(scheduler)
         return scheduler
 

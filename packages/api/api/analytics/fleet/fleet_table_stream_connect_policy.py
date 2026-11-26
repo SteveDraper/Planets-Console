@@ -13,7 +13,6 @@ from api.analytics.fleet.fleet_table_stream_rows import (
     _TERMINAL_EVENT_TYPES,
     PlayerStreamAdmission,
     _fleet_multiplex_event_to_wire_events,
-    cleanup_fleet_table_stream_sessions,
     tag_fleet_table_stream_event,
 )
 from api.analytics.fleet.fleet_table_stream_scheduler import FleetTableStreamScheduler
@@ -93,10 +92,3 @@ class FleetTableStreamConnectPolicy:
 
     def terminal_types(self) -> frozenset[str]:
         return _TERMINAL_EVENT_TYPES
-
-    def end_sessions(self) -> None:
-        cleanup_fleet_table_stream_sessions(
-            self.scheduler,
-            self.stream_scope,
-            stream_token=self.stream_token,
-        )

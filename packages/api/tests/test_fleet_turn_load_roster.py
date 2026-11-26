@@ -17,7 +17,6 @@ from api.analytics.fleet.fleet_table_stream_rows import (
     resolve_player_stream_admission,
 )
 from api.analytics.fleet.fleet_table_stream_scheduler import (
-    FleetTableStreamScheduler,
     _node_complete_stream_events,
     reset_fleet_table_stream_scheduler_for_tests,
 )
@@ -217,7 +216,9 @@ def test_stored_empty_final_ledger_stays_cached_complete(sample_turn):
     assert complete["isFinal"] is True
 
 
-def test_stream_yields_stored_ledger_without_running_the_chain(sample_turn, monkeypatch):
+def test_stream_yields_stored_ledger_without_running_the_chain(
+    sample_turn, monkeypatch, make_fleet_table_stream_scheduler
+):
     services = _services(sample_turn)
     player_id = sample_turn.scores[0].ownerid
     turn_number = sample_turn.settings.turn
@@ -258,7 +259,7 @@ def test_stream_yields_stored_ledger_without_running_the_chain(sample_turn, monk
         perspective=sample_turn.player.id,
         fleet_services=services,
         persistence=services.persistence,
-        scheduler=FleetTableStreamScheduler(),
+        scheduler=make_fleet_table_stream_scheduler(),
         query_context=query_context_for_fleet_services(services, host_turn=sample_turn),
     )
     try:

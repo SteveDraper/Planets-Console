@@ -89,9 +89,6 @@ class _AttachOnlyPolicy:
     def preamble_events(self) -> tuple[dict[str, object], ...]:
         return ()
 
-    def end_sessions(self) -> None:
-        pass
-
     def detach(self) -> None:
         reset_fleet_table_stream_registry_for_tests()
 
@@ -107,13 +104,16 @@ def test_a_catalog_scan_catalogs_nothing_itself() -> None:
 
 
 @pytest.mark.usefixtures("empty_catalog")
-def test_stream_connect_catalogs_the_registries_before_the_controller_attaches() -> None:
-    policy = _AttachOnlyPolicy(FleetTableStreamScope(game_id=10, perspective=2, turn_number=8))
+def test_stream_connect_catalogs_the_registries_before_the_controller_attaches(
+    make_recording_table_stream_scheduler,
+) -> None:
+    scope = FleetTableStreamScope(game_id=10, perspective=2, turn_number=8)
+    policy = _AttachOnlyPolicy(scope)
 
     events = list(
         iter_table_stream_connect_with_scope(
-            begin_scope=lambda: "token",
-            end_scope=lambda _token: None,
+            scheduler=make_recording_table_stream_scheduler(),
+            scope=scope,
             policy_factory=lambda _token: policy,
             player_ids=(),
         )

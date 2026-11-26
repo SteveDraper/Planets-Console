@@ -26,6 +26,7 @@ from api.transport.fleet_table_stream import (
 )
 
 from tests.fleet_table_stream_test_helpers import query_context_for_fleet_services
+from tests.table_stream_test_helpers import end_stream_inline
 
 # Handles from a stand-in orchestrator still need an observers surface to wait on.
 _STAND_IN_OBSERVERS = OrchestratorObservers(threading.Condition())
@@ -49,14 +50,16 @@ class _AdmitOnlyOrchestrator:
         return ComputeHandle(scope=request.scope, _node=node, _observers=_STAND_IN_OBSERVERS)
 
 
-def _install_admit_only_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTableStreamScheduler:
+def _install_admit_only_scheduler(
+    monkeypatch: pytest.MonkeyPatch, make_fleet_table_stream_scheduler
+) -> FleetTableStreamScheduler:
     """Real enqueue_player_run; stub orchestrator submit so events stay test-driven."""
     from api.compute.runtime import reset_orchestrators_for_tests
 
     reset_orchestrators_for_tests()
     reset_fleet_table_stream_registry_for_tests()
     reset_fleet_table_stream_scheduler_for_tests()
-    scheduler = FleetTableStreamScheduler()
+    scheduler = make_fleet_table_stream_scheduler()
     stub = _AdmitOnlyOrchestrator()
 
     monkeypatch.setattr(
@@ -73,13 +76,16 @@ def _install_admit_only_scheduler(monkeypatch: pytest.MonkeyPatch) -> FleetTable
 def test_fleet_connect_multiplexes_progress_across_players_before_complete(
     sample_turn,
     monkeypatch,
+    make_fleet_table_stream_scheduler,
 ):
     """Admit all players, then interleave progress: B emits before either complete.
 
     With sequential connect, player B would not even be scheduled until A's
     host-turn complete drained. Multiplex connect admits both first.
     """
-    scheduler = _install_admit_only_scheduler(monkeypatch)
+    scheduler = _install_admit_only_scheduler(
+        monkeypatch, make_fleet_table_stream_scheduler=make_fleet_table_stream_scheduler
+    )
 
     player_a, player_b = (row.ownerid for row in sample_turn.scores[:2])
     player_ids = (player_a, player_b)
@@ -171,6 +177,6 @@ def test_fleet_connect_multiplexes_progress_across_players_before_complete(
     }
     assert progress_before_first_complete == set(player_ids)
 
-    controller.end_stream(scheduler)
+    end_stream_inline(scheduler, controller)
     thread.join(timeout=2.0)
     assert stream_closed.is_set()

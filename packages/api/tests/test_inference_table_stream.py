@@ -6,7 +6,6 @@ import json
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
-    InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
@@ -117,9 +116,11 @@ def test_table_stream_reconnect_via_ndjson_transport(sample_turn):
     assert json.loads(lines[0]) == {"type": "globalPause", "paused": False}
 
 
-def test_a_same_scope_reconnect_leaves_in_flight_rows_to_the_old_streams_end(sample_turn):
+def test_a_same_scope_reconnect_leaves_in_flight_rows_to_the_old_streams_end(
+    sample_turn, make_inference_scheduler
+):
     reset_inference_row_scheduler_for_tests()
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     scope = InferenceStreamScope(
         game_id=628580,
         perspective=1,

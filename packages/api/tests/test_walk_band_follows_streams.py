@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
 from api.analytics.fleet.fleet_table_stream_registry import (
@@ -42,6 +42,7 @@ from tests.compute_orchestrator_fixtures import RecordingPoolSubmitter
 from tests.compute_published_band_helpers import published_band
 from tests.fixtures.export_framework.harness import make_fixture_query_context
 from tests.on_walk_live_helpers import LiveStream, attach_stream
+from tests.table_stream_test_helpers import RecordingTableStreamScheduler
 from tests.test_compute_pool_published_bands import _player_scopes
 from tests.test_compute_pools import _POOL_EXPORT_REGISTRY, _single_step_thread_registration
 from tests.walk_band_helpers import (
@@ -83,17 +84,16 @@ class _HeldOpenFleetStreamPolicy:
     def preamble_events(self) -> tuple[dict[str, object], ...]:
         return ({"type": "preamble"},)
 
-    def end_sessions(self) -> None:
-        pass
 
-
-def _connect_fleet_stream(walk: Walk) -> Iterator[dict[str, object]]:
+def _connect_fleet_stream(
+    walk: Walk, make_scheduler: Callable[[str], RecordingTableStreamScheduler]
+) -> Iterator[dict[str, object]]:
     """Open a fleet stream through the scoped connect entry and hold it open."""
     scope = FleetTableStreamScope(walk.ctx.game_id, walk.ctx.perspective, SHELL_TURN)
     controller = LiveStream(scope, None, walk.ctx, [walk.player_id])
     stream = iter_table_stream_connect_with_scope(
-        begin_scope=lambda: controller.stream_token,
-        end_scope=lambda _token: None,
+        scheduler=make_scheduler(controller.stream_token),
+        scope=scope,
         policy_factory=lambda _token: _HeldOpenFleetStreamPolicy(scope, controller),
         player_ids=(),
     )
@@ -178,9 +178,11 @@ def test_reopening_either_stream_brings_queued_and_waiting_steps_back(walk, open
     assert walk.pick() == (walk.scope(3), "stream_attached")
 
 
-def test_a_stream_opened_through_scoped_connect_watches_the_walk(walk):
+def test_a_stream_opened_through_scoped_connect_watches_the_walk(
+    walk, make_recording_table_stream_scheduler
+):
     walk.submit_shell()
-    stream = _connect_fleet_stream(walk)
+    stream = _connect_fleet_stream(walk, make_recording_table_stream_scheduler)
     try:
         walk.dispatch_pass()
         assert walk.bands() == all_at("stream_attached")

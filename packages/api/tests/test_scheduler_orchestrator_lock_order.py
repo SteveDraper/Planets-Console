@@ -1,13 +1,13 @@
 """Scheduler locks must not be held while acquiring the orchestrator condition.
 
 Fleet and scores attach to the process orchestrator once per scheduler
-(``SchedulerOrchestratorAttachment``). Stream preempt, end, and detach only
-mutate scheduler maps (a paused detach also wakes the pause-release thread,
-which never blocks), so a caller that already holds the orchestrator
-condition can finish them. Pause status peeks that orchestrator after
-releasing the scheduler lock, so the lock stays free while the peek waits.
-The band derivation reads the stream registries under the orchestrator
-condition without taking their locks.
+(``SchedulerOrchestratorAttachment``). Stream preempt and detach only mutate
+scheduler maps, so a caller that already holds the orchestrator condition can
+finish them. A stream's end, which may also release pause, runs on the
+scheduler's off-lock runner rather than in the connect ``finally``. Pause
+status peeks that orchestrator after releasing the scheduler lock, so the
+lock stays free while the peek waits. The band derivation reads the stream
+registries under the orchestrator condition without taking their locks.
 """
 
 from __future__ import annotations

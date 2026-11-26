@@ -31,6 +31,7 @@ from api.compute.orchestrator_observers import ScopeLifecycleSnapshot
 from api.compute.runtime import get_compute_orchestrator
 from api.compute.scope import ComputeScope
 from api.models.game import TurnInfo
+from api.streaming.table_stream.off_lock_runner import OffLockRunner
 from api.streaming.table_stream.pending_accepts import PendingAccepts
 from api.streaming.table_stream.scheduler_orchestrator_attachment import (
     SchedulerOrchestratorAttachment,
@@ -80,6 +81,10 @@ class _EnqueueAdmissionEarlyReturn:
     session: FleetPlayerStreamSession | None
 
 
+# The thread that ends this scheduler's table streams.
+FLEET_OFF_LOCK_THREAD_NAME = "fleet-off-lock"
+
+
 class FleetTableStreamScheduler:
     """Table-stream adapter: one orchestrator submission per player (fair submit).
 
@@ -97,6 +102,8 @@ class FleetTableStreamScheduler:
         self._orchestrator_attachment = SchedulerOrchestratorAttachment(
             on_scope_outcome=self._on_orchestrator_scope_outcome,
         )
+        # Runs each table stream's end, posted by its connect ``finally``.
+        self.off_lock_runner = OffLockRunner(thread_name=FLEET_OFF_LOCK_THREAD_NAME)
         self._subscribe_to_ledger_writes()
 
     def begin_scope(self, scope: FleetTableStreamScope) -> str:
@@ -309,7 +316,8 @@ class FleetTableStreamScheduler:
         drops all runs, and admission rejects any other token), so an owner end
         cancels every run token, discards every pending accept and drops the
         bindings. A stream that no longer owns the scope ends without touching
-        the current stream's state. Never calls into the orchestrator.
+        the current stream's state. Never calls into the orchestrator. A table
+        stream's connect posts it to the off-lock runner.
         """
         with self._lock:
             if self._scope_guard.end_table_stream_locked(scope, stream_token):
@@ -318,9 +326,11 @@ class FleetTableStreamScheduler:
     def shutdown(self) -> None:
         """Drop all stream state and unregister the orchestrator and ledger listeners.
 
-        Safe to call more than once, and for test teardown after dropping a
-        service stack.
+        Runs the queued stream ends and stops the off-lock runner first. Safe to
+        call more than once, and for test teardown after dropping a service
+        stack.
         """
+        self.off_lock_runner.shutdown()
         with self._lock:
             self._drop_active_stream_state_locked()
         self._orchestrator_attachment.shutdown()

@@ -162,9 +162,6 @@ class FleetTableStreamController(
     def detach(self) -> None:
         detach_fleet_table_stream(self.stream_token)
 
-    def end_stream(self, scheduler: FleetTableStreamScheduler) -> None:
-        scheduler.end_table_stream(self.scope, self.stream_token)
-
     def adopt_admission_scheduled_row(
         self,
         player_id: int,

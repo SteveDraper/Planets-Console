@@ -11,11 +11,12 @@ import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from functools import partial
 
 import pytest
 from api.analytics.military_score_inference.analytic import build_inference_observation
 from api.analytics.military_score_inference.inference_scheduler import (
-    PAUSE_RELEASE_THREAD_NAME,
+    SCORES_OFF_LOCK_THREAD_NAME,
     InferenceRowScheduler,
     reset_inference_row_scheduler_for_tests,
 )
@@ -245,7 +246,7 @@ def test_recompute_releases_pause_when_the_reschedule_raises(
     assert scheduler.global_pause_status(scope)["paused"] is False
 
 
-# --- A stream close releases pause through the off-lock waker ---
+# --- A stream end releases pause on the scheduler's off-lock runner ---
 
 RELEASE_WAIT_SECONDS = 2.0
 
@@ -259,9 +260,15 @@ def _wait_until(predicate, timeout: float = RELEASE_WAIT_SECONDS) -> bool:
     return predicate()
 
 
+def _post_stream_end(scheduler: InferenceRowScheduler, scope, token: str) -> None:
+    """Post the stream's end to the off-lock runner, as the connect ``finally`` does."""
+    scheduler.off_lock_runner.ensure_started()
+    scheduler.off_lock_runner.post(partial(scheduler.end_table_stream, scope, token))
+
+
 @dataclass(frozen=True)
-class HeldWakerPass:
-    """The waker thread's release pass, held until the test sets ``release``.
+class HeldReleasePass:
+    """The runner thread's release pass, held until the test sets ``release``.
 
     ``entered`` is set when the pass starts and ``resumed`` when it saw ``release``
     in time; the test asserts both on its own thread.
@@ -272,16 +279,16 @@ class HeldWakerPass:
     resumed: threading.Event = field(default_factory=threading.Event)
 
 
-def _hold_waker_pass(
+def _hold_release_pass(
     scheduler: InferenceRowScheduler, monkeypatch: pytest.MonkeyPatch
-) -> HeldWakerPass:
-    """Make the waker thread's pass wait until the returned pass is released."""
-    held = HeldWakerPass()
+) -> HeldReleasePass:
+    """Make the runner thread's release pass wait until the returned pass is released."""
+    held = HeldReleasePass()
     attachment = scheduler._orchestrator_attachment
     real_registered = attachment.registered_orchestrator
 
     def registered_orchestrator():
-        if threading.current_thread().name == PAUSE_RELEASE_THREAD_NAME:
+        if threading.current_thread().name == SCORES_OFF_LOCK_THREAD_NAME:
             held.entered.set()
             if held.release.wait(RELEASE_WAIT_SECONDS):
                 held.resumed.set()
@@ -308,13 +315,14 @@ def test_a_close_while_paused_dispatches_the_gate_held_nodes(
     root_scope = _root_scope(sample_turn, 0)
     assert root_scope in get_compute_orchestrator().ready_scopes()
 
-    scheduler.detach_inference_stream(scope, stream_token=token)
+    _post_stream_end(scheduler, scope, token)
 
-    assert _wait_until(lambda: _pool_scopes(workerless_pool) == {root_scope})
+    assert scheduler.off_lock_runner.drain(timeout=RELEASE_WAIT_SECONDS)
+    assert _pool_scopes(workerless_pool) == {root_scope}
     assert root_scope not in get_compute_orchestrator().ready_scopes()
 
 
-def test_a_close_while_the_orchestrator_lock_is_held_returns_and_releases_afterwards(
+def test_an_end_posted_under_the_orchestrator_lock_returns_and_releases_afterwards(
     sample_turn, persistence, workerless_pool, scheduler
 ) -> None:
     scope = stream_scope_for_turn(sample_turn)
@@ -323,20 +331,16 @@ def test_a_close_while_the_orchestrator_lock_is_held_returns_and_releases_afterw
     _accepted_paused_row(sample_turn, persistence, scheduler, token)
     root_scope = _root_scope(sample_turn, 0)
     orchestrator = get_compute_orchestrator()
-    detach = threading.Thread(
-        target=scheduler.detach_inference_stream,
-        args=(scope,),
-        kwargs={"stream_token": token},
-    )
+    post = threading.Thread(target=_post_stream_end, args=(scheduler, scope, token))
 
     with orchestrator._condition:
-        detach.start()
-        detach.join(RELEASE_WAIT_SECONDS)
-        detach_returned_under_the_lock = not detach.is_alive()
+        post.start()
+        post.join(RELEASE_WAIT_SECONDS)
+        post_returned_under_the_lock = not post.is_alive()
 
-    detach.join(RELEASE_WAIT_SECONDS)
-    assert detach_returned_under_the_lock
-    assert _wait_until(lambda: _pool_scopes(workerless_pool) == {root_scope})
+    assert post_returned_under_the_lock
+    assert scheduler.off_lock_runner.drain(timeout=RELEASE_WAIT_SECONDS)
+    assert _pool_scopes(workerless_pool) == {root_scope}
 
 
 def test_a_reopen_before_the_close_releases_gets_no_work_from_the_old_stream(
@@ -352,8 +356,8 @@ def test_a_reopen_before_the_close_releases_gets_no_work_from_the_old_stream(
     closed_token = scheduler.begin_scope(scope)
     scheduler.pause_globally(scope)
     _accepted_paused_row(sample_turn, persistence, scheduler, closed_token)
-    held = _hold_waker_pass(scheduler, monkeypatch)
-    scheduler.detach_inference_stream(scope, stream_token=closed_token)
+    held = _hold_release_pass(scheduler, monkeypatch)
+    _post_stream_end(scheduler, scope, closed_token)
     assert held.entered.wait(RELEASE_WAIT_SECONDS)
 
     reopened_token = scheduler.begin_scope(scope)
@@ -377,8 +381,8 @@ def test_shutdown_with_a_release_pending_registers_nothing_again(
     scheduler.pause_globally(scope)
     _accepted_paused_row(sample_turn, persistence, scheduler, token)
     orchestrator = get_compute_orchestrator()
-    held = _hold_waker_pass(scheduler, monkeypatch)
-    scheduler.detach_inference_stream(scope, stream_token=token)
+    held = _hold_release_pass(scheduler, monkeypatch)
+    _post_stream_end(scheduler, scope, token)
     assert held.entered.wait(RELEASE_WAIT_SECONDS)
 
     shutdown = threading.Thread(target=scheduler.shutdown)

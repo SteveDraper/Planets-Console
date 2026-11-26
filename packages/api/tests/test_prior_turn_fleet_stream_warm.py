@@ -55,6 +55,7 @@ from tests.export_chain_test_fixtures import (
 from tests.fleet_chain_test_turns import HOST_TURN
 from tests.fleet_exports_helpers import host_turn_at
 from tests.scores_exports_helpers import inference_target_player_id
+from tests.table_stream_test_helpers import end_stream_inline
 
 # Handles from a stand-in orchestrator still need an observers surface to wait on.
 _STAND_IN_OBSERVERS = OrchestratorObservers(threading.Condition())
@@ -94,6 +95,7 @@ def _install_scheduler(
     monkeypatch: pytest.MonkeyPatch,
     *,
     worker_count: int = 0,
+    make_inference_scheduler,
 ) -> InferenceRowScheduler:
     reset_inference_row_scheduler_for_tests()
     if worker_count > 0:
@@ -102,7 +104,7 @@ def _install_scheduler(
         # Fresh pool for orchestrator-backed stream tests; allow fleet warm and tier work
         # to make progress without waiting on a saturated process-wide singleton.
         reset_compute_worker_pool_for_tests(worker_count=max(worker_count, 2))
-    scheduler = InferenceRowScheduler(worker_count=worker_count)
+    scheduler = make_inference_scheduler(worker_count=worker_count)
 
     def _get_scheduler() -> InferenceRowScheduler:
         return scheduler
@@ -121,6 +123,7 @@ def _install_scheduler(
 def test_on_fleet_snapshot_persisted_clears_scores_host_turn_document(
     memory_backend,
     persistence,
+    make_inference_scheduler,
 ):
     """Legacy roster path: on_fleet_snapshot_persisted drops all scores@N rows."""
     from unittest.mock import MagicMock
@@ -132,7 +135,7 @@ def test_on_fleet_snapshot_persisted_clears_scores_host_turn_document(
     )
 
     fleet_persistence = FleetSnapshotPersistenceService(memory_backend)
-    scheduler = InferenceRowScheduler(worker_count=0)
+    scheduler = make_inference_scheduler(worker_count=0)
     invalidation = InferenceInvalidationService(
         persistence,
         scheduler=scheduler,
@@ -283,7 +286,7 @@ def _end_open_table_stream(
 ) -> None:
     controller = controller_for_scope(scope)
     if controller is not None:
-        controller.end_stream(scheduler)
+        end_stream_inline(scheduler, controller)
 
 
 def _host_turn_context(
@@ -368,10 +371,11 @@ def test_fleet_persist_at_prior_turn_invalidates_scores_stream_rows(
     sample_turn,
     persistence,
     monkeypatch,
+    make_inference_scheduler,
 ):
     """Fleet@(N-1) persist drops scores@N cache and reschedules the affected player's stream row."""
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_scheduler(monkeypatch)
+    scheduler = _install_scheduler(monkeypatch, make_inference_scheduler=make_inference_scheduler)
     target_player_id = next(
         row.ownerid for row in sample_turn.scores if row.ownerid != sample_turn.player.id
     )
@@ -535,6 +539,7 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     sample_turn,
     persistence,
     monkeypatch,
+    make_inference_scheduler,
 ):
     """First-pass pending overlay triggers reschedule when fleet@(N-1) persists.
 
@@ -542,7 +547,9 @@ def test_stream_recompute_reschedules_after_fleet_overlay_lands(
     fleet persist can race connect admission; correlation is scope + materialization.
     """
     reset_inference_table_stream_registry_for_tests()
-    scheduler = _install_scheduler(monkeypatch, worker_count=1)
+    scheduler = _install_scheduler(
+        monkeypatch, make_inference_scheduler=make_inference_scheduler, worker_count=1
+    )
     player_id = inference_target_player_id(sample_turn)
     player_ids = (player_id,)
     host_turn, ctx = _host_turn_context(

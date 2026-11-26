@@ -15,7 +15,6 @@ from api.analytics.military_score_inference.inference_stream_rows import (
     RowStreamAdmission,
     ScheduledInferenceRow,
     _inference_multiplex_event_to_wire_events,
-    cleanup_inference_stream_sessions,
     tag_inference_stream_event,
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
@@ -90,10 +89,3 @@ class InferenceTableStreamConnectPolicy:
 
     def terminal_types(self) -> frozenset[str]:
         return _TERMINAL_EVENT_TYPES
-
-    def end_sessions(self) -> None:
-        cleanup_inference_stream_sessions(
-            self.scheduler,
-            self.stream_scope,
-            stream_token=self.stream_token,
-        )
