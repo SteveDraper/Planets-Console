@@ -371,11 +371,14 @@ def _tier_persist_payload(
     row_complete: RowComplete,
     job_wire: Mapping[str, Any],
 ) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "runId": run.run_id,
-        "rowComplete": row_complete,
-        CLAIM_EPOCH_WIRE_FIELD: job_wire[CLAIM_EPOCH_WIRE_FIELD],
-    }
+    """Build the persist payload for a row complete from its job wire.
+
+    A wire without a claim epoch (the tier-solve probe never claims) leaves it
+    off the payload, so persist rejects it.
+    """
+    payload: dict[str, object] = {"runId": run.run_id, "rowComplete": row_complete}
+    if CLAIM_EPOCH_WIRE_FIELD in job_wire:
+        payload[CLAIM_EPOCH_WIRE_FIELD] = job_wire[CLAIM_EPOCH_WIRE_FIELD]
     copy_submission_open_fields(job_wire, payload)
     return payload
 
