@@ -67,20 +67,23 @@ from tests.table_stream_test_helpers import end_stream_inline
 # A ladder rebuild under no user mask override, for tests that claim directly.
 NO_OVERRIDE_REBUILD = LadderRebuild(user_override=None)
 
-# The execution generation a direct claim carries unless the test names another,
-# and the scores epoch every direct claim carries.
+# The execution generation and scores epoch a direct claim carries unless the
+# test names another.
 CLAIM_EXECUTION_GENERATION = 1
 CLAIM_SCORES_EPOCH = 0
 
 
 def claim_ladder(
-    scope: ComputeScope, *, execution_generation: int = CLAIM_EXECUTION_GENERATION
+    scope: ComputeScope,
+    *,
+    execution_generation: int = CLAIM_EXECUTION_GENERATION,
+    scores_epoch: int = CLAIM_SCORES_EPOCH,
 ) -> LadderClaim | None:
     """Claim ``scope``'s tier ladder for a live node execution, as a tier wire build does."""
     return claim_tier_ladder(
         scope,
         execution_generation=execution_generation,
-        scores_epoch=CLAIM_SCORES_EPOCH,
+        scores_epoch=scores_epoch,
         rebuild=NO_OVERRIDE_REBUILD,
         is_execution_live=live_execution,
     )
