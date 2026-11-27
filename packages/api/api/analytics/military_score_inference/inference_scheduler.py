@@ -486,7 +486,7 @@ class InferenceRowScheduler(
         and the stream's own admission then takes the index.
         """
         from api.analytics.scores.tier_row_run_registry import (
-            ScopeIndexPolicy,
+            ClaimPrecedence,
             new_tier_row_run,
             register_row_run,
         )
@@ -501,10 +501,10 @@ class InferenceRowScheduler(
             row_run = new_tier_row_run(session, orchestration=orchestration)
             register_row_run(
                 row_run,
-                scope_index=(
-                    ScopeIndexPolicy.TAKE
+                precedence=(
+                    ClaimPrecedence.STREAM
                     if owning_token is not None
-                    else ScopeIndexPolicy.TAKE_IF_VACANT
+                    else ClaimPrecedence.BACKGROUND
                 ),
             )
             self._register_tier_callbacks_for_run(row_run)

@@ -28,7 +28,7 @@ from api.analytics.scores import tier_row_run_registry
 from api.analytics.scores.compute_orchestration import SCORES_PERSISTENCE_POLICY
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
-    ScopeIndexPolicy,
+    ClaimPrecedence,
     StampedLadderRun,
     TierLadderStamp,
     claim_tier_ladder,
@@ -82,7 +82,7 @@ def _ended() -> bool:
 def registry_run(sample_turn) -> tuple[RowRun, ComputeScope]:
     player_id = inference_target_player_id(sample_turn)
     run = new_tier_row_run(ladder_session(sample_turn, player_id))
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     return run, ladder_scope(sample_turn, player_id)
 
 
@@ -139,7 +139,7 @@ def test_a_claim_for_an_ended_execution_changes_nothing(
     others = [detached]
     if reopened:
         others.append(new_tier_row_run(ladder_session(sample_turn, scope.player_id)))
-        register_row_run(others[-1], scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(others[-1], precedence=ClaimPrecedence.STREAM)
     stamp_before = _stamp(scope)
 
     with pytest.raises(ComputeExecutionEndedError):

@@ -18,7 +18,7 @@ from api.analytics.military_score_inference.inference_scheduler import Inference
 from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
-    ScopeIndexPolicy,
+    ClaimPrecedence,
     StampedLadderRun,
     _detach_row_run,
     claim_tier_ladder,
@@ -55,7 +55,7 @@ pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
 def registry_run(sample_turn) -> tuple[RowRun, ComputeScope]:
     player_id = inference_target_player_id(sample_turn)
     run = new_tier_row_run(ladder_session(sample_turn, player_id))
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     return run, ladder_scope(sample_turn, player_id)
 
 
@@ -112,7 +112,7 @@ def test_a_registered_run_wins_over_the_detached_one(sample_turn, registry_run, 
     detached, scope = registry_run
     _claim_and_detach(detached, scope)
     reopened = new_tier_row_run(ladder_session(sample_turn, scope.player_id))
-    register_row_run(reopened, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(reopened, precedence=ClaimPrecedence.STREAM)
 
     claim = claim_tier_ladder(
         scope,

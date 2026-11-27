@@ -136,7 +136,7 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
     refuse; stream ``CANCELED`` only silences delivery.
     """
     from api.analytics.scores.tier_row_run_registry import (
-        ScopeIndexPolicy,
+        ClaimPrecedence,
         get_persist_admission,
         get_row_run_phase,
         register_row_run,
@@ -166,7 +166,7 @@ def test_lifecycle_cancel_sets_token_cancel_deny_and_resolution(sample_turn):
             )
         )
         session = _session_for_player(sample_turn, player_id=player_id)
-        register_row_run(new_tier_row_run(session), scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(new_tier_row_run(session), precedence=ClaimPrecedence.STREAM)
         with scheduler._lock:
             scheduler._runs[session.run_id] = RunOwnership(
                 ComputeScope(
@@ -207,7 +207,7 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.tier_row_run_registry import (
-        ScopeIndexPolicy,
+        ClaimPrecedence,
         get_persist_admission,
         get_row_run,
         get_row_run_phase,
@@ -235,7 +235,7 @@ def test_cancel_after_detach_blocks_persist_via_cancel_deny(sample_turn):
         )
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = new_tier_row_run(session)
-        register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(row_run, precedence=ClaimPrecedence.STREAM)
         with scheduler._lock:
             scheduler._runs[session.run_id] = RunOwnership(
                 ComputeScope(
@@ -322,12 +322,12 @@ def test_cancel_deny_blocks_late_persist_under_churn(sample_turn):
             other = _session_for_player(sample_turn, player_id=player_id)
             # Distinct run_ids via fresh sessions; mark cancelled then leave retained.
             other_run = new_tier_row_run(other)
-            reg.register_row_run(other_run, scope_index=reg.ScopeIndexPolicy.TAKE)
+            reg.register_row_run(other_run, precedence=reg.ClaimPrecedence.STREAM)
             reg._mark_row_run_cancelled(other_run.run_id)
 
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = new_tier_row_run(session)
-        reg.register_row_run(row_run, scope_index=reg.ScopeIndexPolicy.TAKE)
+        reg.register_row_run(row_run, precedence=reg.ClaimPrecedence.STREAM)
         with scheduler._lock:
             scheduler._runs[session.run_id] = RunOwnership(
                 ComputeScope(

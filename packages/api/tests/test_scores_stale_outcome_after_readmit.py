@@ -20,7 +20,7 @@ from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.tier_row_run_registry import (
-    ScopeIndexPolicy,
+    ClaimPrecedence,
     _retire_row_run,
     get_row_run,
     new_tier_row_run,
@@ -52,10 +52,10 @@ def readmitted(sample_turn, monkeypatch):
     old_session = _session(sample_turn)
     scope = _scope_for(old_session)
     old_run = new_tier_row_run(old_session)
-    register_row_run(old_run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(old_run, precedence=ClaimPrecedence.STREAM)
     new_run = new_tier_row_run(_session(sample_turn))
     assert new_run.run_id != old_run.run_id
-    register_row_run(new_run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(new_run, precedence=ClaimPrecedence.STREAM)
     _retire_row_run(old_run.run_id)
     _set_scope_node(
         _singleton_orchestrator(),

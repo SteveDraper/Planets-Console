@@ -12,7 +12,7 @@ from api.analytics.military_score_inference.row_complete_factory import row_comp
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
-    ScopeIndexPolicy,
+    ClaimPrecedence,
     _retire_row_run,
     get_row_run,
     new_tier_row_run,
@@ -39,7 +39,7 @@ def test_run_scores_tier_solve_continues_when_rowrun_retired(sample_turn) -> Non
     """A missing RowRun continues so wire build runs again; it neither completes nor waits."""
     session = _session(sample_turn)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     _retire_row_run(run.run_id)
 
     scope = _scope_for(session)
@@ -68,7 +68,7 @@ def test_run_scores_tier_solve_skip_sentinel_requires_evidence_closed_marker() -
 def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, monkeypatch) -> None:
     session = _session(sample_turn)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scope = _scope_for(session)
 
     orchestrator = _singleton_orchestrator()
@@ -121,7 +121,7 @@ def test_first_peer_complete_keeps_rowrun_while_sibling_running(sample_turn, mon
 def test_peer_failure_does_not_retire_while_sibling_running(sample_turn, monkeypatch) -> None:
     session = _session(sample_turn)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scope = _scope_for(session)
 
     orchestrator = _singleton_orchestrator()

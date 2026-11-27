@@ -30,7 +30,7 @@ scores epoch change retires the ``DETACHED`` shell and the caller takes the
 admit path.
 
 The scope index names the run a claim stamps. Its registering caller decides
-whether a run takes it (:class:`ScopeIndexPolicy`): a stream's run always
+whether a run takes it (:class:`ClaimPrecedence`): a stream's run always
 does, and a background run only when no ``REGISTERED`` run holds it, so a
 background run registered after a stream's run never displaces it and is
 retired at the next claim instead.
@@ -108,16 +108,17 @@ class StampedLadderRun:
     execution_generation: int
 
 
-class ScopeIndexPolicy(Enum):
-    """Whether a RowRun being registered becomes its scope's indexed run.
+class ClaimPrecedence(Enum):
+    """The role of the caller registering a RowRun for its scope.
 
     The registering caller decides; the registry applies it under its lock.
     """
 
-    # The run takes the scope index, replacing any run indexed there.
-    TAKE = "take"
-    # The run takes the scope index only when no REGISTERED run holds it.
-    TAKE_IF_VACANT = "take_if_vacant"
+    # A run a table stream owns, or the probe's run (the scope's only run).
+    STREAM = "stream"
+    # A run no stream owns: an export admit, a walk hop, or a connect
+    # admission that lost its scope.
+    BACKGROUND = "background"
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,11 +240,11 @@ def new_tier_row_run(
     return RowRun(session, ladder=TierLadder(ladder_state, orchestration))
 
 
-def register_row_run(run: RowRun, *, scope_index: ScopeIndexPolicy) -> None:
+def register_row_run(run: RowRun, *, precedence: ClaimPrecedence) -> None:
     """Register one RowRun for orchestrator tier_solve wire build and execution.
 
-    ``scope_index`` says whether the run becomes the scope's indexed run, the
-    one :func:`claim_tier_ladder` stamps: ``TAKE`` always, ``TAKE_IF_VACANT``
+    ``precedence`` says whether the run becomes the scope's indexed run, the
+    one :func:`claim_tier_ladder` stamps: ``STREAM`` always, ``BACKGROUND``
     only when no ``REGISTERED`` run is indexed for the scope. The check and the
     write share one lock hold. A run that does not take the index stays
     registered and is retired at the scope's next claim.
@@ -256,7 +257,7 @@ def register_row_run(run: RowRun, *, scope_index: ScopeIndexPolicy) -> None:
         _forget_cancelled_locked(run.run_id)
         _runs_by_id[run.run_id] = run
         if (
-            scope_index is ScopeIndexPolicy.TAKE
+            precedence is ClaimPrecedence.STREAM
             or _registered_run_for_scope_key_locked(scope_key) is None
         ):
             _run_id_by_scope_key[scope_key] = run.run_id
@@ -308,7 +309,7 @@ def claim_tier_ladder(
     stamp the listener then cancels.
 
     The winner is the ``REGISTERED`` run indexed for the scope (see
-    :class:`ScopeIndexPolicy` for which run that is). With none, it is the
+    :class:`ClaimPrecedence` for which run that is). With none, it is the
     stamped run (normally ``DETACHED`` after its stream closed) while the
     stamp serves this execution and scores epoch.
 

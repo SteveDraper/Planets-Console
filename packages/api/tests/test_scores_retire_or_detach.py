@@ -12,7 +12,7 @@ import pytest
 from api.analytics.scores.persist_decision import PersistDecision
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
-    ScopeIndexPolicy,
+    ClaimPrecedence,
     StampedLadderRun,
     claim_tier_ladder,
     decide_scores_row_persist,
@@ -44,7 +44,7 @@ def _clean_registry():
 def registered(sample_turn):
     player_id = inference_target_player_id(sample_turn)
     run = new_tier_row_run(ladder_session(sample_turn, player_id))
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     return run, ladder_scope(sample_turn, player_id)
 
 

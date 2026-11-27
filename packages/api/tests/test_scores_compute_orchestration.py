@@ -56,7 +56,7 @@ from api.analytics.scores.compute_orchestration import (
     tier_job_outcome_to_step_result,
 )
 from api.analytics.scores.tier_row_run_registry import (
-    ScopeIndexPolicy,
+    ClaimPrecedence,
     _retire_row_run,
     get_row_run_for_scope,
     new_tier_row_run,
@@ -129,7 +129,7 @@ def _scores_scope(sample_turn, player_id: int) -> ComputeScope:
 def _register_run(sample_turn, *, player_id: int | None = None) -> RowRun:
     session = _session_for_player(sample_turn, player_id=player_id)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     return run
 
 
