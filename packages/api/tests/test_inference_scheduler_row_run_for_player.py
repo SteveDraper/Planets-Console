@@ -1,4 +1,4 @@
-"""``row_run_for_player`` reads the registry's indexed run for the scope."""
+"""``row_run_for_player`` returns the ``REGISTERED`` run that holds the scope in the registry."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _stream_scope(sample_turn) -> InferenceStreamScope:
     )
 
 
-def test_the_indexed_run_wins_over_an_earlier_registered_duplicate(sample_turn, scheduler):
+def test_a_stream_run_wins_over_an_earlier_background_run(sample_turn, scheduler):
     player_id = sample_turn.scores[0].ownerid
     stale = _session_for_player(sample_turn, player_id=player_id)
     winner = _session_for_player(sample_turn, player_id=player_id)

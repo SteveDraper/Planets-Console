@@ -38,7 +38,7 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
-        ScopeIndexPolicy,
+        ClaimPrecedence,
         decide_scores_row_persist,
         get_row_run_phase,
         register_row_run,
@@ -63,7 +63,7 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
         first_token = scheduler.begin_scope(scope)
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = new_tier_row_run(session)
-        register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(row_run, precedence=ClaimPrecedence.STREAM)
         with scheduler._lock:
             scheduler._runs[session.run_id] = RunOwnership(
                 ComputeScope(
@@ -124,7 +124,7 @@ def test_a_same_scope_preempt_leaves_the_row_registered_to_persist(
         # Compact cancel admission still refuses a late persist.
         persistence.delete_row(628580, 1, turn_number, player_id)
         cancelled = new_tier_row_run(_session_for_player(sample_turn, player_id=player_id))
-        register_row_run(cancelled, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(cancelled, precedence=ClaimPrecedence.STREAM)
         from api.analytics.scores.tier_row_run_registry import _mark_row_run_cancelled
 
         _mark_row_run_cancelled(cancelled.run_id)
@@ -159,7 +159,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
     """
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
-        ScopeIndexPolicy,
+        ClaimPrecedence,
         _detach_row_run,
         _mark_row_run_cancelled,
         decide_scores_row_persist,
@@ -174,7 +174,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
     reset_tier_row_run_registry_for_tests()
     try:
         cancelled = new_tier_row_run(_session_for_player(sample_turn, player_id=players[0]))
-        register_row_run(cancelled, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(cancelled, precedence=ClaimPrecedence.STREAM)
         _mark_row_run_cancelled(cancelled.run_id)
         assert get_row_run_phase(cancelled.run_id) is None
         assert decide_scores_row_persist(cancelled.run_id) == PersistDecision.refuse(
@@ -182,7 +182,7 @@ def test_row_run_phase_survives_scheduler_remove(sample_turn):
         )
 
         detached = new_tier_row_run(_session_for_player(sample_turn, player_id=players[1]))
-        register_row_run(detached, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(detached, precedence=ClaimPrecedence.STREAM)
         stamp_run_ladder(detached)
         _detach_row_run(detached.run_id)
         assert get_row_run_phase(detached.run_id) is RowRunPhase.DETACHED
@@ -201,7 +201,7 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.persist_decision import PersistDecision
     from api.analytics.scores.tier_row_run_registry import (
-        ScopeIndexPolicy,
+        ClaimPrecedence,
         decide_scores_row_persist,
         get_row_run_phase,
         register_row_run,
@@ -226,7 +226,7 @@ def test_stream_disconnect_detaches_without_cancel_and_allows_persist(sample_tur
         stream_token = scheduler.begin_scope(scope)
         session = _session_for_player(sample_turn, player_id=player_id)
         row_run = new_tier_row_run(session)
-        register_row_run(row_run, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(row_run, precedence=ClaimPrecedence.STREAM)
         with scheduler._lock:
             scheduler._runs[session.run_id] = RunOwnership(
                 ComputeScope(

@@ -26,7 +26,7 @@ from api.analytics.military_score_inference.row_complete_factory import row_comp
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.compute_orchestration import run_scores_tier_solve
 from api.analytics.scores.tier_row_run_registry import (
-    ScopeIndexPolicy,
+    ClaimPrecedence,
     _retire_row_run,
     get_row_run,
     new_tier_row_run,
@@ -68,7 +68,7 @@ def test_empty_peer_complete_then_last_peer_empty_delivers_terminal(
     """
     session = _session(sample_turn)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scope = _scope_for(session)
 
     orchestrator = _singleton_orchestrator()
@@ -124,7 +124,7 @@ def test_orphan_empty_node_complete_delivers_terminal_to_open_stream(sample_turn
     """
     session = _session(sample_turn)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
         game_id=session.game_id,
@@ -202,7 +202,7 @@ def test_late_peer_empty_complete_does_not_clobber_prior_row_complete(sample_tur
     """After a successful peer delivery+finalize, a late empty peer must not RowFailed."""
     session = _session(sample_turn)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
         game_id=session.game_id,
@@ -278,7 +278,7 @@ def test_empty_complete_delivers_to_stream_session_not_ensure_session(sample_tur
     assert ensure_session.player_id == stream_session.player_id
 
     run = new_tier_row_run(ensure_session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scope = _scope_for(ensure_session)
     stream_scope = InferenceStreamScope(
         game_id=stream_session.game_id,
@@ -400,7 +400,7 @@ def test_matching_run_empty_complete_uses_admission_before_row_failed(
 
     session = _session(sample_turn)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
         game_id=session.game_id,
@@ -531,7 +531,7 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
 
     session = _session(sample_turn)
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scope = _scope_for(session)
     stream_scope = InferenceStreamScope(
         game_id=session.game_id,
@@ -601,7 +601,7 @@ def test_row_complete_upgrades_prior_empty_admission_terminal(sample_turn, monke
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),
         summary="exact after force_fresh",
     )
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     scheduler._runs[run.run_id] = RunOwnership(scope, None)
     _set_scope_node(
         orchestrator,
@@ -674,7 +674,7 @@ def test_cancelled_table_row_still_receives_durable_complete(sample_turn) -> Non
     stream_drain.seal_canceled(ui_session.run_id)
 
     solved_run = new_tier_row_run(solved_session)
-    register_row_run(solved_run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(solved_run, precedence=ClaimPrecedence.STREAM)
     scheduler._runs[solved_run.run_id] = RunOwnership(scope, None)
     row_complete = row_complete_with_summary(
         InferenceResult(status=STATUS_EXACT, solutions=(), diagnostics={}),

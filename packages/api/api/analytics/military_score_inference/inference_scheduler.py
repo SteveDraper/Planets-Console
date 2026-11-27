@@ -81,7 +81,7 @@ class TierLadderRegistration(Enum):
     # the run is never accepted by a stream.
     BACKGROUND = "background"
     # The scheduler was built with ``defer_orchestrator_submit`` (tests and
-    # diagnostics): the run is registered, taking the scope index as stream
+    # diagnostics): the run is registered with the claim precedence stream
     # ownership decides, and nothing is bound, accepted or woken.
     SUBMIT_DEFERRED = "submit_deferred"
 
@@ -286,9 +286,10 @@ class InferenceRowScheduler(
     ) -> RowRun | None:
         """Return the live ``REGISTERED`` RowRun for this player, if any.
 
-        Reads the registry's scope index, so a stale duplicate run for the same
-        scope never shadows the indexed run. ``DETACHED`` shells (and cancelled
-        admissions with no shell) are not re-attached here.
+        Returns the run that holds the scope now
+        (``tier_row_run_registry.get_row_run_for_scope``), so a duplicate run
+        for the same scope that loses the ranking never shadows it. ``DETACHED``
+        shells (and cancelled admissions with no shell) are not re-attached here.
         """
         from api.analytics.scores.tier_row_run_registry import get_row_run_for_scope
 
@@ -472,21 +473,21 @@ class InferenceRowScheduler(
         A submit-deferred scheduler returns ``SUBMIT_DEFERRED`` after
         registering.
 
-        Ownership also decides the scope index, so the scope's next ladder
-        claim stamps the stream's run: an owned run takes the index, and a
-        background run takes it only when no ``REGISTERED`` run holds it. A
-        background run never displaces a stream's run. It stays registered
-        beside it as a duplicate until the scope's next ladder claim retires
-        it (``claim_tier_ladder`` hand-over). Duplicates come from an export
+        Ownership also decides the run's claim precedence: an owned run
+        registers ``STREAM`` and any other ``BACKGROUND``, which the
+        registry's ranking (``tier_row_run_registry._rank_scope_runs_locked``)
+        orders. A run that loses the ranking stays registered beside the
+        winner until the scope's next ladder claim retires it, and wins that
+        claim if the runs above it have left. Duplicates come from an export
         admit that checked for a run before its fleet I/O, a connect admission
         that lost its scope on a T -> T' -> T toggle, and an admit at a scope a
         stream has claimed in ``begin_scope`` but not yet attached its
         controller to: an export admit passes the token of the stream attached
         at its own scope, so that admit has none and registers ``BACKGROUND``,
-        and the stream's own admission then takes the index.
+        and the stream's own ``STREAM`` admission then outranks it.
         """
         from api.analytics.scores.tier_row_run_registry import (
-            ScopeIndexPolicy,
+            ClaimPrecedence,
             new_tier_row_run,
             register_row_run,
         )
@@ -501,10 +502,10 @@ class InferenceRowScheduler(
             row_run = new_tier_row_run(session, orchestration=orchestration)
             register_row_run(
                 row_run,
-                scope_index=(
-                    ScopeIndexPolicy.TAKE
+                precedence=(
+                    ClaimPrecedence.STREAM
                     if owning_token is not None
-                    else ScopeIndexPolicy.TAKE_IF_VACANT
+                    else ClaimPrecedence.BACKGROUND
                 ),
             )
             self._register_tier_callbacks_for_run(row_run)

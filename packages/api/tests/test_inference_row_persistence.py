@@ -660,7 +660,7 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.tier_row_run_registry import (
-        ScopeIndexPolicy,
+        ClaimPrecedence,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -677,7 +677,7 @@ def test_scores_persistence_policy_persists_exact_terminal_row(sample_turn, memo
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     persistence = InferenceRowPersistenceService(memory_backend)
     ctx = make_analytic_query_context(
         sample_turn,
@@ -732,7 +732,7 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
         tier_job_outcome_to_step_result,
     )
     from api.analytics.scores.tier_row_run_registry import (
-        ScopeIndexPolicy,
+        ClaimPrecedence,
         register_row_run,
         reset_tier_row_run_registry_for_tests,
     )
@@ -749,7 +749,7 @@ def test_scores_persistence_policy_persists_stopped_terminal_row(
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     step_result = tier_job_outcome_to_step_result(
         run,
         TierJobRowComplete(
@@ -806,7 +806,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
     from api.analytics.options import TurnAnalyticsOptions
     from api.analytics.scores.compute_orchestration import ScoresPersistencePolicy
     from api.analytics.scores.tier_row_run_registry import (
-        ScopeIndexPolicy,
+        ClaimPrecedence,
         _detach_row_run,
         get_row_run_phase,
         register_row_run,
@@ -830,7 +830,7 @@ def test_scores_persistence_policy_persists_when_rowrun_detached(
         turn_number=sample_turn.settings.turn,
     )
     run = new_tier_row_run(session)
-    register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+    register_row_run(run, precedence=ClaimPrecedence.STREAM)
     stamp_run_ladder(run)
     run_id = run.run_id
     _detach_row_run(run_id)

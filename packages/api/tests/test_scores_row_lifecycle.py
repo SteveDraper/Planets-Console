@@ -14,7 +14,7 @@ from api.analytics.military_score_inference.inference_stream_session import (
 from api.analytics.scores.persist_decision import PersistDecision
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
-    ScopeIndexPolicy,
+    ClaimPrecedence,
     decide_scores_row_persist,
     get_row_run,
     get_row_run_phase,
@@ -50,7 +50,7 @@ def test_apply_scores_row_lifecycle_cancel(sample_turn) -> None:
     reset_stream_resolution_registry_for_tests()
     try:
         run = new_tier_row_run(_session(sample_turn))
-        register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(run, precedence=ClaimPrecedence.STREAM)
         assert not run.session.cancel_token.is_cancelled()
 
         apply_scores_row_lifecycle(RowLifecycleOp.CANCEL, run.run_id)
@@ -73,7 +73,7 @@ def test_apply_scores_row_lifecycle_detach(sample_turn) -> None:
     reset_stream_resolution_registry_for_tests()
     try:
         run = new_tier_row_run(_session(sample_turn))
-        register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(run, precedence=ClaimPrecedence.STREAM)
 
         stamp_run_ladder(run)
 
@@ -97,7 +97,7 @@ def test_apply_scores_row_lifecycle_retire(sample_turn) -> None:
     reset_stream_resolution_registry_for_tests()
     try:
         run = new_tier_row_run(_session(sample_turn))
-        register_row_run(run, scope_index=ScopeIndexPolicy.TAKE)
+        register_row_run(run, precedence=ClaimPrecedence.STREAM)
         apply_scores_row_lifecycle(RowLifecycleOp.DETACH, run.run_id)
 
         apply_scores_row_lifecycle(RowLifecycleOp.RETIRE, run.run_id)

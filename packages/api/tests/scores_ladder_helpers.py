@@ -48,6 +48,7 @@ from api.analytics.scores.compute_orchestration import (
 )
 from api.analytics.scores.export_services import resolve_scores_services
 from api.analytics.scores.tier_row_run_registry import (
+    LadderClaim,
     claim_tier_ladder,
     reset_tier_row_run_registry_for_tests,
 )
@@ -66,11 +67,34 @@ from tests.table_stream_test_helpers import end_stream_inline
 # A ladder rebuild under no user mask override, for tests that claim directly.
 NO_OVERRIDE_REBUILD = LadderRebuild(user_override=None)
 
+# The execution generation and scores epoch a direct claim carries unless the
+# test names another.
+CLAIM_EXECUTION_GENERATION = 1
+CLAIM_SCORES_EPOCH = 0
 
-def stamp_run_ladder(run: RowRun, *, execution_generation: int = 1) -> None:
+
+def claim_ladder(
+    scope: ComputeScope,
+    *,
+    execution_generation: int = CLAIM_EXECUTION_GENERATION,
+    scores_epoch: int = CLAIM_SCORES_EPOCH,
+) -> LadderClaim | None:
+    """Claim ``scope``'s tier ladder for a live node execution, as a tier wire build does."""
+    return claim_tier_ladder(
+        scope,
+        execution_generation=execution_generation,
+        scores_epoch=scores_epoch,
+        rebuild=NO_OVERRIDE_REBUILD,
+        is_execution_live=live_execution,
+    )
+
+
+def stamp_run_ladder(
+    run: RowRun, *, execution_generation: int = CLAIM_EXECUTION_GENERATION
+) -> None:
     """Claim ``run``'s ladder for one node execution, as a tier wire build does.
 
-    The run must be the scope's indexed ``REGISTERED`` run. Stamped, it models a
+    The run must be the scope's top-ranked ``REGISTERED`` run. Stamped, it models a
     row whose ladder is in use, which a stream end keeps ``DETACHED`` for resume
     and late persist.
     """
@@ -82,13 +106,7 @@ def stamp_run_ladder(run: RowRun, *, execution_generation: int = 1) -> None:
         turn=session.turn_number,
         player_id=session.player_id,
     )
-    claim = claim_tier_ladder(
-        scope,
-        execution_generation=execution_generation,
-        scores_epoch=0,
-        rebuild=NO_OVERRIDE_REBUILD,
-        is_execution_live=lambda: True,
-    )
+    claim = claim_ladder(scope, execution_generation=execution_generation)
     assert claim is not None and claim.run is run
 
 
