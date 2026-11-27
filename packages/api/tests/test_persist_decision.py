@@ -204,8 +204,8 @@ def test_cancel_churn_does_not_drop_registered_or_detached_shells(sample_turn) -
             register_row_run(cancelled, precedence=ClaimPrecedence.STREAM)
             _mark_row_run_cancelled(cancelled.run_id)
 
-        # live was superseded in the scope index by cancel churn, but its shell
-        # remains until explicit retire (same as pre-scope-keyed behavior).
+        # Cancel churn on later runs for the scope leaves live's shell
+        # registered until an explicit retire.
         assert get_row_run(live.run_id) is live
         assert get_row_run_phase(live.run_id) is RowRunPhase.REGISTERED
         assert decide_scores_row_persist(live.run_id) == PersistDecision.allow()

@@ -201,6 +201,29 @@ def test_closing_the_stream_mid_ladder_resumes_the_same_run_to_a_durable_persist
     assert get_row_run(stream_run_id) is None
 
 
+def test_a_background_run_survives_its_stream_runs_cancel_and_takes_the_ladder(ladder):
+    stream_run_id = ladder.session.run_id
+    background_run_id = ladder.register_background_run().run_id
+    ladder.submit()
+    # The deferred submit skips what a live submit remembers for a later cancel.
+    ladder.scheduler._remember_execution_generation_for_scope(
+        ladder.scope, orchestrator=ladder.orchestrator
+    )
+    assert stream_run_id in ladder.scheduler._execution_generation_by_run_id
+
+    with (
+        patch.object(ladder.scheduler, "_abort_orchestrator_scope") as abort,
+        patch("api.analytics.scores.exports.admit_scores_export_work") as admit,
+    ):
+        ladder.scheduler.cancel_run(stream_run_id)
+        wire = ladder.build_wire()
+
+    abort.assert_not_called()
+    admit.assert_not_called()
+    assert wire["runId"] == background_run_id
+    assert list(ladder.scheduler._runs) == [background_run_id]
+
+
 @pytest.mark.parametrize("stream_closed", [False, True], ids=["streams-open", "streams-closed"])
 def test_a_failing_tier_fails_the_same_way_with_the_stream_open_or_closed(ladder, stream_closed):
     ladder.submit()

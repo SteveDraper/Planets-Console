@@ -58,6 +58,25 @@ def _claim(scope, *, generation: int = GENERATION):
     )
 
 
+def test_a_claim_keeps_the_background_run_that_survives_its_stream_runs_cancel(
+    sample_turn, registered
+) -> None:
+    stream_run, scope = registered
+    background = new_tier_row_run(
+        ladder_session(sample_turn, inference_target_player_id(sample_turn))
+    )
+    register_row_run(background, precedence=ClaimPrecedence.BACKGROUND)
+
+    apply_scores_row_lifecycle(RowLifecycleOp.CANCEL, stream_run.run_id)
+    claim = _claim(scope)
+
+    assert claim is not None
+    assert claim.run is background
+    assert claim.retired_run_ids == ()
+    assert claim.ladder_handed_over is False
+    assert background.pending_rebuild == NO_OVERRIDE_REBUILD
+
+
 def test_detaching_a_run_no_stamp_names_retires_it(registered) -> None:
     run, _scope = registered
 

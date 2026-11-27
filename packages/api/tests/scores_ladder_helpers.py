@@ -70,7 +70,7 @@ NO_OVERRIDE_REBUILD = LadderRebuild(user_override=None)
 def stamp_run_ladder(run: RowRun, *, execution_generation: int = 1) -> None:
     """Claim ``run``'s ladder for one node execution, as a tier wire build does.
 
-    The run must be the scope's indexed ``REGISTERED`` run. Stamped, it models a
+    The run must be the scope's top-ranked ``REGISTERED`` run. Stamped, it models a
     row whose ladder is in use, which a stream end keeps ``DETACHED`` for resume
     and late persist.
     """
