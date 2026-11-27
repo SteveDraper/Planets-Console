@@ -195,7 +195,12 @@ def _stamped_run_locked(stamp: TierLadderStamp | None) -> RowRun | None:
 
 
 def _drop_shell_locked(run_id: str) -> RowRun | None:
-    """Remove retained shell and indexes. Caller holds ``_lock``."""
+    """Drop ``run_id``'s shell and everything keyed by it, returning the shell.
+
+    Removes the shell, its place among its scope's candidates and its tier
+    callbacks, and releases the scope's ladder stamp when the stamp names it.
+    Returns None when no shell is retained. Caller holds ``_lock``.
+    """
     run = _runs_by_id.pop(run_id, None)
     if run is None:
         return None
@@ -522,10 +527,10 @@ def _detach_row_run(run_id: str) -> None:
 
     A run the scope's ladder stamp names goes ``REGISTERED`` → ``DETACHED``: it
     stops being one of the scope's candidates and the shell is kept by id, so
-    a late persist still finds it and the scope's next ``tier_solve`` continuation can resume or
-    hand over its ladder. The stamp keeps it whether or not the stamp still
-    serves: a stale stamp is released, retiring the shell, at the scope's next
-    claim.
+    a late persist still finds it and the scope's next ``tier_solve``
+    continuation can resume or hand over its ladder. The stamp keeps it
+    whether or not the stamp still serves: a stale stamp is released,
+    retiring the shell, at the scope's next claim.
 
     Any other run is retired (the RETIRE side). Only a stamped run can have a
     step in flight or a persist to come: the claim stamps a run before its
