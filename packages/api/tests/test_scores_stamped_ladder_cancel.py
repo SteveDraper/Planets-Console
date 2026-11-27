@@ -50,17 +50,17 @@ from api.streaming.table_stream.row_run_admission import (
 
 from tests.scores_exports_helpers import inference_target_player_id
 from tests.scores_ladder_helpers import (
+    CLAIM_SCORES_EPOCH,
     NO_OVERRIDE_REBUILD,
     ShellLadder,
+    claim_ladder,
     durable_row_complete,
     ladder_scope,
     ladder_session,
 )
 from tests.scores_row_lifecycle_test_helpers import _wait_until
-from tests.submission_open_helpers import live_execution
 
 GENERATION = 7
-EPOCH = 0
 CONTINUE = TierJobContinue()
 
 
@@ -86,20 +86,9 @@ def registry_run(sample_turn) -> tuple[RowRun, ComputeScope]:
     return run, ladder_scope(sample_turn, player_id)
 
 
-def _claim(scope: ComputeScope, *, generation: int = GENERATION) -> RowRun | None:
-    claim = claim_tier_ladder(
-        scope,
-        execution_generation=generation,
-        scores_epoch=EPOCH,
-        rebuild=NO_OVERRIDE_REBUILD,
-        is_execution_live=live_execution,
-    )
-    return None if claim is None else claim.run
-
-
 def test_a_stamped_cancel_cancels_the_run_its_stamp_names(registry_run):
     run, scope = registry_run
-    assert _claim(scope) is run
+    assert claim_ladder(scope, execution_generation=GENERATION).run is run
 
     cancelled = apply_scores_row_lifecycle(
         RowLifecycleOp.CANCEL, StampedLadderRun(scope=scope, execution_generation=GENERATION)
@@ -114,8 +103,8 @@ def test_a_stamped_cancel_cancels_the_run_its_stamp_names(registry_run):
 
 def test_a_stamped_cancel_leaves_a_stamp_of_a_newer_execution(registry_run):
     run, scope = registry_run
-    assert _claim(scope) is run
-    assert _claim(scope, generation=GENERATION + 1) is run
+    assert claim_ladder(scope, execution_generation=GENERATION).run is run
+    assert claim_ladder(scope, execution_generation=GENERATION + 1).run is run
 
     cancelled = apply_scores_row_lifecycle(
         RowLifecycleOp.CANCEL, StampedLadderRun(scope=scope, execution_generation=GENERATION)
@@ -125,7 +114,7 @@ def test_a_stamped_cancel_leaves_a_stamp_of_a_newer_execution(registry_run):
     assert not run.session.cancel_token.is_cancelled()
     assert get_row_run(run.run_id) is run
     assert get_persist_admission(run.run_id) is PersistAdmission.ALLOW
-    assert _stamp(scope) == TierLadderStamp(run.run_id, GENERATION + 1, EPOCH)
+    assert _stamp(scope) == TierLadderStamp(run.run_id, GENERATION + 1, CLAIM_SCORES_EPOCH)
 
 
 @pytest.mark.parametrize("generation", [GENERATION, GENERATION + 1], ids=["serving", "stale"])
@@ -134,7 +123,7 @@ def test_a_claim_for_an_ended_execution_changes_nothing(
     sample_turn, registry_run, generation, reopened
 ):
     detached, scope = registry_run
-    assert _claim(scope) is detached
+    assert claim_ladder(scope, execution_generation=GENERATION).run is detached
     apply_scores_row_lifecycle(RowLifecycleOp.DETACH, detached.run_id)
     others = [detached]
     if reopened:
@@ -146,7 +135,7 @@ def test_a_claim_for_an_ended_execution_changes_nothing(
         claim_tier_ladder(
             scope,
             execution_generation=generation,
-            scores_epoch=EPOCH,
+            scores_epoch=CLAIM_SCORES_EPOCH,
             rebuild=NO_OVERRIDE_REBUILD,
             is_execution_live=_ended,
         )

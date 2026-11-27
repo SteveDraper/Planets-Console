@@ -13,8 +13,6 @@ from api.analytics.military_score_inference.row_run import RowRun
 from api.analytics.scores.row_lifecycle import apply_scores_row_lifecycle
 from api.analytics.scores.tier_row_run_registry import (
     ClaimPrecedence,
-    LadderClaim,
-    claim_tier_ladder,
     get_row_run,
     get_row_run_for_scope,
     new_tier_row_run,
@@ -26,11 +24,13 @@ from api.compute.scope import ComputeScope
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp, RowRunPhase
 
 from tests.scores_exports_helpers import inference_target_player_id
-from tests.scores_ladder_helpers import NO_OVERRIDE_REBUILD, ladder_scope, ladder_session
-from tests.submission_open_helpers import live_execution
-
-GENERATION = 1
-EPOCH = 0
+from tests.scores_ladder_helpers import (
+    CLAIM_EXECUTION_GENERATION,
+    claim_ladder,
+    ladder_scope,
+    ladder_session,
+    stamp_run_ladder,
+)
 
 STREAM = ClaimPrecedence.STREAM
 BACKGROUND = ClaimPrecedence.BACKGROUND
@@ -61,24 +61,11 @@ def register(sample_turn):
     return register_run
 
 
-def _claim(scope: ComputeScope, *, generation: int = GENERATION) -> LadderClaim | None:
-    return claim_tier_ladder(
-        scope,
-        execution_generation=generation,
-        scores_epoch=EPOCH,
-        rebuild=NO_OVERRIDE_REBUILD,
-        is_execution_live=live_execution,
-    )
-
-
-def _stamp(scope: ComputeScope, run: RowRun) -> None:
-    claim = _claim(scope)
-    assert claim is not None and claim.run is run
-
-
-def _assert_holder(scope: ComputeScope, holder: RowRun, *, generation: int = GENERATION) -> None:
+def _assert_holder(
+    scope: ComputeScope, holder: RowRun, *, generation: int = CLAIM_EXECUTION_GENERATION
+) -> None:
     assert get_row_run_for_scope(scope) is holder
-    claim = _claim(scope, generation=generation)
+    claim = claim_ladder(scope, execution_generation=generation)
     assert claim is not None and claim.run is holder
 
 
@@ -99,7 +86,7 @@ def test_a_later_stream_run_beats_an_earlier_one(scope, register) -> None:
 
 def test_a_stream_run_beats_the_serving_stamped_run(scope, register) -> None:
     stamped = register(STREAM)
-    _stamp(scope, stamped)
+    stamp_run_ladder(stamped)
     stream = register(STREAM)
 
     _assert_holder(scope, stream)
@@ -107,7 +94,7 @@ def test_a_stream_run_beats_the_serving_stamped_run(scope, register) -> None:
 
 def test_the_serving_stamped_registered_run_beats_a_background_run(scope, register) -> None:
     stamped = register(BACKGROUND)
-    _stamp(scope, stamped)
+    stamp_run_ladder(stamped)
     register(BACKGROUND)
 
     _assert_holder(scope, stamped)
@@ -118,7 +105,7 @@ def test_a_detached_stamped_run_holds_the_scope_against_a_background_run(
     scope, register, background_first
 ) -> None:
     stamped = register(STREAM)
-    _stamp(scope, stamped)
+    stamp_run_ladder(stamped)
     if background_first:
         background = register(BACKGROUND)
         _detach(stamped)
@@ -127,7 +114,7 @@ def test_a_detached_stamped_run_holds_the_scope_against_a_background_run(
         background = register(BACKGROUND)
 
     assert get_row_run_for_scope(scope) is None
-    claim = _claim(scope)
+    claim = claim_ladder(scope)
     assert claim is not None
     assert claim.run is stamped
     assert claim.retired_run_ids == (background.run_id,)
@@ -143,12 +130,12 @@ def test_the_earliest_background_run_wins_among_several(scope, register) -> None
 
 def test_a_detached_run_is_not_a_candidate(scope, register) -> None:
     detached = register(STREAM)
-    _stamp(scope, detached)
+    stamp_run_ladder(detached)
     _detach(detached)
     background = register(BACKGROUND)
 
     # A later execution: the stamp no longer serves, so the detached run cannot win.
-    claim = _claim(scope, generation=GENERATION + 1)
+    claim = claim_ladder(scope, execution_generation=CLAIM_EXECUTION_GENERATION + 1)
 
     assert claim is not None
     assert claim.run is background
@@ -201,7 +188,7 @@ def test_a_detached_stamped_run_resumes_its_finished_ladder_over_a_background_ru
     scope, register, background_first
 ) -> None:
     stamped = register(STREAM)
-    _stamp(scope, stamped)
+    stamp_run_ladder(stamped)
     # The run's tier steps applied its first-claim rebuild and finished the ladder.
     take_pending_rebuild(stamped)
     stamped.ladder.ladder_state.ladder_complete = True
@@ -212,7 +199,7 @@ def test_a_detached_stamped_run_resumes_its_finished_ladder_over_a_background_ru
         _detach(stamped)
         background = register(BACKGROUND)
 
-    claim = _claim(scope)
+    claim = claim_ladder(scope)
 
     assert claim is not None
     assert claim.run is stamped
@@ -232,7 +219,7 @@ def test_registering_a_registered_run_again_raises(scope, register) -> None:
 
 def test_a_detached_run_may_register_again_as_the_latest_candidate(scope, register) -> None:
     detached = register(STREAM)
-    _stamp(scope, detached)
+    stamp_run_ladder(detached)
     _detach(detached)
     register(STREAM)
 
