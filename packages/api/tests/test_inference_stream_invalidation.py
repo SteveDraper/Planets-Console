@@ -34,6 +34,7 @@ from api.analytics.military_score_inference.models import InferenceResult
 from api.analytics.military_score_inference.row_complete_factory import row_complete_with_summary
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.tier_row_run_registry import get_row_run
+from api.compute.runtime import peek_compute_orchestrator
 from api.compute.wire import StepResult
 from api.models.game import TurnInfo
 from api.models.turn_write import TurnWrite
@@ -41,6 +42,7 @@ from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
 from api.services.inference_row_persistence_service import InferenceRowPersistenceService
+from api.services.turn_stored_fan_out import TurnStoredFanOut
 from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
@@ -109,10 +111,8 @@ def _invalidation_with_fleet(
 
 
 def _store_turn_and_wake(invalidation: InferenceInvalidationService, write: TurnWrite) -> None:
-    """Run the scores turn-stored consumers in hook order: delete, cancel, then wake."""
-    invalidation.invalidate_for_turn_write(write)
-    invalidation.cancel_for_turn_write(write)
-    invalidation.wake_for_turn_write(write)
+    """Run the scores consumer through the turn-stored fan-out, on the process orchestrator."""
+    TurnStoredFanOut(invalidation, (), peek_compute_orchestrator).on_turn_stored(write)
 
 
 def _run_ids_for_players(

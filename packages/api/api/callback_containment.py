@@ -23,6 +23,9 @@ ContainmentLabel = Literal[
     "Fleet ledger bump",
     "Backfill earlier turns listener",
     "After-root-plans callback",
+    "Turn-stored scores delete",
+    "Turn-stored scores cancel",
+    "Turn-stored invalidator",
 ]
 
 

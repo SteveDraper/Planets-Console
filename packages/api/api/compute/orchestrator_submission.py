@@ -206,7 +206,11 @@ class OrchestratorSubmissionMixin:
         ``accept_plan`` to its close, runs inside a root-plan block
         (``OrchestratorObservers.root_plan_block``), so work handed to
         ``run_after_root_plans`` meanwhile runs after the plan closes.
+
+        Raises :class:`NestedRootPlanSubmitError`, planning nothing, when this
+        thread already has a root-plan block of this orchestrator open.
         """
+        self._observers.reject_submit_in_root_plan("submit")
         resolved = resolve_submission_open(request)
         try:
             with (
@@ -232,9 +236,13 @@ class OrchestratorSubmissionMixin:
         The wake re-checks that state under the same lock hold as the mutation.
         A wake attaches to the parked node, so it never registers a root plan.
         The attach schedules a dispatch pass, drained before this returns.
+
+        Raises :class:`NestedRootPlanSubmitError` when this thread has a
+        root-plan block of this orchestrator open.
         """
         if not request.force_fresh:
             raise ValueError("wake_if_parked requires force_fresh=True")
+        self._observers.reject_submit_in_root_plan("wake_if_parked")
         with self._condition:
             if not _is_parked_node(self._nodes.get(request.scope)):
                 return None

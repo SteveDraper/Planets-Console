@@ -13,6 +13,7 @@ and BRANCH_C, and each branch ensures SHARED.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, replace
 
 import pytest
@@ -283,8 +284,30 @@ def test_persist_deferred_fails_a_recovery_of_an_analytic_with_no_export_catalog
     )
 
 
+def _submit_from_another_thread(setup: RunningBranch, request: ComputeRequest) -> None:
+    """Submit ``request`` on a second thread and wait for it, re-raising its failure.
+
+    A submit that lands while the recovery's root plan is open comes from
+    another thread: the filling thread cannot submit inside its own root plan.
+    """
+    failures: list[BaseException] = []
+
+    def submit() -> None:
+        try:
+            setup.orchestrator.submit(request)
+        except BaseException as error:
+            failures.append(error)
+
+    thread = threading.Thread(target=submit, name="window-submit")
+    thread.start()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    if failures:
+        raise failures[0]
+
+
 def _arm_unrelated_submit_before_the_recreate(setup: RunningBranch, sample_turn) -> ComputeScope:
-    """Submit the second player's SHARED as the recovery's SHARED submit opens.
+    """Submit the second player's SHARED from another thread as the recovery's SHARED submit opens.
 
     That fresh plan refreshes readiness across the DAG after BRANCH_B's
     demotion and before the recreated SHARED registers.
@@ -292,7 +315,7 @@ def _arm_unrelated_submit_before_the_recreate(setup: RunningBranch, sample_turn)
     other_shared = _other_player_shared_scope(setup, sample_turn)
 
     def submit_other_shared() -> None:
-        setup.orchestrator.submit(ComputeRequest(ctx=setup.ctx, scope=other_shared))
+        _submit_from_another_thread(setup, ComputeRequest(ctx=setup.ctx, scope=other_shared))
 
     setup.shared_root_plan.arm(on_enter=submit_other_shared)
     return other_shared
@@ -383,8 +406,8 @@ def test_a_force_fresh_attach_before_the_recreate_does_not_recreate_the_supersed
     aborted_shared = setup.orchestrator.nodes[setup.shared]
 
     def attach_branch_force_fresh() -> None:
-        setup.orchestrator.submit(
-            ComputeRequest(ctx=setup.ctx, scope=setup.branch, force_fresh=True)
+        _submit_from_another_thread(
+            setup, ComputeRequest(ctx=setup.ctx, scope=setup.branch, force_fresh=True)
         )
 
     setup.shared_root_plan.arm(on_enter=attach_branch_force_fresh)

@@ -130,6 +130,15 @@ def _patch_scores_dag_without_fleet_deps(monkeypatch) -> None:
     real catalog with ``force_root`` (entry ``step_kind``), which would otherwise
     demand-load ``fleet@T-1`` for single-turn fixtures that never plan fleet.
     """
+    patch_scores_only_dag(monkeypatch)
+    monkeypatch.setattr(
+        "api.compute.orchestrator_submission.prepare_dependency_chain_turns",
+        lambda *_args, **_kwargs: None,
+    )
+
+
+def patch_scores_only_dag(monkeypatch) -> None:
+    """Plan a scores submit as its root node alone; every other analytic plans for real."""
     from api.compute.dag import PlannedComputeNode
     from api.compute.dag import plan_compute_dag as real_plan
     from api.compute.scope import normalize_export_scope_to_compute_scope
@@ -167,7 +176,3 @@ def _patch_scores_dag_without_fleet_deps(monkeypatch) -> None:
         )
 
     monkeypatch.setattr("api.compute.orchestrator_submission.plan_compute_dag", scores_only_dag)
-    monkeypatch.setattr(
-        "api.compute.orchestrator_submission.prepare_dependency_chain_turns",
-        lambda *_args, **_kwargs: None,
-    )

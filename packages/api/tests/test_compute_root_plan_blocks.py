@@ -222,6 +222,36 @@ def _pool_orchestrator(root_plan_hook: ArmableRootPlanHook | None = None):
     )
 
 
+def test_submit_ensure_and_wake_raise_inside_a_root_plan_and_run_from_held_work(sample_turn):
+    hook = ArmableRootPlanHook()
+    orchestrator = _pool_orchestrator(hook)
+    ctx = _ctx(sample_turn)
+    scope = _shared_scope(sample_turn)
+    other = make_compute_scope(SHARED_ID, replace(make_export_scope(sample_turn), perspective=2))
+    request = ComputeRequest(ctx=ctx, scope=other)
+    nested_calls = {
+        "submit": lambda: orchestrator.submit(request),
+        "ensure_scopes": lambda: orchestrator.ensure_scopes((request,)),
+        "wake_if_parked": lambda: orchestrator.wake_if_parked(
+            ComputeRequest(ctx=ctx, scope=other, force_fresh=True)
+        ),
+    }
+    refused: list[str] = []
+
+    def submit_inside_the_plan() -> None:
+        for call in nested_calls.values():
+            with pytest.raises(NestedRootPlanSubmitError) as error:
+                call()
+            refused.append(error.value.operation)
+        orchestrator.run_after_root_plans(nested_calls["submit"])
+
+    hook.arm(for_scope=scope, on_enter=submit_inside_the_plan)
+    orchestrator.submit(ComputeRequest(ctx=ctx, scope=scope))
+
+    assert refused == list(nested_calls)
+    assert orchestrator.nodes[other].state == "running"
+
+
 def _running_node_with_abort_listener(sample_turn, ran: list[str]):
     """A pool orchestrator with one running node and a listener that records its abort."""
     orchestrator = _pool_orchestrator()

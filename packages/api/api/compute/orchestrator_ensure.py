@@ -79,9 +79,12 @@ class OrchestratorEnsureMixin:
         closes. The satisfied scopes' submits run before it, outside it.
 
         Raises :class:`NestedBlockingWaitError` before planning when called
-        inside a drain or a step of this orchestrator.
+        inside a drain or a step of this orchestrator, and
+        :class:`NestedRootPlanSubmitError` when this thread has a root-plan
+        block of this orchestrator open.
         """
         self._observers.reject_blocking_wait("ensure_scopes")
+        self._observers.reject_submit_in_root_plan("ensure_scopes")
         if not requests:
             return ()
 
