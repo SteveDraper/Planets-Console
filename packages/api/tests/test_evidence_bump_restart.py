@@ -414,6 +414,7 @@ def test_the_bump_drains_the_abort_listeners_before_it_reschedules_a_row(walk, m
     end_shell(shell)
 
 
+@pytest.mark.allows_contained_callback_errors
 def test_a_failed_mark_write_still_reschedules_the_rows_the_settle_stopped(walk, monkeypatch):
     shell = walk.open_shell()
     walk.submit_shell()
@@ -430,4 +431,23 @@ def test_a_failed_mark_write_still_reschedules_the_rows_the_settle_stopped(walk,
 
     assert_aborted(walk_node(walk, SHELL_TURN))
     assert shell.fleet_stream.rescheduled_player_ids == [walk.player_id]
+    end_shell(shell)
+
+
+def test_an_interrupt_in_the_mark_write_propagates_without_the_wake(walk, monkeypatch):
+    shell = walk.open_shell()
+    walk.submit_shell()
+
+    def interrupt_the_mark_write(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        fleet_persistence(walk.ctx), "invalidate_player_ledgers_from_turn", interrupt_the_mark_write
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        _bump(walk, BASELINE_TURN + 1)
+
+    assert_aborted(walk_node(walk, SHELL_TURN))
+    assert shell.fleet_stream.rescheduled_player_ids == []
     end_shell(shell)

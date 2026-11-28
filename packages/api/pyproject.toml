@@ -24,5 +24,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "slow: full inference-corpus or OR-Tools solver integration (excluded from make ci; run make test_api_full)",
-    "allows_observer_callback_errors: the test makes an orchestrator observer callback raise on purpose, so the suite guard does not fail it",
+    "allows_contained_callback_errors: the test makes a contained callback (run_contained) raise on purpose, so the suite guard does not fail it",
 ]

@@ -19,6 +19,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 )
 from api.analytics.off_mode import MarkPersist, off_mode_mark_persist
 from api.analytics.walk_row_reschedule import reschedule_walk_rows
+from api.callback_containment import FailureCollector
 from api.compute.in_flight_settle import PlayerWork
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
@@ -170,27 +171,29 @@ class InferenceInvalidationService:
         durable bump runs inside a scores persist callback, where the drain
         call returns at once (the active drain runs the listeners after that
         callback), so there the wake re-admits rows before their abort
-        listeners run. When the mark write raises, the stopped rows are still
-        woken, then the error is raised.
+        listeners run.
+
+        A mark write that raises an ``Exception`` is contained and logged; the
+        stopped rows are still woken, then that error is raised as it was. An
+        interrupt in the mark write propagates at once, without the wake.
         """
         orchestrator = self._current_orchestrator()
         known_turns: set[int] = set()
-        bump_failure: list[BaseException] = []
+        bump_failures = FailureCollector()
+
+        def bump_known_turns() -> None:
+            known_turns.update(
+                fleet.invalidate_player_ledgers_from_turn(
+                    game_id,
+                    perspective,
+                    host_turn,
+                    player_id,
+                    durable=durable,
+                )
+            )
 
         def bump_mark_and_epoch() -> None:
-            try:
-                known_turns.update(
-                    fleet.invalidate_player_ledgers_from_turn(
-                        game_id,
-                        perspective,
-                        host_turn,
-                        player_id,
-                        durable=durable,
-                    )
-                )
-            except BaseException as exc:
-                # Raised after the settle; the wake still runs so stopped rows restart.
-                bump_failure.append(exc)
+            bump_failures.run(bump_known_turns, "Fleet ledger bump")
 
         policy = recompute.settle_policy(player_live_walk_rows(game_id, perspective, player_id))
         if policy is None:
@@ -215,8 +218,8 @@ class InferenceInvalidationService:
                 live_rows=player_live_walk_rows(game_id, perspective, player_id),
             )
         )
-        if bump_failure:
-            raise bump_failure[0]
+        if bump_failures.first_error is not None:
+            raise bump_failures.first_error
         return known_turns
 
     def _wake(self, targets: tuple[WakeTarget, ...]) -> None:

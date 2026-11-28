@@ -35,7 +35,7 @@ from tests.fixtures.export_framework.harness import (
     make_fixture_query_context,
 )
 
-OBSERVERS_LOGGER = "api.compute.orchestrator_observers"
+CONTAINMENT_LOGGER = "api.callback_containment"
 
 
 def _diamond(sample_turn):
@@ -100,7 +100,7 @@ def test_waiting_on_an_already_terminal_handle_inside_a_drain_raises(sample_turn
     assert handle.wait() is handle
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_blocking_wait_escaping_a_callback_is_logged_and_the_drain_goes_on(sample_turn, caplog):
     ctx, shared, _branch = _diamond(sample_turn)
     orchestrator = _inline_orchestrator(inline_compute_registration(SHARED_ID))
@@ -111,11 +111,11 @@ def test_a_blocking_wait_escaping_a_callback_is_logged_and_the_drain_goes_on(sam
             lambda: orchestrator.ensure_scope(ComputeRequest(ctx=ctx, scope=shared))
         )
         orchestrator.observers.schedule_post_lock(lambda: ran_after.append("next"))
-    with caplog.at_level(logging.ERROR, logger=OBSERVERS_LOGGER):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         orchestrator.drain_post_lock_callbacks()
 
     assert ran_after == ["next"]
-    [record] = [record for record in caplog.records if record.name == OBSERVERS_LOGGER]
+    [record] = [record for record in caplog.records if record.name == CONTAINMENT_LOGGER]
     assert record.exc_info is not None
     assert record.exc_info[0] is NestedBlockingWaitError
 

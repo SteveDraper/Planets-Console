@@ -7,23 +7,22 @@ semantics stay in one place without thin wrappers on the orchestrator.
 
 from __future__ import annotations
 
-import logging
 import threading
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
+from api.callback_containment import ContainmentLabel, run_contained
 from api.compute.errors import ComputeScopeAbortedError, NestedBlockingWaitError
 from api.compute.profile import StepSurface
 from api.compute.scope import ComputeScope
 
 if TYPE_CHECKING:
     from api.compute.orchestrator_state import ComputeNodeRun
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -138,28 +137,21 @@ NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 # Like a gate, it must never admit more because of a commit earlier in the pass.
 NodeDispatchCommitHook = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
-# Names the kind of observer callback in a failure log.
-ObserverRole = Literal["Post-lock callback", "Ready-queue listener", "Inline-start listener"]
 
 
 def _call_each_contained[*Args](
     callbacks: Iterable[Callable[[*Args], None]],
     args: tuple[*Args],
-    role: ObserverRole,
+    label: ContainmentLabel,
 ) -> None:
-    """Call every callback with ``args``, logging each failure and running the rest.
+    """Call every callback with ``args`` through ``run_contained``, running the rest past a failure.
 
-    A failure is logged with its stack trace and the callback named, and is
-    not re-raised. An observer callback never fails the work that notified
-    it: the notifier may be partway through a node transition under the
-    orchestrator lock, or be a pool worker that must keep running. Only
-    ``Exception`` is contained, so an interrupt still propagates.
+    An observer callback never fails the work that notified it: the notifier
+    may be partway through a node transition under the orchestrator lock, or
+    be a pool worker that must keep running.
     """
     for callback in callbacks:
-        try:
-            callback(*args)
-        except Exception:
-            logger.exception("%s %r failed; running the rest", role, callback)
+        run_contained(partial(callback, *args), label)
 
 
 class _DrainState(threading.local):
