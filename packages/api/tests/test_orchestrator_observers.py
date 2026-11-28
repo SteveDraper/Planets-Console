@@ -24,14 +24,15 @@ from tests.compute_orchestrator_fixtures import (
     pool_compute_registration,
 )
 from tests.compute_pool_test_helpers import complete_running_pool_step
+from tests.contained_callback_guard import (
+    CONTAINMENT_LOGGER,
+    failing_on_contained_callback_errors,
+)
 from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
-from tests.observer_callback_guard import failing_on_observer_callback_errors
-
-OBSERVERS_LOGGER = "api.compute.orchestrator_observers"
 
 
 class _PostLockCallbackFailed(RuntimeError):
@@ -43,10 +44,10 @@ def _raise_post_lock_failure() -> None:
 
 
 def _callback_failure_records(caplog) -> list[logging.LogRecord]:
-    return [record for record in caplog.records if record.name == OBSERVERS_LOGGER]
+    return [record for record in caplog.records if record.name == CONTAINMENT_LOGGER]
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_raising_callback_does_not_drop_the_rest_of_its_batch(caplog):
     condition = threading.Condition()
     observers = OrchestratorObservers(condition)
@@ -55,7 +56,7 @@ def test_a_raising_callback_does_not_drop_the_rest_of_its_batch(caplog):
         observers.schedule_post_lock(_raise_post_lock_failure)
         observers.schedule_post_lock(lambda: ran.append("later"))
 
-    with caplog.at_level(logging.ERROR, logger=OBSERVERS_LOGGER):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         observers.drain_post_lock_callbacks()
 
     assert ran == ["later"]
@@ -65,7 +66,7 @@ def test_a_raising_callback_does_not_drop_the_rest_of_its_batch(caplog):
     assert record.exc_info[0] is _PostLockCallbackFailed
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_callbacks_a_survivor_schedules_still_run_in_the_same_drain(caplog):
     condition = threading.Condition()
     observers = OrchestratorObservers(condition)
@@ -79,7 +80,7 @@ def test_callbacks_a_survivor_schedules_still_run_in_the_same_drain(caplog):
         observers.schedule_post_lock(_raise_post_lock_failure)
         observers.schedule_post_lock(schedule_follow_up)
 
-    with caplog.at_level(logging.ERROR, logger=OBSERVERS_LOGGER):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         observers.drain_post_lock_callbacks()
 
     assert ran == ["follow-up"]
@@ -93,7 +94,7 @@ class _PersistWithRaisingNotification(StubPersistencePolicy):
         return _raise_post_lock_failure
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency_completes(
     sample_turn, caplog
 ):
@@ -118,7 +119,7 @@ def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency
     orchestrator.submit(ComputeRequest(ctx=ctx, scope=branch_scope))
     assert pool_submitter.submissions == [(shared_scope, "materialize")]
 
-    with caplog.at_level(logging.ERROR, logger=OBSERVERS_LOGGER):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         complete_running_pool_step(
             orchestrator,
             shared_scope,
@@ -134,7 +135,7 @@ def test_dependents_dispatch_when_a_post_lock_callback_raises_after_a_dependency
     assert len(_callback_failure_records(caplog)) == 1
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_the_suite_guard_fails_a_test_whose_callback_raises_on_another_thread():
     condition = threading.Condition()
     observers = OrchestratorObservers(condition)
@@ -143,7 +144,7 @@ def test_the_suite_guard_fails_a_test_whose_callback_raises_on_another_thread():
     drainer = threading.Thread(target=observers.drain_post_lock_callbacks)
 
     with pytest.raises(pytest.fail.Exception) as guard_failure:
-        with failing_on_observer_callback_errors():
+        with failing_on_contained_callback_errors():
             drainer.start()
             drainer.join()
 
@@ -172,7 +173,7 @@ def _assert_one_logged_failure(caplog, *, role: str, listener_name: str) -> None
     assert record.exc_info[0] is _ListenerFailed
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_raising_ready_queue_listener_is_logged_and_later_listeners_still_run(
     sample_turn, caplog
 ):
@@ -183,7 +184,7 @@ def test_a_raising_ready_queue_listener_is_logged_and_later_listeners_still_run(
     observers.register_ready_queue_listener(_raise_ready_queue_failure)
     observers.register_ready_queue_listener(received.append)
 
-    with caplog.at_level(logging.ERROR, logger=OBSERVERS_LOGGER):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         with condition:
             observers.notify_ready_queue_changed((scope,))
 
@@ -193,7 +194,7 @@ def test_a_raising_ready_queue_listener_is_logged_and_later_listeners_still_run(
     )
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_raising_inline_start_listener_is_logged_and_later_listeners_still_run(
     sample_turn, caplog
 ):
@@ -209,7 +210,7 @@ def test_a_raising_inline_start_listener_is_logged_and_later_listeners_still_run
         )
     )
 
-    with caplog.at_level(logging.ERROR, logger=OBSERVERS_LOGGER):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         observers.notify_inline_start(node, "materialize")
 
     assert received == [(scope, node, "materialize")]

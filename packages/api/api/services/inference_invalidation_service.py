@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from api.analytics.fleet.compute_orchestration import wake_fleet_scope
 from api.analytics.fleet.fleet_table_stream_registry import reschedule_fleet_table_player
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
@@ -14,14 +16,17 @@ from api.analytics.military_score_inference.inference_scheduler import (
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
+    cancel_inference_rows_queued,
     reschedule_all_inference_rows,
     reschedule_inference_row,
 )
 from api.analytics.off_mode import MarkPersist, off_mode_mark_persist
 from api.analytics.walk_row_reschedule import reschedule_walk_rows
+from api.callback_containment import FailureCollector
 from api.compute.in_flight_settle import PlayerWork
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
+from api.models.turn_write import TurnWrite
 from api.services.evidence_bump import (
     BumpRecompute,
     DurableRecompute,
@@ -80,14 +85,35 @@ class InferenceInvalidationService:
             turn_number=host_turn,
         )
 
-    def on_turn_stored(self, game_id: int, perspective: int, turn_number: int) -> None:
-        cleared_host_turns = self._persistence.invalidate_for_turn_write(
-            game_id,
-            perspective,
-            turn_number,
-        )
-        for host_turn in cleared_host_turns:
-            reschedule_all_inference_rows(self._scope(game_id, perspective, host_turn))
+    def invalidate_for_turn_write(self, write: TurnWrite) -> None:
+        """Delete the scores rows a stored turn invalidates, at its host turns."""
+        self._persistence.invalidate_for_turn_write(write)
+
+    def cancel_for_turn_write(self, write: TurnWrite) -> None:
+        """Cancel the open streams' row runs at the stored turn's host turns.
+
+        Each run gets lifecycle CANCEL and a queued abort of its node
+        (:meth:`~InferenceRowScheduler.cancel_run_queued`) through its
+        stream's scheduler, the one :meth:`wake_for_turn_write` re-admits
+        through: nothing plans, submits or drains, so this is safe inside an
+        open root plan. The streams keep their scheduled rows for the wake.
+        """
+        for host_turn in self._persistence.host_turns_for_turn_write(write):
+            cancel_inference_rows_queued(self._scope(write.game_id, write.perspective, host_turn))
+
+    def wake_for_turn_write(self, write: TurnWrite) -> None:
+        """Re-admit every row of the open streams at the stored turn's host turns.
+
+        ``force_schedule`` keeps a re-admitted row from painting a cached
+        complete over its replaced node. The reschedule's own cancel finds no
+        entry for a run :meth:`cancel_for_turn_write` already cancelled, so
+        for those rows it only re-admits.
+        """
+        for host_turn in self._persistence.host_turns_for_turn_write(write):
+            reschedule_all_inference_rows(
+                self._scope(write.game_id, write.perspective, host_turn),
+                force_schedule=True,
+            )
 
     def on_inference_evidence_updated(
         self,
@@ -170,31 +196,31 @@ class InferenceInvalidationService:
         durable bump runs inside a scores persist callback, where the drain
         call returns at once (the active drain runs the listeners after that
         callback), so there the wake re-admits rows before their abort
-        listeners run. When the mark write raises, the stopped rows are still
-        woken, then the error is raised.
+        listeners run.
+
+        A mark write that raises an ``Exception`` is contained and logged; the
+        stopped rows are still woken, then that error is raised as it was. An
+        interrupt in the mark write propagates at once, without the wake.
         """
         orchestrator = self._current_orchestrator()
         known_turns: set[int] = set()
-        bump_failure: list[BaseException] = []
+        bump_failures = FailureCollector()
 
-        def bump_mark_and_epoch() -> None:
-            try:
-                known_turns.update(
-                    fleet.invalidate_player_ledgers_from_turn(
-                        game_id,
-                        perspective,
-                        host_turn,
-                        player_id,
-                        durable=durable,
-                    )
+        def bump_known_turns() -> None:
+            known_turns.update(
+                fleet.invalidate_player_ledgers_from_turn(
+                    game_id,
+                    perspective,
+                    host_turn,
+                    player_id,
+                    durable=durable,
                 )
-            except BaseException as exc:
-                # Raised after the settle; the wake still runs so stopped rows restart.
-                bump_failure.append(exc)
+            )
 
+        bump_contained = partial(bump_failures.run, bump_known_turns, "Fleet ledger bump")
         policy = recompute.settle_policy(player_live_walk_rows(game_id, perspective, player_id))
         if policy is None:
-            bump_mark_and_epoch()
+            bump_contained()
             stopped: frozenset[ComputeScope] = frozenset()
         else:
             stopped = orchestrator.settle_in_flight_work(
@@ -205,7 +231,7 @@ class InferenceInvalidationService:
                     analytic_ids=FLEET_WALK_ANALYTIC_IDS,
                 ),
                 policy,
-                then=bump_mark_and_epoch,
+                then=bump_contained,
             )
         orchestrator.drain_post_lock_callbacks()
         self._wake(
@@ -215,8 +241,8 @@ class InferenceInvalidationService:
                 live_rows=player_live_walk_rows(game_id, perspective, player_id),
             )
         )
-        if bump_failure:
-            raise bump_failure[0]
+        if bump_failures.first_error is not None:
+            raise bump_failures.first_error
         return known_turns
 
     def _wake(self, targets: tuple[WakeTarget, ...]) -> None:

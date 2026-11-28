@@ -13,6 +13,7 @@ and BRANCH_C, and each branch ensures SHARED.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, replace
 
 import pytest
@@ -43,6 +44,7 @@ from tests.compute_persist_deferred_helpers import (
     shared_recovery,
 )
 from tests.compute_pool_test_helpers import complete_running_pool_step
+from tests.contained_callback_guard import CONTAINMENT_LOGGER
 from tests.fixtures.export_framework.diamond_exports import (
     SHARED_ID,
 )
@@ -283,8 +285,30 @@ def test_persist_deferred_fails_a_recovery_of_an_analytic_with_no_export_catalog
     )
 
 
+def _submit_from_another_thread(setup: RunningBranch, request: ComputeRequest) -> None:
+    """Submit ``request`` on a second thread and wait for it, re-raising its failure.
+
+    A submit that lands while the recovery's root plan is open comes from
+    another thread: the filling thread cannot submit inside its own root plan.
+    """
+    failures: list[BaseException] = []
+
+    def submit() -> None:
+        try:
+            setup.orchestrator.submit(request)
+        except BaseException as error:
+            failures.append(error)
+
+    thread = threading.Thread(target=submit, name="window-submit")
+    thread.start()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    if failures:
+        raise failures[0]
+
+
 def _arm_unrelated_submit_before_the_recreate(setup: RunningBranch, sample_turn) -> ComputeScope:
-    """Submit the second player's SHARED as the recovery's SHARED submit opens.
+    """Submit the second player's SHARED from another thread as the recovery's SHARED submit opens.
 
     That fresh plan refreshes readiness across the DAG after BRANCH_B's
     demotion and before the recreated SHARED registers.
@@ -292,7 +316,7 @@ def _arm_unrelated_submit_before_the_recreate(setup: RunningBranch, sample_turn)
     other_shared = _other_player_shared_scope(setup, sample_turn)
 
     def submit_other_shared() -> None:
-        setup.orchestrator.submit(ComputeRequest(ctx=setup.ctx, scope=other_shared))
+        _submit_from_another_thread(setup, ComputeRequest(ctx=setup.ctx, scope=other_shared))
 
     setup.shared_root_plan.arm(on_enter=submit_other_shared)
     return other_shared
@@ -383,8 +407,8 @@ def test_a_force_fresh_attach_before_the_recreate_does_not_recreate_the_supersed
     aborted_shared = setup.orchestrator.nodes[setup.shared]
 
     def attach_branch_force_fresh() -> None:
-        setup.orchestrator.submit(
-            ComputeRequest(ctx=setup.ctx, scope=setup.branch, force_fresh=True)
+        _submit_from_another_thread(
+            setup, ComputeRequest(ctx=setup.ctx, scope=setup.branch, force_fresh=True)
         )
 
     setup.shared_root_plan.arm(on_enter=attach_branch_force_fresh)
@@ -416,7 +440,7 @@ def _defer_with_a_raising_recovery_submit(
     setup: RunningBranch, caplog, submit_failure: BaseException
 ) -> None:
     """Defer BRANCH_B on SHARED; the recovery submit's ``submit_failure`` reaches the drain log."""
-    with caplog.at_level(logging.ERROR, logger="api.compute.orchestrator_observers"):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         persist_branch_step_deferred(setup, shared_recovery(setup))
     assert [record.exc_info[1] for record in caplog.records if record.exc_info] == [submit_failure]
 
@@ -462,7 +486,7 @@ def test_a_recovery_submit_refused_because_the_requester_ended_plans_nothing(sam
     assert branch_node.error is abort_error
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_recovery_submit_raising_before_registration_fails_the_node(sample_turn, caplog):
     setup = running_branch(sample_turn)
     complete_shared = setup.orchestrator.nodes[setup.shared]
@@ -475,7 +499,7 @@ def test_a_recovery_submit_raising_before_registration_fails_the_node(sample_tur
     _assert_branch_failed_with(setup, submit_failure)
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_recovery_plan_raising_leaves_the_superseded_node_and_fails_the_waiter(
     sample_turn, monkeypatch, caplog
 ):
@@ -495,7 +519,7 @@ def test_a_recovery_plan_raising_leaves_the_superseded_node_and_fails_the_waiter
     _assert_branch_failed_with(setup, plan_failure)
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_recovery_submit_raising_leaves_the_node_waiting_on_a_running_dependency(
     sample_turn, caplog
 ):
@@ -511,7 +535,7 @@ def test_a_recovery_submit_raising_leaves_the_node_waiting_on_a_running_dependen
     _assert_branch_waits_then_settles_on(setup, running_shared)
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_recovery_whose_root_plan_refuses_the_plan_fails_the_waiter(sample_turn, caplog):
     setup = running_branch(sample_turn)
     complete_shared = setup.orchestrator.nodes[setup.shared]
@@ -524,7 +548,7 @@ def test_a_recovery_whose_root_plan_refuses_the_plan_fails_the_waiter(sample_tur
     _assert_branch_failed_with(setup, hook_failure)
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_recovery_submit_raising_after_registration_settles_on_the_replacement(
     sample_turn, caplog
 ):

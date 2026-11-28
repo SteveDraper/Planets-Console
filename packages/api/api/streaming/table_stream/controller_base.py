@@ -92,6 +92,15 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
         with self.stream_lock:
             return tuple(self.scheduled_rows.values())
 
+    def scheduled_run_ids(self) -> tuple[str, ...]:
+        """Run ids of the roster's scheduled rows, in roster order; ``scheduled_rows`` is kept.
+
+        A later ``reschedule_all`` still finds every row, so it can re-admit
+        rows whose runs a caller cancelled from these ids.
+        """
+        with self.stream_lock:
+            return self._scheduled_run_ids_locked()
+
     def enqueue_on_scheduled_row(
         self,
         player_id: int,
@@ -242,14 +251,10 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
         before_collect_cancels: Callable[[], None] | None = None,
     ) -> bool:
         """Cancel and re-admit every player; schedule/submit outside ``stream_lock``."""
-        cancel_run_ids: list[str] = []
         with self.stream_lock:
             if before_collect_cancels is not None:
                 before_collect_cancels()
-            for player_id in self.player_ids:
-                old_row = self.scheduled_rows.get(player_id)
-                if old_row is not None:
-                    cancel_run_ids.append(self._run_id_for_scheduled_row(old_row))
+            cancel_run_ids = self._scheduled_run_ids_locked()
             self.scheduled_rows.clear()
         for run_id in cancel_run_ids:
             cancel_run_id(run_id)
@@ -273,6 +278,14 @@ class TableStreamControllerBase(Generic[ScheduledT, AdmissionT]):
             ):
                 return False
         return True
+
+    def _scheduled_run_ids_locked(self) -> tuple[str, ...]:
+        """Run ids of the roster's scheduled rows, in roster order. Caller holds ``stream_lock``."""
+        return tuple(
+            self._run_id_for_scheduled_row(row)
+            for row in (self.scheduled_rows.get(player_id) for player_id in self.player_ids)
+            if row is not None
+        )
 
     def _run_id_for_scheduled_row(self, row: ScheduledT) -> str:
         session = getattr(row, "session", None)

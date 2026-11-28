@@ -32,6 +32,7 @@ from api.compute import (
     build_compute_registry,
 )
 from api.compute.turn_cache import TurnInfoCache
+from api.models.turn_write import TurnWrite
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
 
 from tests.compute_orchestrator_fixtures import (
@@ -529,7 +530,9 @@ def test_storing_turn_document_puts_deserialized_turn(sample_turn) -> None:
         TurnLoadService.turn_store_key(game_id, perspective, turn_number),
         rst,
     )
-    on_turn_stored.assert_called_once_with(game_id, perspective, turn_number)
+    on_turn_stored.assert_called_once_with(
+        TurnWrite(game_id=game_id, perspective=perspective, turn_number=turn_number)
+    )
 
 
 def test_storing_turn_document_replaces_stale_cached_turn(sample_turn) -> None:
@@ -593,7 +596,9 @@ def test_storing_turn_document_without_turn_drops_cached_turn(sample_turn) -> No
         TurnLoadService.turn_store_key(game_id, perspective, turn_number),
         rst,
     )
-    on_turn_stored.assert_called_once_with(game_id, perspective, turn_number)
+    on_turn_stored.assert_called_once_with(
+        TurnWrite(game_id=game_id, perspective=perspective, turn_number=turn_number)
+    )
 
 
 def test_turn_info_cache_put_replaces_cached_turn(sample_turn) -> None:

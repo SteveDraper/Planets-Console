@@ -90,3 +90,18 @@ class NestedBlockingWaitError(CoreAPIError):
             f"{operation} cannot run inside a compute post-lock drain or a compute step"
         )
         self.operation = operation
+
+
+class NestedRootPlanSubmitError(CoreAPIError):
+    """A submission was called on a thread with an open root-plan block of this orchestrator.
+
+    Root plans hold their on-walk assumptions while they are open, so work
+    planned under one would read the outer plan's assumed evidence. Work that
+    must start compute from inside a root-plan block goes through
+    ``run_after_root_plans``, which runs it once every block on the thread
+    has closed. Raised before anything is planned or fetched.
+    """
+
+    def __init__(self, operation: str) -> None:
+        super().__init__(f"{operation} cannot run inside an open compute root plan")
+        self.operation = operation

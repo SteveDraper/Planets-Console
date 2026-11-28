@@ -13,6 +13,7 @@ from api.compute.runtime import peek_compute_orchestrator
 from api.compute.turn_cache import get_process_turn_info_cache
 from api.concepts.homeworld_layout import homeworld_settings_fingerprint
 from api.models.game import GameInfo
+from api.models.turn_write import TurnWrite
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -22,6 +23,7 @@ from api.services.load_all_turns import LoadAllTurnsService
 from api.services.turn_analytic_service import TurnAnalyticService
 from api.services.turn_concept_service import TurnConceptService
 from api.services.turn_load_service import TurnLoadService
+from api.services.turn_stored_fan_out import TurnStoredFanOut
 from api.storage.base import StorageBackend
 
 
@@ -87,16 +89,26 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
     )
     inference_invalidation.bind_scheduler(inference_scheduler)
 
-    def on_turn_stored(game_id: int, perspective: int, turn_number: int) -> None:
-        inference_invalidation.on_turn_stored(game_id, perspective, turn_number)
-        fleet_persistence.invalidate_for_turn_write(game_id, perspective, turn_number)
-        homeworld_persistence.invalidate_evidence_from_turn(game_id, perspective, turn_number)
+    def invalidate_fleet_ledgers(write: TurnWrite) -> None:
+        fleet_persistence.invalidate_for_turn_write(
+            write.game_id, write.perspective, write.turn_number
+        )
 
+    def invalidate_homeworld_evidence(write: TurnWrite) -> None:
+        homeworld_persistence.invalidate_evidence_from_turn(
+            write.game_id, write.perspective, write.turn_number
+        )
+
+    turn_stored = TurnStoredFanOut(
+        inference_invalidation,
+        (invalidate_fleet_ledgers, invalidate_homeworld_evidence),
+        peek_compute_orchestrator,
+    )
     turns = TurnLoadService(
         storage,
         credentials,
         games,
-        on_turn_stored=on_turn_stored,
+        on_turn_stored=turn_stored.on_turn_stored,
         turn_info_cache=get_process_turn_info_cache,
     )
     load_all = LoadAllTurnsService(credentials, games, turns)

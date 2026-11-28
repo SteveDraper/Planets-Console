@@ -13,6 +13,7 @@ from api.analytics.military_score_inference.inference_stream_domain_events impor
 from api.analytics.scoreboard_evidence import stamp_scoreboard_row_for_context
 from api.analytics.scores_assets import ANALYTIC_ID as SCORES_ANALYTIC_ID
 from api.errors import NotFoundError, ValidationError
+from api.models.turn_write import TurnWrite
 from api.serialization.inference_row_persistence import (
     PersistedInferenceRow,
     persisted_inference_row_from_json,
@@ -184,20 +185,16 @@ class InferenceRowPersistenceService:
         except NotFoundError:
             return
 
-    def invalidate_for_turn_write(
-        self,
-        game_id: int,
-        perspective: int,
-        turn_number: int,
-    ) -> set[int]:
-        """Delete inference persistence for turn T and T-1; return cleared host turns."""
-        cleared: set[int] = set()
-        for host_turn in (turn_number, turn_number - 1):
-            if host_turn < 1:
-                continue
-            self.delete_host_turn_document(game_id, perspective, host_turn)
-            cleared.add(host_turn)
-        return cleared
+    @staticmethod
+    def host_turns_for_turn_write(write: TurnWrite) -> tuple[int, ...]:
+        """Host turns whose inference rows a stored turn T invalidates: T, then T-1 when >= 1."""
+        turn_number = write.turn_number
+        return tuple(host_turn for host_turn in (turn_number, turn_number - 1) if host_turn >= 1)
+
+    def invalidate_for_turn_write(self, write: TurnWrite) -> None:
+        """Delete inference persistence at :meth:`host_turns_for_turn_write`."""
+        for host_turn in self.host_turns_for_turn_write(write):
+            self.delete_host_turn_document(write.game_id, write.perspective, host_turn)
 
     def has_mine_residual_sticky_prior(
         self,

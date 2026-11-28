@@ -13,6 +13,7 @@ from api.errors import (
 )
 from api.models.game import TurnInfo
 from api.models.planet import Planet
+from api.models.turn_write import TurnWrite
 from api.planets_nu import PlanetsNuClient
 from api.serialization.codecs import dataclass_deserialization_detail
 from api.serialization.turn import turn_info_from_json
@@ -56,7 +57,7 @@ class TurnLoadService:
         credentials: CredentialService,
         games: GameService,
         *,
-        on_turn_stored: Callable[[int, int, int], None] | None = None,
+        on_turn_stored: Callable[[TurnWrite], None] | None = None,
         turn_info_cache: Callable[[], TurnInfoReadThroughCache] | None = None,
     ) -> None:
         self._storage = storage
@@ -197,6 +198,13 @@ class TurnLoadService:
         *,
         turn: TurnInfo | None = None,
     ) -> None:
+        """Store ``rst`` as the turn, then report the write to the turn-stored hook.
+
+        The storage put and the turn-info cache update both finish before the
+        hook runs, so the turn is readable from inside the hook and from
+        anything the hook starts: a dependency-chain fill that triggered the
+        write never fetches the same turn again.
+        """
         self._storage.put(self.turn_store_key(game_id, perspective, turn_number), rst)
         cache = self._read_through_turn_info_cache()
         if cache is not None:
@@ -205,7 +213,9 @@ class TurnLoadService:
             else:
                 cache.drop(game_id, perspective, turn_number)
         if self._on_turn_stored is not None:
-            self._on_turn_stored(game_id, perspective, turn_number)
+            self._on_turn_stored(
+                TurnWrite(game_id=game_id, perspective=perspective, turn_number=turn_number)
+            )
 
     def store_archive_turn_if_missing(
         self,

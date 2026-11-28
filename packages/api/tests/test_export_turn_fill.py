@@ -287,3 +287,114 @@ def test_missing_turns_start_at_the_accelerated_ensure_floor(sample_turn):
     ctx = make_fixture_query_context(accelerated, stored_turns=turns)
 
     assert missing_dependency_chain_turns(ctx, _scope(ctx, 5)) == ()
+
+
+def _walk_reporting(*reasons):
+    """Return a ``dependency_walk_unavailable`` stand-in that reports ``reasons`` in order."""
+    remaining = list(reasons)
+
+    def dependency_walk_unavailable(analytic_id, scope, *, force_root, backfill_earlier_turns):
+        return remaining.pop(0)
+
+    return dependency_walk_unavailable
+
+
+def _fetch_until(turns: dict[int, TurnInfo], sample_turn, failing_turn: int):
+    def ensure_turn(turn_number: int) -> TurnInfo | None:
+        if turn_number == failing_turn:
+            return None
+        turns[turn_number] = clone_turn_at(sample_turn, turn_number)
+        return turns[turn_number]
+
+    return ensure_turn
+
+
+@pytest.mark.parametrize(
+    ("stored", "ensure_turn_through", "walk_reasons", "reason", "missing_turn", "detail"),
+    [
+        (
+            (1, 3),
+            None,
+            ("turn_not_stored",),
+            "turn_not_stored",
+            2,
+            "turn 2 is not stored (sign in to auto-fetch missing turns for the evidence chain)",
+        ),
+        (
+            (1, 4),
+            2,
+            ("turn_not_stored",),
+            "turn_fetch_failed",
+            2,
+            "could not load turn 2 from Planets.nu (required for the evidence chain)",
+        ),
+        (
+            (1, 5),
+            4,
+            ("turn_not_stored",),
+            "turn_fetch_failed",
+            4,
+            (
+                "could not load turn 4 from Planets.nu (required for the evidence chain; "
+                "auto-fetched turns 2,3 before failure)"
+            ),
+        ),
+        (
+            (1, 2, 3),
+            None,
+            ("turn_not_stored", "turn_not_stored"),
+            "turn_not_stored",
+            None,
+            "an intermediate turn in the evidence chain is not stored",
+        ),
+        (
+            (1, 2, 3),
+            None,
+            ("ensure_cycle",),
+            "ensure_cycle",
+            None,
+            "turn unavailable (ensure_cycle)",
+        ),
+    ],
+    ids=[
+        "no_login_hook",
+        "first_fetch_fails",
+        "fetch_fails_after_partial_fill",
+        "walk_hole_outside_the_chain",
+        "walk_reason_other_than_a_hole",
+    ],
+)
+def test_prepare_error_carries_one_detail_per_reason(
+    sample_turn,
+    stored,
+    ensure_turn_through,
+    walk_reasons,
+    reason,
+    missing_turn,
+    detail,
+):
+    from api.analytics.export_turn_fill import (
+        DependencyChainFillError,
+        prepare_dependency_chain_turns,
+    )
+
+    turns = {turn_number: clone_turn_at(sample_turn, turn_number) for turn_number in stored}
+    shell_turn = max(stored)
+    ctx = make_fixture_query_context(turns[shell_turn], stored_turns=turns)
+    ctx.dependency_walk_unavailable = _walk_reporting(*walk_reasons)
+    if ensure_turn_through is not None:
+        ctx.ensure_turn = _fetch_until(turns, sample_turn, ensure_turn_through)
+
+    with pytest.raises(DependencyChainFillError) as raised:
+        prepare_dependency_chain_turns(
+            ctx,
+            "fleet",
+            _scope(ctx, shell_turn),
+            backfill_earlier_turns=False,
+        )
+
+    error = raised.value
+    assert error.reason == reason
+    assert error.missing_turn == missing_turn
+    assert error.detail == detail
+    assert str(error) == f"cannot plan compute DAG: {detail}"

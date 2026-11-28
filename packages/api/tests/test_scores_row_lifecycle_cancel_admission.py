@@ -6,6 +6,7 @@ import threading
 import time
 from dataclasses import replace
 
+import pytest
 from api.analytics.military_score_inference.inference_row_runner import (
     TierJobRowComplete,
     run_inference_tier_job,
@@ -449,8 +450,11 @@ def test_cancel_between_tier_finish_and_emit_does_not_persist(sample_turn, monke
     assert run_id not in scheduler._runs
 
 
-def test_cancel_run_uses_cached_generation_without_orch_lookup(sample_turn, monkeypatch, request):
-    """cancel_run must not call execution_generation_for_scope (scheduler→orch nest).
+@pytest.mark.parametrize("cancel_method", ["cancel_run", "cancel_run_queued"])
+def test_cancel_run_uses_cached_generation_without_orch_lookup(
+    sample_turn, monkeypatch, request, cancel_method
+):
+    """Neither cancel variant may call execution_generation_for_scope (scheduler→orch nest).
 
     Fingerprint: generation lookup under the scheduler lock ABBA-deadlocks with an
     orch holder that drains listeners needing the scheduler, and hangs diagnostics
@@ -506,7 +510,7 @@ def test_cancel_run_uses_cached_generation_without_orch_lookup(sample_turn, monk
         )
 
     monkeypatch.setattr(orchestrator, "execution_generation_for_scope", forbid_generation_lookup)
-    scheduler.cancel_run(session.run_id)
+    getattr(scheduler, cancel_method)(session.run_id)
 
     assert session.run_id not in scheduler._runs
     assert orchestrator.nodes[scope].state == "failed"

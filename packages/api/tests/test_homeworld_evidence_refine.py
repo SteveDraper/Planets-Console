@@ -346,9 +346,15 @@ def test_export_ensure_raises_on_missing_intermediate_turn(persistence) -> None:
     assert wire["ensureFailures"][0]["missingTurn"] == 2
 
 
-def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> None:
-    """Login-backed ensure_turn fills holes so the evidence chain can continue."""
+def test_export_ensure_autofetches_missing_intermediate_turns(persistence, monkeypatch) -> None:
+    """Login-backed ensure_turn fills holes so the evidence chain can continue.
+
+    The orchestrator's root-plan prepare is the one chain fill: it is the only
+    prepare, and it is the one that finds the hole.
+    """
+    import api.compute.orchestrator_submission as orchestrator_submission
     from api.analytics.compute_context import make_analytic_compute_context
+    from api.analytics.export_turn_fill import missing_dependency_chain_turns
     from api.analytics.export_types import ExportScope
     from api.analytics.homeworld_locator.exports import ensure_homeworld_export
     from api.analytics.turn_roster import iter_turn_players
@@ -398,8 +404,22 @@ def test_export_ensure_autofetches_missing_intermediate_turns(persistence) -> No
         perspective=services.perspective,
         ensure_turn=ensure_turn,
     ).exports
+    holes_seen_by_prepare: list[tuple[int, ...]] = []
+    prepare = orchestrator_submission.prepare_dependency_chain_turns
+
+    def recording_prepare(query_ctx, analytic_id, scope, **kwargs):
+        holes_seen_by_prepare.append(missing_dependency_chain_turns(query_ctx, scope))
+        prepare(query_ctx, analytic_id, scope, **kwargs)
+
+    monkeypatch.setattr(
+        orchestrator_submission,
+        "prepare_dependency_chain_turns",
+        recording_prepare,
+    )
+
     assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
     assert ensure_calls == [2]
+    assert holes_seen_by_prepare == [(2,)]
     assert persistence.get_evidence_aggregate(628580, 1, 3) is not None
 
 
@@ -487,8 +507,8 @@ def test_export_ensure_gap_fill_walks_dependencies(persistence) -> None:
     assert persistence.get_evidence_aggregate(628580, 1, 4) is not None
 
 
-def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkeypatch) -> None:
-    """Homeworld ensure fills turns via walk check, then submit+wait (no sync ensure loop)."""
+def test_export_ensure_leaves_chain_fill_to_orchestrator(persistence, monkeypatch) -> None:
+    """Homeworld ensure runs no walk check of its own; it goes straight to submit+wait."""
     from unittest.mock import patch
 
     from api.analytics.compute_context import make_analytic_compute_context
@@ -571,7 +591,7 @@ def test_export_ensure_prepares_chain_then_uses_orchestrator(persistence, monkey
     ):
         assert ensure_homeworld_export(ctx, ExportScope(game_id=628580, perspective=1, turn=3))
 
-    assert walk_scopes == [(ANALYTIC_ID, 3)]
+    assert walk_scopes == []
     assert orchestrator_calls == [(ANALYTIC_ID, 3)]
     assert persistence.get_evidence_aggregate(628580, 1, 3) is not None
 

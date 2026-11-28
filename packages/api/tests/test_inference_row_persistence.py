@@ -22,6 +22,7 @@ from api.analytics.military_score_inference.inference_table_stream_registry impo
 from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.tier_row_run_registry import new_tier_row_run
 from api.errors import NotFoundError
+from api.models.turn_write import TurnWrite
 from api.serialization.inference_row_persistence import (
     INFERENCE_ROW_PERSISTENCE_VERSION,
     PersistedInferenceRow,
@@ -394,10 +395,20 @@ def test_invalidate_for_turn_write_deletes_pair_documents(memory_backend, persis
             solutions=[],
         ),
     )
-    cleared = persistence.invalidate_for_turn_write(628580, 1, 111)
-    assert cleared == {111, 110}
+    persistence.invalidate_for_turn_write(TurnWrite(628580, 1, 111))
     assert persistence.get_row(628580, 1, 111, 8) is None
     assert persistence.get_row(628580, 1, 110, 8) is None
+
+
+@pytest.mark.parametrize(
+    ("turn_number", "host_turns"),
+    [(111, (111, 110)), (2, (2, 1)), (1, (1,))],
+)
+def test_host_turns_for_turn_write_are_the_turn_and_the_one_before_from_one(
+    turn_number, host_turns
+):
+    write = TurnWrite(628580, 1, turn_number)
+    assert InferenceRowPersistenceService.host_turns_for_turn_write(write) == host_turns
 
 
 def test_stream_replays_persisted_row_without_scheduler_work(sample_turn, persistence):

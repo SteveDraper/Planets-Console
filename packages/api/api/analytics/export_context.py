@@ -417,7 +417,8 @@ class AnalyticQueryContext:
 
         Production ensure runs through the compute orchestrator (``ensure_scope`` /
         ``query``). Callers that need a cheap ``turn_not_stored`` / cycle check
-        before submit (e.g. homeworld turn fill) use this walk-only probe.
+        before planning (the orchestrator's chain fill,
+        ``prepare_dependency_chain_turns``) use this walk-only probe.
         ``force_root`` must match the subsequent ``plan_compute_dag`` walk so an
         entry step still sees prior-turn holes on an already-ensured root.
         """

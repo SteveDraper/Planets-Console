@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from api.analytics.export_dependency_walk import ensure_dependency_turn_floor
 from api.analytics.export_types import ExportScope, UnavailableReason
@@ -24,6 +24,9 @@ from api.models.game import TurnInfo
 
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
+
+SIGN_IN_TO_FILL_CHAIN_GUIDANCE = "(sign in to auto-fetch missing turns for the evidence chain)"
+"""Guidance appended when an evidence-chain turn is missing and no login can fetch it."""
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,20 @@ def fill_missing_dependency_chain_turns(
     When a login-backed ``ensure_turn`` hook is present, fetch every hole from
     Planets.nu into storage so the ensure walk can continue. Stops at the first
     fetch failure.
+
+    The fill bounds turn-fetch nesting:
+
+    - It works out every hole on ``[ensure floor, scope.turn)`` once, then
+      fetches them in ascending order from this one frame; the loop here, not
+      any nested submit, owns the iteration over missing turns.
+    - A nested fill for a lower scope reads the same floor, except at the
+      accelerated-start boundary: a scope at turn N-1 (N the first reliable
+      scoreboard turn) has floor 1 where scopes at N and above have floor N.
+    - A stored turn is never fetched twice: holes are the turns ``ctx.load_turn``
+      cannot read, and a fetched turn is stored before its turn-stored hook runs.
+
+    Its single caller is :func:`prepare_dependency_chain_turns`, which the
+    compute orchestrator runs while planning a root (``submit`` / ``ensure_scopes``).
     """
     missing = missing_dependency_chain_turns(ctx, scope)
     if not missing:
@@ -93,52 +110,48 @@ def fill_missing_dependency_chain_turns(
     )
 
 
+ChainFillReason = UnavailableReason | Literal["turn_fetch_failed"]
+"""Why a chain fill failed: the dependency walk's reason, or a failed turn fetch."""
+
+
 class DependencyChainFillError(ValidationError):
-    """A compute DAG cannot be planned because a required turn is still missing."""
+    """A compute DAG cannot be planned because a required turn is still missing.
+
+    ``detail`` states the failure without a caller's framing; ``str(error)`` is
+    ``"cannot plan compute DAG: " + detail``. A caller that reports the failure
+    in its own words prefixes ``detail`` instead of rebuilding it.
+    """
 
     def __init__(
         self,
-        message: str,
+        detail: str,
         *,
-        reason: str,
-        missing_turn: int | None = None,
-        fetched_turns: tuple[int, ...] = (),
-        auto_fetch_unavailable: bool = False,
+        reason: ChainFillReason,
+        missing_turn: int | None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(f"cannot plan compute DAG: {detail}")
+        self.detail = detail
         self.reason = reason
         self.missing_turn = missing_turn
-        self.fetched_turns = fetched_turns
-        self.auto_fetch_unavailable = auto_fetch_unavailable
 
 
-def _fill_error(scope: ExportScope, fill: DependencyChainTurnFill) -> DependencyChainFillError:
+def _fill_error(fill: DependencyChainTurnFill) -> DependencyChainFillError:
     missing_turn = fill.still_missing
     if fill.auto_fetch_unavailable:
         return DependencyChainFillError(
-            (
-                f"cannot plan compute DAG: turn {missing_turn} is not stored "
-                f"(sign in to auto-fetch missing turns for the evidence chain)"
-            ),
+            f"turn {missing_turn} is not stored {SIGN_IN_TO_FILL_CHAIN_GUIDANCE}",
             reason="turn_not_stored",
             missing_turn=missing_turn,
-            fetched_turns=fill.fetched_turns,
-            auto_fetch_unavailable=True,
         )
-    message = (
-        f"cannot plan compute DAG: could not load turn {missing_turn} from Planets.nu "
-        f"(required for the evidence chain"
-    )
+    detail = f"could not load turn {missing_turn} from Planets.nu (required for the evidence chain"
     if fill.fetched_turns:
         fetched = ",".join(str(turn_number) for turn_number in fill.fetched_turns)
-        message += f"; auto-fetched turns {fetched} before failure"
-    message += ")"
+        detail += f"; auto-fetched turns {fetched} before failure"
+    detail += ")"
     return DependencyChainFillError(
-        message,
+        detail,
         reason="turn_fetch_failed",
         missing_turn=missing_turn,
-        fetched_turns=fill.fetched_turns,
-        auto_fetch_unavailable=False,
     )
 
 
@@ -152,18 +165,13 @@ def _walk_unavailable_error(
         missing = missing_dependency_chain_turns(ctx, scope)
         missing_turn = missing[0] if missing else None
         if missing_turn is not None:
-            message = (
-                f"cannot plan compute DAG: turn {missing_turn} is not stored "
-                f"(evidence chain requires contiguous turns)"
-            )
+            detail = f"turn {missing_turn} is not stored (evidence chain requires contiguous turns)"
         else:
-            message = (
-                "cannot plan compute DAG: an intermediate turn in the evidence chain is not stored"
-            )
+            detail = "an intermediate turn in the evidence chain is not stored"
     else:
-        message = f"cannot plan compute DAG: turn unavailable ({reason})"
+        detail = f"turn unavailable ({reason})"
     return DependencyChainFillError(
-        message,
+        detail,
         reason=reason,
         missing_turn=missing_turn,
     )
@@ -201,7 +209,7 @@ def prepare_dependency_chain_turns(
             ensure_turn=ctx.ensure_turn,
         )
         if fill.still_missing is not None:
-            raise _fill_error(scope, fill)
+            raise _fill_error(fill)
         unavailable = ctx.dependency_walk_unavailable(
             analytic_id,
             scope,

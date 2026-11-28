@@ -147,7 +147,7 @@ class _ListenerError(RuntimeError):
     pass
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_an_inline_start_listener_that_raises_does_not_stop_the_step(sample_turn):
     first, second = _two_shared_scopes(sample_turn)
     orchestrator = _inline_shared(StubPersistencePolicy())
@@ -269,7 +269,7 @@ def test_a_hand_off_failure_after_the_finish_applied_leaves_the_epoch_retry_runn
     assert node.error is None
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_ready_queue_listener_that_raises_on_an_epoch_requeue_still_dispatches_the_retry(
     sample_turn,
 ):
@@ -300,7 +300,7 @@ def test_a_ready_queue_listener_that_raises_on_an_epoch_requeue_still_dispatches
     assert orchestrator.metrics.epoch_discards == 1
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_ready_queue_listener_that_raises_as_a_pass_commits_leaves_the_pass_whole(
     sample_turn,
 ):
@@ -397,7 +397,7 @@ def test_a_hand_off_failure_for_an_accepted_pool_item_leaves_its_node_running(
     assert orchestrator.nodes[scope].error is None
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_gate_that_raises_mid_pass_still_hands_off_the_work_already_committed(sample_turn):
     first, second = _two_shared_scopes(sample_turn)
     orchestrator = _inline_shared(StubPersistencePolicy())
@@ -496,7 +496,7 @@ def test_a_pass_hands_its_pool_work_to_the_pool_before_it_runs_its_inline_work(s
     assert orchestrator.nodes[pool_scope].state == "running"
 
 
-@pytest.mark.allows_observer_callback_errors
+@pytest.mark.allows_contained_callback_errors
 def test_a_raise_out_of_the_pool_hand_off_still_runs_the_inline_work_and_drains(
     sample_turn, monkeypatch
 ):

@@ -70,6 +70,19 @@ def reschedule_inference_row(scope: InferenceStreamScope, player_id: int) -> boo
     return controller.reschedule_player(player_id)
 
 
+def cancel_inference_rows_queued(scope: InferenceStreamScope) -> bool:
+    """Cancel every row run on the open table stream for ``scope``, queuing the aborts.
+
+    The stream keeps its scheduled rows, so a later
+    :func:`reschedule_all_inference_rows` re-admits every row.
+    """
+    controller = controller_for_scope(scope)
+    if controller is None:
+        return False
+    controller.cancel_all_rows_queued()
+    return True
+
+
 def reschedule_all_inference_rows(
     scope: InferenceStreamScope,
     *,

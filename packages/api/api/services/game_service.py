@@ -1,11 +1,12 @@
 """Game info reads and Planets.nu refresh."""
 
-import logging
 import threading
 from collections.abc import Callable
+from functools import partial
 
 from dacite.exceptions import DaciteError
 
+from api.callback_containment import run_contained
 from api.errors import NotFoundError, ValidationError
 from api.models.enums import GameStatus
 from api.models.game import GameInfo
@@ -26,8 +27,6 @@ from api.transport.sector_display import (
     sector_display_name_from_game_info,
     sector_display_name_from_stored_payload,
 )
-
-logger = logging.getLogger(__name__)
 
 _sector_title_by_stored_game_id: dict[str, str | None] = {}
 # Serializes the read and the write of a Backfill earlier turns choice, so
@@ -237,11 +236,7 @@ class GameService:
                 backfill_earlier_turns_document(enabled),
             )
         if enabled and not was_enabled and self._on_backfill_enabled is not None:
-            try:
-                self._on_backfill_enabled(game_id)
-            except Exception:
-                logger.exception(
-                    "Backfill earlier turns listener failed for game %s; the setting stays on",
-                    game_id,
-                )
+            run_contained(
+                partial(self._on_backfill_enabled, game_id), "Backfill earlier turns listener"
+            )
         return enabled
