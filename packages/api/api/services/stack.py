@@ -13,6 +13,7 @@ from api.compute.runtime import peek_compute_orchestrator
 from api.compute.turn_cache import get_process_turn_info_cache
 from api.concepts.homeworld_layout import homeworld_settings_fingerprint
 from api.models.game import GameInfo
+from api.models.turn_write import TurnWrite
 from api.services.credential_service import CredentialService
 from api.services.game_service import GameService
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -88,7 +89,10 @@ def build_service_stack(storage: StorageBackend) -> ServiceStack:
     inference_invalidation.bind_scheduler(inference_scheduler)
 
     def on_turn_stored(game_id: int, perspective: int, turn_number: int) -> None:
-        inference_invalidation.on_turn_stored(game_id, perspective, turn_number)
+        write = TurnWrite(game_id=game_id, perspective=perspective, turn_number=turn_number)
+        inference_invalidation.invalidate_for_turn_write(write)
+        inference_invalidation.cancel_for_turn_write(write)
+        inference_invalidation.wake_for_turn_write(write)
         fleet_persistence.invalidate_for_turn_write(game_id, perspective, turn_number)
         homeworld_persistence.invalidate_evidence_from_turn(game_id, perspective, turn_number)
 

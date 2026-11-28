@@ -14,6 +14,7 @@ from api.analytics.military_score_inference.inference_scheduler import (
 )
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_table_stream_registry import (
+    cancel_inference_rows_queued,
     reschedule_all_inference_rows,
     reschedule_inference_row,
 )
@@ -23,6 +24,7 @@ from api.callback_containment import FailureCollector
 from api.compute.in_flight_settle import PlayerWork
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
+from api.models.turn_write import TurnWrite
 from api.services.evidence_bump import (
     BumpRecompute,
     DurableRecompute,
@@ -81,14 +83,35 @@ class InferenceInvalidationService:
             turn_number=host_turn,
         )
 
-    def on_turn_stored(self, game_id: int, perspective: int, turn_number: int) -> None:
-        cleared_host_turns = self._persistence.invalidate_for_turn_write(
-            game_id,
-            perspective,
-            turn_number,
-        )
-        for host_turn in cleared_host_turns:
-            reschedule_all_inference_rows(self._scope(game_id, perspective, host_turn))
+    def invalidate_for_turn_write(self, write: TurnWrite) -> None:
+        """Delete the scores rows a stored turn invalidates, at its host turns."""
+        self._persistence.invalidate_for_turn_write(write)
+
+    def cancel_for_turn_write(self, write: TurnWrite) -> None:
+        """Cancel the open streams' row runs at the stored turn's host turns.
+
+        Each run gets lifecycle CANCEL and a queued abort of its node
+        (:meth:`~InferenceRowScheduler.cancel_run_queued`) through its
+        stream's scheduler, the one :meth:`wake_for_turn_write` re-admits
+        through: nothing plans, submits or drains, so this is safe inside an
+        open root plan. The streams keep their scheduled rows for the wake.
+        """
+        for host_turn in self._persistence.host_turns_for_turn_write(write):
+            cancel_inference_rows_queued(self._scope(write.game_id, write.perspective, host_turn))
+
+    def wake_for_turn_write(self, write: TurnWrite) -> None:
+        """Re-admit every row of the open streams at the stored turn's host turns.
+
+        ``force_schedule`` keeps a re-admitted row from painting a cached
+        complete over its replaced node. The reschedule's own cancel finds no
+        entry for a run :meth:`cancel_for_turn_write` already cancelled, so
+        for those rows it only re-admits.
+        """
+        for host_turn in self._persistence.host_turns_for_turn_write(write):
+            reschedule_all_inference_rows(
+                self._scope(write.game_id, write.perspective, host_turn),
+                force_schedule=True,
+            )
 
     def on_inference_evidence_updated(
         self,

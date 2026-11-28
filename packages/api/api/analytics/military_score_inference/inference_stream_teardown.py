@@ -4,16 +4,19 @@ A stream detaches its own rows when it ends (``end_table_stream``, which runs
 ``detach_inference_stream`` and then releases pause).
 ``begin_scope`` never detaches a run; it resets only stream-owned state and
 releases the work global pause held.
-``cancel_run`` is the explicit cancel path (lifecycle CANCEL, then abort).
+``cancel_run`` is the explicit cancel path (lifecycle CANCEL, then abort);
+``cancel_run_queued`` is the same cancel with the abort's listeners left queued.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from api.analytics.export_context import AnalyticQueryContext
 from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
+from api.compute.errors import ComputeScopeAbortedError
 from api.compute.orchestrator import ComputeOrchestrator
 from api.compute.scope import ComputeScope
 from api.streaming.table_stream.row_run_admission import RowLifecycleOp
@@ -25,6 +28,10 @@ if TYPE_CHECKING:
 # Shared abort detail so scope-outcome listeners can ignore intentional cancels
 # (must not deliver RowFailed / orphan terminals to an open multiplex).
 SCORES_ROW_RUN_CANCELLED_MESSAGE = "scores inference row run cancelled"
+
+
+def _row_run_cancelled_error() -> ComputeScopeAbortedError:
+    return ComputeScopeAbortedError(SCORES_ROW_RUN_CANCELLED_MESSAGE)
 
 
 @dataclass
@@ -139,7 +146,27 @@ class InferenceStreamTeardownMixin:
         scope's ladder stamp names for that execution. When that was this run,
         its CANCEL already released the stamp and the listener changes nothing;
         a resumable ``DETACHED`` shell the stamp names is cancelled too.
+
+        The abort's listeners are drained before this returns.
         """
+        self._cancel_run(run_id, self._abort_orchestrator_scope)
+
+    def cancel_run_queued(self: InferenceRowScheduler, run_id: str) -> None:
+        """Cancel one row run as :meth:`cancel_run` does, queuing the abort's listeners.
+
+        The abort runs through
+        :meth:`~api.compute.orchestrator.ComputeOrchestrator.queue_scope_abort`,
+        which plans, submits and drains nothing, so this is safe inside an open
+        root plan. The listeners run at the next drain on any thread.
+        """
+        self._cancel_run(run_id, self._queue_orchestrator_scope_abort)
+
+    def _cancel_run(
+        self: InferenceRowScheduler,
+        run_id: str,
+        abort: Callable[[ComputeScope, int], None],
+    ) -> None:
+        """Apply lifecycle CANCEL to ``run_id``; ``abort`` its scope unless a sibling owns it."""
         abort_scope: ComputeScope | None = None
         abort_generation: int | None = None
         with self._lock:
@@ -157,12 +184,12 @@ class InferenceStreamTeardownMixin:
             )
             if not sibling_still_owns_scope:
                 abort_scope = root_scope
-        # Abort outside the scheduler lock: ``abort_scope`` drains node-complete
-        # listeners that may deliver stream events (controller ``stream_lock``) or
-        # call ``owns_table_stream`` (needs this lock). Holding ``_lock`` here ABBA /
+        # Abort outside the scheduler lock: the abort's node-complete listeners may
+        # deliver stream events (controller ``stream_lock``) or call
+        # ``owns_table_stream`` (needs this lock). Holding ``_lock`` here ABBA /
         # self-deadlocks with ``reschedule_player`` (stream_lock -> cancel -> abort).
         if abort_scope is not None and abort_generation is not None:
-            self._abort_orchestrator_scope(abort_scope, abort_generation)
+            abort(abort_scope, abort_generation)
 
     def _drop_preempted_stream_binding_locked(self: InferenceRowScheduler) -> None:
         """Drop the preempted stream's binding. Caller holds ``self._lock``."""
@@ -210,14 +237,27 @@ class InferenceStreamTeardownMixin:
         into a user-visible fleet table error.
 
         Must run without the scheduler lock held (see ``cancel_run``). Always targets the
-        process-wide singleton orchestrator (#209).
+        process-wide singleton orchestrator (#209). Drains the abort's listeners.
         """
-        from api.compute.errors import ComputeScopeAbortedError
         from api.compute.runtime import get_compute_orchestrator
 
         get_compute_orchestrator().abort_scope(
             root_scope,
-            ComputeScopeAbortedError(SCORES_ROW_RUN_CANCELLED_MESSAGE),
+            _row_run_cancelled_error(),
+            expected_execution_generation=execution_generation,
+        )
+
+    def _queue_orchestrator_scope_abort(
+        self: InferenceRowScheduler,
+        root_scope: ComputeScope,
+        execution_generation: int,
+    ) -> None:
+        """:meth:`_abort_orchestrator_scope` with the abort's listeners queued, not drained."""
+        from api.compute.runtime import get_compute_orchestrator
+
+        get_compute_orchestrator().queue_scope_abort(
+            root_scope,
+            _row_run_cancelled_error(),
             expected_execution_generation=execution_generation,
         )
 

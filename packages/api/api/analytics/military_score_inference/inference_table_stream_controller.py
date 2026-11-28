@@ -356,6 +356,15 @@ class InferenceTableStreamController(
                             stream_drain.close(scheduled.session.run_id)
         self.wake_multiplex.set()
 
+    def cancel_all_rows_queued(self) -> None:
+        """Cancel every scheduled row's run with a queued abort, keeping ``scheduled_rows``.
+
+        Cancels through this stream's scheduler, the one
+        :meth:`reschedule_all_rows` re-admits through.
+        """
+        for run_id in self.scheduled_run_ids():
+            self.scheduler.cancel_run_queued(run_id)
+
     def reschedule_all_rows(self, *, force_schedule: bool = False) -> bool:
         """Cancel and re-admit every row; schedule/submit outside ``stream_lock``."""
         return self.reschedule_all(

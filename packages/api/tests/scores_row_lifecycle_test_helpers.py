@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 from api.analytics.military_score_inference.analytic import build_inference_observation
+from api.analytics.military_score_inference.inference_scheduler import InferenceRowScheduler
+from api.analytics.military_score_inference.inference_stream_rows import (
+    ScheduledInferenceRow,
+    schedule_inference_row,
+)
+from api.analytics.military_score_inference.inference_stream_scope import InferenceStreamScope
 from api.analytics.military_score_inference.inference_stream_session import (
     InferenceRowStreamSession,
+)
+from api.analytics.military_score_inference.inference_table_stream_controller import (
+    InferenceTableStreamController,
 )
 
 from tests.scores_exports_helpers import minimal_stream_query_context
@@ -32,6 +42,75 @@ def _session_for_player(
             game_id=game_id,
             perspective=perspective,
         ),
+    )
+
+
+def _stream_scope(sample_turn) -> InferenceStreamScope:
+    return InferenceStreamScope(
+        game_id=628580,
+        perspective=1,
+        turn_number=sample_turn.settings.turn,
+    )
+
+
+def _schedule_player_row(
+    scheduler: InferenceRowScheduler,
+    sample_turn,
+    *,
+    player_id: int,
+    stream_token: str,
+) -> ScheduledInferenceRow:
+    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
+    scheduled = schedule_inference_row(
+        scheduler,
+        score=score,
+        turn=sample_turn,
+        player_id=player_id,
+        game_id=628580,
+        perspective=1,
+        stream_token=stream_token,
+        query_context=minimal_stream_query_context(sample_turn),
+    ).row
+    scheduler.accept_pending_run(scheduled.session.run_id)
+    return scheduled
+
+
+def _attach_active_table_stream(
+    sample_turn,
+    scheduler: InferenceRowScheduler,
+    player_ids: tuple[int, ...],
+) -> tuple[
+    InferenceTableStreamController,
+    dict[int, ScheduledInferenceRow],
+    threading.Event,
+]:
+    scope = _stream_scope(sample_turn)
+    stream_token = scheduler.begin_scope(scope)
+    controller = InferenceTableStreamController(
+        scope=scope,
+        stream_token=stream_token,
+        turn=sample_turn,
+        player_ids=player_ids,
+        scheduler=scheduler,
+        game_id=628580,
+        perspective=1,
+        query_context=minimal_stream_query_context(sample_turn),
+    )
+
+    for player_id in player_ids:
+        scheduled = _schedule_player_row(
+            scheduler,
+            sample_turn,
+            player_id=player_id,
+            stream_token=stream_token,
+        )
+        controller.register_scheduled_row(player_id, scheduled)
+
+    controller.attach()
+    return (
+        controller,
+        controller.scheduled_rows,
+        controller.wake_multiplex,
     )
 
 

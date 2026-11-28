@@ -16,10 +16,8 @@ from api.analytics.military_score_inference.inference_scheduler import (
     reset_inference_row_scheduler_for_tests,
 )
 from api.analytics.military_score_inference.inference_stream_rows import (
-    ScheduledInferenceRow,
     ScheduleRowAdmission,
     iter_scores_table_inference_events,
-    schedule_inference_row,
 )
 from api.analytics.military_score_inference.inference_stream_scope import (
     InferenceStreamScope,
@@ -38,6 +36,7 @@ from api.analytics.military_score_inference.solver import STATUS_EXACT
 from api.analytics.scores.tier_row_run_registry import get_row_run
 from api.compute.wire import StepResult
 from api.models.game import TurnInfo
+from api.models.turn_write import TurnWrite
 from api.serialization.inference_row_persistence import PersistedInferenceRow
 from api.serialization.turn import turn_info_from_json, turn_info_to_json
 from api.services.inference_invalidation_service import InferenceInvalidationService
@@ -46,7 +45,12 @@ from api.storage.memory_asset import MemoryAssetBackend
 
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.scores_exports_helpers import minimal_stream_query_context
-from tests.scores_row_lifecycle_test_helpers import _patch_scores_dag_without_fleet_deps
+from tests.scores_row_lifecycle_test_helpers import (
+    _attach_active_table_stream,
+    _patch_scores_dag_without_fleet_deps,
+    _schedule_player_row,
+    _stream_scope,
+)
 from tests.table_stream_test_helpers import end_stream_inline
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
@@ -82,14 +86,6 @@ def _install_workerless_scheduler(
     return scheduler
 
 
-def _stream_scope(sample_turn) -> InferenceStreamScope:
-    return InferenceStreamScope(
-        game_id=628580,
-        perspective=1,
-        turn_number=sample_turn.settings.turn,
-    )
-
-
 def _end_open_table_stream(
     scope: InferenceStreamScope,
     scheduler: InferenceRowScheduler,
@@ -97,67 +93,6 @@ def _end_open_table_stream(
     controller = controller_for_scope(scope)
     if controller is not None:
         end_stream_inline(scheduler, controller.scope, controller.stream_token)
-
-
-def _schedule_player_row(
-    scheduler: InferenceRowScheduler,
-    sample_turn,
-    *,
-    player_id: int,
-    stream_token: str,
-) -> ScheduledInferenceRow:
-    score = next(row for row in sample_turn.scores if row.ownerid == player_id)
-    scheduled = schedule_inference_row(
-        scheduler,
-        score=score,
-        turn=sample_turn,
-        player_id=player_id,
-        game_id=628580,
-        perspective=1,
-        stream_token=stream_token,
-        query_context=minimal_stream_query_context(sample_turn),
-    ).row
-    scheduler.accept_pending_run(scheduled.session.run_id)
-    return scheduled
-
-
-def _attach_active_table_stream(
-    sample_turn,
-    scheduler: InferenceRowScheduler,
-    player_ids: tuple[int, ...],
-) -> tuple[
-    InferenceTableStreamController,
-    dict[int, ScheduledInferenceRow],
-    threading.Event,
-]:
-    scope = _stream_scope(sample_turn)
-    stream_token = scheduler.begin_scope(scope)
-    controller = InferenceTableStreamController(
-        scope=scope,
-        stream_token=stream_token,
-        turn=sample_turn,
-        player_ids=player_ids,
-        scheduler=scheduler,
-        game_id=628580,
-        perspective=1,
-        query_context=minimal_stream_query_context(sample_turn),
-    )
-
-    for player_id in player_ids:
-        scheduled = _schedule_player_row(
-            scheduler,
-            sample_turn,
-            player_id=player_id,
-            stream_token=stream_token,
-        )
-        controller.register_scheduled_row(player_id, scheduled)
-
-    controller.attach()
-    return (
-        controller,
-        controller.scheduled_rows,
-        controller.wake_multiplex,
-    )
 
 
 def _invalidation_with_fleet(
@@ -171,6 +106,13 @@ def _invalidation_with_fleet(
         scheduler=scheduler,
         fleet_persistence=FleetSnapshotPersistenceService(storage),
     )
+
+
+def _store_turn_and_wake(invalidation: InferenceInvalidationService, write: TurnWrite) -> None:
+    """Run the scores turn-stored consumers in hook order: delete, cancel, then wake."""
+    invalidation.invalidate_for_turn_write(write)
+    invalidation.cancel_for_turn_write(write)
+    invalidation.wake_for_turn_write(write)
 
 
 def _run_ids_for_players(
@@ -739,7 +681,7 @@ def test_turn_invalidation_reschedule_skips_immediate_path_players(
     assert len(_run_ids_for_players(scheduler, player_ids)) == 0
 
     _seed_cached_rows(persistence, turn_number=turn_number, player_ids=player_ids)
-    invalidation.on_turn_stored(628580, 1, turn_number)
+    _store_turn_and_wake(invalidation, TurnWrite(628580, 1, turn_number))
 
     _wait_until(lambda: controller_for_scope(_stream_scope(first_turn)) is not None)
     assert len(_run_ids_for_players(scheduler, player_ids)) == 0
@@ -815,7 +757,7 @@ def test_turn_stored_reschedule_uses_refreshed_host_turn(
         updated_militarychange,
     )
     _put_turn_in_storage(memory_backend, updated_turn)
-    invalidation.on_turn_stored(628580, 1, turn_number)
+    _store_turn_and_wake(invalidation, TurnWrite(628580, 1, turn_number))
 
     _wait_until(
         lambda: (
