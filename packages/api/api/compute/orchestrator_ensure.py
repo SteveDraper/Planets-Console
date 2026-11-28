@@ -73,6 +73,11 @@ class OrchestratorEnsureMixin:
         the first before submitting the rest -- that would serialize cross-player
         DAG work.
 
+        The unsatisfied roots' plans open, fill and register inside one
+        root-plan block (``OrchestratorObservers.root_plan_block``), so work
+        handed to ``run_after_root_plans`` meanwhile runs after every plan
+        closes. The satisfied scopes' submits run before it, outside it.
+
         Raises :class:`NestedBlockingWaitError` before planning when called
         inside a drain or a step of this orchestrator.
         """
@@ -100,7 +105,8 @@ class OrchestratorEnsureMixin:
                 (index, resolve_submission_open(request)) for index, request in unsatisfied
             ]
             try:
-                handles_by_index |= self._submit_unsatisfied_roots(resolved_unsatisfied)
+                with self._observers.root_plan_block():
+                    handles_by_index |= self._submit_unsatisfied_roots(resolved_unsatisfied)
             finally:
                 self._observers.drain_post_lock_callbacks()
 

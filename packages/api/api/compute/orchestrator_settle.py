@@ -5,7 +5,8 @@ selection names, all in one orchestrator lock hold. It never drains post-lock
 callbacks. They share one queue, so the caller's drain, another thread's
 drain that runs first, or the drain already active on the caller's thread
 applies them. ``drain_post_lock_callbacks`` is the public drain for a caller
-with no drain of its own.
+with no drain of its own, and ``run_after_root_plans`` runs a caller's work
+after that drain once no root plan is open on its thread.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ _AbortReason: TypeAlias = Literal["abort_scope", "settle"]
 
 
 class OrchestratorSettleMixin:
-    """Settle in-flight work, drain what it queued, and abort one node."""
+    """Settle in-flight work, drain what it queued, run work after root plans, abort one node."""
 
     def settle_in_flight_work(
         self: ComputeOrchestrator,
@@ -126,6 +127,15 @@ class OrchestratorSettleMixin:
         """
         self._observers.drain_post_lock_callbacks()
 
+    def run_after_root_plans(self: ComputeOrchestrator, callback: Callable[[], None]) -> None:
+        """Run ``callback`` once no root-plan block of this orchestrator is open on this thread.
+
+        At once after a drain when none is open, else held for the outermost
+        block's exit on this thread; a failure is contained and logged
+        either way (``OrchestratorObservers.run_after_root_plans``).
+        """
+        self._observers.run_after_root_plans(callback)
+
     def abort_scope(
         self: ComputeOrchestrator,
         scope: ComputeScope,
@@ -146,6 +156,29 @@ class OrchestratorSettleMixin:
         itself does not recreate those dependencies. A later ``force_fresh``
         attach of a ``waiting_deps`` waiter recreates abort-failed dependencies
         along the ``waiting_deps`` chain.
+
+        Drains the abort's listeners before returning; :meth:`queue_scope_abort`
+        is the same abort with the drain left to the caller.
+        """
+        aborted = self.queue_scope_abort(
+            scope, error, expected_execution_generation=expected_execution_generation
+        )
+        if aborted:
+            self._observers.drain_post_lock_callbacks()
+        return aborted
+
+    def queue_scope_abort(
+        self: ComputeOrchestrator,
+        scope: ComputeScope,
+        error: BaseException,
+        *,
+        expected_execution_generation: int | None = None,
+    ) -> bool:
+        """Abort a non-terminal node under the lock and queue its listeners, draining nothing.
+
+        Same no-op rules and return value as :meth:`abort_scope`. Plans,
+        submits and drains nothing, so it is safe inside an open root plan;
+        the queued listeners run at the next drain on any thread.
         """
         with self._condition:
             node = self._nodes.get(scope)
@@ -157,7 +190,6 @@ class OrchestratorSettleMixin:
             ):
                 return False
             self._abort_node_locked(node, error, reason="abort_scope")
-        self._observers.drain_post_lock_callbacks()
         return True
 
     def _abort_node_locked(

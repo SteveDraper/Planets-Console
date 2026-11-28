@@ -201,10 +201,18 @@ class OrchestratorSubmissionMixin:
         A raise inside the pass is logged by the drain and does not reach the
         caller. A root plan that raises as it closes still leaves its
         registered work dispatched.
+
+        The root plan, from its open through the chain fill and
+        ``accept_plan`` to its close, runs inside a root-plan block
+        (``OrchestratorObservers.root_plan_block``), so work handed to
+        ``run_after_root_plans`` meanwhile runs after the plan closes.
         """
         resolved = resolve_submission_open(request)
         try:
-            with self._open_root_plan(resolved) as root_plan:
+            with (
+                self._observers.root_plan_block(),
+                self._open_root_plan(resolved) as root_plan,
+            ):
                 planned_request = self._prepare_root_planned_request(resolved, root_plan)
                 with self._condition:
                     handle = self._submit_locked(

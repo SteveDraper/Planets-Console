@@ -1,6 +1,7 @@
 """Observer registration and notify surface for ComputeOrchestrator.
 
-Owns listener lists, dispatch gates/hooks, and post-lock callbacks. Callers
+Owns listener lists, dispatch gates/hooks, post-lock callbacks, and the
+per-thread root-plan blocks with the work they hold. Callers
 register via ``ComputeOrchestrator.observers.register_*`` so lock-order
 semantics stay in one place without thin wrappers on the orchestrator.
 """
@@ -9,7 +10,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -17,7 +18,11 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from api.callback_containment import ContainmentLabel, run_contained
-from api.compute.errors import ComputeScopeAbortedError, NestedBlockingWaitError
+from api.compute.errors import (
+    ComputeScopeAbortedError,
+    NestedBlockingWaitError,
+    NestedRootPlanSubmitError,
+)
 from api.compute.profile import StepSurface
 from api.compute.scope import ComputeScope
 
@@ -137,6 +142,9 @@ NodeDispatchGate = Callable[["ComputeNodeRun"], bool]
 # Like a gate, it must never admit more because of a commit earlier in the pass.
 NodeDispatchCommitHook = Callable[["ComputeNodeRun"], bool]
 PostLockCallback = Callable[[], None]
+# Work held while a root-plan block is open on this thread, run once the
+# outermost block exits.
+AfterRootPlansCallback = Callable[[], None]
 
 
 def _call_each_contained[*Args](
@@ -155,15 +163,23 @@ def _call_each_contained[*Args](
 
 
 class _DrainState(threading.local):
-    """What this thread is doing for one orchestrator: draining its queue, or running a step."""
+    """What this thread is doing for one orchestrator.
+
+    Draining its queue, running a step, or planning inside root-plan blocks.
+    ``root_plan_blocks`` counts open blocks, not plans (one block may hold
+    several root plans open); ``held_after_root_plans`` is the work held
+    until the outermost of them exits.
+    """
 
     def __init__(self) -> None:
         self.is_draining = False
         self.steps_running = 0
+        self.root_plan_blocks = 0
+        self.held_after_root_plans: list[AfterRootPlansCallback] = []
 
 
 class OrchestratorObservers:
-    """Listener registration, notify fan-out, and post-lock callback drain."""
+    """Listener registration, notify fan-out, post-lock callback drain, and root-plan blocks."""
 
     def __init__(self, condition: threading.Condition) -> None:
         self._condition = condition
@@ -203,6 +219,73 @@ class OrchestratorObservers:
             yield
         finally:
             state.steps_running -= 1
+
+    @contextmanager
+    def root_plan_block(self) -> Iterator[None]:
+        """Mark this thread as planning inside root plans of this orchestrator.
+
+        Re-entrant. Encloses the opening of each root plan through its close,
+        so nothing held runs while a plan's on-walk assumption is in force.
+        When the outermost block exits normally or by an ``Exception``, the
+        work ``run_after_root_plans`` held runs on this thread: one drain
+        first, then each callback in order, contained. A held callback that
+        opens its own block runs that block's held work before the next one,
+        so the order is depth-first. On any other ``BaseException`` the held
+        work is dropped.
+        """
+        state = self._drain_state
+        state.root_plan_blocks += 1
+        try:
+            yield
+        except BaseException as error:
+            held = self._leave_root_plan_block()
+            if isinstance(error, Exception):
+                self._run_after_root_plans_now(held)
+            raise
+        self._run_after_root_plans_now(self._leave_root_plan_block())
+
+    def _leave_root_plan_block(self) -> list[AfterRootPlansCallback]:
+        """Close one block; return the held work when it was the outermost, else nothing."""
+        state = self._drain_state
+        state.root_plan_blocks -= 1
+        if state.root_plan_blocks:
+            return []
+        held, state.held_after_root_plans = state.held_after_root_plans, []
+        return held
+
+    def run_after_root_plans(self, callback: AfterRootPlansCallback) -> None:
+        """Run ``callback`` once no root-plan block is open on this thread.
+
+        With no block open it runs at once, after a drain, so callbacks
+        already queued (an abort's listeners, say) run first; inside an
+        active drain that drain returns at once and they run after it.
+        Otherwise it is held for the outermost block's exit
+        (:meth:`root_plan_block`), on this thread only. Either way a failure
+        is contained and logged, never raised to the caller.
+        """
+        state = self._drain_state
+        if state.root_plan_blocks:
+            state.held_after_root_plans.append(callback)
+            return
+        self._run_after_root_plans_now((callback,))
+
+    def _run_after_root_plans_now(self, callbacks: Sequence[AfterRootPlansCallback]) -> None:
+        """Drain once, then run each callback contained; nothing when there are none."""
+        if not callbacks:
+            return
+        self.drain_post_lock_callbacks()
+        for callback in callbacks:
+            run_contained(callback, "After-root-plans callback")
+
+    def reject_submit_in_root_plan(self, operation: str) -> None:
+        """Raise when this thread has a root-plan block of this orchestrator open.
+
+        A submission planned there would read the open plan's assumed
+        evidence; held work runs after the outermost block exits, where this
+        does not raise.
+        """
+        if self._drain_state.root_plan_blocks:
+            raise NestedRootPlanSubmitError(operation)
 
     @property
     def dispatch_gates(self) -> list[NodeDispatchGate]:
