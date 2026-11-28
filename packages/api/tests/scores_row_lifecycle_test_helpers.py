@@ -45,7 +45,7 @@ def _session_for_player(
     )
 
 
-def _stream_scope(sample_turn) -> InferenceStreamScope:
+def stream_scope(sample_turn) -> InferenceStreamScope:
     return InferenceStreamScope(
         game_id=628580,
         perspective=1,
@@ -53,7 +53,7 @@ def _stream_scope(sample_turn) -> InferenceStreamScope:
     )
 
 
-def _schedule_player_row(
+def schedule_player_row(
     scheduler: InferenceRowScheduler,
     sample_turn,
     *,
@@ -75,7 +75,7 @@ def _schedule_player_row(
     return scheduled
 
 
-def _attach_active_table_stream(
+def attach_active_table_stream(
     sample_turn,
     scheduler: InferenceRowScheduler,
     player_ids: tuple[int, ...],
@@ -84,7 +84,7 @@ def _attach_active_table_stream(
     dict[int, ScheduledInferenceRow],
     threading.Event,
 ]:
-    scope = _stream_scope(sample_turn)
+    scope = stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope)
     controller = InferenceTableStreamController(
         scope=scope,
@@ -98,7 +98,7 @@ def _attach_active_table_stream(
     )
 
     for player_id in player_ids:
-        scheduled = _schedule_player_row(
+        scheduled = schedule_player_row(
             scheduler,
             sample_turn,
             player_id=player_id,

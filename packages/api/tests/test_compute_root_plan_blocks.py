@@ -28,13 +28,12 @@ from tests.compute_orchestrator_fixtures import (
     make_export_scope,
     pool_compute_registration,
 )
+from tests.contained_callback_guard import CONTAINMENT_LOGGER
 from tests.fixtures.export_framework.diamond_exports import SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
-
-CONTAINMENT_LOGGER = "api.callback_containment"
 
 
 class _HeldCallbackFailed(RuntimeError):

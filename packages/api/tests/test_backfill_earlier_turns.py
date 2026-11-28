@@ -28,6 +28,8 @@ from api.storage.memory_asset import MemoryAssetBackend
 from api.storage_factory import clear_backend_cache, get_storage
 from fastapi.testclient import TestClient
 
+from tests.contained_callback_guard import CONTAINMENT_LOGGER
+
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 _GAME_ID = 628580
 
@@ -126,10 +128,10 @@ def test_failing_listener_does_not_fail_the_save(storage, caplog):
         raise RuntimeError("scan blew up")
 
     service = GameService(storage, on_backfill_enabled=fail)
-    with caplog.at_level(logging.ERROR, logger="api.callback_containment"):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         assert service.set_backfill_earlier_turns(_GAME_ID, True) is True
     assert read_backfill_earlier_turns(storage, _GAME_ID) is True
-    [failure] = [record for record in caplog.records if record.name == "api.callback_containment"]
+    [failure] = [record for record in caplog.records if record.name == CONTAINMENT_LOGGER]
     assert "Backfill earlier turns listener" in failure.getMessage()
     assert str(_GAME_ID) in failure.getMessage()
     assert failure.exc_info[1].args == ("scan blew up",)

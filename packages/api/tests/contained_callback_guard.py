@@ -18,6 +18,8 @@ from contextlib import contextmanager
 import pytest
 from api.callback_containment import logger as callback_containment_logger
 
+CONTAINMENT_LOGGER = callback_containment_logger.name
+
 _FAILURE_FORMAT = logging.Formatter("[%(threadName)s] %(message)s")
 
 

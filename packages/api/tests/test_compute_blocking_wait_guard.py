@@ -26,6 +26,7 @@ from tests.compute_orchestrator_fixtures import (
     make_export_scope,
     pool_compute_registration,
 )
+from tests.contained_callback_guard import CONTAINMENT_LOGGER
 from tests.fixtures.export_framework.chain_exports import CHAIN_ID
 from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
@@ -34,8 +35,6 @@ from tests.fixtures.export_framework.harness import (
     build_stored_turn_chain,
     make_fixture_query_context,
 )
-
-CONTAINMENT_LOGGER = "api.callback_containment"
 
 
 def _diamond(sample_turn):

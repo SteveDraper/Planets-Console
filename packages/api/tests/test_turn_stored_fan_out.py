@@ -17,8 +17,8 @@ from api.models.turn_write import TurnWrite
 from api.services.turn_stored_fan_out import TurnStoredFanOut, TurnStoredInvalidationError
 
 from tests.compute_orchestrator_fixtures import RecordingPoolSubmitter
+from tests.contained_callback_guard import CONTAINMENT_LOGGER
 
-CONTAINMENT_LOGGER = "api.callback_containment"
 WRITE = TurnWrite(game_id=628580, perspective=1, turn_number=111)
 
 

@@ -44,6 +44,7 @@ from tests.compute_persist_deferred_helpers import (
     shared_recovery,
 )
 from tests.compute_pool_test_helpers import complete_running_pool_step
+from tests.contained_callback_guard import CONTAINMENT_LOGGER
 from tests.fixtures.export_framework.diamond_exports import (
     SHARED_ID,
 )
@@ -439,7 +440,7 @@ def _defer_with_a_raising_recovery_submit(
     setup: RunningBranch, caplog, submit_failure: BaseException
 ) -> None:
     """Defer BRANCH_B on SHARED; the recovery submit's ``submit_failure`` reaches the drain log."""
-    with caplog.at_level(logging.ERROR, logger="api.callback_containment"):
+    with caplog.at_level(logging.ERROR, logger=CONTAINMENT_LOGGER):
         persist_branch_step_deferred(setup, shared_recovery(setup))
     assert [record.exc_info[1] for record in caplog.records if record.exc_info] == [submit_failure]
 

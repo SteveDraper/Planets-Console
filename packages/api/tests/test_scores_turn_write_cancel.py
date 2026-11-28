@@ -40,8 +40,8 @@ from api.streaming.table_stream import stream_drain
 from api.streaming.table_stream.row_run_admission import PersistAdmission
 
 from tests.scores_row_lifecycle_test_helpers import (
-    _attach_active_table_stream,
     _patch_scores_dag_without_fleet_deps,
+    attach_active_table_stream,
 )
 from tests.table_stream_test_helpers import end_stream_inline
 
@@ -55,7 +55,7 @@ class _OpenStream:
         self.player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
         self.scheduler = scheduler
         self.controller: InferenceTableStreamController
-        self.controller, _rows, _wake = _attach_active_table_stream(
+        self.controller, _rows, _wake = attach_active_table_stream(
             sample_turn, scheduler, self.player_ids
         )
         self.orchestrator: ComputeOrchestrator = get_compute_orchestrator()

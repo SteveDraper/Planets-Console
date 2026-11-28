@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from api.analytics.fleet.compute_orchestration import wake_fleet_scope
 from api.analytics.fleet.fleet_table_stream_registry import reschedule_fleet_table_player
 from api.analytics.fleet.fleet_table_stream_scope import FleetTableStreamScope
@@ -215,12 +217,10 @@ class InferenceInvalidationService:
                 )
             )
 
-        def bump_mark_and_epoch() -> None:
-            bump_failures.run(bump_known_turns, "Fleet ledger bump")
-
+        bump_contained = partial(bump_failures.run, bump_known_turns, "Fleet ledger bump")
         policy = recompute.settle_policy(player_live_walk_rows(game_id, perspective, player_id))
         if policy is None:
-            bump_mark_and_epoch()
+            bump_contained()
             stopped: frozenset[ComputeScope] = frozenset()
         else:
             stopped = orchestrator.settle_in_flight_work(
@@ -231,7 +231,7 @@ class InferenceInvalidationService:
                     analytic_ids=FLEET_WALK_ANALYTIC_IDS,
                 ),
                 policy,
-                then=bump_mark_and_epoch,
+                then=bump_contained,
             )
         orchestrator.drain_post_lock_callbacks()
         self._wake(

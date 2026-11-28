@@ -48,10 +48,10 @@ from api.storage.memory_asset import MemoryAssetBackend
 from tests.compute_pool_test_helpers import complete_running_pool_step
 from tests.scores_exports_helpers import minimal_stream_query_context
 from tests.scores_row_lifecycle_test_helpers import (
-    _attach_active_table_stream,
     _patch_scores_dag_without_fleet_deps,
-    _schedule_player_row,
-    _stream_scope,
+    attach_active_table_stream,
+    schedule_player_row,
+    stream_scope,
 )
 from tests.table_stream_test_helpers import end_stream_inline
 
@@ -217,7 +217,7 @@ def test_mask_change_reschedules_in_flight_row_while_table_stream_active_case_3(
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     assert len(player_ids) == 2
 
-    _attach_active_table_stream(sample_turn, scheduler, player_ids)
+    attach_active_table_stream(sample_turn, scheduler, player_ids)
     persistence = InferenceRowPersistenceService(memory_backend)
     invalidation = _invalidation_with_fleet(persistence, scheduler, memory_backend)
 
@@ -253,7 +253,7 @@ def test_mask_change_reschedules_completed_row_while_table_stream_active_case_4(
     )
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
 
-    _active_stream, scheduled_rows, _wake = _attach_active_table_stream(
+    _active_stream, scheduled_rows, _wake = attach_active_table_stream(
         sample_turn,
         scheduler,
         player_ids,
@@ -310,7 +310,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
 
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     target_player_id = player_ids[0]
-    scope_key = _stream_scope(sample_turn)
+    scope_key = stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope_key)
     controller = InferenceTableStreamController(
         scope=scope_key,
@@ -327,7 +327,7 @@ def test_reschedule_completed_scores_row_submits_fresh_orchestrator_work(
     _patch_scores_dag_without_fleet_deps(monkeypatch)
 
     for player_id in player_ids:
-        scheduled = _schedule_player_row(
+        scheduled = schedule_player_row(
             scheduler,
             sample_turn,
             player_id=player_id,
@@ -399,7 +399,7 @@ def test_recompute_reschedules_all_rows_while_table_stream_active_cases_1_and_2(
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
     turn_number = sample_turn.settings.turn
 
-    _attach_active_table_stream(sample_turn, scheduler, player_ids)
+    attach_active_table_stream(sample_turn, scheduler, player_ids)
     persistence = InferenceRowPersistenceService(memory_backend)
     for player_id in player_ids:
         persistence.put_row_without_notify(
@@ -528,7 +528,7 @@ def test_all_cached_replay_keeps_stream_open_for_mask_invalidation_case_4_integr
     )
     events: list[dict[str, object]] = []
     stream_closed = threading.Event()
-    scope = _stream_scope(sample_turn)
+    scope = stream_scope(sample_turn)
 
     def consume_stream() -> None:
         try:
@@ -610,7 +610,7 @@ def test_all_cached_replay_keeps_stream_open_for_recompute_cases_1_and_2_integra
         perspective=1,
         persistence=persistence,
     )
-    scope = _stream_scope(sample_turn)
+    scope = stream_scope(sample_turn)
     events: list[dict[str, object]] = []
     stream_closed = threading.Event()
 
@@ -683,7 +683,7 @@ def test_turn_invalidation_reschedule_skips_immediate_path_players(
     _seed_cached_rows(persistence, turn_number=turn_number, player_ids=player_ids)
     _store_turn_and_wake(invalidation, TurnWrite(628580, 1, turn_number))
 
-    _wait_until(lambda: controller_for_scope(_stream_scope(first_turn)) is not None)
+    _wait_until(lambda: controller_for_scope(stream_scope(first_turn)) is not None)
     assert len(_run_ids_for_players(scheduler, player_ids)) == 0
     _wait_until(
         lambda: sum(1 for event in events if event.get("type") == "complete") >= 2 * len(player_ids)
@@ -696,7 +696,7 @@ def test_turn_invalidation_reschedule_skips_immediate_path_players(
         ]
         assert len(post_invalidation_completes) == 2
 
-    _end_open_table_stream(_stream_scope(first_turn), scheduler)
+    _end_open_table_stream(stream_scope(first_turn), scheduler)
     thread.join(timeout=2.0)
 
 
@@ -770,7 +770,7 @@ def test_turn_stored_reschedule_uses_refreshed_host_turn(
     assert after_observation.military_delta_2x == 2 * updated_militarychange
     assert after_observation.military_delta_2x != before_observation.military_delta_2x
 
-    _end_open_table_stream(_stream_scope(sample_turn), scheduler)
+    _end_open_table_stream(stream_scope(sample_turn), scheduler)
     thread.join(timeout=2.0)
 
 
@@ -816,7 +816,7 @@ def test_recompute_force_schedules_immediate_path_players(
 
     assert len(_run_ids_for_players(scheduler, player_ids)) == 0
 
-    _end_open_table_stream(_stream_scope(first_turn), scheduler)
+    _end_open_table_stream(stream_scope(first_turn), scheduler)
     thread.join(timeout=2.0)
 
 
@@ -837,7 +837,7 @@ def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
         monkeypatch, make_inference_scheduler=make_inference_scheduler
     )
     player_id = sample_turn.scores[0].ownerid
-    scope = _stream_scope(sample_turn)
+    scope = stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope)
     controller = InferenceTableStreamController(
         scope=scope,
@@ -850,7 +850,7 @@ def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
         query_context=minimal_stream_query_context(sample_turn),
     )
 
-    fresher = _schedule_player_row(
+    fresher = schedule_player_row(
         scheduler,
         sample_turn,
         player_id=player_id,
@@ -859,7 +859,7 @@ def test_dispatch_admission_keeps_fresher_row_when_invalidation_wins_race(
     controller.register_scheduled_row(player_id, fresher)
     fresher_run_id = fresher.session.run_id
 
-    stale = _schedule_player_row(
+    stale = schedule_player_row(
         scheduler,
         sample_turn,
         player_id=player_id,
@@ -898,7 +898,7 @@ def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
         monkeypatch, make_inference_scheduler=make_inference_scheduler
     )
     player_id = sample_turn.scores[0].ownerid
-    scope = _stream_scope(sample_turn)
+    scope = stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope)
     controller = InferenceTableStreamController(
         scope=scope,
@@ -911,7 +911,7 @@ def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
         query_context=minimal_stream_query_context(sample_turn),
     )
 
-    cancelled = _schedule_player_row(
+    cancelled = schedule_player_row(
         scheduler,
         sample_turn,
         player_id=player_id,
@@ -920,7 +920,7 @@ def test_dispatch_admission_reschedules_when_connect_run_cancelled_before_adopt(
     scheduler.cancel_row_run(cancelled.session.run_id)
     assert cancelled.session.cancel_token.is_cancelled()
 
-    replacement = _schedule_player_row(
+    replacement = schedule_player_row(
         scheduler,
         sample_turn,
         player_id=player_id,
@@ -960,7 +960,7 @@ def test_adopt_admission_rejects_cancelled_connect_run(
         monkeypatch, make_inference_scheduler=make_inference_scheduler
     )
     player_id = sample_turn.scores[0].ownerid
-    scope = _stream_scope(sample_turn)
+    scope = stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope)
     controller = InferenceTableStreamController(
         scope=scope,
@@ -973,7 +973,7 @@ def test_adopt_admission_rejects_cancelled_connect_run(
         query_context=minimal_stream_query_context(sample_turn),
     )
 
-    cancelled = _schedule_player_row(
+    cancelled = schedule_player_row(
         scheduler,
         sample_turn,
         player_id=player_id,
@@ -1018,7 +1018,7 @@ def test_reschedule_row_with_running_node_does_not_deadlock(
 
     player_ids = (sample_turn.scores[0].ownerid,)
     target_player_id = player_ids[0]
-    scope_key = _stream_scope(sample_turn)
+    scope_key = stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope_key)
     controller = InferenceTableStreamController(
         scope=scope_key,
@@ -1034,7 +1034,7 @@ def test_reschedule_row_with_running_node_does_not_deadlock(
 
     _patch_scores_dag_without_fleet_deps(monkeypatch)
 
-    scheduled = _schedule_player_row(
+    scheduled = schedule_player_row(
         scheduler,
         sample_turn,
         player_id=target_player_id,
@@ -1104,7 +1104,7 @@ def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
     request.addfinalizer(cleanup)
 
     player_id = sample_turn.scores[0].ownerid
-    scope_key = _stream_scope(sample_turn)
+    scope_key = stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope_key)
     controller = InferenceTableStreamController(
         scope=scope_key,
@@ -1119,7 +1119,7 @@ def test_cancel_raced_schedule_does_not_abort_live_sibling_scope(
     controller.attach()
     _patch_scores_dag_without_fleet_deps(monkeypatch)
 
-    survivor = _schedule_player_row(
+    survivor = schedule_player_row(
         scheduler,
         sample_turn,
         player_id=player_id,
@@ -1157,7 +1157,7 @@ def test_cancel_abort_failure_does_not_deliver_stream_terminal(
         monkeypatch, make_inference_scheduler=make_inference_scheduler
     )
     player_ids = (sample_turn.scores[0].ownerid,)
-    controller, scheduled_rows, _wake = _attach_active_table_stream(
+    controller, scheduled_rows, _wake = attach_active_table_stream(
         sample_turn,
         scheduler,
         player_ids,
@@ -1238,7 +1238,7 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
         turn_number=sample_turn.settings.turn,
         player_ids=(player_id,),
     )
-    scope_key = _stream_scope(sample_turn)
+    scope_key = stream_scope(sample_turn)
     stream_token = scheduler.begin_scope(scope_key)
     controller = InferenceTableStreamController(
         scope=scope_key,
@@ -1260,7 +1260,7 @@ def test_reschedule_after_cancel_replaces_aborted_node_despite_cached_admission(
 
     _patch_scores_dag_without_fleet_deps(monkeypatch)
 
-    scheduled = _schedule_player_row(
+    scheduled = schedule_player_row(
         scheduler,
         sample_turn,
         player_id=player_id,

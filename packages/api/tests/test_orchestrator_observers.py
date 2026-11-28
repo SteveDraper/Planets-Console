@@ -24,14 +24,15 @@ from tests.compute_orchestrator_fixtures import (
     pool_compute_registration,
 )
 from tests.compute_pool_test_helpers import complete_running_pool_step
-from tests.contained_callback_guard import failing_on_contained_callback_errors
+from tests.contained_callback_guard import (
+    CONTAINMENT_LOGGER,
+    failing_on_contained_callback_errors,
+)
 from tests.fixtures.export_framework.diamond_exports import BRANCH_B_ID, SHARED_ID
 from tests.fixtures.export_framework.harness import (
     DIAMOND_FIXTURE_EXPORT_REGISTRY,
     make_fixture_query_context,
 )
-
-CONTAINMENT_LOGGER = "api.callback_containment"
 
 
 class _PostLockCallbackFailed(RuntimeError):

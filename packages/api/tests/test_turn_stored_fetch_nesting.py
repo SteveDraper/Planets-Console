@@ -61,16 +61,16 @@ from tests.compute_orchestrator_fixtures import (
     inline_compute_registration,
     make_compute_scope,
 )
+from tests.contained_callback_guard import CONTAINMENT_LOGGER
 from tests.fixtures.export_framework.chain_exports import CHAIN_ID
 from tests.fixtures.export_framework.harness import CHAIN_FIXTURE_EXPORT_REGISTRY
 from tests.fixtures.export_framework.state import FIXTURE_EXPORT_STATE
 from tests.scores_row_lifecycle_test_helpers import (
-    _attach_active_table_stream,
+    attach_active_table_stream,
     patch_scores_only_dag,
 )
 from tests.table_stream_test_helpers import end_stream_inline
 from tests.turn_stored_harness_helpers import (
-    CONTAINMENT_LOGGER,
     DEFAULT_RECURSION_LIMIT,
     GAME_ID,
     PERSPECTIVE,
@@ -79,7 +79,8 @@ from tests.turn_stored_harness_helpers import (
     build_stored_game,
     record_calls,
     stack_depth,
-    turn_number_of_call,
+    turn_of_ids_call,
+    turn_of_write_call,
 )
 
 pytestmark = pytest.mark.usefixtures("no_scores_row_runs")
@@ -190,7 +191,7 @@ def harness(sample_turn, monkeypatch, make_inference_scheduler) -> Iterator[_Har
     game.store_turns(range(1, sample_turn.settings.turn + 1))
     scheduler = make_inference_scheduler()
     player_ids = tuple(row.ownerid for row in sample_turn.scores[:2])
-    stream, _rows, _wake = _attach_active_table_stream(sample_turn, scheduler, player_ids)
+    stream, _rows, _wake = attach_active_table_stream(sample_turn, scheduler, player_ids)
     built = _Harness(
         game=game,
         orchestrator=orchestrator,
@@ -345,11 +346,23 @@ def test_every_invalidation_of_the_fill_precedes_the_first_re_admit(harness, mon
     stream_turn = harness.stream_turn
     _missing_up_to(harness, stream_turn + 2, first_missing=stream_turn - 2)
     events: list[tuple[str, int]] = []
-    record_calls(monkeypatch, FleetSnapshotPersistenceService, "invalidate_for_turn_write", events)
     record_calls(
-        monkeypatch, HomeworldLocatorPersistenceService, "invalidate_evidence_from_turn", events
+        monkeypatch,
+        FleetSnapshotPersistenceService,
+        "invalidate_for_turn_write",
+        turn_of_ids_call,
+        events,
     )
-    record_calls(monkeypatch, InferenceInvalidationService, "wake_for_turn_write", events)
+    record_calls(
+        monkeypatch,
+        HomeworldLocatorPersistenceService,
+        "invalidate_evidence_from_turn",
+        turn_of_ids_call,
+        events,
+    )
+    record_calls(
+        monkeypatch, InferenceInvalidationService, "wake_for_turn_write", turn_of_write_call, events
+    )
 
     harness.submit_chain(stream_turn + 2)
 
@@ -374,29 +387,29 @@ class _InjectedFailure(RuntimeError):
 
 
 _INVALIDATIONS = (
-    (InferenceInvalidationService, "invalidate_for_turn_write"),
-    (InferenceInvalidationService, "cancel_for_turn_write"),
-    (FleetSnapshotPersistenceService, "invalidate_for_turn_write"),
-    (HomeworldLocatorPersistenceService, "invalidate_evidence_from_turn"),
+    (InferenceInvalidationService, "invalidate_for_turn_write", turn_of_write_call),
+    (InferenceInvalidationService, "cancel_for_turn_write", turn_of_write_call),
+    (FleetSnapshotPersistenceService, "invalidate_for_turn_write", turn_of_ids_call),
+    (HomeworldLocatorPersistenceService, "invalidate_evidence_from_turn", turn_of_ids_call),
 )
 
 
 @pytest.mark.allows_contained_callback_errors
-@pytest.mark.parametrize(("owner", "method"), _INVALIDATIONS)
+@pytest.mark.parametrize(("owner", "method", "turn_of"), _INVALIDATIONS)
 def test_a_failed_invalidation_reaches_the_fill_caller_after_every_consumer_ran(
-    harness, monkeypatch, owner, method
+    harness, monkeypatch, owner, method, turn_of
 ):
     stream_turn = harness.stream_turn
     _missing_up_to(harness, stream_turn + 2, first_missing=stream_turn - 2)
     before = harness.stream_run_ids()
     events: list[tuple[str, int]] = []
-    for other_owner, other_method in _INVALIDATIONS:
+    for other_owner, other_method, other_turn_of in _INVALIDATIONS:
         if (other_owner, other_method) != (owner, method):
-            record_calls(monkeypatch, other_owner, other_method, events)
+            record_calls(monkeypatch, other_owner, other_method, other_turn_of, events)
     real = getattr(owner, method)
 
     def fail_at_the_stream_turn(self, *args):
-        if turn_number_of_call(args) == stream_turn:
+        if turn_of(args) == stream_turn:
             raise _InjectedFailure(method)
         return real(self, *args)
 
@@ -412,7 +425,7 @@ def test_a_failed_invalidation_reaches_the_fill_caller_after_every_consumer_ran(
     assert harness.game.stack.turns.is_turn_stored(GAME_ID, PERSPECTIVE, stream_turn)
     assert [name for name, turn in events if turn == stream_turn] == [
         f"{other_owner.__name__}.{other_method}"
-        for other_owner, other_method in _INVALIDATIONS
+        for other_owner, other_method, _turn_of in _INVALIDATIONS
         if (other_owner, other_method) != (owner, method)
     ]
     harness.assert_stream_rows_re_admitted(before)
@@ -453,7 +466,9 @@ def test_the_stale_run_is_aborted_before_the_outer_plan_and_re_admitted_after(ha
             events.append(("abort", snapshot.scope.turn)) if snapshot.is_intentional_abort else None
         )
     )
-    record_calls(monkeypatch, InferenceInvalidationService, "wake_for_turn_write", events)
+    record_calls(
+        monkeypatch, InferenceInvalidationService, "wake_for_turn_write", turn_of_write_call, events
+    )
     at_accept_plan: list[object] = []
 
     def record_old_nodes() -> None:

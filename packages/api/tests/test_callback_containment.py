@@ -7,7 +7,7 @@ import logging
 import pytest
 from api.callback_containment import FailureCollector, run_contained
 
-CONTAINMENT_LOGGER = "api.callback_containment"
+from tests.contained_callback_guard import CONTAINMENT_LOGGER
 
 
 class _CallbackFailed(RuntimeError):

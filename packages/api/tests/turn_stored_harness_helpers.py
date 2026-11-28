@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
@@ -29,7 +30,6 @@ from api.transport.game_info_update import RefreshGameInfoParams
 GAME_ID = 628580
 PERSPECTIVE = 1
 USERNAME = "player1"
-CONTAINMENT_LOGGER = "api.callback_containment"
 DEFAULT_RECURSION_LIMIT = 1000
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "api" / "storage" / "assets"
 
@@ -196,17 +196,28 @@ def build_stored_game(turns: TurnSource, monkeypatch) -> StoredGame:
     )
 
 
-def turn_number_of_call(args: tuple) -> int:
-    """The stored turn a turn-stored consumer was called for (a ``TurnWrite`` or positional ids)."""
-    return args[0].turn_number if isinstance(args[0], TurnWrite) else args[2]
+def turn_of_write_call(args: tuple) -> int:
+    """The turn of a ``(write: TurnWrite)`` call."""
+    return args[0].turn_number
 
 
-def record_calls(monkeypatch, owner: type, method: str, events: list[tuple[str, int]]) -> None:
-    """Record each call of ``owner.method`` by its turn, then run it."""
+def turn_of_ids_call(args: tuple) -> int:
+    """The turn of a ``(game_id, perspective, turn_number)`` call."""
+    return args[2]
+
+
+def record_calls(
+    monkeypatch,
+    owner: type,
+    method: str,
+    turn_of: Callable[[tuple], int],
+    events: list[tuple[str, int]],
+) -> None:
+    """Record each call of ``owner.method`` by the turn ``turn_of`` reads, then run it."""
     real = getattr(owner, method)
 
     def recorded(self, *args):
-        events.append((f"{owner.__name__}.{method}", turn_number_of_call(args)))
+        events.append((f"{owner.__name__}.{method}", turn_of(args)))
         return real(self, *args)
 
     monkeypatch.setattr(owner, method, recorded)
