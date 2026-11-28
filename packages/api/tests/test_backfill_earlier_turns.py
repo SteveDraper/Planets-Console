@@ -120,18 +120,19 @@ def test_off_to_on_notifies_once(storage):
     assert notified == [_GAME_ID, _GAME_ID]
 
 
+@pytest.mark.allows_contained_callback_errors
 def test_failing_listener_does_not_fail_the_save(storage, caplog):
     def fail(game_id: int) -> None:
         raise RuntimeError("scan blew up")
 
     service = GameService(storage, on_backfill_enabled=fail)
-    with caplog.at_level(logging.ERROR, logger="api.services.game_service"):
+    with caplog.at_level(logging.ERROR, logger="api.callback_containment"):
         assert service.set_backfill_earlier_turns(_GAME_ID, True) is True
     assert read_backfill_earlier_turns(storage, _GAME_ID) is True
-    failures = [record for record in caplog.records if record.exc_info is not None]
-    assert len(failures) == 1
-    assert str(_GAME_ID) in failures[0].getMessage()
-    assert failures[0].exc_info[1].args == ("scan blew up",)
+    [failure] = [record for record in caplog.records if record.name == "api.callback_containment"]
+    assert "Backfill earlier turns listener" in failure.getMessage()
+    assert str(_GAME_ID) in failure.getMessage()
+    assert failure.exc_info[1].args == ("scan blew up",)
 
 
 class _ReadersMeetStorage:

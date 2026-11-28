@@ -21,6 +21,7 @@ ContainmentLabel = Literal[
     "Ready-queue listener",
     "Inline-start listener",
     "Fleet ledger bump",
+    "Backfill earlier turns listener",
 ]
 
 
