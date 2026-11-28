@@ -194,8 +194,13 @@ def test_first_shared_ship_limit_turn_raises_on_missing_turn() -> None:
     shell = turns[5]
     del turns[3]
 
-    with pytest.raises(ValidationError, match="scoreboard history turn 3"):
+    with pytest.raises(ValidationError) as raised:
         first_shared_ship_limit_turn(shell_turn=shell, load_turn=_turn_loader(turns))
+
+    assert str(raised.value) == (
+        "scoreboard history turn 3 is required to resolve origin-distance evidence "
+        "freeze at ship limit (sign in to auto-fetch missing turns for the evidence chain)"
+    )
 
 
 def test_effective_observations_honor_through_turn() -> None:

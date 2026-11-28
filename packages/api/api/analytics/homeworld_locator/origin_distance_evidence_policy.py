@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
+from api.analytics.export_turn_fill import SIGN_IN_TO_FILL_CHAIN_GUIDANCE
 from api.analytics.homeworld_locator.models import OriginDistanceObservation
 from api.analytics.homeworld_locator.types import HomeworldEvidenceAggregate
 from api.concepts.accelerated_scoreboard import accelerated_ensure_floor
@@ -53,8 +54,7 @@ def first_shared_ship_limit_turn(
         if loaded is None:
             raise ValidationError(
                 f"scoreboard history turn {turn_number} is required to resolve "
-                "origin-distance evidence freeze at ship limit "
-                "(sign in to auto-fetch missing turns for the evidence chain)"
+                f"origin-distance evidence freeze at ship limit {SIGN_IN_TO_FILL_CHAIN_GUIDANCE}"
             )
         if is_at_or_over_shared_ship_limit(loaded.settings, loaded.scores):
             return turn_number

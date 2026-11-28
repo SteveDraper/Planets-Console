@@ -25,6 +25,9 @@ from api.models.game import TurnInfo
 if TYPE_CHECKING:
     from api.analytics.export_context import AnalyticQueryContext
 
+SIGN_IN_TO_FILL_CHAIN_GUIDANCE = "(sign in to auto-fetch missing turns for the evidence chain)"
+"""Guidance appended when an evidence-chain turn is missing and no login can fetch it."""
+
 
 @dataclass(frozen=True)
 class DependencyChainTurnFill:
@@ -136,10 +139,7 @@ def _fill_error(fill: DependencyChainTurnFill) -> DependencyChainFillError:
     missing_turn = fill.still_missing
     if fill.auto_fetch_unavailable:
         return DependencyChainFillError(
-            (
-                f"turn {missing_turn} is not stored "
-                f"(sign in to auto-fetch missing turns for the evidence chain)"
-            ),
+            f"turn {missing_turn} is not stored {SIGN_IN_TO_FILL_CHAIN_GUIDANCE}",
             reason="turn_not_stored",
             missing_turn=missing_turn,
         )
