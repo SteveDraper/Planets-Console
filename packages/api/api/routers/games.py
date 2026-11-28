@@ -54,6 +54,14 @@ from api.transport.territory_movie import TerritoryMovieResponse
 router = APIRouter(prefix="/v1/games", tags=["games"])
 
 
+def _auto_fetch_username_description(planner: str) -> str:
+    """OpenAPI text for a username query that lets `planner` auto-fetch missing turns."""
+    return (
+        f"Optional turn-load credential username so {planner} can "
+        "auto-fetch missing historical turns (stored account API key)."
+    )
+
+
 def get_planets_client() -> PlanetsNuClient:
     return PlanetsNuClient.from_config()
 
@@ -225,10 +233,7 @@ def get_scores_table_inference_stream(
     username: Annotated[
         str,
         Query(
-            description=(
-                "Optional turn-load credential username so scores DAG planning can "
-                "auto-fetch missing historical turns (stored account API key)."
-            ),
+            description=_auto_fetch_username_description("scores DAG planning"),
         ),
     ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
@@ -262,10 +267,7 @@ def get_fleet_table_stream(
     username: Annotated[
         str,
         Query(
-            description=(
-                "Optional turn-load credential username so fleet DAG planning can "
-                "auto-fetch missing historical turns (stored account API key)."
-            ),
+            description=_auto_fetch_username_description("fleet DAG planning"),
         ),
     ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
@@ -412,10 +414,7 @@ def post_homeworld_locator_assertion(
     username: Annotated[
         str,
         Query(
-            description=(
-                "Optional turn-load credential username so rematerialize can "
-                "auto-fetch missing historical turns (stored account API key)."
-            ),
+            description=_auto_fetch_username_description("rematerialize"),
         ),
     ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
@@ -442,10 +441,7 @@ def post_homeworld_locator_refresh(
     username: Annotated[
         str,
         Query(
-            description=(
-                "Optional turn-load credential username so rematerialize can "
-                "auto-fetch missing historical turns (stored account API key)."
-            ),
+            description=_auto_fetch_username_description("rematerialize"),
         ),
     ] = "",
     analytics: TurnAnalyticService = Depends(get_turn_analytic_service),
